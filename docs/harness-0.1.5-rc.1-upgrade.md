@@ -21,6 +21,14 @@
 >   在自带 Node 与 Electron utility process 下均正常引导（token 1.6–2.4s），inject / entry
 >   失败 0；真实 Chromium 加载首屏 console.error 0 条。
 
+> **后续：已跟进到 `0.1.5-rc.3`**（2026-09-23 执行，npm `next`；`latest` 仍为 rc.2，Windows 环境）。
+>
+> - 217 个 dsh 依赖 `0.1.5-rc.2` → `0.1.5-rc.3`；cordis 系 8 个包版本未动；**28 个补丁全部干净套用，零重做**（含 cordis-plugin-loader 1.0.3）。
+> - 锁文件顺带清掉了 electron-builder 26.15.3 依赖链上已不被 manifest 声明的陈旧残留（`electron-winstaller`/`electron-builder-squirrel-windows`/`@electron/windows-sign`/`postject` 等 Squirrel 系）：registry 上 `app-builder-lib@26.15.3` 的 optionalDependencies 为空，本仓库 Windows 打包走 NSIS 不用 Squirrel 目标，仓库代码亦无引用。Windows 正式打包验证待发版时由 CI win job 兜底。
+> - 版本串配套更新：`test/{release,readme-parity,patch-hunk-counts,session-delete-patch,web-home-import,local-path-links,open-in-finder}` 及 README 六语言文件的 `0.1.5-rc.2` → `rc.3`（readme-parity 五个本地化用例因英文 README 先行更新一度红，同步后恢复）。
+> - 验证：tsc、build、`verify-harness-auth.mjs`（401→303→200）通过；vitest 与升级前基线持平——**1104 通过 / 10 失败**，其中 9 个为本机环境缺口（python3 不在 PATH 的 release-notes ×8、需 git+ssh 外网的 generation 集成 ×1、ppt 三个 tgz 测试文件在测试进程内 tar 解包失败），1 个为 `lan-mobile-bridge` 在全量并发下的偶发 `fetch failed`（单文件 3/3 全过，隔离复跑无法复现）。这些失败在 rc.2 基线同样存在或为抖动，非本次升级引入。
+> - 环境注意事项（Windows + npm 12.0.2）：锁文件 resolved 指向 npmmirror，安装需 `npm_config_registry=https://registry.npmmirror.com`，否则 EALLOWREMOTE；npm 12 的 install-scripts 白名单逐版本生效，`node`/`esbuild`/`koffi`/`node-pty`/`protobufjs`/`@deepseek-ai/dsh-subprocess-local`/`@google/genai` 需 `npm install-scripts approve`，且 `node` 包装完需 `npm rebuild node` 落 bin/node.exe。
+
 ## 一、依赖方式：vendored tarball → npm registry
 
 `0.1.2-rc.1` 升级文档里写的「上游尚未发布 npm registry 包」已经不成立。实测 226 个
