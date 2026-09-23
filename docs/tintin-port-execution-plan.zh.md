@@ -98,6 +98,17 @@ dsh 侧已实证（0.1.5-rc.3 node_modules 实读）：provider 走 `dsh-llm-dee
 
 ### WP-1 地基扩展：桥服务端与原生能力（8~12d）
 
+**进度（2026-09-23 开工，P0 同日）**：
+- ✅ 纯逻辑模块：`lib/machine-id.js`、`lib/server-proxy.js`（ESM 近 1:1 搬运，去 ipcMain 壳），8 单测全绿
+- ✅ host 编排：`/tintin/ipc/<channel>` 分发路由（server:* → FastAPI，信任门+错误保留）、tintin settings namespace（schemastery）、tintinBridge 服务（`ctx.provide`）
+- ✅ 端到端实测：`/tintin/ipc/server:llmModels` 转发 `192.168.111.31:8000/llm/models` 返回完整模型列表；未知通道 404；server.url 未配置时回退 127.0.0.1:8766
+- ⏳ 待做：TINTIN_BIN_DIR 壳注入 + ffmpeg/剪映模块搬运、老配置迁移、机器码端到端比对
+
+**WP-1 排错记录（真实启动抓到，铁律 5/7 打点价值实证）**：
+1. `cannot get property "settings" without inject`——settings 服务必须进插件顶层 `inject` 数组（scoped `ctx.inject(['webServer','tools'])` 不覆盖它）。
+2. `schema is not a function`——`settings.register` 要 schemastery `z.object()`，不是普通 JSON schema。
+3. `z.object().optional is not a function`——schemastery 无 `.optional()`（实测 undefined）；空对象 schema 全可选，读取判空。
+
 范围（host 侧，全部进 `packages/tintin-bundle/`，按域拆模块，单文件 ≤1000 行）：
 
 | 模块 | 来源（SRC） | 方式 | 要点 |
