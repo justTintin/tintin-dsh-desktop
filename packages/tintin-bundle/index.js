@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import { resolveMachineIdSync } from './lib/machine-id.js'
+import { findLegacyConfigDir, planLegacyMigration } from './lib/legacy-config.js'
 import {
   createServerUrlResolver,
   createHttpRequest,
@@ -160,6 +161,27 @@ export async function apply(ctx) {
   // legacy ai_config.json path is injected by the shell via TINTIN_AI_CONFIG
   // (WP-1 shell hook), absent by default.
   const tintinSettings = ctx.settings.register(name, TintinConfig, { applies: 'live' })
+
+  // One-shot legacy config migration on boot (A2: config only). Reads the old
+  // client's split-domain config and writes differing values into this
+  // namespace. Idempotent — already-current values are skipped by the planner.
+  ctx.effect(() => {
+    const appData = process.env.APPDATA || null
+    const legacyDir = findLegacyConfigDir(appData ?? undefined)
+    if (!legacyDir) return undefined
+    const ops = planLegacyMigration(legacyDir, tintinSettings.get())
+    if (ops.length === 0) return undefined
+    const patch = {}
+    for (const { path, value } of ops) {
+      let node = patch
+      for (let i = 0; i < path.length - 1; i++) node = node[path[i]] ??= {}
+      node[path[path.length - 1]] = value
+    }
+    ctx.logger.info('tintin-bundle: migrating legacy config (%d keys)', ops.length)
+    tintinSettings.update(patch).catch((e) => ctx.logger.warn('tintin-bundle: legacy migration failed: %s', e?.message ?? e))
+    return undefined
+  }, 'tintin-bundle: legacy config migration')
+
   const aiConfigPath = process.env.TINTIN_AI_CONFIG || null
   const readAiConfig = aiConfigPath
     ? () => { try { return existsSync(aiConfigPath) ? JSON.parse(readFileSync(aiConfigPath, 'utf8')) : null } catch { return null } }
