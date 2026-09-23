@@ -190,20 +190,25 @@ dsh 侧已实证（0.1.5-rc.3 node_modules 实读）：provider 走 `dsh-llm-dee
 - 视觉理解（选素材/抽帧研判）走**服务端** `/llm/vision`（qwen-vl），在媒体工具的 `defineTool.execute` 内部调用——**不经对话 LLM（DeepSeek）识图**（成本与延迟双重原因，架构文档 §4.5）。
 - 落实为工具实现约束：所有视觉类工具的视觉调用一律指向服务端 vision 端点，禁止路由到对话模型。
 
-**设置迁移映射（2026-09-23 补，源 = `components/settings/Card*.vue` + `config-store.js`）**——设置页 UI 整体不移植，逐卡分流：
+**设置迁移映射（2026-09-23 对齐定稿；键面经主进程+渲染层实测扫描核对）**——设置页 UI 整体不移植，逐项分流：
 
-| 源设置卡 | 去向 | 形态 |
+| 源设置项（实测使用处数） | 去向 | 状态/裁决 |
 | --- | --- | --- |
-| CardLocalConfig（服务器地址/下载目录/素材路径） | tintin-bundle **schema 设置卡**：`ctx.settings.register(ns, Config, {applies:'live'})`（写法 ✅ `dsh-image-generation/index.js:68`） | 零 UI 代码，harness 自动渲染表单；config-store 分域逻辑搬 host，存储迁入 harness settings（DSH_HOME） |
-| CardAccountLogin（账号/激活/license） | tintin-bundle **自定义交互卡**（激活按钮/状态徽章/测试连接） | client slot 自定义组件（`settings.plugin.item` ✅ image-gen client.js:310）；license 校验对接 `/system/license/*` |
-| CardPlatform（平台/飞书集成） | P2 随飞书集成 | 同上 |
-| CardA2Inference（本地 AI 双模式） | 缓议（随本地 AI） | 若立项则 schema 卡 |
-| CardEnvMaint（缓存清理/日志级别） | 拆解：`env.logLevel` → schema 卡；清理动作 → host 路由 + 按钮卡 | 日志查看用 harness 自带 diagnostics |
-| CardTheme / CardAbout / 窗口偏好 | **不搬** | harness settings-general 原生（主题/语言）；上游壳更新器（关于/版本）；dsh-desktop 窗口管理 |
-| LogViewerDialog | 不搬 | tintin 日志经 host `ctx.logger` → harness.log（log-bridge 先例） |
-| 模型 provider 设置 | **不搬**，harness 原生 settings-models | provider 配置固化指向 TinTin `/llm` |
+| `server.url`（14 处） | tintin settings namespace + 老配置迁移 + resolver 三级回退 | ✅ 已通；设置卡 UI 随 WP-5a |
+| `machineIdV2` | lib/machine-id 同机同值（实测一致） | ✅ 无需持久化 |
+| `llm.defaultModel`（3 处） | harness 模型选择器 + agent-default-model | ✅ 原生替代；WP-5a 固化默认 |
+| `llm.webSearch`（2 处） | harness web 搜索设置 | ✅ 原生替代，不迁 |
+| `themeMode`（2 处）/ `window.*` / `windowState` | harness 外观/上游壳 | ✅ 原生替代，不迁 |
+| `inference.*`（5 键，本地 AI 双模式） | 缓议（既有裁决） | 不迁 |
+| `local.cacheDir`（5 处） | **固定 `$DSH_HOME/tintin/cache`，不做设置项**（2026-09-23 裁决） | WP-5a 落地 |
+| `downloadDir` + `media.settings.downloadDir` | **随 P2 再定**，届时缺省=工作区 `downloads/`（2026-09-23 裁决；P1 文案混剪不消费） | P2 |
+| `feishu.*`（7 键） | P2 随飞书集成（既有裁决） | P2 |
+| 激活/license 卡（CardAccountLogin） | **P1 不做激活**（2026-09-23 裁决：内部运营团队内部分发，X-Machine-ID 租户隔离已够；license 体系保留对接能力，需要时再加卡） | 不做 |
+| `env.logLevel` | 不迁（harness 自带日志体系）；需调试时再加 tintin namespace 字段 | 不做 |
+| LogViewerDialog / CardAbout | 不搬（harness.log + 上游壳关于/更新） | ✅ 原生替代 |
+| 模型 provider 设置 | harness 原生 settings-models；WP-5a 固化 tintin-server 指向 `/llm` | ✅ 原生替代 |
 
-UI 落点：简单键值走 schema 卡；整分区可选 `settings.section`（market-installer "插件市场"分区先例 ✅ client.js:685-710）——TinTin 设置项建议先各插件一张 `settings.plugin.item` 卡，超过一屏再升级为分区。老客户端 userData 配置迁移（含存储键两跳 copy→plan→copywriting）为 P2 数据迁移项。
+WP-5a 待做清单（已排期，非遗漏）：tintin 设置卡（服务器地址）、provider 首启固化、预置 zh + 固化"始终中文回复"、cacheDir 固定目录落地。
 
 **P1 交付边界**：P1 交付 = 地基（tintin-bundle：桥/原生能力/tintinBridge）+ polyfill 桥 + **媒体 2 卡（文案混剪、剪映模板）+ 会话业务组件（WP-5：上下文条/五智能体 preset/识图路由/设置迁移）** + 模型接入。**明确不包含**：其余 11 张媒体卡（P2 占位等排期，2026-09-23 A1 裁决；恢复一张加一行注册表）；**运营工具 6 卡（P3）**；智能混剪**永久不移植**（功能本就计划过期，2026-09-23，见附录 D）；浏览器域全家（P2 spike + 搬运）；本地 AI 离线双模式（缓议）；定时任务/飞书/Office（P2 按需）；无人值守与集中调度（MCP 后补）。数据迁移仅老用户配置（A2 裁决），会话历史不迁（A5）。**会话交互保留复用 harness 会话 UI**（2026-09-23 定位修正：换编排引擎不换会话形态）——依据与缺口分析见架构文档 §4 及本文附录 C/D。
 
