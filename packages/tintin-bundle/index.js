@@ -5,19 +5,46 @@
 // (V5 local file write, V6 external process, V7 job channel) and stay minimal
 // on purpose; WP-1 replaces them with the real seam handlers.
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, readdirSync, statSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import z from '@deepseek-ai/schemastery'
+import { resolveMachineIdSync } from './lib/machine-id.js'
+import {
+  createServerUrlResolver,
+  createHttpRequest,
+  resolveEndpoint,
+  API_ENDPOINTS,
+} from './lib/server-proxy.js'
 
 const PING_PATH = '/tintin/ping'
 const PROBE_FILE_PATH = '/tintin/probe/file'
 const PROBE_SPAWN_PATH = '/tintin/probe/spawn'
 const JOBS_PATH = '/tintin/jobs'
 const JOB_STATUS_RE = /^\/tintin\/jobs\/([a-z0-9-]+)$/
+const IPC_PATH = '/tintin/ipc'
+const IPC_RE = /^\/tintin\/ipc\/(.+)$/
+
+// TinTin server.* channel → endpoint. Each maps a client bridge call onto the
+// FastAPI service; extend as WP-2 polyfill grows (对照 SRC preload server 域).
+const IPC_SERVER_ROUTES = {
+  'server:health': { method: 'GET', endpoint: API_ENDPOINTS.health.check },
+  'server:llmModels': { method: 'GET', endpoint: API_ENDPOINTS.llm.models },
+  'server:materialList': { method: 'POST', endpoint: API_ENDPOINTS.material.list },
+  'server:materialSearch': { method: 'POST', endpoint: API_ENDPOINTS.material.search },
+}
+
+// TinTin settings namespace schema (server.url 等本地配置), schemastery form
+// (settings.register 需要 z schema——image-generation:14 先例). schemastery 无
+// optional 修饰（实测 optional 为 undefined）；空对象 schema 全可选，读取处
+// 自行判空（server?.url）。字段约束随 WP-5 设置卡细化。
+const TintinConfig = z.object({}).default({})
 
 export const name = 'tintin-bundle'
-export const inject = []
+// settings: TinTin config seam (server.url etc.). tools/webServer injected via
+// scoped ctx.inject below so the tool half still loads where no web server runs.
+export const inject = ['settings']
 
 function isLoopback(address) {
   return (
@@ -86,6 +113,50 @@ export async function apply(ctx) {
       return { ok: true, pid: process.pid, time: Date.now() }
     },
   })
+
+  // ── WP-1 foundation: config seam + server bridge ─────────────────────────
+  // Config seam: TinTin's server.url lives in the harness settings namespace
+  // 'tintin' (registered below). readConfig reads the committed value; the
+  // legacy ai_config.json path is injected by the shell via TINTIN_AI_CONFIG
+  // (WP-1 shell hook), absent by default.
+  const tintinSettings = ctx.settings.register(name, TintinConfig, { applies: 'live' })
+  const aiConfigPath = process.env.TINTIN_AI_CONFIG || null
+  const readAiConfig = aiConfigPath
+    ? () => { try { return existsSync(aiConfigPath) ? JSON.parse(readFileSync(aiConfigPath, 'utf8')) : null } catch { return null } }
+    : null
+  const getServerUrl = createServerUrlResolver({
+    readConfig: (key) => { const v = tintinSettings.get(); return key === 'server.url' ? v?.server?.url : undefined },
+    readAiConfig,
+  })
+  const getMachineId = () => resolveMachineIdSync()
+  const httpRequest = createHttpRequest({
+    getServerUrl,
+    getMachineId,
+    log: (...a) => ctx.logger.info(...a),
+    warn: (...a) => ctx.logger.warn(...a),
+  })
+
+  // tintinBridge: the host service the media/ops plugins inject (WP-1 契约).
+  // Surface: server proxy, machine id, config, jobs registry, media stream.
+  const tintinBridge = {
+    getServerUrl,
+    getMachineId,
+    httpRequest,
+    jobs,
+    // dispatch a server.* bridge call to the FastAPI service.
+    async callServer(channel, payload) {
+      const route = IPC_SERVER_ROUTES[channel]
+      if (!route) {
+        const err = new Error(`Unknown TinTin bridge channel: ${channel}`)
+        err.code = 'unknown-channel'
+        throw err
+      }
+      const path = resolveEndpoint(route.endpoint, payload?.params ?? payload)
+      const result = await httpRequest(route.method, path, { body: route.method === 'GET' ? undefined : payload?.body ?? payload })
+      return result.data
+    },
+  }
+  ctx.provide('tintinBridge', tintinBridge)
 
   ctx.inject(['webServer', 'tools'], (webCtx) => webCtx.effect(() => {
     webCtx.tools.register(pingServerTool)
@@ -189,12 +260,46 @@ export async function apply(ctx) {
       },
     })
 
+    // WP-1: /tintin/ipc/<channel> dispatch — the host endpoint the WP-2
+    // window.tintin polyfill calls. server:* channels forward to the FastAPI
+    // service through the bridge; failure keeps status + message (铁律 7).
+    const disposeIpc = webCtx.webServer.register({
+      kind: 'prefix',
+      path: IPC_PATH,
+      handler: async (req, res) => {
+        const match = IPC_RE.exec(new URL(req.url, 'http://localhost').pathname)
+        if (req.method !== 'POST' || !isTrustedRequest(req, true) || !match) {
+          sendJson(res, !match ? 404 : req.method === 'POST' ? 403 : 405, { error: 'Request rejected.' })
+          return
+        }
+        const channel = match[1]
+        let payload
+        try {
+          const chunks = []
+          for await (const c of req) chunks.push(c)
+          payload = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}
+        } catch {
+          sendJson(res, 400, { error: 'Invalid JSON body.' })
+          return
+        }
+        try {
+          const result = await tintinBridge.callServer(channel, payload)
+          sendJson(res, 200, { result })
+        } catch (error) {
+          const code = error?.code === 'unknown-channel' ? 404 : (error?.status ?? 502)
+          ctx.logger.warn('tintin-bundle: ipc %s failed: %s', channel, error?.message ?? error)
+          sendJson(res, code, { error: error?.message ?? String(error) })
+        }
+      },
+    })
+
     return async () => {
       disposePing()
       disposeFile()
       disposeSpawn()
       disposeJobs()
       disposeJobStatus()
+      disposeIpc()
     }
   }, 'tintin-bundle: probe routes'))
   ctx.logger.info('tintin-bundle host ready')
