@@ -380,6 +380,38 @@ export async function apply(ctx) {
       },
     })
 
+    // WP-2 upload passthrough: the browser sends multipart/form-data (native
+    // FormData); we buffer the body and forward it verbatim with its
+    // content-type (boundary included) to the FastAPI service via the bridge.
+    // Progress stays client-side (XHR upload.onprogress); server-side task
+    // progress uses the job channel.
+    const disposeUpload = webCtx.webServer.register({
+      kind: 'exact',
+      path: '/tintin/upload',
+      handler: async (req, res) => {
+        const url = new URL(req.url, 'http://localhost')
+        const targetPath = url.searchParams.get('path')
+        if (req.method !== 'POST' || !isTrustedRequest(req, true) || typeof targetPath !== 'string'
+          || !targetPath.startsWith('/') || /^\/\//.test(targetPath) || /^[a-z]+:/i.test(targetPath)) {
+          sendJson(res, 400, { error: 'Request rejected.' })
+          return
+        }
+        const chunks = []
+        for await (const c of req) chunks.push(c)
+        const body = Buffer.concat(chunks)
+        try {
+          const result = await httpRequest('POST', targetPath, {
+            body,
+            headers: req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] } : {},
+          })
+          sendJson(res, 200, { result: result.data })
+        } catch (error) {
+          ctx.logger.warn('tintin-bundle: upload %s failed: %s', targetPath, error?.message ?? error)
+          sendJson(res, error?.status ?? 502, { error: error?.message ?? String(error) })
+        }
+      },
+    })
+
     return async () => {
       disposePing()
       disposeFile()
@@ -387,6 +419,7 @@ export async function apply(ctx) {
       disposeJobs()
       disposeJobStatus()
       disposeIpc()
+      disposeUpload()
     }
   }, 'tintin-bundle: probe routes'))
   ctx.logger.info('tintin-bundle host ready')

@@ -99,8 +99,25 @@ window.__ModuleLoader__.load({
         post: (path, body, headers, timeout) => call('server:post', { path, body, headers, timeout }),
         put: (path, body, headers) => call('server:put', { path, body, headers }),
         delete: (path, params) => call('server:delete', { path, params }),
-        // upload/sse land in WP-2 follow-up (multipart + job progress channel).
-        upload: () => Promise.reject(new Error('tintin upload not yet bridged (WP-2)')),
+        // Multipart upload: XHR gives native FormData multipart + real
+        // upload progress (fetch cannot); host route /tintin/upload forwards
+        // the body verbatim to the service. onProgress(ratio 0..1) optional.
+        upload: (path, fields, onProgress) => new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          xhr.open('POST', `/tintin/upload?path=${encodeURIComponent(path)}`)
+          if (typeof onProgress === 'function') {
+            xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
+          }
+          xhr.onload = () => {
+            let j = null
+            try { j = JSON.parse(xhr.responseText) } catch { /* non-json */ }
+            if (xhr.status >= 200 && xhr.status < 300) resolve(j ? j.result : j)
+            else reject(Object.assign(new Error((j && j.error) || `HTTP ${xhr.status}`), { status: xhr.status }))
+          }
+          xhr.onerror = () => reject(new Error('upload network error'))
+          xhr.send(fields)
+        }),
+        // sse lands when a ported card needs it (job polling covers progress).
         sse: () => Promise.reject(new Error('tintin sse not yet bridged (WP-2)')),
       }
       window.tintin = {
