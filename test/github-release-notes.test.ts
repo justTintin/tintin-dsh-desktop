@@ -1,4 +1,4 @@
-import { execFile as execFileCallback } from 'node:child_process'
+import { execFile as execFileCallback, execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -22,6 +22,19 @@ async function work(): Promise<string> {
 
 const run = (args: string[]) => execFile('python3', [script, ...args], { cwd: projectRoot, timeout: 20_000 })
 
+// These suites drive the real python3 interpreter from upstream CI. A Windows
+// dev box may only have the Microsoft Store stub (exit 9009); skip rather
+// than report CI tooling as a product regression.
+const python3Available = (() => {
+  try {
+    execFileSync('python3', ['-c', ''], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+const describeWithPython = python3Available ? describe : describe.skip
+
 const VALID = `# DSH Desktop v9.9.9 — 测试主题
 
 ## 更新内容
@@ -35,7 +48,7 @@ const VALID = `# DSH Desktop v9.9.9 — 测试主题
 - 客户端内可直接更新。
 `
 
-describe('github_release_notes build-prompt', () => {
+describeWithPython('github_release_notes build-prompt', () => {
   // Reading repository history and generating diffs can exceed the default
   // five seconds on native Intel CI. Keep the subprocess independently bounded.
   it('emits the evidence blocks, the style reference, and the Chinese contract', { timeout: 30_000 }, async () => {
@@ -54,7 +67,7 @@ describe('github_release_notes build-prompt', () => {
   })
 })
 
-describe('github_release_notes validate', () => {
+describeWithPython('github_release_notes validate', () => {
   it('accepts a well-formed Chinese note', async () => {
     const dir = await work()
     const file = path.join(dir, 'n.md')
@@ -80,7 +93,7 @@ describe('github_release_notes validate', () => {
   })
 })
 
-describe('github_release_notes generate-fallback', () => {
+describeWithPython('github_release_notes generate-fallback', () => {
   it('produces a note that passes validate and starts with the contract title', { timeout: 30_000 }, async () => {
     const dir = await work()
     const file = path.join(dir, 'fb.md')

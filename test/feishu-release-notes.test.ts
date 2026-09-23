@@ -4,7 +4,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
-describe('Feishu release notes pipeline', () => {
+// The pipeline under test is a python3 script from upstream CI. A Windows dev
+// box may only have the Microsoft Store stub (exit 9009); skip rather than
+// report CI tooling as a product regression.
+const python3Available = (() => {
+  try {
+    execFileSync('python3', ['-c', ''], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+
+describe.skipIf(!python3Available)('Feishu release notes pipeline', () => {
   const pythonTestTimeoutMs = 15_000
   const scriptPath = join(process.cwd(), '.github', 'scripts', 'feishu_release_notes.py')
   const workflowPath = join(process.cwd(), '.github', 'workflows', 'release.yml')

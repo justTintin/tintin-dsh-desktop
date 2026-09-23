@@ -1,14 +1,34 @@
 import { it, expect } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { promisify } from 'node:util'
 import { installGeneration } from '../packages/dsh-desktop-market-installer/generations/installer.mjs'
 
-it('real pnpm refuses unapproved scripts and executes an explicitly approved rebuild in staging', async () => {
+// This integration test needs a real pnpm and a tar that accepts absolute
+// Windows drive paths (upstream CI runs on Linux/macOS). Git-Bash ships MSYS
+// GNU tar, which reads `C:\...` as a remote host spec and aborts; skip rather
+// than report environment limits as a product regression.
+const nativeToolsAvailable = (() => {
+  let probe
+  try {
+    execFileSync('pnpm', ['--version'], { stdio: 'ignore' })
+    probe = mkdtempSync(join(tmpdir(), 'dsh-tar-probe-'))
+    writeFileSync(join(probe, 'f.txt'), 'x')
+    execFileSync('tar', ['-czf', join(probe, 'p.tgz'), '-C', probe, 'f.txt'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  } finally {
+    if (probe) rmSync(probe, { recursive: true, force: true })
+  }
+})()
+
+it.skipIf(!nativeToolsAvailable)('real pnpm refuses unapproved scripts and executes an explicitly approved rebuild in staging', async () => {
   // Windows TEMP may contain an 8.3 alias (RUNNER~1). pnpm resolves its
   // workspace root to a real path; keep every install path in that form.
   const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-build-approval-')))

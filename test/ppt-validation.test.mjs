@@ -1,5 +1,6 @@
 import { beforeAll, afterAll, afterEach, describe, it, expect } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm, symlink } from 'node:fs/promises'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -9,9 +10,28 @@ import yaml from 'js-yaml'
 import { unzipSync } from 'fflate'
 import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 
+// The suite extracts the distributable archive into an absolute temp dir.
+// Git-Bash's MSYS GNU tar mangles `C:\...`/`D:\...` -C targets ("Cannot
+// open"), while upstream CI tar and Windows bsdtar handle them; probe the
+// real invocation shape and skip when the local tar cannot run it.
+const tarHandlesAbsolutePaths = (() => {
+  let probe
+  try {
+    probe = mkdtempSync(path.resolve('node_modules/.tar-probe-'))
+    writeFileSync(path.join(probe, 'f.txt'), 'x')
+    execFileSync('tar', ['-czf', path.join(probe, 'p.tgz'), '-C', probe, 'f.txt'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  } finally {
+    if (probe) rmSync(probe, { recursive: true, force: true })
+  }
+})()
+
 let packageRoot, apply, cli
 const cleanups = []
 beforeAll(async () => {
+  if (!tarHandlesAbsolutePaths) return
   // Test the distributable archive, with ordinary dependency resolution from node_modules.
   packageRoot = await mkdtemp(path.resolve('node_modules/.ppt-validation-'))
   execFileSync('tar', ['-xzf', 'packages/ppt-bundles/dsh-ppt-0.1.1-rc.2-desktop-20260906.tgz', '-C', packageRoot, '--strip-components=1'])
@@ -62,7 +82,7 @@ async function fixture({ broken = true, malformed = false } = {}) {
   return { root, workspace, project, exec, run, writePages, rpc }
 }
 
-describe('PPT validation authoring loop', () => {
+describe.skipIf(!tarHandlesAbsolutePaths)('PPT validation authoring loop', () => {
   it.each([
     ['plain', String.raw`水是供应链中\n最被低估的\n宏观变量`],
     ['single-quoted', String.raw`'水是供应链中\n最被低估的\n宏观变量'`],
