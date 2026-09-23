@@ -174,11 +174,40 @@ const tintinClient = (() => {
         sse: () => Promise.reject(new Error('tintin sse not yet bridged (WP-2)')),
 
         // ── 命名通道（对照源 preload server 域逐个映射，2026-09-23 WP-1 续）──
-        // 两类：HTTP 封装（方法+路径，与源 preload 同参）与 multipart 上传封装
-        // （源 handler 把 payload 字段转 FormData——File/Blob 直接进 FormData，
-        // 标量转字符串；对照 server-proxy.js montage:split L845-871 的字段表）。
-        // 本地原生通道（final:mix/jianying:export/voice:dubVideos 等）不在
-        // 此列——它们走 Proxy 转发 /tintin/ipc，待宿主路由落地。
+        // 三类：HTTP 封装（方法+路径）、multipart 上传封装（File/Blob 进
+        // FormData）、本地原生通道（lib/montage/ 已接线——命名方法 → 冒号
+        // 通道，args 按源 invoke 的位置参数包一层）。未映射的本地通道
+        // （montage:clearCache 等本地 fs 操作未搬）走 Proxy 转发 404，
+        // 调用点 catch 降级。
+        // ── 本地原生（lib/montage）──
+        finalMix: (p, onProgress) => call('final:mix', { args: [p, undefined, onProgress] }),
+        finalCollectOutputs: (dir) => call('final:collectOutputs', { args: [dir] }),
+        finalFindSrt: (p) => call('final:findSrt', { args: [p] }),
+        finalListResults: (dir) => call('final:listResults', { args: [dir] }),
+        finalReadTiming: (p) => call('final:readTiming', { args: [p] }),
+        jianyingExport: (p) => call('jianying:export', { args: [p] }),
+        lutList: () => call('lut:list', { args: [] }),
+        jyTemplatesList: (p) => call('jytpl:list', { args: [p] }),
+        jyTemplatesSync: (p) => call('jytpl:sync', { args: [p] }),
+        jyTemplatesDeleteServer: (p) => call('jytpl:deleteServer', { args: [p] }),
+        editorExportJianyingPackage: (p) => call('editor:exportJianyingPackage', { args: [p] }),
+        bgmDownloadUrl: (p) => call('bgm:downloadUrl', { args: [p] }),
+        voiceScanDir: (p) => call('voice:scanDir', { args: [p] }),
+        voiceCloneBatch: (p, onProgress) => call('voice:cloneBatch', { args: [p, undefined, onProgress] }),
+        voiceCloneBatchStop: (p) => call('voice:cloneBatchStop', { args: [p] }),
+        voiceDubVideos: (p, onProgress) => call('voice:dubVideos', { args: [p, undefined, onProgress] }),
+        voiceFonts: () => call('voice:fonts', { args: [] }),
+        voiceFontFile: (p) => call('voice:fontFile', { args: [p] }),
+        voiceSubtitleStyles: () => call('voice:subtitleStyles', { args: [] }),
+        voiceExportAudio: (p) => call('voice:exportAudio', { args: [p] }),
+        fancyListTemplates: () => call('fancy:listTemplates', { args: [] }),
+        fancyServerTemplates: () => call('fancy:serverTemplates', { args: [] }),
+        fancyEnsurePreviews: (p, onProgress) => call('fancy:ensurePreviews', { args: [p, undefined, onProgress] }),
+        textfxServerTemplates: () => call('textfx:serverTemplates', { args: [] }),
+        jyAudioSyncNow: () => call('jyaudio:syncNow', { args: [] }),
+        jyAudioSyncStatus: () => call('jyaudio:status', { args: [] }),
+        jyAudioSetEnabled: (enabled) => call('jyaudio:setEnabled', { args: [enabled] }),
+        // ── HTTP 封装 ──
         llmChat: (payload) => call('server:post', { path: '/llm/chat/completions', body: payload }),
         llmModels: () => call('server:get', { path: '/llm/models' }),
         llmAdjustCopywriting: (payload) => call('server:post', { path: '/script/adjust-copywriting', body: payload }),

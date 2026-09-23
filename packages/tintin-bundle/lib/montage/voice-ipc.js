@@ -1,0 +1,991 @@
+// ═══════════════════════════════════════════════════════════════
+// voice-ipc.js — 智能混剪 Step3「口播配音」域通道（宿主侧）
+// CJS→ESM 纯搬迁（2026-09-23，铁律10）：源 = desktop/main/montage-voice-ipc.js，
+// 仅转换 require/module.exports 与 ipcMain 壳——createMontageVoiceIpc(ipcMain,
+// {httpRequest, ...}) 的 12 个 ipcMain.handle 壳剥离为具名函数（参数去 event；
+// progressChannel 的 event.sender.send 语义由调用方注入的 ctx.emit 实现），
+// 工厂改名 createMontageVoiceApi 并返回「通道名 → (args, ctx)」表，由
+// index.js NATIVE_CHANNELS 消费。函数体逐字保留。
+// P0 进度注：voice:cloneBatch/dubVideos 等 progressChannel 通道当前同步阻塞
+// 返回最终结果（ctx.emit 为空时静默跳过推送），jobId 化进度是后续项。
+// 对照原客户端（studio/gui/montage/）：
+//   · workers/voice_workers.py  VoiceCloneWorker（api 模式）→ voice:cloneBatch
+//     （2026-09-09 用户裁决：整句 TTS（原版逐句+句间 0.15s 静音拼接）+ 变速 atempo
+//     + .timing.json 句级时间轴估算）
+//   · workers/concat_workers.py VideoDubbingWorker → voice:dubVideos
+//     （ffmpeg 字幕烧制/花字/tpad/atempo 链/替换原声）
+//   · video_montage_page.py     _do_scan_voice_video_dir L1621-1695 → voice:scanDir
+//   · _refresh_server_fonts     GET /config/fonts → voice:fonts
+//   · _on_btn_export_clicked    shutil.copy2 → voice:exportAudio
+// 契约（禁止臆造）：POST /indextts/tts（2026-09-05 用户告知：服务端将删除全部 /voxcpm/* 接口，
+//   口播配音通道随声音克隆裁决统一切 IndexTTS）
+//   IndexTTSRequest = {"text": 预处理后, "prompt_audio": base64|null}（无 speaker 字段；
+//   lang/duration_factor/emo_text/emo_alpha 不传用服务端默认），响应 WAV 二进制，超时 180s，
+//   3 次重试（503/连接中断 → /indextts/health 轮询恢复，max_wait 20s/15s）。
+//   原版 inference_timesteps/cfg_value 存而不用（不发送服务端，原版同口径）。
+// 纯函数在 voice-tts-logic.js（本文件仅编排与进程/文件 IO）。
+// ═══════════════════════════════════════════════════════════════
+
+import { spawn, execSync } from 'node:child_process'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import * as L from './voice-tts-logic.js'
+import * as FT from './fancy-templates.js'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// ── ffmpeg/ffprobe 路径（同 ffmpeg-gate.js getBinDir 口径，未导出故本地等价实现；
+//    harness 宿主注入 TINTIN_BIN_DIR 优先——index.js resolveBinary 同源机制）──
+function getBinDir() {
+  if (process.env.TINTIN_BIN_DIR && fs.existsSync(process.env.TINTIN_BIN_DIR)) {
+    return process.env.TINTIN_BIN_DIR
+  }
+  if (process.resourcesPath) {
+    const pkgBin = path.join(process.resourcesPath, 'bin')
+    if (fs.existsSync(pkgBin)) return pkgBin
+  }
+  const devBin = path.resolve(__dirname, '..', 'resources', 'bin', 'win')
+  if (fs.existsSync(devBin)) return devBin
+  return ''
+}
+
+function getFfmpegPath() {
+  const binDir = getBinDir()
+  if (binDir) {
+    const exe = path.join(binDir, 'ffmpeg.exe')
+    if (fs.existsSync(exe)) return exe
+  }
+  return 'ffmpeg'
+}
+
+function getFfprobePath() {
+  const binDir = getBinDir()
+  if (binDir) {
+    const exe = path.join(binDir, 'ffprobe.exe')
+    if (fs.existsSync(exe)) return exe
+  }
+  return 'ffprobe'
+}
+
+/** 媒体时长（秒）（对照 utils_media.py get_media_duration L168-183：ffprobe format=duration） */
+function getMediaDuration(filepath) {
+  try {
+    const out = execSync(
+      `"${getFfprobePath()}" -v error -show_entries format=duration -of csv=p=0 "${filepath}"`,
+      { timeout: 10000, windowsHide: true, encoding: 'utf-8' },
+    ).trim()
+    if (out) return parseFloat(out) || 0.0
+  } catch (_) { /* 原版失败返回 0.0 */ }
+  return 0.0
+}
+
+/** ffmpeg 运行（对照 utils_media change_audio_speed / VideoDubbingWorker _run_proc 口径） */
+function runFfmpeg(args) {
+  return new Promise((resolve) => {
+    const proc = spawn(getFfmpegPath(), args, { windowsHide: true })
+    let stderr = ''
+    proc.stderr.on('data', (c) => { stderr += c })
+    proc.on('close', (code) => resolve({ code, stderr }))
+    proc.on('error', (e) => resolve({ code: -1, stderr: String(e) }))
+  })
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// ── 2026-09-19 字幕对齐增强（用户报障：字幕落后声音约半秒）──
+// 背景：整句合成后 timing 按句字数比例估算，与真实语音节奏（起音延迟/标点停顿/
+//   语速起伏）存在 ±0.5s 漂移。此处用 ffmpeg silencedetect 实测 wav 的静音/语音
+//   边界：句窗口整体平移+缩放到实测语音跨度，实测内部停顿数=句数-1 时句界
+//   吸附到停顿中点；任何失败回退原估算 timing（既有行为不变）。
+
+/** 解析 silencedetect stderr → 静音区间；推导 leadIn/tailOut/句间停顿（单位秒）。无法判定返回 null */
+function parseSilencedetect(stderr, totalDur) {
+  const silences = []
+  for (const line of String(stderr).split(/\r?\n/)) {
+    let m = /silence_start:\s*(-?[\d.]+)/.exec(line)
+    if (m) { silences.push({ start: Math.max(0, Number(m[1])), end: totalDur }); continue }
+    m = /silence_end:\s*([\d.]+)/.exec(line)
+    if (m && silences.length) silences[silences.length - 1].end = Number(m[1])
+  }
+  const speech = []
+  let pos = 0
+  for (const s of silences) {
+    if (s.start - pos >= 0.06) speech.push({ start: pos, end: s.start })
+    pos = Math.max(pos, s.end)
+  }
+  if (totalDur - pos >= 0.06) speech.push({ start: pos, end: totalDur })
+  if (!speech.length || !silences.length) return null // 全静音/无静音：无可对齐边界
+  const leadIn = speech[0].start
+  const tailOut = Math.max(0, totalDur - speech[speech.length - 1].end)
+  const gaps = []
+  for (let i = 1; i < speech.length; i++) {
+    const g0 = speech[i - 1].end, g1 = speech[i].start
+    if (g1 - g0 >= 0.18) gaps.push({ mid: Math.round(((g0 + g1) / 2) * 1000) / 1000 })
+  }
+  return { leadIn, tailOut, gaps }
+}
+
+/** 实测对齐：句窗口平移 leadIn、按实测语音跨度缩放；实测内部停顿数=句数-1 时句界吸附停顿中点 */
+function alignTimingToSpeech(timing, m, totalDur) {
+  if (!Array.isArray(timing) || !timing.length || !m) return timing
+  // 2026-09-19 防御（用户报障：timing 全零）：测量对象必须带有限数值边界——
+  // 非法（如误传 Promise/解析残缺）时原样返回估算 timing，不产出 NaN/null
+  if (!Number.isFinite(m.leadIn) || !Number.isFinite(m.tailOut) || !Number.isFinite(totalDur)) return timing
+  const span = Math.max(0.2, totalDur - m.leadIn - m.tailOut)
+  const scale = span / Math.max(0.2, totalDur)
+  const r3 = (x) => Math.round(x * 1000) / 1000
+  const out = timing.map((t) => ({
+    text: t.text,
+    start: r3(m.leadIn + t.start * scale),
+    end: r3(m.leadIn + t.end * scale),
+  }))
+  const gaps = m.gaps || []
+  if (gaps.length === out.length - 1) {
+    for (let j = 0; j < gaps.length; j++) {
+      const mid = r3(gaps[j].mid)
+      out[j].end = mid
+      out[j + 1].start = mid
+    }
+    const last = out[out.length - 1]
+    last.end = Math.max(last.start + 0.2, r3(totalDur - m.tailOut))
+  }
+  return out
+}
+
+/** 实测 wav 语音边界（ffmpeg silencedetect；失败返回 null → 回退估算 timing） */
+async function detectSpeechBounds(wavPath, totalDur) {
+  const { code, stderr } = await runFfmpeg([
+    '-hide_banner', '-nostats', '-i', wavPath,
+    '-af', 'silencedetect=noise=-35dB:d=0.25',
+    '-f', 'null', '-',
+  ])
+  if (code !== 0 || !stderr) return null
+  return parseSilencedetect(String(stderr), totalDur)
+}
+
+// ── Windows 注册表字体族解析（对照 VideoDubbingWorker._lookup_windows_font_file L787-824）──
+// reg query 枚举 Fonts 键值；值名形如 "Microsoft YaHei (TrueType)" → 去 " (" 后缀，
+// 复合族名按 " & " 拆分逐段精确比较（防误选字重）。
+function lookupWindowsFontFile(family) {
+  const target = String(family || '').trim().toLowerCase()
+  if (!target || process.platform !== 'win32') return ''
+  const fontsDir = path.join(process.env.SystemRoot || 'C:\\Windows', 'Fonts')
+  for (const root of ['HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts', 'HKCU\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts']) {
+    try {
+      const out = execSync(`reg query "${root}"`, { encoding: 'utf-8', windowsHide: true })
+      for (const line of String(out).split(/\r?\n/)) {
+        const m = line.match(/^\s*(.+?)\s+REG_SZ\s+(.+?)\s*$/)
+        if (!m) continue
+        const regFamily = m[1].replace(/\s+\($/, '').trim()
+        const parts = regFamily.split('&').map((p) => p.trim().toLowerCase()).filter(Boolean)
+        if (!parts.includes(target)) continue
+        const full = path.join(fontsDir, m[2])
+        if (fs.existsSync(full)) return full
+      }
+    } catch (_) { continue }
+  }
+  return ''
+}
+
+// ── 路由壳工厂（原 createMontageVoiceIpc(ipcMain, {httpRequest, ...})）─────────
+// ipcMain 参数由分发注册器顶替：工厂返回「通道名 → (args, ctx)」表，index.js
+// NATIVE_CHANNELS 消费；依赖注入面（httpRequest/isExpectedOfflineError/
+// getServerUrl）保持不变。
+function createMontageVoiceApi({ httpRequest, isExpectedOfflineError, getServerUrl }) {
+  const channels = {}
+
+  // ── voice:scanDir — 扫描视频输入目录（_do_scan_voice_video_dir L1621-1695 口径）──
+  // exts 无 .flv（.mp4/.mkv/.avi/.mov/.webm/.m4v）；basename 小写字典序；
+  // 自动检测 voices/voice_{i+1}.wav 已生成；伴随同名 .txt 读入 original_texts。
+  async function voiceScanDir(payload) {
+    try {
+      const p = payload || {}
+      const dirPath = String(p.dirPath || '').trim()
+      const selected = Array.isArray(p.selectedFiles) ? p.selectedFiles : []
+      if (!dirPath || !fs.existsSync(dirPath)) return { files: [], voicesDir: '' }
+
+      // _cleanup_stale_montage_outputs L597-634 一比一：进入第③步时传入本次确认列表，
+      // 删除 outputs 里不属于本次列表的旧 montage_concat_* 产物（含附属同名文件），
+      // 避免配音列表把历次合成的旧视频全扫进来（原版「34个变9个」根因）
+      const keepFiles = Array.isArray(p.keepFiles) ? p.keepFiles : []
+      if (keepFiles.length) {
+        try {
+          const keepStems = new Set()
+          for (const pf of keepFiles) {
+            const stem = path.resolve(pf).replace(/\.[^.]+$/, '')
+            keepStems.add(stem)
+            keepStems.add(stem + '_sources')
+            keepStems.add(stem + '.meta')
+          }
+          for (const f of fs.readdirSync(dirPath)) {
+            if (!f.startsWith('montage_concat_')) continue // 只动混剪专属命名，不碰用户其它视频
+            const full = path.resolve(path.join(dirPath, f))
+            if (keepStems.has(full.replace(/\.[^.]+$/, ''))) continue
+            try { fs.unlinkSync(full) } catch (_) { /* 删除失败按原版仅告警口径忽略 */ }
+          }
+        } catch (_) { /* 清理失败不阻断扫描 */ }
+      }
+
+      const exts = ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v']
+      let files = []
+      // 显式选中的文件若仍在当前目录 → 原样使用（L1648-1653 口径）
+      if (selected.length) {
+        const firstParent = path.resolve(path.dirname(selected[0]))
+        if (firstParent === path.resolve(dirPath)) files = selected.map((f) => path.resolve(f))
+      }
+      if (!files.length) {
+        try {
+          for (const f of fs.readdirSync(dirPath)) {
+            if (exts.some((e) => f.toLowerCase().endsWith(e))) files.push(path.join(dirPath, f))
+          }
+        } catch (err) {
+          return { error: `扫描视频目录失败: ${err.message}` }
+        }
+      }
+      files.sort((a, b) => path.basename(a).toLowerCase().localeCompare(path.basename(b).toLowerCase()))
+
+      const voicesDir = path.join(L.resolveOutMontageDir(dirPath), 'voices')
+      // 配音产物重关联（2026-09-15 用户报障：dubbedPath 为会话态，重启后丢失 →
+      // collectCandidates 回退未配音的第二步产物，导出时间轴静默丢口播）。
+      // 配音产物固定落 <montage_cache>/dubbed/dubbed_<视频名>，存在即回填。
+      const dubbedDir = path.join(path.dirname(voicesDir), 'dubbed')
+      const items = files.map((filepath, i) => {
+        const expectedWav = path.join(voicesDir, `voice_${i + 1}.wav`)
+        let originalText = ''
+        const txtPath = filepath.replace(/\.[^.]+$/, '') + '.txt'
+        try {
+          if (fs.existsSync(txtPath)) originalText = fs.readFileSync(txtPath, 'utf-8').trim()
+        } catch (_) { /* 读失败按空 */ }
+        const dubbedCand = path.join(dubbedDir, 'dubbed_' + path.basename(filepath))
+        return {
+          path: filepath,
+          name: path.basename(filepath),
+          wavPath: fs.existsSync(expectedWav) ? expectedWav : '',
+          dubbedPath: fs.existsSync(dubbedCand) ? dubbedCand : '',
+          originalText,
+          // 原版行构建时逐行 get_media_duration(filepath)（dialogs.py L1850 口径）
+          durationSec: getMediaDuration(filepath),
+          // 克隆音频时长（voice_audio_durations 口径）：已生成 wav 顺带探测，
+          // 返回 Step3 重建行时绿字不再回退 --:--（2026-09-10 用户报障修复）
+          voiceDurSec: fs.existsSync(expectedWav) ? getMediaDuration(expectedWav) : 0,
+        }
+      })
+      return { files: items, voicesDir }
+    } catch (err) {
+      return { error: err.message }
+    }
+  }
+
+  // ── TTS 单次请求（对照 _post_tts L140-188：180s 超时、3 次重试、恢复轮询）──
+  // IndexTTSRequest 口径：无 speaker 字段（voxcpm 遗留）；extra = 克隆参数
+  //  （duration_factor/emo_text/emo_alpha，2026-09-09 用户裁决「设置声音克隆」弹窗配置）
+  // 停顿标记保护（2026-09-08 服务端句间停顿标记）：text 里的 ((pause=N)) 不得进
+  //  preprocessTtsText（数字会被转中文、字母会被拆分），按标记切分逐段预处理后原样拼回。
+  const PAUSE_MARK_RE = /\(\(pause=\d+\)\)/g
+  function preprocessTtsKeepingPause(text) {
+    if (!PAUSE_MARK_RE.test(text)) return L.preprocessTtsText(text)
+    PAUSE_MARK_RE.lastIndex = 0
+    return String(text)
+      .split(/((?:\(\(pause=\d+\)\)))/)
+      .map((p) => (/^\(\(pause=\d+\)\)$/.test(p) ? p : L.preprocessTtsText(p)))
+      .join('')
+  }
+  async function postTts(apiUrl, text, refAudioB64, extra, targetDuration = 0) {
+    const payload = {
+      text: preprocessTtsKeepingPause(text),
+      prompt_audio: refAudioB64 || null,
+      ...(extra || {}),
+      // 2026-09-20 用户裁决：目标时长（秒）——服务端按其控制生成时长（0/缺省=自然时长）
+      ...(targetDuration > 0 ? { target_duration: targetDuration } : {}),
+    }
+    const maxAttempts = 3
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await httpRequest('POST', apiUrl, { body: payload, timeout: 180000 })
+        // httpRequest 非 2xx 会 reject（err.status/err.response），2xx 返回 {data,status,raw}
+        return res.raw || Buffer.from(JSON.stringify(res.data ?? ''))
+      } catch (err) {
+        const status = err && err.status
+        const connReset = isExpectedOfflineError(err)
+        if (status !== 503 && !connReset) {
+          // 确定性错误直接抛（原版非 503 ApiError 直接 raise）
+          throw new Error(`TTS 请求失败 HTTP ${status || '—'}: ${formatHttpErr(err)}`)
+        }
+        if (attempt < maxAttempts) {
+          // 连接中断 → 等恢复（20s）；503 繁忙 → 等 15s；均带 /health 轮询
+          await waitForServerRecovery(apiUrl, connReset ? 20.0 : 15.0)
+          await sleep(2000)
+          continue
+        }
+        throw new Error(`TTS 请求失败（已重试 ${maxAttempts} 次）: ${formatHttpErr(err)}`)
+      }
+    }
+    throw new Error('TTS 请求失败')
+  }
+
+  function formatHttpErr(err) {
+    if (!err) return '(无输出)'
+    if (err.response !== undefined && err.response !== null) {
+      const body = typeof err.response === 'string' ? err.response : JSON.stringify(err.response)
+      return `HTTP ${err.status || ''} ${body}`.trim()
+    }
+    return err.message || String(err)
+  }
+
+  /** 连接中断后轮询 /health 等恢复（对照 _wait_for_server_recovery L57-72） */
+  async function waitForServerRecovery(apiUrl, maxWait) {
+    const health = L.deriveHealthUrl(apiUrl)
+    if (!health) { await sleep(Math.min(3000, maxWait * 1000)); return false }
+    const deadline = Date.now() + maxWait * 1000
+    while (Date.now() < deadline) {
+      try {
+        const r = await httpRequest('GET', health, { timeout: 3000 })
+        const d = typeof r.data === 'object' ? r.data : {}
+        if (r.status === 200 && d.loaded) return true
+      } catch (_) { /* 轮询期内失败继续 */ }
+      await sleep(2000)
+    }
+    return false
+  }
+
+  /**
+   * 合成一条文案为 wav（2026-09-09 用户裁决：整句合成——原版为逐句合成后拼接，
+   *   句间固定插 0.15s 静音（_concat_wav_bytes gap_sec=0.15，不可配置）；整句化后
+   *   句间停顿由模型按标点自然处理。.timing.json 仍按句估算写入（字幕烧制逐行时间轴依赖）。
+   * 2026-09-08 服务端新增句间停顿标记（仅 indextts，写在 text 里）：((pause=毫秒)) / 连续
+   *   空格 / 换行；服务端按标记拆段逐段推理后插精确静音拼接，无标记走单段路径（零开销）。
+   *   pauseMs>0 时在句界插入显式标记（用户可调，替代原版固定 0.15s），>0 会多段推理、
+   *   长文案耗时线性增加（文档明示）。
+   */
+  async function synthesizeItem(text, refAudioB64, outWavPath, apiUrl, emit, extra, pauseMs, targetDuration = 0) {
+    const segs = L.splitSentences(text)
+    let mergedText = text.trim()
+    // 2026-09-20：qwen3 引擎不插 ((pause=ms)) 标记（IndexTTS 专属约定，qwen3 会照读）
+    const pause = (extra && extra.engine === 'qwen3') ? 0 : Math.max(0, Math.round(Number(pauseMs ?? 0) || 0))
+    if (pause > 0 && segs.length > 1) {
+      // 句界插显式停顿标记（splitSentences 保留句尾标点，直接 join）
+      mergedText = segs.join(`((pause=${pause}))`)
+    } else if (mergedText.includes('\n')) {
+      // 整句合成：多行文案用「。」连接为一次 TTS 请求（单句路径零开销）
+      mergedText = mergedText.split('\n').map((l) => l.trim()).filter(Boolean).join('。') + '。'
+    }
+    emit?.({ stage: '正在合成语音...' })
+    let content
+    let segTiming = null
+    if ((extra && extra.engine === 'qwen3') && segs.length > 1 && mergedText.length > 120) {
+      // 2026-09-21 文案混剪长文案（用户裁决「先文案→再声音→再按文案剪辑」）：qwen3 整段
+      //   单次请求有输入长度上限 → 按句拆成多次请求、帧级拼接（句间静音=「句间停顿」设置；
+      //   分段实测时长攒 timing）。target_duration 不随分句下发（长文案以声音自然时长为准，
+      //   下游本就「取得声音后不做变速、时间轴以声音为准」）；silencedetect/whisperx 照常精化。
+      const gapSec = Math.max(0, Number(pauseMs ?? 0) || 0) / 1000
+      const bufs = []
+      segTiming = []
+      let cursor = 0
+      for (let i = 0; i < segs.length; i++) {
+        emit?.({ stage: `正在合成语音（第 ${i + 1}/${segs.length} 句）...` })
+        const buf = L.repairWavBytes(await postTts(apiUrl, segs[i], refAudioB64, extra, 0))
+        const d = L.wavBytesDuration(buf)
+        segTiming.push({ text: segs[i], start: Math.round(cursor * 1000) / 1000, end: Math.round((cursor + d) * 1000) / 1000 })
+        cursor += d + gapSec
+        bufs.push(buf)
+      }
+      content = L.concatWavBuffers(bufs, gapSec)
+    } else {
+      content = L.repairWavBytes(await postTts(apiUrl, mergedText, refAudioB64, extra, targetDuration))
+    }
+    fs.writeFileSync(outWavPath, content)
+    try {
+      const totalDur = L.wavBytesDuration(content)
+      // 2026-09-18 用户裁决：停顿感知 timing——句界精确扣除/加回 pause 量，
+      // 字幕句界不再因停顿均摊漂移（单句/无停顿等价旧口径）
+      let timing = segTiming
+        ? segTiming
+        : segs.length <= 1
+          ? [{ text: mergedText, start: 0, end: Math.round(totalDur * 1000) / 1000 }]
+          : L.buildPauseAwareTiming(segs, totalDur, pause)
+      // 2026-09-19 字幕对齐增强（用户报障：字幕落后声音约半秒）：silencedetect
+      //   实测语音起止与句间停顿，句窗口平移/缩放 + 句界吸附到实测停顿中点——
+      //   消除字数比例估算与真实语音节奏的 ±0.5s 漂移；任何失败回退估算 timing。
+      try {
+        // 2026-09-19 修复（用户报障：预览词条/字幕全挤在 0 点）：此处必须 await——
+        // detectSpeechBounds 是 async，裸调用返回 Promise（真值）→ alignTimingToSpeech
+        // 拿到 Promise 当测量结果 → leadIn/tailOut=undefined → 全 NaN → JSON 序列化为
+        // null → 变速时 scaleTimingSidecar Number(null)=0 → timing 整条清零
+        const measured = await detectSpeechBounds(outWavPath, totalDur)
+        if (measured) timing = alignTimingToSpeech(timing, measured, totalDur)
+      } catch (_) { /* 实测失败回退估算 timing */ }
+      writeTimingSidecar(outWavPath, timing)
+      // 2026-09-19（用户方案·whisperx 字级对齐；2026-09-20 用户裁决：调用点=克隆
+      //   完成后统一一次，导出/服务端合成不重复调用）：POST /whisper/transcribe →
+      //   返回 segments[].words[] 字级流与 cues[]（文案原文+实测真值）；行由
+      //   buildRowsFromCues(cues, words) 生成后覆写上面的估算 timing——行带 chars
+      //   字级 spans，文字模板命中窗口=词首末字符真值。
+      //   best-effort：网络失败/超时保留估算 timing，不阻断克隆。
+      try {
+        const aligned = await transcribeAlignedRows(outWavPath, text)
+        if (aligned) writeTimingSidecar(outWavPath, aligned)
+      } catch (_) { /* 对齐失败保留估算 timing */ }
+    } catch (_) { /* 写时间轴失败不阻断（原版 OSError 兜底） */ }
+  }
+
+  /** whisperx 字级对齐（2026-09-19 用户方案；2026-09-20 用户裁决：调用点=克隆完成
+   *  后统一一次，导出/服务端合成不重复调用）：上传 wav + 文案原文 → POST /whisper/transcribe
+   *  （mode=raw,subtitle 单次调用）→ 一次返回双份：raw=segments[].words[] 字级流；
+   *  subtitle=cues[]（文案原文+实测真值，{text,start,end} 即 timing 行形状）。
+   *  行=buildRowsFromCues(cues, words)：cues 原样为行，行内可见字符与行时间窗词流
+   *  按首字锚定 1:1 挂 chars（文字模板命中窗口=词首末字符实测起止）；
+   *  无 cues/无有效行 → null（调用方保留估算 timing） */
+  /** 对齐调用（带重试）：2026-09-20 实机日志——whisper 工作进程 CUDA 崩溃 rc=-6
+   *  返回 500，服务端提示「请重试（将自动重新加载模型）」；此前一次失败即静默回退
+   *  估算 timing，该条字级/ALIGNED.SRT 永远缺失。现 HTTP 失败按 10s/30s 间隔重试
+   *  （共 3 次尝试）；200 但无有效行（服务端产物为空）不重试直接回退。 */
+  async function transcribeAlignedRows(wavPath, text) {
+    const retryDelays = [10000, 30000]
+    let lastErr = null
+    for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+      if (attempt > 0) {
+        console.warn(`[voice] transcribe 对齐失败（第 ${attempt} 次重试，${retryDelays[attempt - 1]}ms 后）：`, String((lastErr && lastErr.message) || lastErr).slice(0, 160))
+        await new Promise((r) => setTimeout(r, retryDelays[attempt - 1]))
+      }
+      try {
+        return await transcribeAlignedOnce(wavPath, text)
+      } catch (err) { lastErr = err }
+    }
+    console.warn('[voice] transcribe 对齐重试耗尽，保留估算 timing：', String((lastErr && lastErr.message) || lastErr).slice(0, 160))
+    return null
+  }
+
+  /** 单次对齐请求（无重试；失败抛错交给上层重试包装） */
+  async function transcribeAlignedOnce(wavPath, text) {
+    const boundary = '----TintinAlign' + Math.random().toString(16).substring(2)
+    const parts = []
+    const putField = (k, v) => parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`))
+    putField('language', 'zh')
+    putField('fmt', 'json')
+    putField('mode', 'raw,subtitle')
+    putField('subtitle', 'true')
+    putField('subtitle_text', String(text || ''))
+    // 2026-09-20 契约更新：tempo 为 multipart number 字段（实测必带，1.0=音频原速对齐；
+    //   缺失 → 422 Field required query/body）。此前旧格式未带 → 422 → aligned.srt 缺失
+    putField('tempo', '1.0')
+    parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${path.basename(wavPath).replace(/"/g, '')}"\r\nContent-Type: audio/wav\r\n\r\n`))
+    parts.push(fs.readFileSync(wavPath))
+    parts.push(Buffer.from('\r\n'))
+    parts.push(Buffer.from(`--${boundary}--\r\n`))
+    const res = await httpRequest('POST', '/whisper/transcribe', {
+      body: Buffer.concat(parts),
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      timeout: 300000,
+    })
+    const raw = res && res.raw && res.raw.length
+      ? Buffer.from(res.raw).toString('utf-8')
+      : String((res && res.data) ?? '')
+    let j = null
+    try { j = JSON.parse(raw) } catch (_) { console.warn('[voice] transcribe 响应非 JSON：', String(raw).slice(0,200)); return null }
+    const words = []
+    for (const seg of (j && Array.isArray(j.segments)) ? j.segments : []) {
+      if (Array.isArray(seg.words)) words.push(...seg.words)
+    }
+    if (j && j.error) console.warn('[voice] transcribe 服务端错误：', String(j.error).slice(0,200))
+    // 2026-09-20 修正（实机报障：对齐结果永远拿不到）：7248348 换实现（cues 直接为
+    //   行）时调用点漏改，此处曾引用已删除的 alignCopyToWords/charsToTimingRows →
+    //   每次对齐都 ReferenceError 被上层静默吞掉：日志只见请求、字级行与
+    //   .aligned.srt 从未落盘。现改为 cues 原样为行 + 行内字级锚（buildRowsFromCues）。
+    const rows = buildRowsFromCues(Array.isArray(j && j.cues) ? j.cues : [], words)
+    // 服务端对齐 SRT（字幕单一来源=服务端）：落为 <wav>.aligned.srt，合成上传/
+    // 资产归位直取；客户端不再自行切段生成字幕
+    if (typeof j.srt === 'string' && j.srt.includes('-->')) {
+      try { fs.writeFileSync(wavPath + '.aligned.srt', j.srt, 'utf-8') } catch (_) {}
+    }
+    return rows.length ? rows : null
+  }
+
+  // 单条失败记录跳过不中断；任务间 sleep 0.3s；变速对齐视频时长（clamp+timing 缩放）。
+  // ── voice:cloneBatchStop — 停止批量克隆（2026-09-23 用户裁决：服务端无响应时
+  //  不必等全批跑完；按 progressChannel 定向置停止标记，当前素材完成后停止，
+  //  剩余任务保持待合成可直接重试。半截 wav 不会存在：写盘在单条合成末尾整文件落）──
+  const voiceBatchStopChannels = new Set()
+  function voiceCloneBatchStop(payload) {
+    const ch = String((payload || {}).progressChannel || '')
+    if (ch) voiceBatchStopChannels.add(ch)
+    return { ok: true }
+  }
+
+  // ── voice:cloneBatch — 批量克隆人声（VoiceCloneWorker.run L330-412 口径）──
+  async function voiceCloneBatch(payload, ctx) {
+    try {
+      const p = payload || {}
+      const tasks = Array.isArray(p.tasks) ? p.tasks : []
+      if (!tasks.length) throw new Error('voice:cloneBatch requires tasks[]')
+      // 2026-09-05：服务端将删除 /voxcpm/*，口播配音恒走 /indextts/tts（与声音克隆同通道）
+      const apiUrl = String(p.apiUrl || '').trim() || (getServerUrl().replace(/\/$/, '') + '/indextts/tts')
+      const speedMin = Number(p.speedMin ?? 0.9)
+      const speedMax = Number(p.speedMax ?? 1.2)
+      // 2026-09-20 用户裁决：传了 sample_id 走样本库渠道（服务端用库内样本+自动补
+      // ref_text），无需下载样本音频；未传时维持 prompt_audio 下载转 b64 兜底
+      const sampleId = Math.max(0, Number(p.sampleId || 0))
+      // 克隆参数（渲染层「设置声音克隆」弹窗配置；契约同声音克隆页 /indextts/tts）
+      const tp = p.ttsParams || {}
+      const ttsExtra = {
+        duration_factor: Number(tp.durationFactor ?? 1.0),
+        ...(String(tp.emoText || '').trim() ? { emo_text: String(tp.emoText).trim() } : {}),
+        emo_alpha: Number(tp.emoAlpha ?? 0.5),
+        // 2026-09-20（服务端 TTS 统一入口）：engine=qwen3 → Qwen3-TTS；克隆必填
+        // ref_text=参考音频文稿（缺失服务端 400），渲染层随批次下发
+        ...(String(p.engine || '').trim() ? { engine: String(p.engine).trim() } : {}),
+        ...(String(p.refText || '').trim() ? { ref_text: String(p.refText).trim() } : {}),
+        // Qwen3-TTS 专属（2026-09-20 用户裁决）：预置音色/指令文本
+        ...(String(p.speaker || '').trim() ? { speaker: String(p.speaker).trim() } : {}),
+        ...(String(p.instruct || '').trim() ? { instruct: String(p.instruct).trim() } : {}),
+        ...(sampleId > 0 ? { sample_id: sampleId } : {}),
+      }
+      // 句间停顿（2026-09-08 服务端停顿标记）：毫秒值写在 text 里，不进请求载荷
+      const pauseMs = Math.max(0, Math.round(Number(tp.pauseMs ?? 0) || 0))
+      const channel = p.progressChannel || ''
+
+      let refAudioB64 = null
+      const refAudioPath = String(p.refAudioPath || '')
+      if (refAudioPath && fs.existsSync(refAudioPath)) {
+        refAudioB64 = fs.readFileSync(refAudioPath).toString('base64')
+      } else if (p.refAudioUrl) {
+        // 参考声音来自服务端样本库（GET /voice/samples 的 audio_url；相对路径拼 serverUrl）
+        let u = String(p.refAudioUrl)
+        if (!/^https?:/i.test(u)) u = getServerUrl().replace(/\/$/, '') + (u.startsWith('/') ? u : '/' + u)
+        const r = await httpRequest('GET', u, { timeout: 30000 })
+        refAudioB64 = Buffer.from(r.raw || '').toString('base64')
+      }
+
+      // 进度推送：原 event.sender.send(channel, …) → ctx?.emit（调用方注入；
+      // P0 同步阻塞返回最终结果，ctx.emit 为空时静默跳过，jobId 化是后续项）
+      const emitRow = (rowIdx, value, stage, extra) => {
+        if (channel && ctx?.emit) ctx.emit({ rowIdx, value, stage, ...(extra || {}) })
+      }
+      const emitStage = (stage) => {
+        if (channel && ctx?.emit) ctx.emit({ stage })
+      }
+
+      const results = {}
+      const durations = {} // videoPath → 克隆音频时长（原版 voice_audio_durations 口径）
+      const failures = []
+      const total = tasks.length
+      let stopped = false
+      for (let index = 0; index < total; index++) {
+        if (channel && voiceBatchStopChannels.has(channel)) {
+          stopped = true
+          emitStage(`已停止：剩余 ${total - index} 条保持待合成，可直接重试`)
+          break
+        }
+        const t = tasks[index]
+        const text = String(t.text || '').trim()
+        if (!text) continue
+        emitStage(`正在克隆第 ${t.rowIdx + 1} 个声音片段 (${index + 1}/${total})...`)
+        emitRow(t.rowIdx, 15)
+        try {
+          fs.mkdirSync(path.dirname(t.outWavPath), { recursive: true })
+          emitRow(t.rowIdx, 50)
+          // 2026-09-20 用户裁决：目标时长=各行视频时长（以声音对齐），随 TTS 请求下发
+          const rowVideoDur = t.videoPath && fs.existsSync(t.videoPath) ? getMediaDuration(t.videoPath) : 0
+          await synthesizeItem(text, refAudioB64, t.outWavPath, apiUrl, (msg) => emitRow(t.rowIdx, 50, msg.stage), ttsExtra, pauseMs, rowVideoDur > 0 ? rowVideoDur : 0)
+          emitRow(t.rowIdx, 90)
+
+          // 2026-09-20 用户裁决：取得声音后不做变速/补静音——配音原样落盘，
+          //   时间轴以声音为准（行 lengthMode 默认 'audio'：视频末帧定格延长至
+          //   配音长度；speedMin/speedMax 载荷字段保留但不消费）
+          results[t.videoPath] = t.outWavPath
+          durations[t.videoPath] = getMediaDuration(t.outWavPath)
+          // 2026-09-11 用户裁决「状态要实时」：完成事件随带 wavPath/时长，渲染层即时
+          // 回写该行（此前 wavPath 只在整批返回后统一回写 → 已合成行整批期间仍显示未生成）
+          emitRow(t.rowIdx, 100, undefined, { wavPath: t.outWavPath, durSec: durations[t.videoPath] })
+        } catch (err) {
+          emitRow(t.rowIdx, 0, undefined, { failed: true })
+          failures.push({ rowIdx: t.rowIdx, msg: err.message })
+          emitStage(`注意： 第 ${t.rowIdx + 1} 个声音克隆失败，已跳过继续...`)
+        }
+        await sleep(300)
+      }
+      return { results, durations, failures }
+    } catch (err) {
+      return { error: err.message }
+    }
+  }
+
+  // ── fancy:listTemplates — 花字模板列表 + 已缓存预览图（dataURL）──
+  // 对照 step3_voice_view.py fancy_template_combo 填充 + _start_fancy_preview_loader。
+  // 预览图主进程 ffmpeg 现场生成（ensureTemplatePreview 缓存），渲染层 <img> 直用。
+  async function fancyListTemplates() {
+    try {
+      const templates = FT.listFancyTemplates(true).map((tpl) => {
+        // 全业务字段回传（渲染层选模板后原样回传给 dubVideos，音效/动画信息不丢）
+        const { _path, ...rest } = tpl
+        return { ...rest, anim: L.getFancyAnim(tpl), hasSound: !!FT.getFancySoundPath(tpl) }
+      })
+      const previews = {}
+      for (const tpl of templates) {
+        const p = FT.templatePreviewPath(tpl.template_id)
+        if (fs.existsSync(p) && fs.statSync(p).size > 0) {
+          previews[tpl.template_id] = `data:image/png;base64,${fs.readFileSync(p).toString('base64')}`
+        }
+      }
+      return { templates, previews }
+    } catch (err) {
+      return { error: err.message }
+    }
+  }
+
+  // ── fancy:serverTemplates — 服务端花字模板库（GET /fancy/templates）──
+  // 对照 docs/CLIENT-FANCY-ACCESS.md：模板管理与渲染在服务端，客户端只做「选择设置」。
+  // 响应 {items,total}（openapi 空 schema，宽容解析：数组直收 / items 包裹解包）；
+  // 与 voice:fonts 同模式：离线返回 null，渲染层回退本地模板。
+  async function fancyServerTemplates() {
+    try {
+      const res = await httpRequest('GET', '/fancy/templates', { timeout: 10000 })
+      const data = res.data
+      const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : [])
+      return { templates: items, total: data?.total ?? items.length }
+    } catch (err) {
+      if (isExpectedOfflineError(err)) return null
+      return { error: err.message }
+    }
+  }
+
+  // ── textfx:serverTemplates — 服务端文字模板库 ──
+  // 2026-09-09 用户裁决：文字模板（textfx 动画体系）与花字（fancy 模板）是独立概念，
+  // 不得混淆。解析口径同 fancy:serverTemplates（{items,total} 宽容解包，离线 null）。
+  // 2026-09-10 实测纠偏：服务端真实路由为 /text_templates/templates（本地契约快照
+  // 记录的 /textfx/templates 在服务端从未存在、恒 404，宽容解析误显示为空库）；
+  // 返回字段为 id（渲染层口径 template_id），在此归一化，渲染层零改动。
+  // 注：2026-09-10 在线契约纠偏：统一合成 POST /montage/concat（multipart）已支持全套
+  // text_template_* 字段，不存在也不需要独立「文字模板烧制」接口（所有素材统一合成）；
+  // 本 handler 仅供选择/预览，烧制走统一合成字段接入。
+  async function textfxServerTemplates() {
+    try {
+      const res = await httpRequest('GET', '/text_templates/templates', { timeout: 10000 })
+      const data = res.data
+      const raw = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : [])
+      const items = raw
+        .map((it) => {
+          const id = it && (it.id ?? it.template_id ?? it.templateId)
+          if (!id) return null
+          return { ...it, template_id: String(id) }
+        })
+        .filter(Boolean)
+      return { templates: items, total: data?.total ?? items.length }
+    } catch (err) {
+      if (isExpectedOfflineError(err)) return null
+      return { error: err.message }
+    }
+  }
+
+  // ── textfx:matchKeywords 已删除（2026-09-19 架构：服务端 /text_templates/match 下线，
+  // 客户端不再调用关键词命中——词源=产品资料关联关键词（渲染层对字幕行命中），
+  // 产品未关联词时渲染层走 LLM 兜底（llm:chat）提词 ──
+
+  // ── fancy:ensurePreviews — 补齐缺失的模板预览图（逐个 ffmpeg 生成，后台调用）──
+  // 2026-09-09 对齐：payload.templates 可选传入服务端 /fancy/templates 模板（与本地
+  // 同格式，ensureTemplatePreview 按 style 串渲染，与本地模板同一预览口径）。
+  async function fancyEnsurePreviews(payload, ctx) {
+    try {
+      const ffmpeg = getFfmpegPath()
+      const fontPath = fs.existsSync('C:/Windows/Fonts/msyhbd.ttc')
+        ? 'C:/Windows/Fonts/msyhbd.ttc'
+        : (fs.existsSync('C:/Windows/Fonts/msyh.ttc') ? 'C:/Windows/Fonts/msyh.ttc' : '')
+      const previews = {}
+      let generated = 0
+      const serverList = Array.isArray(payload && payload.templates) ? payload.templates : []
+      const templates = [...FT.listFancyTemplates(true), ...serverList.filter((t) => t && t.template_id)]
+      for (let i = 0; i < templates.length; i++) {
+        const tpl = templates[i]
+        const out = FT.ensureTemplatePreview(tpl, ffmpeg, fontPath)
+        if (out) {
+          previews[tpl.template_id] = `data:image/png;base64,${fs.readFileSync(out).toString('base64')}`
+          generated++
+          // 逐个回传进度（对照原版 _FancyPreviewWorker 串行后台生成）；
+          // 原定向通道 event.sender.send('fancy:previewProgress', …) → ctx?.emit
+          ctx?.emit?.({ idx: i + 1, total: templates.length })
+        }
+      }
+      return { previews, generated }
+    } catch (err) {
+      return { error: err.message }
+    }
+  }
+
+  // ── voice:dubVideos — 批量替换原声（VideoDubbingWorker.run L843-1456 口径）──
+  async function voiceDubVideos(payload, ctx) {
+    try {
+      const p = payload || {}
+      const tasks = Array.isArray(p.tasks) ? p.tasks : []
+      if (!tasks.length) throw new Error('voice:dubVideos requires tasks[]')
+      const channel = p.progressChannel || ''
+      // 进度推送：原 event.sender.send(channel, …) → ctx?.emit（P0 同步返回不推送）
+      const emit = (rowIdx, value, stage) => { if (channel && ctx?.emit) ctx.emit({ rowIdx, value, stage }) }
+
+      // 字幕字体：族名 → 注册表解析本机字体文件，解析不到回退微软雅黑（L768-785 口径）
+      const family = String(p.subtitleFont || '').trim()
+      const fontPathEsc = p.addSubtitles
+        ? L.resolveSubtitleFontPath(family, {
+            familyPath: family ? lookupWindowsFontFile(family) : '',
+            path: (cand) => fs.existsSync(cand.replace(/\\:/g, ':')),
+          })
+        : ''
+      // 花字字体：msyhbd.ttc → msyh.ttc → msyh（L930-934 口径）
+      const fancyFontPath = fs.existsSync('C:/Windows/Fonts/msyhbd.ttc')
+        ? 'C\\:/Windows/Fonts/msyhbd.ttc'
+        : (fs.existsSync('C:/Windows/Fonts/msyh.ttc') ? 'C\\:/Windows/Fonts/msyh.ttc' : 'msyh')
+
+      // 花字模板（L1054-1055：非 dict → None=自定义样式）+ 模板音效（缺失静默跳过）
+      // 2026-09-09 对齐核实：服务端 /fancy/templates 返回的剪映系模板与本地同格式
+      // （style 即 ffmpeg drawtext 样式串），可直接进本地烧制链；anim 缺失时推导。
+      let fancyTemplate = null
+      if (p.fancyTemplate) {
+        try {
+          const parsed = typeof p.fancyTemplate === 'string' ? JSON.parse(p.fancyTemplate) : p.fancyTemplate
+          if (parsed && typeof parsed === 'object' && parsed.template_id) {
+            fancyTemplate = parsed
+            // 服务端模板无 anim 字段（本地 listTemplates 时推导）→ 此处补推导，烧制动画不丢
+            if (!fancyTemplate.anim) fancyTemplate.anim = L.getFancyAnim(fancyTemplate)
+          }
+        } catch (_) { fancyTemplate = null }
+      }
+      const fancySoundPath = fancyTemplate ? FT.getFancySoundPath(fancyTemplate) : ''
+      const fancySoundGainDb = fancyTemplate ? FT.getFancySoundGainDb(fancyTemplate) : -6.0
+
+      const results = {}
+      const total = tasks.length
+      for (let index = 0; index < total; index++) {
+        const t = tasks[index]
+        emit(index, Math.floor(index / total * 100), `正在进行视频原声替换配音 (${index + 1}/${total})...`)
+        try {
+          fs.mkdirSync(path.dirname(t.outVideoPath), { recursive: true })
+          const lengthMode = (p.lengthModes || {})[t.videoPath] || 'video'
+          const videoDur = getMediaDuration(t.videoPath)
+          const audioDur = getMediaDuration(t.voiceWavPath)
+          // 输入视频预检（run L1155-1161）：ffprobe 读不出时长 = 文件不完整/损坏
+          //（如服务端成片下载中断导致 moov 缺失）。立即报明确错误，不带坏文件进 ffmpeg。
+          if (videoDur <= 0) {
+            throw new Error(
+              `输入视频无法读取（文件可能不完整或损坏，常见原因为服务端`
+              + `成片下载中断）：${t.videoPath}\n请重新执行镜头合成后再配音。`)
+          }
+          // .timing.json 句级时间轴（对照 _load_timing_sidecar L826-841：句 text 均非空才有效）
+          let timing = null
+          try {
+            const sidecar = t.voiceWavPath + '.timing.json'
+            if (fs.existsSync(sidecar)) {
+              const arr = JSON.parse(fs.readFileSync(sidecar, 'utf-8'))
+              if (Array.isArray(arr) && arr.length && arr.every((x) => x && x.text)) timing = arr
+            }
+          } catch (_) { timing = null }
+
+          const args = L.buildDubFFmpegArgs({
+            videoPath: t.videoPath,
+            voiceWavPath: t.voiceWavPath,
+            outputVideoPath: t.outVideoPath,
+            text: String(t.text || ''),
+            addSubtitles: !!p.addSubtitles,
+            lengthMode,
+            videoDur,
+            audioDur,
+            timing,
+            fancyText: !!p.fancyText,
+            fancyStyle: p.fancyStyle || 'gold',
+            // 花字内容已改为自动提取卖点（PR#4），fancyWords 仅兼容保留不再参与渲染
+            fancyWords: Array.isArray(p.fancyWords) ? p.fancyWords : [],
+            fancyPosition: p.fancyPosition || 'upper_middle',
+            // 背景不透明度缺省 20%（2026-09-15 用户裁决，原 0.5）
+            subtitleBoxOpacity: p.subtitleBoxOpacity ?? 0.2,
+            // 2026-09-09 裁决：字幕/花字特效迁 Step4 统一烧制，配音链只出声音（纯化配音）
+            burnEffects: false,
+            // 字幕文字样式预设 key（2026-09-09 裁决：样式属字幕配置；主进程 SUBTITLE_STYLES 查表）
+            subtitleStyle: String(p.subtitleStyle || 'white'),
+            // 服务端 /subtitle_styles 完整样式对象（2026-09-17 用户裁决：字幕样式统一
+            // 来自服务端；配音链 burnEffects=false 不烧字幕，此处透传保持与 Step4 烧制链对称）
+            subtitleStyleObj: (p.subtitleStyleObj && typeof p.subtitleStyleObj === 'object') ? p.subtitleStyleObj : null,
+            subtitleAnim: String(p.subtitleAnim || 'fade'),
+            fancyTemplate,
+            fancySoundPath,
+            fancySoundGainDb,
+            subtitleFontPath: fontPathEsc,
+            fancyFontPath,
+          })
+          const r = await runFfmpeg(args)
+          if (r.code !== 0) {
+            throw new Error(`视频原声替换配音失败：\n${r.stderr || '(无输出)'}\n命令: ${['ffmpeg', ...args].join(' ')}`)
+          }
+          results[t.videoPath] = t.outVideoPath
+        } catch (err) {
+          return { error: err.message, results }
+        }
+      }
+      emit(total - 1, 100, '所有视频替换配音完成！')
+      return { results }
+    } catch (err) {
+      return { error: err.message }
+    }
+  }
+
+  // ── voice:fonts — 服务端字体列表（对照 _refresh_server_fonts → GET /config/fonts）──
+  async function voiceFonts() {
+    try {
+      const res = await httpRequest('GET', '/config/fonts', { timeout: 10000 })
+      const data = res.data
+      const fonts = Array.isArray(data) ? data : (Array.isArray(data?.fonts) ? data.fonts : [])
+      return { fonts }
+    } catch (err) {
+      if (isExpectedOfflineError(err)) return null
+      return { error: err.message }
+    }
+  }
+
+  // ── voice:fontFile — 服务端字体文件字节（GET /config/fonts/{font_id}/file；
+  // 2026-09-09 用户裁决：字体下拉按自身字体自渲染，FontFace 加载服务端字体文件）──
+  async function voiceFontFile(fontId) {
+    const fid = String(fontId || '').trim()
+    if (!fid || /[\\/]/.test(fid)) return { error: '非法 font_id' }
+    try {
+      // httpRequest 保留原始 Buffer（res.raw），非 JSON 二进制响应原样透传
+      const res = await httpRequest('GET', `/config/fonts/${encodeURIComponent(fid)}/file`, { timeout: 30000 })
+      const buf = res.raw
+      if (!buf || !buf.length) return { error: '字体文件为空' }
+      return { data: new Uint8Array(buf) }
+    } catch (err) {
+      if (isExpectedOfflineError(err)) return null
+      return { error: err.message }
+    }
+  }
+
+  // ── voice:subtitleStyles — 服务端字幕样式库（2026-09-17 用户裁决：字幕样式统一来自服务端）
+  //     GET /subtitle_styles → 返回样式列表，渲染层用于 UI 色板 + 预览；
+  //     主进程 buildServerFxFields 用于服务端烧制、serverStyleToDrawtext 用于本地 ffmpeg 烧制。──
+  async function voiceSubtitleStyles() {
+    try {
+      const res = await httpRequest('GET', '/subtitle_styles', { timeout: 10000 })
+      const data = res.data
+      const styles = Array.isArray(data) ? data : (Array.isArray(data?.styles) ? data.styles : [])
+      return { styles }
+    } catch (err) {
+      if (isExpectedOfflineError(err)) return null
+      return { error: err.message }
+    }
+  }
+
+  // ── voice:exportAudio — 导出克隆声音（对照 _on_btn_export_clicked shutil.copy2）──
+  async function voiceExportAudio(payload) {
+    try {
+      const p = payload || {}
+      if (!p.srcPath || !fs.existsSync(p.srcPath)) return { error: '源音频不存在' }
+      if (!p.savePath) return { error: '缺少保存路径' }
+      fs.copyFileSync(p.srcPath, p.savePath)
+      return { ok: true, savePath: p.savePath }
+    } catch (err) {
+      return { error: err.message }
+    }
+  }
+
+  // ── 通道注册表（client polyfill {args:[...]} 位置参 → 具名函数）──────────
+  channels['voice:scanDir'] = (args, ctx) => voiceScanDir(...args, ctx)
+  channels['voice:cloneBatch'] = (args, ctx) => voiceCloneBatch(...args, ctx)
+  channels['voice:cloneBatchStop'] = (args, ctx) => voiceCloneBatchStop(...args, ctx)
+  channels['voice:dubVideos'] = (args, ctx) => voiceDubVideos(...args, ctx)
+  channels['voice:fonts'] = (args, ctx) => voiceFonts(...args, ctx)
+  channels['voice:fontFile'] = (args, ctx) => voiceFontFile(...args, ctx)
+  channels['voice:subtitleStyles'] = (args, ctx) => voiceSubtitleStyles(...args, ctx)
+  channels['voice:exportAudio'] = (args, ctx) => voiceExportAudio(...args, ctx)
+  channels['fancy:listTemplates'] = (args, ctx) => fancyListTemplates(...args, ctx)
+  channels['fancy:serverTemplates'] = (args, ctx) => fancyServerTemplates(...args, ctx)
+  channels['fancy:ensurePreviews'] = (args, ctx) => fancyEnsurePreviews(...args, ctx)
+  channels['textfx:serverTemplates'] = (args, ctx) => textfxServerTemplates(...args, ctx)
+  return channels
+}
+
+function writeTimingSidecar(wavPath, timing) {
+  try {
+    // 2026-09-19 防御：时间轴必须每行有限且 end>start（text 非空）才落盘——
+    // 全零/NaN/null 的 timing 一经写入会被下游（变速缩放/字幕/SRT 资产）放大成
+    // 整链污染；非法时跳过写入（下游无 timing 自动回退字数比例估算）
+    const rows = Array.isArray(timing) ? timing : []
+    const valid = rows.length > 0 && rows.every((x) => x && String(x.text || '').trim()
+      && Number.isFinite(Number(x.start)) && Number.isFinite(Number(x.end))
+      && Number(x.end) > Number(x.start))
+    if (!valid) {
+      console.warn('[voice] timing 非法（全零/NaN/空行），跳过写入 sidecar：', wavPath)
+      return
+    }
+    fs.writeFileSync(wavPath + '.timing.json', JSON.stringify(timing, null, 1))
+  } catch (_) { /* 对照 _write_timing_sidecar OSError 兜底 */ }
+}
+
+function scaleTimingSidecar(wavPath, factor) {
+  const p = wavPath + '.timing.json'
+  try {
+    if (!fs.existsSync(p)) return
+    const timing = JSON.parse(fs.readFileSync(p, 'utf-8'))
+    // 2026-09-19 防御：仅缩放有限数值行——Number(null)=0 曾把 NaN/null 行批量
+    // 清零成数值 0（timing 整链污染的放大器）；非法行原样保留
+    let touched = false
+    for (const t of timing) {
+      const s = Number(t.start), e = Number(t.end)
+      if (Number.isFinite(s) && Number.isFinite(e) && (s > 0 || e > 0)) {
+        t.start = Math.round(s * factor * 1000) / 1000
+        t.end = Math.round(e * factor * 1000) / 1000
+        touched = true
+      }
+      // 字级 spans 同步缩放（timing 行可带 chars：whisperx 字级时间戳）
+      if (Array.isArray(t.chars)) {
+        for (const c of t.chars) {
+          const cs = Number(c.start), ce = Number(c.end)
+          if (Number.isFinite(cs) && Number.isFinite(ce)) {
+            c.start = Math.round(cs * factor * 1000) / 1000
+            c.end = Math.round(ce * factor * 1000) / 1000
+          }
+        }
+      }
+    }
+    if (touched) fs.writeFileSync(p, JSON.stringify(timing, null, 1))
+  } catch (_) { /* 对照 _scale_timing_sidecar 兜底 */ }
+}
+
+/** cues + 字级词流 → timing 行（2026-09-19 用户方案·纯函数可单测）：
+ *  cues=服务端 subtitle 对齐产物（文案原文+实测真值），原样为行；
+ *  每行 chars=该行时间窗内的词流与行可见字符顺序 1:1 配对（标点/空白 span=null），
+ *  供 matchKeywordHits 取「词首末字符实测起止」做文字模板命中窗口。 */
+function buildRowsFromCues(cues, words) {
+  const rows = []
+  for (const cue of Array.isArray(cues) ? cues : []) {
+    const text = String((cue && cue.text) || '').trim()
+    const start = Number(cue && cue.start) || 0
+    const end = Number(cue && cue.end) || 0
+    if (!text || !(end > start)) continue
+    const inWin = (Array.isArray(words) ? words : []).filter((w) => {
+      if (!w) return false
+      const ws = Number(w.start), we = Number(w.end)
+      return Number.isFinite(ws) && Number.isFinite(we) && ws >= start - 0.05 && we <= end + 0.05
+    })
+    const chars = []
+    let wi = 0
+    for (const c of Array.from(text)) {
+      if (/[\p{P}\p{S}\s]/u.test(c)) { chars.push({ c, start: null, end: null }); continue }
+      // 首字锚定：剩余词流前方 4 词内找首字匹配（ASR 漏/错字 → 该字符 span=null
+      // 跳过，不错位——实测「专业级无感延迟」ASR 仅识别后四字也能对齐）
+      let found = -1
+      for (let d = 0; d < 4 && wi + d < inWin.length; d++) {
+        const first = Array.from(String(inWin[wi + d].word || inWin[wi + d].w || ''))[0] || ''
+        if (first.toLowerCase() === c.toLowerCase()) { found = d; break }
+      }
+      if (found >= 0) {
+        const w = inWin[wi + found]
+        chars.push({ c, start: Number(w.start) || 0, end: Number(w.end) || 0 })
+        wi += found + 1
+      } else {
+        chars.push({ c, start: null, end: null })
+      }
+    }
+    rows.push({ text, start, end, chars })
+  }
+  return rows
+}
+// 导出名守恒：源 module.exports = { createMontageVoiceIpc, getFfmpegPath,
+// getFfprobePath, getMediaDuration, lookupWindowsFontFile, parseSilencedetect,
+// alignTimingToSpeech, writeTimingSidecar, scaleTimingSidecar, buildRowsFromCues }；
+// createMontageVoiceIpc 由路由壳工厂 createMontageVoiceApi 顶替（签名见上方注）。
+export { createMontageVoiceApi, getFfmpegPath, getFfprobePath, getMediaDuration, lookupWindowsFontFile, parseSilencedetect, alignTimingToSpeech, writeTimingSidecar, scaleTimingSidecar, buildRowsFromCues }

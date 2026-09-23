@@ -33,3 +33,6 @@ export function createHttpRequest(deps?: HttpRequestDeps): (
   fullPath: string,
   options?: { body?: unknown; headers?: Record<string, string>; timeout?: number },
 ) => Promise<HttpResult>
+
+/** 「外部服务未部署/不可达」的正常错误判定（montage 域离线回退 null 契约共用）。 */
+export function isExpectedOfflineError(err: unknown): boolean

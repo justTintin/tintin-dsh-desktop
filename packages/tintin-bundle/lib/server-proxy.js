@@ -214,3 +214,18 @@ export function createHttpRequest({ getServerUrl, getMachineId, log = () => {}, 
     })
   }
 }
+
+/**
+ * 判定是否为"外部服务未部署/不可达"的正常错误，这类错误不打主进程堆栈
+ * (SRC server-proxy.js isExpectedOfflineError, L455-464 — verbatim; the
+ * montage voice/final channels inject this to mirror the offline-returns-null
+ * contract of voice:fonts / fancy:serverTemplates / lut:list).
+ */
+export function isExpectedOfflineError(err) {
+  const code = err && (err.code || err.message)
+  if (!code) return false
+  const offlineCodes = ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH']
+  if (typeof code === 'string' && offlineCodes.some((c) => code.includes(c))) return true
+  if (typeof err.message === 'string' && /fetch failed|network error/i.test(err.message)) return true
+  return false
+}

@@ -16,9 +16,13 @@ import { findLegacyConfigDir, planLegacyMigration } from './lib/legacy-config.js
 import {
   createServerUrlResolver,
   createHttpRequest,
+  isExpectedOfflineError,
   resolveEndpoint,
   API_ENDPOINTS,
 } from './lib/server-proxy.js'
+import { createFfmpegGateApi } from './lib/montage/ffmpeg-gate.js'
+import { createMontageVoiceApi } from './lib/montage/voice-ipc.js'
+import { createMontageFinalApi } from './lib/montage/final-ipc.js'
 
 const PING_PATH = '/tintin/ping'
 const PROBE_FILE_PATH = '/tintin/probe/file'
@@ -44,6 +48,15 @@ const IPC_SERVER_ROUTES = {
   'server:put': { method: 'PUT', generic: true },
   'server:delete': { method: 'DELETE', generic: true },
 }
+
+// ── NATIVE_CHANNELS — 本地原生通道（montage 域，WP-3）──────────────────────
+// <ns>:<method> 通道不走上面的 server:* 白名单：通道名直接映射到 lib/montage/
+// 搬运模块的具名函数（ipcMain 壳已剥离，见各模块头注）。载荷 = client polyfill
+// 的 {args:[...]}（位置参数，回调已剔除），返回值 sendJson 200 {result}。
+// 每个条目形如 (args, ctx) => fn(...args, ctx)；ctx.emit 为进度事件注入点——
+// P0 阶段同步阻塞返回最终结果，进度条先不做（jobId 化是后续项）。
+// ffmpeg/ffprobe 经 resolveBinary 注入（TINTIN_BIN_DIR）；httpRequest 族经
+// createHttpRequest 注入（依赖注入面同源 createMontageFinalIpc 工厂参数）。
 
 // ── WP-1 media binaries ────────────────────────────────────────────────────
 // Resolve the dir holding ffmpeg/ffprobe/yt-dlp: the shell hands it over as
@@ -237,13 +250,38 @@ export async function apply(ctx) {
     warn: (...a) => ctx.logger.warn(...a),
   })
 
+  // NATIVE_CHANNELS（montage 域本地原生通道）：ffmpeg 族二进制经 resolveBinary
+  // 注入（TINTIN_BIN_DIR；voice/final 模块内 getBinDir 同源读取该 env），
+  // 服务端依赖经 createHttpRequest/isExpectedOfflineError/getServerUrl 注入——
+  // 注入面与源 createMontageVoiceIpc/createMontageFinalIpc 工厂参数一致。
+  // jyaudio:*（剪映音频自动同步定时任务）随 final 工厂一并注册。
+  const montageDeps = { httpRequest, isExpectedOfflineError, getServerUrl }
+  const nativeChannels = {
+    ...createFfmpegGateApi({ ffmpegPath: resolveBinary('ffmpeg'), ffprobePath: resolveBinary('ffprobe') }),
+    ...createMontageVoiceApi(montageDeps),
+    ...createMontageFinalApi(montageDeps),
+  }
+
   // tintinBridge: the host service the media/ops plugins inject (WP-1 契约).
-  // Surface: server proxy, machine id, config, jobs registry, media stream.
+  // Surface: server proxy, machine id, config, jobs registry, media stream,
+  // native montage channels (WP-3).
   const tintinBridge = {
     getServerUrl,
     getMachineId,
     httpRequest,
     jobs,
+    // dispatch a native <ns>:<method> bridge call to the ported montage module
+    // handlers. args is the polyfill's positional {args:[...]} array; ctx.emit
+    // is the progress-event sink (undefined in P0 — sync blocking return).
+    async callNative(channel, args) {
+      const entry = nativeChannels[channel]
+      if (!entry) {
+        const err = new Error(`Unknown TinTin native channel: ${channel}`)
+        err.code = 'unknown-channel'
+        throw err
+      }
+      return await entry(Array.isArray(args) ? args : [], { emit: undefined })
+    },
     // dispatch a server.* bridge call to the FastAPI service.
     async callServer(channel, payload) {
       const route = IPC_SERVER_ROUTES[channel]
@@ -379,8 +417,10 @@ export async function apply(ctx) {
     })
 
     // WP-1: /tintin/ipc/<channel> dispatch — the host endpoint the WP-2
-    // window.tintin polyfill calls. server:* channels forward to the FastAPI
-    // service through the bridge; failure keeps status + message (铁律 7).
+    // window.tintin polyfill calls. Native montage channels (<ns>:<method>,
+    // NATIVE_CHANNELS) run the ported local handlers first; server:* channels
+    // forward to the FastAPI service through the bridge; failure keeps
+    // status + message (铁律 7).
     const disposeIpc = webCtx.webServer.register({
       kind: 'prefix',
       path: IPC_PATH,
@@ -401,6 +441,15 @@ export async function apply(ctx) {
           return
         }
         try {
+          // Native channel first: the polyfill forwards unknown window.tintin
+          // members as {args:[...]} positional payloads. P0 progress note:
+          // long-running channels (final:mix / voice:cloneBatch / dubVideos)
+          // block until the final result — jobId-based progress is follow-up.
+          if (nativeChannels[channel]) {
+            const result = await tintinBridge.callNative(channel, payload?.args)
+            sendJson(res, 200, { result })
+            return
+          }
           const result = await tintinBridge.callServer(channel, payload)
           sendJson(res, 200, { result })
         } catch (error) {
