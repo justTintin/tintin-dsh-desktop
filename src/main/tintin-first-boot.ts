@@ -98,6 +98,7 @@ export function seedTintinDefaults(dshHome: string, appDataDir: string | undefin
 }
 
 let workspaceEnsured = false
+let providerEnsured = false
 
 /** Register the default workspace through the public RPC once harness is ready. */
 export async function ensureDefaultWorkspace(snapshot: RuntimeSnapshot): Promise<void> {
@@ -139,5 +140,64 @@ export async function ensureDefaultWorkspace(snapshot: RuntimeSnapshot): Promise
     // One-shot guard already set; a failure surfaces in the UI as "no
     // workspace", recoverable by picking one manually.
     console.warn('[tintin-first-boot] workspace ensure failed:', error instanceof Error ? error.message : String(error))
+  }
+}
+
+/**
+ * Keep the TinTin provider permanent (2026-09-24 user ruling): the settings
+ * UI hides its delete button, and this backstop restores the provider even if
+ * it was removed through any other path — next boot brings it back from the
+ * configured server address. Runs once after the harness is ready.
+ */
+export async function ensureTinTinProvider(snapshot: RuntimeSnapshot): Promise<void> {
+  if (providerEnsured) return
+  const base = snapshot.url
+  const token = snapshot.authToken
+  if (snapshot.phase !== 'ready' || typeof base !== 'string' || typeof token !== 'string') return
+  providerEnsured = true
+  try {
+    const origin = new URL(base).origin
+    const exchange = new URL('/', origin)
+    exchange.searchParams.set('token', token)
+    const res = await fetch(exchange, { redirect: 'manual' })
+    const setCookie = res.headers.getSetCookie?.() ?? []
+    const cookie = setCookie.map((h: string) => h.split(';')[0]?.trim() ?? '').find((p: string) => p.includes('='))
+    if (!cookie) throw new Error('no Set-Cookie on token exchange')
+    // method is the full public RPC name ('settings/describe' | 'settings/mutate')
+    // and maps 1:1 onto the /api/<method> HTTP route.
+    const rpc = async (method: string, args: unknown): Promise<unknown> => {
+      const r = await fetch(new URL(`/api/${method}`, origin), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie },
+        body: JSON.stringify({ type: 'client-request', rpcId: `tintin-ensure-${Date.now()}`, method, payload: { args } }),
+      })
+      const j = await r.json().catch(() => null)
+      const result = (j as { result?: { ok?: boolean, error?: { message?: string }, value?: unknown } })?.result
+      if (!result) throw new Error(`${method} returned no result (HTTP ${String(r.status)})`)
+      if (result.ok === false) throw new Error(`${method}: ${result.error?.message ?? 'unknown error'}`)
+      return result.value
+    }
+    const all = await rpc('settings/describe', {}) as {
+      namespaces?: Array<{ ns: string, value?: Record<string, unknown> }>
+    } | undefined
+    const namespaces = all?.namespaces ?? []
+    const serverUrl = String(
+      (namespaces.find((n) => n.ns === 'tintin-bundle')?.value as { server?: { url?: unknown } })?.server?.url ?? '')
+    const provider = (namespaces.find((n) => n.ns === 'llm-pi-ai')?.value as {
+      providers?: Record<string, unknown>
+    } | undefined)?.providers?.['tintin-server']
+    if (provider !== undefined || serverUrl.length === 0) return
+    await rpc('settings/mutate', {
+      ns: 'llm-pi-ai',
+      ops: [{
+        op: 'set', path: ['providers', 'tintin-server'], value: {
+          displayName: 'TinTin', apiKeyEnv: 'TINTIN_SERVER_API_KEY', api: 'openai-completions',
+          baseURL: `${serverUrl}/llm`, models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }],
+        },
+      }],
+    })
+    console.info(`[tintin-first-boot] tintin-server provider restored from ${serverUrl}`)
+  } catch (error) {
+    console.warn('[tintin-first-boot] provider ensure failed:', error instanceof Error ? error.message : String(error))
   }
 }

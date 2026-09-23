@@ -1,7 +1,7 @@
 import { initializeDesktopService, desktopDiagnostics } from './desktop-service'
 import { checkBlockingPluginUpdates, selectPluginRecoveryTarget, PluginRecoveryEvidence, planPluginRecovery, runPluginRecoveryPlan, type PluginRecoveryCheck } from './plugin-recovery-market'
 import { RepairAgentService, type CrashEvidence } from './repair-agent'
-import { ensureDefaultWorkspace, seedTintinDefaults } from './tintin-first-boot'
+import { ensureDefaultWorkspace, ensureTinTinProvider, seedTintinDefaults } from './tintin-first-boot'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -3390,9 +3390,11 @@ async function bootstrap(): Promise<void> {
       desktopDiagnostics?.runtimeChanged(snapshot, () => runtime.flushLog(), runtime.launchAttemptId)
       if (!safeModeVisible && snapshot.phase === 'ready') {
         lastCrashEvidence = undefined
-        // TinTin default workspace (first boot): register Documents/tintin-workspace
-        // through the public RPC so a fresh install can create sessions.
+        // TinTin default workspace + provider permanence (first boot / any boot):
+        // register Documents/tintin-workspace, restore the tintin-server provider
+        // if it was removed — the product ships exactly this one provider.
         void ensureDefaultWorkspace(snapshot)
+        void ensureTinTinProvider(snapshot)
       }
       if (!safeModeVisible && snapshot.phase === 'failed') {
         lastCrashEvidence = {
