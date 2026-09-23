@@ -24,8 +24,10 @@
   ],
   "scripts": {
     "postinstall": "patch-package && node scripts/install-brand-assets.mjs && install-electron --no",
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "npm run tintin:media --silent && electron-vite dev",
+    "build": "npm run tintin:media --silent && electron-vite build",
+    "tintin:media": "vite build -c packages/tintin-media-bundle/vite.config.mts",
+    "tintin:presets": "node scripts/build-tintin-presets.mjs",
     "icons:generate": "node scripts/generate-app-icons.mjs",
     "loader:generate": "node scripts/generate-loader-gifs.mjs",
     "preview": "electron-vite preview",
