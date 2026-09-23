@@ -5,9 +5,10 @@
 // (V5 local file write, V6 external process, V7 job channel) and stay minimal
 // on purpose; WP-1 replaces them with the real seam handlers.
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
 import { resolveMachineIdSync } from './lib/machine-id.js'
@@ -189,6 +190,36 @@ export async function apply(ctx) {
     tintinSettings.update(patch).catch((e) => ctx.logger.warn('tintin-bundle: legacy migration failed: %s', e?.message ?? e))
     return undefined
   }, 'tintin-bundle: legacy config migration')
+
+  // WP-5c: sync the bundled role presets into $DSH_HOME/.agent-presets/ —
+  // the preset roster's user root, auto-scanned by dsh-agent-presets. Our
+  // tintin-* directories are ours to own: refreshed on every boot so package
+  // updates land (a user copy under another id stays untouched). The default
+  // preset is switched via the composition (cordis.patch.yml), not here.
+  ctx.effect(() => {
+    const home = process.env.DSH_HOME
+    if (!home) return undefined
+    const srcRoot = new URL('./presets/', import.meta.url)
+    const srcDir = fileURLToPath(srcRoot)
+    const destRoot = join(home, '.agent-presets')
+    if (!existsSync(srcDir)) return undefined
+    try {
+      mkdirSync(destRoot, { recursive: true })
+      let synced = 0
+      for (const id of readdirSync(srcDir)) {
+        const src = join(srcDir, id)
+        if (!statSync(src).isDirectory()) continue
+        const dest = join(destRoot, id)
+        mkdirSync(dest, { recursive: true })
+        for (const f of readdirSync(src)) copyFileSync(join(src, f), join(dest, f))
+        synced++
+      }
+      if (synced > 0) ctx.logger.info('tintin-bundle: synced %d role presets to .agent-presets', synced)
+    } catch (error) {
+      ctx.logger.warn('tintin-bundle: preset sync failed: %s', error?.message ?? error)
+    }
+    return undefined
+  }, 'tintin-bundle: role preset sync')
 
   const aiConfigPath = process.env.TINTIN_AI_CONFIG || null
   const readAiConfig = aiConfigPath

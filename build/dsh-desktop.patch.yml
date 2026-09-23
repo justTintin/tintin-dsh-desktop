@@ -51,6 +51,14 @@
       config:
         root: !!js dshHomePath('kimi-ppt')
 
+# TinTin 总助手 is the product default preset (WP-5c). This layer applies
+# after dsh-web-app's insert, so the whole-config restatement switches the
+# default away from `standard`; schema defaults cover the root flags. The
+# role presets themselves sync to $DSH_HOME/.agent-presets from tintin-bundle.
+- id: agent-presets
+  config:
+    default: tintin-assistant
+
 # Harness creates the full Cordis HMR service after boot when no `hmr` service
 # exists, and that service throws without Node's internal module loader —
 # which a packaged Electron app cannot provide, so every signed macOS launch
