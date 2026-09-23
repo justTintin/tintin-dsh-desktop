@@ -32,6 +32,12 @@
     - id: dsh-image-generation
       name: dsh-image-generation
 
+    # TinTin bridge host: local capability and server-proxy routes for the
+    # TinTin shell. P0 registers the liveness route; WP-1 grows the IPC
+    # dispatcher, job registry and media streaming on this seam.
+    - id: tintin-bundle
+      name: tintin-bundle
+
     # DSH PPT owns one direct PPTD workflow and one standard Composer client.
     # The package contains no Tencent editor runtime or SlideP route.
     - id: dsh-ppt-composer
