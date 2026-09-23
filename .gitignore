@@ -31,3 +31,7 @@ docs/mobile-connection-latency.zh.md
 
 # Local pnpm content store
 /.pnpm-store/
+
+# TinTin media binaries (ffmpeg/ffprobe/yt-dlp, ~300MB, git LFS in SRC).
+# Not committed; fetched by scripts/fetch-tintin-binaries.mjs before packaging.
+resources/bin/

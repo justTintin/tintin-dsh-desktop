@@ -35,6 +35,21 @@ const IPC_SERVER_ROUTES = {
   'server:materialSearch': { method: 'POST', endpoint: API_ENDPOINTS.material.search },
 }
 
+// ── WP-1 media binaries ────────────────────────────────────────────────────
+// Resolve the dir holding ffmpeg/ffprobe/yt-dlp: the shell hands it over as
+// TINTIN_BIN_DIR (resources/bin); fall back to a local search when unset.
+export function getBinDir() {
+  const fromEnv = process.env.TINTIN_BIN_DIR
+  if (fromEnv) return fromEnv
+  return null
+}
+
+export function resolveBinary(bin) {
+  const dir = getBinDir()
+  const name = process.platform === 'win32' ? `${bin}.exe` : bin
+  return dir ? join(dir, name) : name
+}
+
 // TinTin settings namespace schema (server.url 等本地配置), schemastery form
 // (settings.register 需要 z schema——image-generation:14 先例). schemastery 无
 // optional 修饰（实测 optional 为 undefined）；空对象 schema 全可选，读取处
@@ -114,6 +129,31 @@ export async function apply(ctx) {
     },
   })
 
+  // WP-1: prove the TINTIN_BIN_DIR binary chain end to end — agent-invocable.
+  const ffmpegProbeTool = defineTool({
+    name: 'ffmpeg_probe',
+    description: 'Report the resolved ffmpeg binary path and its version, proving the TinTin media binary chain (TINTIN_BIN_DIR) is wired. Use to verify ffmpeg availability before media work.',
+    parameters: {},
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: {
+        ok: { type: 'boolean', required: true }, bin: { type: 'string', required: true }, version: { type: 'string' },
+      } },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+    },
+    isConcurrencySafe: () => true,
+    presentCall: () => ({ card: 'generic', kind: 'execute', title: 'Probe ffmpeg', rawInput: {} }),
+    async execute() {
+      const bin = resolveBinary('ffmpeg')
+      return await new Promise((resolve) => {
+        const child = spawn(bin, ['-version'], { stdio: ['ignore', 'pipe', 'pipe'] })
+        let out = ''
+        child.stdout.on('data', (b) => { out += b.toString() })
+        child.on('error', (e) => resolve({ ok: false, bin, version: undefined, error: e.message }))
+        child.on('close', (code) => resolve({ ok: code === 0, bin, version: out.split('\n')[0]?.slice(0, 80) }))
+      })
+    },
+  })
+
   // ── WP-1 foundation: config seam + server bridge ─────────────────────────
   // Config seam: TinTin's server.url lives in the harness settings namespace
   // 'tintin' (registered below). readConfig reads the committed value; the
@@ -160,6 +200,7 @@ export async function apply(ctx) {
 
   ctx.inject(['webServer', 'tools'], (webCtx) => webCtx.effect(() => {
     webCtx.tools.register(pingServerTool)
+    webCtx.tools.register(ffmpegProbeTool)
     const disposePing = webCtx.webServer.register({
       kind: 'exact',
       path: PING_PATH,

@@ -353,6 +353,10 @@
     ],
     "extraResources": [
       {
+        "from": "resources/bin",
+        "to": "bin"
+      },
+      {
         "from": "build/app-icon.png",
         "to": "icon.png"
       },

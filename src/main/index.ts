@@ -3367,6 +3367,12 @@ async function bootstrap(): Promise<void> {
     dshMarketPatchPath: desktopResourcePath('dsh-desktop-market.patch.yml'),
     dshHome: join(app.getPath('userData'), 'harness'),
     logPath: join(app.getPath('logs'), 'harness.log'),
+    // TinTin media binaries (ffmpeg/ffprobe/yt-dlp), shipped via extraResources
+    // → resources/bin. Dev resolves the repo's resources/bin; packaged reads
+    // process.resourcesPath/bin. The host plugin resolves tools from this env.
+    tintinBinDir: app.isPackaged
+      ? join(process.resourcesPath, 'bin')
+      : join(app.getAppPath(), 'resources', 'bin'),
     // Keep the Harness origin stable across launches. These ports are separate
     // from the production/development mobile bridge ports (43127/43128).
     preferredPort: DEFAULT_HARNESS_PORT + (developmentBuild ? 1 : 0),

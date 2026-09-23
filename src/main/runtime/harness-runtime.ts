@@ -29,6 +29,10 @@ export interface HarnessRuntimeOptions {
   startupTimeoutMs?: number
   /** Mirror log lines to the console (development builds only). */
   echoLogs?: boolean
+  /** TinTin media binaries dir (ffmpeg/ffprobe/yt-dlp), handed to the Harness
+   *  child as TINTIN_BIN_DIR. Undefined leaves the host plugin to its own
+   *  search (WP-1). */
+  tintinBinDir?: string
   onChanged(snapshot: RuntimeSnapshot): void
 }
 
@@ -291,7 +295,8 @@ export function buildHarnessSpawnOptions(
   dshHome: string,
   platform: NodeJS.Platform = process.platform,
   environment: NodeJS.ProcessEnv = process.env,
-  profile: string = 'web'
+  profile: string = 'web',
+  tintinBinDir?: string
 ): SpawnOptionsWithoutStdio {
   const {
     ELECTRON_RUN_AS_NODE: _runAsNode,
@@ -333,6 +338,12 @@ export function buildHarnessSpawnOptions(
       // `profiles/node_modules` fallback, whose junctions Windows can refuse.
       ...(profile === SAFE_MODE_PROFILE && { DSH_DESKTOP_HOST_RESOLVED: '1' }),
       NODE_COMPILE_CACHE: environment.NODE_COMPILE_CACHE ?? pathApi.join(dshHome, 'cache', 'compile-cache'),
+      // TinTin (WP-1): hand the media pipeline's binaries (ffmpeg/ffprobe/yt-dlp,
+      // shipped in resources/bin) to the Harness child. Dev reads the repo's
+      // resources/bin; packaged reads process.resourcesPath/bin. The host
+      // plugin resolves tools via this env (getBinDir), falling back to its own
+      // search when unset.
+      ...(tintinBinDir !== undefined && { TINTIN_BIN_DIR: tintinBinDir }),
       [pathKey]: resolveEnvironmentPath(environment, platform)
     },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -529,7 +540,8 @@ export class HarnessRuntime {
           this.options.dshHome,
           process.platform,
           shellEnvironment,
-          profile
+          profile,
+          this.options.tintinBinDir
         )
       )
     } catch (error) {
