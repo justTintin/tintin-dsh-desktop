@@ -1,0 +1,162 @@
+// ═══════════════════════════════════════════════════════════════
+// useWorkbenchPickers — 工作台输入区·产品/素材/脚本选择弹窗搜索域
+// 服务端契约（API-GUIDE 已核实，响应为自由格式 → pickListItems
+// 容错解析 {items}|{data}|{results}|裸数组）：
+//   · GET  /api/product-library/search?q=&limit=   产品（品类/品牌/型号）
+//   · GET  /material/list?search=&brand=&model=&media_type=   图视网格（原版
+//     素材检索口径；缩略图/预览走 /material/thumbnail、/material/serve）
+//   · GET  /audio/library?keyword=&category=       音频库（播放走
+//     /audio/library/{audio_id}/file；分类候选 GET /audio/categories）
+//   · GET  /api/storyboard/scripts?topic=&page=    分镜脚本库（主题）
+// HTTP 全部经主进程通用 server:get/post IPC（离线 null / 5xx 抛错），本层
+// 只做调用编排与异常文案映射（searchErrorText），组件零 URL 拼装（IRON-06）。
+// 异常分支（spec）：网络失败/5xx/空结果 均有提示。
+// ═══════════════════════════════════════════════════════════════
+
+import { ref } from 'vue'
+import { getTintin } from './useSettingsConfig'
+import { pickListItems, pickListTotal, pickDistinctValues, searchErrorText } from './workbenchChatContext'
+
+export type PickerItem = Record<string, unknown>
+
+/** 单次搜索调用的统一封装：离线/5xx/{error} → Error(用户可读文案)，返回原始 payload */
+async function fetchJsonPayload(call: () => Promise<unknown>): Promise<unknown> {
+  let data: unknown
+  try {
+    data = await call()
+  } catch (e) {
+    throw new Error(searchErrorText(e))
+  }
+  if (data === null || data === undefined) {
+    throw new Error(searchErrorText(null)) // 离线静默 null
+  }
+  if (typeof data === 'object' && 'error' in (data as Record<string, unknown>)) {
+    const msg = String((data as Record<string, unknown>).error || '')
+    if (msg) throw new Error(searchErrorText(new Error(msg)))
+  }
+  return data
+}
+
+/** payload → 列表（pickListItems 容错解析 {items}|{data}|{results}|裸数组） */
+async function fetchJsonList(call: () => Promise<unknown>): Promise<PickerItem[]> {
+  return pickListItems(await fetchJsonPayload(call))
+}
+
+/* ── 三个弹窗的搜索 fetcher（组件只消费，不感知 URL） ───────── */
+
+/** 产品搜索：GET /api/product-library/search?q=&limit=200 */
+export async function fetchProducts(kw: string): Promise<PickerItem[]> {
+  const t = getTintin()
+  if (!t?.server) throw new Error(searchErrorText(null))
+  return fetchJsonList(() => t.server.get('/api/product-library/search', { q: kw, limit: 200 }))
+}
+
+/** 图视网格检索：GET /material/list（品牌/型号/分类/类型过滤 + 分页，原版素材检索
+ *  vector_search/page.py 口径；空媒体类型=全部）；返回 items + total
+ *  （total 缺失 → -1，调用方退化为单页不分页） */
+export async function fetchMaterialGrid(p: {
+  search?: string
+  brand?: string
+  model?: string
+  category?: string
+  mediaType?: string
+  page?: number
+  size?: number
+}): Promise<{ items: PickerItem[]; total: number }> {
+  const t = getTintin()
+  if (!t?.server) throw new Error(searchErrorText(null))
+  const q: Record<string, unknown> = {
+    page: Math.max(1, Number(p.page) || 1),
+    size: Math.max(1, Number(p.size) || 60),
+  }
+  if (String(p.search || '').trim()) q.search = String(p.search).trim()
+  if (String(p.brand || '').trim()) q.brand = String(p.brand).trim()
+  if (String(p.model || '').trim()) q.model = String(p.model).trim()
+  if (String(p.category || '').trim()) q.category = String(p.category).trim()
+  if (String(p.mediaType || '').trim()) q.media_type = String(p.mediaType).trim()
+  const data = await fetchJsonPayload(() => t.server.get('/material/list', q))
+  return { items: pickListItems(data), total: pickListTotal(data) }
+}
+
+/** 素材字段候选值：GET /material/distinct?field=brand|model|category（原版素材检索
+ *  过滤下拉候选口径；失败回退空数组——候选缺失不阻塞弹窗，仍可手输过滤） */
+export async function fetchMaterialDistinct(field: 'brand' | 'model' | 'category'): Promise<string[]> {
+  const t = getTintin()
+  if (!t?.server) return []
+  try {
+    return pickDistinctValues(await t.server.get('/material/distinct', { field }))
+  } catch (_) {
+    return []
+  }
+}
+
+/** 音频库检索：GET /audio/library（keyword + category 过滤，契约已核实） */
+export async function fetchAudioLibrary(p: { keyword?: string; category?: string }): Promise<PickerItem[]> {
+  const t = getTintin()
+  if (!t?.server) throw new Error(searchErrorText(null))
+  const q: Record<string, unknown> = { page: 1, size: 60 }
+  if (String(p.keyword || '').trim()) q.keyword = String(p.keyword).trim()
+  if (String(p.category || '').trim()) q.category = String(p.category).trim()
+  return fetchJsonList(() => t.server.get('/audio/library', q))
+}
+
+/** 音频分类候选：GET /audio/categories（失败回退空 → 分类下拉仅「全部分类」） */
+export async function fetchAudioCategories(): Promise<string[]> {
+  const t = getTintin()
+  if (!t?.server) return []
+  try {
+    const d = await t.server.get('/audio/categories')
+    const arr = Array.isArray(d) ? d : ((d as any)?.categories ?? (d as any)?.items ?? [])
+    return (Array.isArray(arr) ? arr : [])
+      .map((x: unknown) =>
+        typeof x === 'string' ? x : String((x as Record<string, unknown>)?.category ?? (x as Record<string, unknown>)?.name ?? '')
+      )
+      .filter(Boolean)
+  } catch (_) {
+    return []
+  }
+}
+
+/** 脚本列表：GET /api/storyboard/scripts?topic=&page=1&page_size=100 */
+export async function fetchScripts(kw: string): Promise<PickerItem[]> {
+  const t = getTintin()
+  if (!t?.server) throw new Error(searchErrorText(null))
+  return fetchJsonList(() =>
+    t.server.get('/api/storyboard/scripts', { topic: String(kw || '').trim(), page: 1, page_size: 100 })
+  )
+}
+
+/* ── 搜索状态工厂（弹窗组件内消费；状态即 UI 三态数据） ─────── */
+
+export function usePickerSearch(fetcher: (kw: string) => Promise<PickerItem[]>) {
+  const kw = ref('')
+  const items = ref<PickerItem[]>([])
+  const loading = ref(false)
+  const error = ref('')
+  /** 是否已完成至少一次搜索（区分「未搜索」与「空结果」两种空态） */
+  const searched = ref(false)
+
+  async function run() {
+    loading.value = true
+    error.value = ''
+    try {
+      items.value = await fetcher(kw.value)
+    } catch (e) {
+      items.value = []
+      error.value = (e as Error)?.message || String(e)
+    } finally {
+      loading.value = false
+      searched.value = true
+    }
+  }
+
+  /** 弹窗每次打开时重置（原版弹窗每次 exec 都重新加载） */
+  function reset() {
+    kw.value = ''
+    items.value = []
+    error.value = ''
+    searched.value = false
+  }
+
+  return { kw, items, loading, error, searched, run, reset }
+}
