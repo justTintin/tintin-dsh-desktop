@@ -430,6 +430,12 @@ window.__ModuleLoader__.load({
           name: 'settings.plugin.item', key: 'tintin-bundle', order: -90,
         }, TintinSettingsCard))
 
+        // First-boot setup wizard (2026-09-24 user ruling): prompt for the
+        // SERVER ADDRESS (host:port), not an API key — probe it host-side
+        // (browser→LAN is cross-origin), fetch the model list, then configure
+        // the tintin-server provider and default model from the answer.
+        void maybeShowSetupWizard()
+
         // P0-V3 probe: proves this client module executed inside the workbench
         // renderer and that same-origin host routing answers it.
         fetch('/tintin/ping')
@@ -442,3 +448,88 @@ window.__ModuleLoader__.load({
     }
   },
 })
+
+async function maybeShowSetupWizard() {
+  // Settings may still be loading when plugins activate; retry briefly.
+  let ns
+  for (let i = 0; i < 10 && !ns; i++) {
+    try {
+      const all = await tintinClient.settingsRpc('settings/describe', {})
+      ns = (all?.namespaces ?? []).find((n) => n.ns === 'tintin-bundle')
+    } catch { /* retry */ }
+    if (!ns) await new Promise((r) => setTimeout(r, 1500))
+  }
+  if (!ns || ns.value?.server?.provisioned === true) return
+
+  const el = document.createElement('div')
+  el.id = 'tintin-setup-wizard'
+  el.style.cssText = 'position:fixed;inset:0;z-index:13000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);'
+  el.innerHTML = [
+    '<div style="width:min(460px,92vw);padding:28px;border-radius:16px;background:var(--dsw-alias-bg-layer-2,#1e1e20);color:var(--dsw-alias-label-primary,#e8e8e6);box-shadow:0 12px 40px rgba(0,0,0,.4);font-family:inherit">',
+    '  <div style="font-size:20px;font-weight:700;margin-bottom:6px">欢迎使用 TinTin</div>',
+    '  <div style="font-size:13px;color:var(--dsw-alias-label-tertiary,#8b8b88);margin-bottom:18px">配置 TinTin 服务端地址（AI 推理服务，含端口），将自动拉取可用模型。</div>',
+    '  <input id="tintin-setup-url" style="width:100%;box-sizing:border-box;height:40px;padding:0 14px;font:inherit;font-size:14px;border:.5px solid var(--dsw-alias-border-l4,#555);border-radius:10px;background:var(--dsw-alias-bg-layer-3,transparent);color:inherit" placeholder="http://192.168.0.10:8000" />',
+    '  <div id="tintin-setup-status" style="min-height:20px;margin-top:10px;font-size:12.5px;color:var(--dsw-alias-label-tertiary,#8b8b88)"></div>',
+    '  <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">',
+    '    <button id="tintin-setup-skip" style="appearance:none;font:inherit;font-size:13px;padding:8px 14px;border-radius:8px;border:.5px solid var(--dsw-alias-border-l4,#555);background:transparent;color:var(--dsw-alias-label-secondary,#bbb);cursor:pointer">暂不配置</button>',
+    '    <button id="tintin-setup-go" style="appearance:none;font:inherit;font-size:13px;font-weight:600;padding:8px 20px;border-radius:8px;border:0;background:var(--dsw-alias-label-primary,#4f7cff);color:#fff;cursor:pointer">测试并配置</button>',
+    '  </div>',
+    '</div>',
+  ].join('')
+  document.body.appendChild(el)
+  const input = el.querySelector('#tintin-setup-url')
+  const status = el.querySelector('#tintin-setup-status')
+  const go = el.querySelector('#tintin-setup-go')
+  const skip = el.querySelector('#tintin-setup-skip')
+  input.value = String(ns.value?.server?.url ?? '')
+
+  const setBusy = (busy, text, isError) => {
+    go.disabled = busy
+    go.textContent = busy ? '连接中…' : '测试并配置'
+    status.textContent = text ?? ''
+    status.style.color = isError ? '#f87171' : (text && text.includes('✓') ? '#4ade80' : 'var(--dsw-alias-label-tertiary,#8b8b88)')
+  }
+  const finish = async (url, models, preferred) => {
+    const ops = [{ op: 'set', path: ['server', 'url'], value: url }, { op: 'set', path: ['server', 'provisioned'], value: true }]
+    await tintinClient.settingsRpc('settings/mutate', { ns: 'tintin-bundle', ops })
+    await tintinClient.settingsRpc('settings/mutate', {
+      ns: 'llm-pi-ai',
+      ops: [{
+        op: 'set', path: ['providers', 'tintin-server'], value: {
+          displayName: 'TinTin', apiKeyEnv: 'TINTIN_SERVER_API_KEY', api: 'openai-completions',
+          baseURL: `${url}/llm`, models: models.map((m) => ({ id: m.id, name: m.name })),
+        },
+      }],
+    })
+    await tintinClient.settingsRpc('settings/mutate', {
+      ns: 'agent-default-model',
+      ops: [{ op: 'set', path: [], value: { provider: 'tintin-server', model: preferred.id } }],
+    })
+  }
+
+  skip.onclick = async () => {
+    try { await tintinClient.settingsRpc('settings/mutate', { ns: 'tintin-bundle', ops: [{ op: 'set', path: ['server', 'provisioned'], value: true }] }) } catch { /* keep default */ }
+    el.remove()
+  }
+  go.onclick = async () => {
+    const url = input.value.trim().replace(/\/+$/u, '')
+    if (!/^https?:\/\/[^\s/]+/i.test(url)) { setBusy(false, '地址需形如 http://<主机>:<端口>', true); return }
+    setBusy(true, `正在连接 ${url} …`)
+    try {
+      const r = await fetch('/tintin/setup/probe', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(j.error ?? `HTTP ${String(r.status)}`)
+      const { models, preferred } = j.result
+      setBusy(true, `✓ 连接成功，发现 ${String(models.length)} 个模型，正在配置…`)
+      await finish(url, models, preferred)
+      status.textContent = `✓ 配置完成（默认模型 ${preferred.name}），即将刷新…`
+      status.style.color = '#4ade80'
+      setTimeout(() => location.reload(), 900)
+    } catch (e) {
+      setBusy(false, e instanceof Error ? e.message : String(e), true)
+    }
+  }
+}

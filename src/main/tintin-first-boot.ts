@@ -51,6 +51,7 @@ function seedSettings(dshHome: string, serverUrl: string): void {
     'tintin-bundle:',
     '  server:',
     `    url: ${serverUrl}`,
+    '    provisioned: false',
     'llm-pi-ai:',
     '  providers:',
     '    tintin-server:',

@@ -83,7 +83,12 @@ export function resolveBinary(bin) {
 // host reads it defensively either way. Seeded on first boot by the shell
 // (tintin-first-boot.ts) so a fresh install is usable without manual RPC.
 const TintinConfig = z.object({
-  server: z.object({ url: z.string() }).default({}),
+  server: z.object({
+    url: z.string(),
+    // First-boot wizard marker: false until the user has confirmed a server
+    // address through the setup overlay (probe → models → provider config).
+    provisioned: z.boolean().default(false),
+  }).default({}),
 }).default({})
 
 export const name = 'tintin-bundle'
@@ -517,6 +522,46 @@ export async function apply(ctx) {
       },
     })
 
+    // First-boot setup wizard probe: the browser cannot reach an arbitrary LAN
+    // address directly (cross-origin), so the host probes the candidate server
+    // (health + model list) on its behalf and returns what the provider config
+    // should contain.
+    const disposeSetupProbe = webCtx.webServer.register({
+      kind: 'exact',
+      path: '/tintin/setup/probe',
+      handler: async (req, res) => {
+        if (req.method !== 'POST' || !isTrustedRequest(req, true)) {
+          sendJson(res, req.method === 'POST' ? 403 : 405, { error: 'Request rejected.' })
+          return
+        }
+        const chunks = []
+        for await (const c of req) chunks.push(c)
+        let base
+        try { base = JSON.parse(Buffer.concat(chunks).toString('utf8')).url } catch { base = null }
+        base = typeof base === 'string' ? base.replace(/\/+$/u, '') : ''
+        if (!/^https?:\/\/[^\s/]+/i.test(base)) {
+          sendJson(res, 400, { error: '地址需形如 http://<主机>:<端口>' })
+          return
+        }
+        try {
+          const health = await fetch(`${base}/health`, { signal: AbortSignal.timeout(8000) })
+          if (!health.ok) throw new Error(`/health 返回 ${String(health.status)}`)
+          const modelsRes = await fetch(`${base}/llm/models`, { signal: AbortSignal.timeout(8000) })
+          if (!modelsRes.ok) throw new Error(`/llm/models 返回 ${String(modelsRes.status)}`)
+          const data = await modelsRes.json()
+          const models = Array.isArray(data?.models) && data.models.length
+            ? data.models.map((m) => ({ id: String(m?.id ?? ''), name: String(m?.name ?? m?.id ?? ''), isDefault: m?.default === true }))
+            : []
+          if (!models.length) throw new Error('服务端未返回模型列表')
+          const preferred = models.find((m) => m.isDefault) ?? models[0]
+          sendJson(res, 200, { result: { ok: true, base, models, preferred } })
+        } catch (error) {
+          ctx.logger.warn('tintin-bundle: setup probe %s failed: %s', base, error?.message ?? error)
+          sendJson(res, 502, { error: `无法连接 ${base}：${error instanceof Error ? error.message : String(error)}` })
+        }
+      },
+    })
+
     return async () => {
       disposePing()
       disposeFile()
@@ -525,6 +570,7 @@ export async function apply(ctx) {
       disposeJobStatus()
       disposeIpc()
       disposeUpload()
+      disposeSetupProbe()
     }
   }, 'tintin-bundle: probe routes'))
   ctx.logger.info('tintin-bundle host ready')
