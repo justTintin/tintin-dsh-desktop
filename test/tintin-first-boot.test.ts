@@ -38,6 +38,15 @@ function describeBody(args: { serverUrl?: string, provider?: unknown }): unknown
   }
 }
 
+function credentialDescribeBody(configured: boolean): unknown {
+  return {
+    type: 'server-response',
+    result: { ok: true, value: { TINTIN_SERVER_API_KEY: { configured } } },
+  }
+}
+
+const credentialSetOk = { type: 'server-response', result: { ok: true, value: null } }
+
 function readySnapshot(): RuntimeSnapshot {
   return { phase: 'ready', message: '', logs: [], url: 'http://127.0.0.1:43130', authToken: 'launch-token' }
 }
@@ -72,10 +81,12 @@ describe('ensureTinTinProvider self-heal', () => {
     vi.restoreAllMocks()
   })
 
-  it('restores a deleted provider, posting describe to /api/settings/describe (the original bug posted it to settings/mutate)', async () => {
+  it('restores a deleted provider and its missing credential, posting describe to /api/settings/describe (the original bug posted it to settings/mutate)', async () => {
     const captured = stubFetch({
       'settings/describe': () => jsonResponse(describeBody({ serverUrl: 'http://192.168.111.31:8000' })),
       'settings/mutate': () => jsonResponse({ type: 'server-response', result: { ok: true, value: {} } }),
+      'credentials/describe': () => jsonResponse(credentialDescribeBody(false)),
+      'credentials/set': () => jsonResponse(credentialSetOk),
     })
     const mod = await loadModule()
 
@@ -94,14 +105,22 @@ describe('ensureTinTinProvider self-heal', () => {
     const value = op?.value as { baseURL?: string, apiKeyEnv?: string } | undefined
     expect(value?.baseURL).toBe('http://192.168.111.31:8000/llm')
     expect(value?.apiKeyEnv).toBe('TINTIN_SERVER_API_KEY')
+    // Credential half: describe → set with the placeholder key.
+    const setCred = captured.find((r) => r.url.endsWith('/api/credentials/set'))
+    expect(setCred).toBeDefined()
+    expect(setCred?.body?.method).toBe('credentials/set')
+    const credArgs = setCred?.body?.payload as { args?: { ref?: string, value?: string } } | undefined
+    expect(credArgs?.args?.ref).toBe('TINTIN_SERVER_API_KEY')
+    expect(credArgs?.args?.value).toBe('sk-tintin-local')
   })
 
-  it('is a no-op when the provider still exists (no mutate call)', async () => {
+  it('is a no-op when the provider and its stored credential both exist (no writes)', async () => {
     const captured = stubFetch({
       'settings/describe': () => jsonResponse(describeBody({
         serverUrl: 'http://192.168.111.31:8000',
         provider: { displayName: 'TinTin', baseURL: 'http://192.168.111.31:8000/llm' },
       })),
+      'credentials/describe': () => jsonResponse(credentialDescribeBody(true)),
     })
     const mod = await loadModule()
 
@@ -109,11 +128,34 @@ describe('ensureTinTinProvider self-heal', () => {
 
     expect(captured.some((r) => r.url.endsWith('/api/settings/describe'))).toBe(true)
     expect(captured.some((r) => r.url.endsWith('/api/settings/mutate'))).toBe(false)
+    expect(captured.some((r) => r.url.endsWith('/api/credentials/set'))).toBe(false)
+  })
+
+  it('restores a missing credential even when the provider is intact and never overwrites one already stored', async () => {
+    const captured = stubFetch({
+      'settings/describe': () => jsonResponse(describeBody({
+        serverUrl: 'http://192.168.111.31:8000',
+        provider: { displayName: 'TinTin', baseURL: 'http://192.168.111.31:8000/llm' },
+      })),
+      'credentials/describe': () => jsonResponse(credentialDescribeBody(false)),
+      'credentials/set': () => jsonResponse(credentialSetOk),
+    })
+    const mod = await loadModule()
+
+    await mod.ensureTinTinProvider(readySnapshot())
+
+    expect(captured.some((r) => r.url.endsWith('/api/settings/mutate'))).toBe(false)
+    const setCred = captured.find((r) => r.url.endsWith('/api/credentials/set'))
+    expect(setCred?.body?.method).toBe('credentials/set')
+    const credArgs = setCred?.body?.payload as { args?: { ref?: string, value?: string } } | undefined
+    expect(credArgs?.args?.ref).toBe('TINTIN_SERVER_API_KEY')
+    expect(credArgs?.args?.value).toBe('sk-tintin-local')
   })
 
   it('does not invent a provider when no server URL is configured', async () => {
     const captured = stubFetch({
       'settings/describe': () => jsonResponse(describeBody({})),
+      'credentials/describe': () => jsonResponse(credentialDescribeBody(true)),
     })
     const mod = await loadModule()
 

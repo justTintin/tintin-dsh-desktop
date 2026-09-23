@@ -20,6 +20,11 @@ import type { RuntimeSnapshot } from '../shared/contracts'
 
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:8766'
 const WORKSPACE_DIR_NAME = 'tintin-workspace'
+// The TinTin inference server runs unauthenticated in this build (A3 auth
+// lands later), so the stored key is a placeholder by design; it only has to
+// be non-empty for llm-pi-ai to send a bearer header the server ignores.
+export const TINTIN_SERVER_API_KEY_REF = 'TINTIN_SERVER_API_KEY'
+const TINTIN_PLACEHOLDER_API_KEY = 'sk-tintin-local'
 
 // The old client's userData used the package name; earlier packaged builds
 // used the productName. Read both (newest mtime wins when both exist).
@@ -78,7 +83,7 @@ function seedCredentials(dshHome: string): void {
     'version: 1',
     'records: {}',
     'refs:',
-    '  TINTIN_SERVER_API_KEY: sk-tintin-local',
+    `  ${TINTIN_SERVER_API_KEY_REF}: ${TINTIN_PLACEHOLDER_API_KEY}`,
     '',
   ].join('\n'), 'utf8')
 }
@@ -147,7 +152,13 @@ export async function ensureDefaultWorkspace(snapshot: RuntimeSnapshot): Promise
  * Keep the TinTin provider permanent (2026-09-24 user ruling): the settings
  * UI hides its delete button, and this backstop restores the provider even if
  * it was removed through any other path — next boot brings it back from the
- * configured server address. Runs once after the harness is ready.
+ * configured server address. It also restores the provider's stored
+ * credential: without it every session fails with MISSING_CREDENTIAL, the
+ * Models page shows the provider as unconfigured, and the client onboarding
+ * treats the install as provider-less and nags for an API key. Both halves
+ * run through the same public RPCs the Models page uses, so a value the user
+ * stored later is detected first and never overwritten. Runs once after the
+ * harness is ready.
  */
 export async function ensureTinTinProvider(snapshot: RuntimeSnapshot): Promise<void> {
   if (providerEnsured) return
@@ -186,17 +197,29 @@ export async function ensureTinTinProvider(snapshot: RuntimeSnapshot): Promise<v
     const provider = (namespaces.find((n) => n.ns === 'llm-pi-ai')?.value as {
       providers?: Record<string, unknown>
     } | undefined)?.providers?.['tintin-server']
-    if (provider !== undefined || serverUrl.length === 0) return
-    await rpc('settings/mutate', {
-      ns: 'llm-pi-ai',
-      ops: [{
-        op: 'set', path: ['providers', 'tintin-server'], value: {
-          displayName: 'TinTin', apiKeyEnv: 'TINTIN_SERVER_API_KEY', api: 'openai-completions',
-          baseURL: `${serverUrl}/llm`, models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }],
-        },
-      }],
-    })
-    console.info(`[tintin-first-boot] tintin-server provider restored from ${serverUrl}`)
+    if (provider === undefined && serverUrl.length > 0) {
+      await rpc('settings/mutate', {
+        ns: 'llm-pi-ai',
+        ops: [{
+          op: 'set', path: ['providers', 'tintin-server'], value: {
+            displayName: 'TinTin', apiKeyEnv: TINTIN_SERVER_API_KEY_REF, api: 'openai-completions',
+            baseURL: `${serverUrl}/llm`, models: [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }],
+          },
+        }],
+      })
+      console.info(`[tintin-first-boot] tintin-server provider restored from ${serverUrl}`)
+    }
+
+    // Credential half. Profiles created before first-boot seeding shipped can
+    // hold a credentials.yaml the harness itself wrote (browser-session grant
+    // only) — the ref must be (re)stored, but a real key the user entered
+    // through the Models page wins and is left alone.
+    const described = await rpc('credentials/describe', { refs: [TINTIN_SERVER_API_KEY_REF] }) as
+      Record<string, { configured?: boolean }> | undefined
+    if (described?.[TINTIN_SERVER_API_KEY_REF]?.configured !== true) {
+      await rpc('credentials/set', { ref: TINTIN_SERVER_API_KEY_REF, value: TINTIN_PLACEHOLDER_API_KEY })
+      console.info('[tintin-first-boot] tintin-server credential restored (placeholder key)')
+    }
   } catch (error) {
     console.warn('[tintin-first-boot] provider ensure failed:', error instanceof Error ? error.message : String(error))
   }
