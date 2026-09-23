@@ -1,6 +1,7 @@
 import { initializeDesktopService, desktopDiagnostics } from './desktop-service'
 import { checkBlockingPluginUpdates, selectPluginRecoveryTarget, PluginRecoveryEvidence, planPluginRecovery, runPluginRecoveryPlan, type PluginRecoveryCheck } from './plugin-recovery-market'
 import { RepairAgentService, type CrashEvidence } from './repair-agent'
+import { ensureDefaultWorkspace, seedTintinDefaults } from './tintin-first-boot'
 import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -3355,6 +3356,9 @@ async function bootstrap(): Promise<void> {
       console.warn(`[desktop-storage] error during ${context}:`, error)
     }
   })
+  // TinTin first boot: seed settings/credentials before the harness reads them
+  // (files only written when absent, so a live harness never races this).
+  seedTintinDefaults(dshHome, app.getPath('appData'))
   createWindow()
   runtime = new HarnessRuntime({
     // A packaged app's stdout may be a closed pipe; only mirror logs in development.
@@ -3384,7 +3388,12 @@ async function bootstrap(): Promise<void> {
         : spawn(executablePath, args, options),
     onChanged: (snapshot) => {
       desktopDiagnostics?.runtimeChanged(snapshot, () => runtime.flushLog(), runtime.launchAttemptId)
-      if (!safeModeVisible && snapshot.phase === 'ready') lastCrashEvidence = undefined
+      if (!safeModeVisible && snapshot.phase === 'ready') {
+        lastCrashEvidence = undefined
+        // TinTin default workspace (first boot): register Documents/tintin-workspace
+        // through the public RPC so a fresh install can create sessions.
+        void ensureDefaultWorkspace(snapshot)
+      }
       if (!safeModeVisible && snapshot.phase === 'failed') {
         lastCrashEvidence = {
           logs: snapshot.logs,

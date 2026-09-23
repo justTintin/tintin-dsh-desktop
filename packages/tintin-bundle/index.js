@@ -77,7 +77,14 @@ export function resolveBinary(bin) {
 // (settings.register 需要 z schema——image-generation:14 先例). schemastery 无
 // optional 修饰（实测 optional 为 undefined）；空对象 schema 全可选，读取处
 // 自行判空（server?.url）。字段约束随 WP-5 设置卡细化。
-const TintinConfig = z.object({}).default({})
+// TinTin settings namespace schema (schemastery; no .optional() exists — nested
+// default({}) keeps absent sections valid). Declaring server.url makes the
+// harness settings UI render the field as the 服务器地址 card (WP-5a); the
+// host reads it defensively either way. Seeded on first boot by the shell
+// (tintin-first-boot.ts) so a fresh install is usable without manual RPC.
+const TintinConfig = z.object({
+  server: z.object({ url: z.string() }).default({}),
+}).default({})
 
 export const name = 'tintin-bundle'
 // settings: TinTin config seam (server.url etc.). tools/webServer injected via

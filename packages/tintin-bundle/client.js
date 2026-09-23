@@ -4,7 +4,6 @@
 // here is deterministic; apply()-time installation raced that registration
 // and lost non-deterministically (observed dev17 ok / dev18 missing).
 const tintinClient = (() => {
-
     // ── TinTin 顶部 Tab 栏 + 视图切换（2026-09-23 用户实测修正）─────────────
     // 原 conversation.session.header.actions 挂法有三个缺陷：仅会话内存在、
     // 靠右不居中、点击只弹小面板不切换视图。改为常驻居中 Tab 栏 + 主区视图
@@ -345,15 +344,92 @@ const tintinClient = (() => {
       console.info('[tintin] window.tintin polyfill installed')
     }
 
+    // Generic settings RPC for the card below (same-origin fetch carries the
+    // harness session cookie; settings/describe + settings/mutate are public).
+    const settingsRpc = (method, args) => fetch(method === 'settings/describe' ? '/api/settings/describe' : '/api/settings/mutate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId: `tintin-card-${Date.now()}`, method, payload: { args } }),
+    }).then(async (r) => {
+      const j = await r.json().catch(() => ({}))
+      if (j?.result?.ok === false) throw new Error(j.result.error?.message ?? method)
+      return j?.result?.value
+    })
+
     // Install now (see header comment): the media bundle's factory registers
     // its view provider against __tintinViews, which must already exist.
     installTintinChrome()
     installTintinBridge()
 
+    return { settingsRpc }
+})()
+
+// ── 插件定义（factory 期执行；React 只在此处可用）────────────────────────
+// 设置卡走 settings.plugin.item slot（ConfigurablePluginsTab 契约：列表只
+// 分发 key，卡片组件由插件 client 贡献——image-generation 同款注册式样）。
+window.__ModuleLoader__.load({
+  id: 'tintin-bundle',
+  factory: (require) => {
+    const React = require('react')
+    const h = React.createElement
+
+    function TintinSettingsCard() {
+      const [url, setUrl] = React.useState('')
+      const [state, setState] = React.useState('loading') // loading|ready|saving|saved|error
+      const [error, setError] = React.useState('')
+      React.useEffect(() => {
+        tintinClient.settingsRpc('settings/describe', {}).then((all) => {
+          const ns = (all?.namespaces ?? []).find((n) => n.ns === 'tintin-bundle')
+          setUrl(String(ns?.value?.server?.url ?? ''))
+          setState('ready')
+        }).catch((e) => { setError(String(e?.message ?? e)); setState('error') })
+      }, [])
+      const save = () => {
+        setState('saving'); setError('')
+        tintinClient.settingsRpc('settings/mutate', {
+          ns: 'tintin-bundle',
+          ops: [{ op: 'set', path: ['server', 'url'], value: url.replace(/\/$/u, '') }],
+        })
+          .then(() => setState('saved'))
+          .catch((e) => { setError(String(e?.message ?? e)); setState('error') })
+      }
+      return h('div', { style: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' } },
+        h('div', { style: { fontSize: '15px', fontWeight: 600 } }, 'TinTin 服务器'),
+        h('div', { style: { display: 'flex', gap: '8px' } },
+          h('input', {
+            value: url,
+            onChange: (e) => { setUrl(e.target.value); setState('ready') },
+            placeholder: 'http://192.168.0.10:8000',
+            style: {
+              flex: 1, minWidth: 0, height: '34px', padding: '0 12px', font: 'inherit',
+              border: '0.5px solid var(--dsw-alias-border-l4, #555)', borderRadius: '8px',
+              background: 'var(--dsw-alias-bg-layer-3, transparent)', color: 'inherit',
+            },
+          }),
+          h('button', {
+            type: 'button', onClick: save, disabled: state === 'saving' || state === 'loading',
+            style: {
+              appearance: 'none', font: 'inherit', padding: '0 16px', height: '34px', cursor: 'pointer',
+              border: '0.5px solid transparent', borderRadius: '8px',
+              background: 'var(--dsw-alias-label-primary, #4f7cff)', color: 'var(--dsw-alias-bg-layer-3, #fff)',
+            },
+          }, state === 'saving' ? '保存中…' : '保存'),
+        ),
+        state === 'saved' && h('span', { style: { fontSize: '12px', color: '#4ade80' } }, '已保存'),
+        state === 'error' && h('span', { style: { fontSize: '12px', color: '#f87171' } }, `保存失败：${error}`),
+        h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #888)' } },
+          'AI 推理服务地址（FastAPI）。修改后模型提供方的 API 地址需在「设置 → 模型 → TinTin」同步更新。'),
+      )
+    }
+
     return {
       name: 'tintin-bundle',
-      inject: [],
-      apply() {
+      inject: ['slots'],
+      apply(ctx) {
+        ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
+          name: 'settings.plugin.item', key: 'tintin-bundle', order: -90,
+        }, TintinSettingsCard))
+
         // P0-V3 probe: proves this client module executed inside the workbench
         // renderer and that same-origin host routing answers it.
         fetch('/tintin/ping')
@@ -364,9 +440,5 @@ const tintinClient = (() => {
           )
       },
     }
-})()
-
-window.__ModuleLoader__.load({
-  id: 'tintin-bundle',
-  factory: () => tintinClient,
+  },
 })

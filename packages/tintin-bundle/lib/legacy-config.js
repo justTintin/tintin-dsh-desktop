@@ -8,24 +8,30 @@ import { join } from 'node:path'
 
 /** Keys we migrate, legacy config-store domain file → new settings path. */
 const MIGRATIONS = [
-  { file: 'server.json', read: (j) => j?.server?.url ?? j?.['server.url'], to: ['server', 'url'] },
+  // All three observed server.json shapes flatten to one reader.
+  { file: 'server.json', read: (j) => j?.url ?? j?.['server.url'] ?? j?.server_url, to: ['server', 'url'] },
 ]
 
 /**
- * Locate the legacy config dir. The old client stored split-domain JSON under
- * <userData>/config (resolveConfigBasePath). userData derives from the old
- * productName ("螺丝钉-电商智能体矩阵") under %APPDATA% on Windows.
+ * Locate the legacy config dir. The old client split-domain JSON lives under
+ * <userData>/config; its userData used the package name (tintin-client-electron)
+ * on this fleet — earlier packaged builds used the productName. First hit wins.
  * `appDataDir` is injected (testability); returns null when absent.
  */
 export function findLegacyConfigDir(appDataDir) {
   if (!appDataDir) return null
-  const dir = join(appDataDir, '螺丝钉-电商智能体矩阵', 'config')
-  return existsSync(dir) ? dir : null
+  for (const dir of ['tintin-client-electron', '螺丝钉-电商智能体矩阵']) {
+    const candidate = join(appDataDir, dir, 'config')
+    if (existsSync(candidate)) return candidate
+  }
+  return null
 }
 
 /**
  * Read migratable values from the legacy config dir. Pure read, no writes.
  * Returns a flat list of { path, value } ops for the settings seam.
+ * server.json shapes seen in the wild: {"server.url": "..."} flat dot-key,
+ * plus nested {server:{url}} and server_url variants.
  */
 export function readLegacyConfig(configDir) {
   const ops = []
@@ -33,7 +39,9 @@ export function readLegacyConfig(configDir) {
     const file = join(configDir, m.file)
     if (!existsSync(file)) continue
     try {
-      const value = m.read(JSON.parse(readFileSync(file, 'utf8')))
+      const raw = JSON.parse(readFileSync(file, 'utf8'))
+      const nested = raw && typeof raw === 'object' ? raw.server : undefined
+      const value = m.read({ ...raw, ...(nested && typeof nested === 'object' ? nested : {}) })
       if (value) ops.push({ path: m.to, value })
     } catch { /* a malformed legacy file is skipped, not fatal */ }
   }
