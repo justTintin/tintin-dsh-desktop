@@ -48,16 +48,22 @@ packages/
 
 ## 4. 原「工作台」→ agent 能力映射
 
-工作台用替换而非还原的根因（2026-09-23 用户裁决）：原会话对 agent 的调用效率与判断不足——任务编排与拆解在服务端实现，脑（服务端）手（客户端本地 ffmpeg/剪映/文件）分离，本地执行靠 `client-task-thread.js` 轮询领取→执行→上报闭环驱动，链路长且服务端编排为定制实现（V2 多智能体编排仍处接口需求阶段）。dsh 的 agent 回路（agent-loop/subagent/plan-mode/goal-round/compaction/审批/技能）为产品级实现且与本地工具同进程，调用与判断均优。
+> 定位修正（2026-09-23 用户裁决）：**TinTin 媒体业务由会话交互驱动**（"说需求→智能体拆解编排执行"），**会话形态保留**——复用 harness 会话 UI 作对话引擎，TinTin 往里挂业务组件。不替换会话 UI、不做独立工作台。
 
-| 原工作台件 | 去向 |
+换引擎不换形态的根因（2026-09-23 用户裁决）：原会话对 agent 的调用效率与判断不足——任务编排与拆解在服务端实现，脑（服务端）手（客户端本地 ffmpeg/剪映/文件）分离，本地执行靠 `client-task-thread.js` 轮询领取→执行→上报闭环驱动，链路长且服务端编排为定制实现（V2 多智能体编排仍处接口需求阶段）。dsh 的 agent 回路（agent-loop/subagent/plan-mode/goal-round/compaction/审批/技能）为产品级实现且与本地工具同进程，调用与判断均优——**换的是编排引擎，会话外壳沿用**。
+
+| 原工作台件 | 去向（2026-09-23 修正） |
 | --- | --- |
-| 会话/消息流/输入框/审批 | **harness 会话 UI 原生替代，不移植**（约 5.7k 行 UI 退役） |
-| 上下文选择器（产品/素材/脚本/音色） | 任务装配面板 slot → task.json（主方案 §3.5b，`conversation.input.accessory` 有 ppt 先例；P0-V4 勘察定面积） |
+| 会话/消息流/输入框/审批 | **复用 harness 会话 UI**（对话引擎 harness 出，非替换 TinTin 会话形态） |
+| 业务上下文选择器（产品/素材/脚本/音色） | 会话输入区 `conversation.input.accessory` slot 挂 TinTin 上下文条（WP-5b，ppt 先例），选择结果 → task.json |
+| 运营/媒体工具入口（顶部 Tab 形态） | **会话标题栏右侧挂入口，落点 `conversation.session.header.actions` slot**（2026-09-23 用户确认；现成插件 slot，jobs/schedule/subagent 先例，非 patch 非壳层定制），点击展开工具面板/页 |
+| 智能体切换（总助手/编导/制作/质检/素材库） | harness 原生 **agent preset**（WP-5c）：五 preset 目录注册，人设按 dsh 模型重写（不照搬 SRC 服务端编排人设） |
+| 识图/视觉研判 | **服务端 `/llm/vision`（qwen-vl）**，在媒体工具 `defineTool.execute` 内部调用——不经对话 LLM（WP-5d，成本与延迟原因） |
 | 定时任务 | host 侧 local-scheduler 逻辑搬入地基 + 工具/面板 |
 | 通知中心/任务队列 | `/tintin/jobs/*` + harness 原生任务/审批 |
 | 技能广场 | `ctx.skills.registerProvider`（dsh-image-generation 先例）+ TinTin 技能包（text-storyboard、viral-writer）转 SKILL.md |
 | agent 编排 | `defineTool` 先粗后细（montage_full_pipeline → 步骤级），模型经 provider 指向 TinTin LLM 代理 |
+| 工作区 | harness 工作区 = 媒体项目目录（组织素材/产物/任务，**非编程工程**）；默认 `Documents\tintin-workspace`（裁决已录 §4 注） |
 
 浏览器域、本地 AI（ONNX/向量库）不在首批：属 Electron 壳进程能力或重原生闭包，另行分期设计（壳层实现 + 独立面板窗口或 loopback 桥，参照上游 `*-panel.html` 先例）。
 

@@ -146,7 +146,7 @@ dsh 侧已实证（0.1.5-rc.3 node_modules 实读）：provider 走 `dsh-llm-dee
   - **文案混剪**：`copywriting-montage/` 全家（CopywritingMontage + CopywritingStep1-4Panel + CopywritingStoryboard + CopywritingBgmPickDialog + UiContext）+ `composables/copywritingMontage/*` + `copywritingMontage*Logic.ts` + `useCopywritingMontage`；**含与智能混剪共享的 `composables/montage/*` 子集**（以 `audit-ipc-consumers.js` 实际引用圈定，不搬废用卡独有部分）；
   - **剪映模板**：`JianYingTemplates.vue` + `main/jianying-templates.js`（含模板预览资产路由）；
   - `views/MediaTools.vue` 卡片注册表只启用这两张；所需 `components/common/*`、stores 子集（server/tasks）。
-- UI 形态决策树（依 P0-V4 结果）：有大面积 slot → 挂主界面；仅附件级 slot → `conversation.input.accessory` 入口 + 展开面板；两者皆难 → 壳开独立 BrowserWindow 加载插件路由页（兜底，主方案已批）。
+- **UI 形态（2026-09-23 最终裁决，用户确认）**：会话标题栏右侧（"标准模式"行右侧空白）挂 `运营工具`、`媒体工具` 入口，落点 **`conversation.session.header.actions` slot**（现成插件 slot，conversation 包 `renderSlot` 渲染，jobs/schedule/subagent 等包先例）——**非 patch、非壳层定制**。点击展开对应工具面板/页（卡片 UI 形态依展开面板/右侧栏 tab 细化，实现时定）。替代此前的"附件入口+面板"与"壳层顶栏"方案。
 - [ ] 文案混剪全流程可用：文案/分镜→智能匹配（方案C）→本地合成→配音（含时长对齐）→特效/BGM→成片导出 + 一键剪映草稿；进度全程可见；服务端离线不影响本地直出主路径
 - [ ] 剪映模板可用：模板列表/预览/套用导入；依赖的剪映互通产物（jianying-templates 数据）随 WP-1 模块就绪
 - [ ] 其余卡片入口不可见（注册表只有两行），服务端离线时"未部署"态正确
@@ -156,12 +156,28 @@ dsh 侧已实证（0.1.5-rc.3 node_modules 实读）：provider 走 `dsh-llm-dee
 - 6 卡全量：`OtProductLibrary`（含 `OtCopywritingPanel`）、`OtKnowledgeBase`(planned 占位)、`ReversePromptImage/Video`（注意：现居 media-tools 目录，搬运时归位 ops）、`OtVideoScore`、`OtVideoMarketing`；本地记录库 `video-prediction-store.js` → host 存储（位置 `$DSH_HOME/tintin/`，不进 profile 数据）。
 - [ ] 产品资料增删改查 + 文案生成全流程可用；服务端离线时卡片显示"未部署"态（现行为保持）
 
-### WP-5 模型接入与任务装配面板（3~5d）
+### WP-5 模型接入与会话业务组件（5~8d，2026-09-23 按产品定位修正重写）
 
-- provider 固化默认指向 TinTin `/llm`（key 不落客户端）；`ctx.settings.register` 提供服务器地址配置卡（写法 ✅ `dsh-image-generation/index.js:68`）。
-- **中文化落地（A4 裁决 2026-09-23）**：首启预置 locale=zh、保留 dsh 设置行用户切换；`ctx.systemPrompt.section` 固化"始终中文回复"（写法 ✅ `dsh-image-generation/index.js:97-112`）；tintin 插件自身文案经 `ctx.locale.register` 仅注册 zh（国际化后补，A4-⑧）。词典本体见 P2。
-- 任务装配面板 slot：产品/素材/脚本/音色 → `task.json` 落会话工作区（主方案 §3.5b 三层设计照做，schema 通用化，为 P2 重流水线卡预留字段位）。
-- [ ] 装配 → 一句"开始" → agent 读 task.json 走通（对话参数 > task.json > 默认的合并优先级生效）
+> 定位修正（2026-09-23 用户裁决）：**会话交互保留并复用 harness 会话 UI**——TinTin 媒体业务由会话驱动（"说需求→智能体拆解编排执行"），harness 提供对话引擎，TinTin 往里挂业务组件。不替换会话 UI、不做独立工作台。
+
+**5a. 模型接入与默认固化**
+- provider 固化默认指向 TinTin `/llm`（key 不落客户端）；`ctx.settings.register` 提供服务器地址配置卡（写法 ✅ `dsh-image-generation/index.js:68`）。默认模型 `agent-default-model` 指向 tintin-server（P0-V11 已实证此形态可行）。
+- 首启预置 locale=zh + `ctx.systemPrompt.section` 固化"始终中文回复"（A4 裁决）；插件自身文案仅 zh（国际化后补）。
+
+**5b. 业务上下文组件（会话输入区，替代原"装配面板"）**
+- 落点 `conversation.input.accessory` slot（V4 已实证，ppt 先例 ✅ `packages/ppt-runtime/adapter/client.js`）：会话输入框上方挂 TinTin 上下文条——**产品 / 素材 / 脚本 / 音色**选择器（移植 SRC `components/workbench/WbPick*.vue` 的产品库/素材库/脚本选择器，近 1:1）。
+- 选择结果序列化 `task.json` 落会话工作区（主方案 §3.5b 三层设计照做，schema 通用化，为 P2 重流水线卡预留字段位）；工具缺参时读 task.json（对话参数 > task.json > 默认 合并优先级）。
+- [ ] 输入区上下文条可见可选；选产品/素材/脚本后写 task.json；agent 一句"开始"读 task.json 走通
+
+**5c. 智能体角色（harness 原生 preset 机制，2026-09-23 裁决）**
+- 五角色用 preset 承载：`packages/tintin-bundle/presets/` 下五目录（总助手/编导智能体/制作智能体/质检智能体/素材库智能体），经 preset root 注册（`dsh-agent-presets` bundle 提供先例 ✅，AgentPreset 目录 = 人设+工具集+技能+默认模型组合，`Config.default` 设总助手为默认）。
+- **人设内容重写而非照搬**：SRC 原人设按"服务端编排+客户端轮询"写成，含过时编排指令；按 dsh 模型重写为"角色职责 + 可用工具/技能"，编排交 agent-loop。保留五角色的职责划分（业务资产）。
+- 会话顶部智能体切换 = harness preset 选择器（`Agent 预设` 分区已有）。
+- [ ] 五个 preset 注册可见可切换；切换后会话人设与工具集随之变化
+
+**5d. 识图路由（服务端，2026-09-23 裁决）**
+- 视觉理解（选素材/抽帧研判）走**服务端** `/llm/vision`（qwen-vl），在媒体工具的 `defineTool.execute` 内部调用——**不经对话 LLM（DeepSeek）识图**（成本与延迟双重原因，架构文档 §4.5）。
+- 落实为工具实现约束：所有视觉类工具的视觉调用一律指向服务端 vision 端点，禁止路由到对话模型。
 
 **设置迁移映射（2026-09-23 补，源 = `components/settings/Card*.vue` + `config-store.js`）**——设置页 UI 整体不移植，逐卡分流：
 
@@ -178,7 +194,7 @@ dsh 侧已实证（0.1.5-rc.3 node_modules 实读）：provider 走 `dsh-llm-dee
 
 UI 落点：简单键值走 schema 卡；整分区可选 `settings.section`（market-installer "插件市场"分区先例 ✅ client.js:685-710）——TinTin 设置项建议先各插件一张 `settings.plugin.item` 卡，超过一屏再升级为分区。老客户端 userData 配置迁移（含存储键两跳 copy→plan→copywriting）为 P2 数据迁移项。
 
-**P1 交付边界**：P1 交付 = 地基（tintin-bundle：桥/原生能力/tintinBridge）+ polyfill 桥 + **媒体 2 卡（文案混剪、剪映模板）+ 会话内设置及迁移（WP-5）** + 装配面板 + 模型接入。**明确不包含**：其余 11 张媒体卡（P2 占位等排期，2026-09-23 A1 裁决；恢复一张加一行注册表）；**运营工具 6 卡（P3）**；智能混剪**永久不移植**（功能本就计划过期，2026-09-23，见附录 D）；浏览器域全家（P2 spike + 搬运）；本地 AI 离线双模式（缓议）；定时任务/飞书/Office（P2 按需）；无人值守与集中调度（MCP 后补）。数据迁移仅老用户配置（A2 裁决），会话历史不迁（A5）。工作台为替换形态（等价或更强）——依据与缺口分析见架构文档 §4 及本文附录 C/D。
+**P1 交付边界**：P1 交付 = 地基（tintin-bundle：桥/原生能力/tintinBridge）+ polyfill 桥 + **媒体 2 卡（文案混剪、剪映模板）+ 会话业务组件（WP-5：上下文条/五智能体 preset/识图路由/设置迁移）** + 模型接入。**明确不包含**：其余 11 张媒体卡（P2 占位等排期，2026-09-23 A1 裁决；恢复一张加一行注册表）；**运营工具 6 卡（P3）**；智能混剪**永久不移植**（功能本就计划过期，2026-09-23，见附录 D）；浏览器域全家（P2 spike + 搬运）；本地 AI 离线双模式（缓议）；定时任务/飞书/Office（P2 按需）；无人值守与集中调度（MCP 后补）。数据迁移仅老用户配置（A2 裁决），会话历史不迁（A5）。**会话交互保留复用 harness 会话 UI**（2026-09-23 定位修正：换编排引擎不换会话形态）——依据与缺口分析见架构文档 §4 及本文附录 C/D。
 
 ## 3. P2/P3 清单（顺序可调；2026-09-23 A1 裁决后的批次划分）
 
@@ -251,16 +267,19 @@ UI 落点：简单键值走 schema 卡；整分区可选 `settings.section`（ma
 
 **勘察方式**：真实 Chromium 工作台（IAB）+ node_modules slot 注册枚举。
 
-**宿主侧结论**：渲染挂载点只有 `renderSlot('root')` 一个总口——**无大面积/主界面级 slot**。P1 UI 形态按 §3 决策树降级：**`conversation.input.accessory` 附件入口 slot + 展开面板**（ppt adapter 先例 ✅ `packages/ppt-runtime/adapter/client.js`），或兜底壳独立 BrowserWindow。
+**宿主侧结论**：渲染挂载点只有 `renderSlot('root')` 一个总口——**无大面积/主界面级 slot**。P1 UI 形态最终定为（2026-09-23 用户确认）：**会话标题栏右侧挂"运营工具/媒体工具"入口，落点 `conversation.session.header.actions` slot**（现成插件 slot，conversation 包 renderSlot 渲染，jobs/schedule/subagent 先例），点击展开工具面板/页。
 
 **可用 slot 名录（实读 + 活验证）**：
 
 | slot | 面积 | 证据 | 用途归属 |
 | --- | --- | --- | --- |
+| `conversation.session.header.actions` | 会话标题栏右侧操作区 | conversation 包 renderSlot 实证，jobs/schedule/subagent 挂入先例 | **运营工具/媒体工具入口（最终形态）** |
+| `sidebar.panellist` | 左侧栏面板列表 | `dsh-client-ui-sidebar/lib/client.js:123` renderSlot + :350 订阅（他人定制"工作台"区实证） | 业务入口面板（备选） |
+| `sidebar.right.pane.tab` / `sidebar.right.tab.*` | 右侧栏自定义 tab | sidebar-right 包 slot | 工具页展开（备选） |
 | `settings.section` | 整分区 | 活验证："插件市场"分区即 market-installer 贡献 | TinTin 设置分区候选 |
 | `settings.plugin.item` | 插件卡 | 活验证："生图工具"卡在插件配置列表（image-generation） | 各插件设置卡（WP-5） |
 | `settings.plugins.tab` | 分区 tab | market-installer/client.js:685-710 | |
-| `conversation.input.accessory` | 输入区附件位 | ppt adapter 用例（patch 新增） | **P1 面板入口** |
+| `conversation.input.accessory` | 输入区附件位 | ppt adapter 用例（patch 新增） | **WP-5b 业务上下文条（产品/素材/脚本/音色选择器）** |
 | `conversation.composer.dock` / `conversation.hero.modeActions` | 编排区/首页动作 | ppt adapter 用例（patch 新增） | 备选 |
 | `conversation.chat.node` | 对话流自定义节点 | image-generation client.js:300 | 进度/产物节点 |
 | `sidebar.brand.mark/name`、`conversation.hero.brand.mark` | 品牌位 | 本 fork client-ui 已占用（TinTin 品牌） | 品牌 |
@@ -299,8 +318,10 @@ UI 落点：简单键值走 schema 卡；整分区可选 `settings.section`（ma
 
 | 功能点 | 源 | 处置 | 备注 |
 | --- | --- | --- | --- |
-| 会话/消息流/输入框/审批 | `views/Workbench.vue` + `components/workbench/Wb*.vue` | 替换 | harness 会话 UI（裁决理由见架构文档 §4） |
-| 上下文选择器（产品/素材/脚本/音色） | `WbPick*.vue` + `useWorkbenchPickers` | P1（WP-5 装配面板） | → task.json |
+| 会话/消息流/输入框/审批 | `views/Workbench.vue` + `components/workbench/Wb*.vue` | **复用 harness 会话 UI**（2026-09-23 修正：换编排引擎不换会话形态） | 会话外壳沿用 harness，业务组件挂 slot |
+| 业务上下文选择器（产品/素材/脚本/音色） | `WbPick*.vue` + `useWorkbenchPickers` | P1（WP-5b 会话输入区 accessory slot） | → task.json |
+| 智能体切换（总助手/编导/制作/质检/素材库） | SRC 人设/角色逻辑 | P1（WP-5c harness preset） | 人设按 dsh 重写不照搬 |
+| 识图/视觉研判 | 服务端 `/llm/vision` 调用 | P1（WP-5d 工具内服务端路由） | 不经对话 LLM |
 | 定时任务（面板+本地调度） | Wb 抽屉 + `main/local-scheduler.js` | P2 按需 | schtasks 逻辑搬 host |
 | 通知中心/任务队列 | `Wb*.vue` + `useWorkbenchTask*` | 替换 + jobs 路由供数 | `/tintin/jobs/*` |
 | 技能广场 | `skill-store.js` + `skills-server-ipc.js` | 替换 | text-storyboard/viral-writer 转 SKILL.md（P2） |
