@@ -313,7 +313,7 @@ UI 落点：简单键值走 schema 卡；整分区可选 `settings.section`（ma
 
 **升级节奏建议**：跟随 latest/next 通道；每次升级按 docs/harness-*-upgrade.md runbook + 本附录流程（补丁重放 → 冲突面评估 → 强制重装 file: tarball → 全量门禁）。
 
-## V13 记录（2026-09-23）：machine-id 派生输入实读 SRC `machine-id.js` = hostname + networkInterfaces(MAC) + platform + createHash，**无应用名参与**——同机新老客户端理论同 ID（X-Machine-ID 租户连续性成立）。实机端到端比对（老客户端产出 vs 移植后 host 产出）留待 WP-1 machine-id 模块搬运后实测。
+## V13 记录（2026-09-23）：machine-id 派生输入实读 SRC `machine-id.js` = hostname + networkInterfaces(MAC) + platform + createHash，**无应用名参与**——同机新老客户端理论同 ID（X-Machine-ID 租户连续性成立）。**✅ 端到端比对完成（2026-09-23）**：SRC 原版（CJS）与移植版（lib/machine-id.js ESM）同机各跑一次，machine_id 完全一致（`fbecd90627372842`），派生输入（hostname/mac/cpu）逐项一致——服务端注册与任务归属在新客户端无缝衔接。V13 关闭。
 
 ## 附录 C：SRC 模块地图（搬运索引）
 
