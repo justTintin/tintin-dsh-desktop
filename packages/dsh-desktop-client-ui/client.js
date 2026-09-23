@@ -6,7 +6,10 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
 
     const React = require('react')
-    const { BrandWordmark, FishLogo } = require('@deepseek-ai/dsh-client-ui-primitives')
+
+    // TinTin fork (2026-09-23): the upstream BrandWordmark renders the DeepSeek
+    // logotype and FishLogo is the DeepSeek whale — neither belongs in this
+    // product, so the brand slots render our own artwork instead.
 
     // Tight bounds of the mark inside its 1000x1000 source artwork.
     const BRAND_MARK_VIEWBOX = { x: 42, y: 218, width: 898, height: 564 }
@@ -30,11 +33,17 @@ window.__ModuleLoader__.load({
     }
 
     function DesktopBrandName() {
-      return React.createElement(BrandWordmark, { includeMark: false })
+      // Typographic stand-in until the TinTin wordmark artwork lands: the slot
+      // inherits the sidebar label color in both themes.
+      return React.createElement('span', {
+        style: { fontSize: '17px', fontWeight: 600, letterSpacing: '0.2px', color: 'inherit', lineHeight: 1 },
+      }, 'TinTin')
     }
 
-    function ConversationBrandMark(props) {
-      return React.createElement(FishLogo, props)
+    function ConversationBrandMark() {
+      // Conversation hero: keep this shell's own window-with-tail mark rather
+      // than a third-party logo, until TinTin artwork replaces both.
+      return React.createElement(DesktopBrandMark)
     }
 
     const inject = ['slots']

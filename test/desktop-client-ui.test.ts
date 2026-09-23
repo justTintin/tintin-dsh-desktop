@@ -49,8 +49,6 @@ describe('DSH Desktop client slot occupants', () => {
       type,
       props: { ...props, children }
     })
-    const BrandWordmark = vi.fn()
-    const FishLogo = vi.fn()
     const plugin = definition!.factory((id) => {
       if (id === 'react') {
         return {
@@ -58,9 +56,6 @@ describe('DSH Desktop client slot occupants', () => {
           useEffect: (effect: () => void | (() => void)) => effect(),
           useState: (initial: unknown) => [initial, vi.fn()]
         }
-      }
-      if (id === '@deepseek-ai/dsh-client-ui-primitives') {
-        return { BrandWordmark, FishLogo }
       }
       throw new Error(`Unexpected client dependency: ${id}`)
     })
@@ -96,8 +91,10 @@ describe('DSH Desktop client slot occupants', () => {
     const sidebarName = registrations.find(
       ({ config }) => config.name === 'sidebar.brand.name'
     )!.component({}) as { type: unknown; props: Record<string, unknown> }
-    expect(sidebarName.type).toBe(BrandWordmark)
-    expect(sidebarName.props.includeMark).toBe(false)
+    // TinTin fork: the name seat renders our typographic wordmark, never the
+    // upstream DeepSeek logotype.
+    expect(sidebarName.type).toBe('span')
+    expect(sidebarName.props.children).toEqual(['TinTin'])
 
     const sidebarMark = registrations.find(
       ({ config }) => config.name === 'sidebar.brand.mark'
@@ -112,7 +109,10 @@ describe('DSH Desktop client slot occupants', () => {
     const heroMark = registrations.find(
       ({ config }) => config.name === 'conversation.hero.brand.mark'
     )!.component({ size: 48 }) as { type: unknown; props: Record<string, unknown> }
-    expect(heroMark.type).toBe(FishLogo)
-    expect(heroMark.props.size).toBe(48)
+    // TinTin fork: the hero wraps this shell's own mark component, which then
+    // renders the window-with-tail svg — not the whale logo.
+    expect(typeof heroMark.type).toBe('function')
+    const heroSvg = (heroMark.type as (props: Record<string, unknown>) => { type: unknown })({ size: 48 })
+    expect(heroSvg.type).toBe('svg')
   })
 })

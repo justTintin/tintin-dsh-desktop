@@ -2,21 +2,21 @@ const packageJson = require('./package.json')
 
 module.exports = {
   ...packageJson.build,
-  appId: 'io.dsh.desktop.dev',
-  productName: 'DSH Desktop Dev',
+  appId: 'com.tintin.desktop.dev',
+  productName: 'TinTin Dev',
   directories: {
     ...packageJson.build.directories,
     output: 'dist-dev'
   },
   extraMetadata: {
-    name: 'dsh-desktop-dev',
-    productName: 'DSH Desktop Dev',
+    name: 'tintin-dev',
+    productName: 'TinTin Dev',
     dshDesktopChannel: 'development'
   },
-  artifactName: 'dsh-desktop-dev-${os}-${arch}.${ext}',
+  artifactName: 'tintin-dev-${os}-${arch}.${ext}',
   nsis: {
     ...packageJson.build.nsis,
-    artifactName: 'dsh-desktop-dev-windows-${arch}-setup.${ext}'
+    artifactName: 'tintin-dev-windows-${arch}-setup.${ext}'
   },
   publish: null
 }

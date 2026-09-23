@@ -571,18 +571,20 @@ function attachWindowsMenuView(window: BrowserWindow): void {
 }
 
 function configureAppIdentity(): void {
+  // TinTin fork identity (2026-09-23): this build must not share the official
+  // dsh-desktop profile. Harness stores workspaces, sessions, credentials and
+  // custom presets below userData, and both products writing one closure
+  // corrupts profiles/node_modules across locked harness versions — so the
+  // fork deliberately owns a separate directory instead of keeping the
+  // upstream `dsh-desktop` one. "TinTin" is a placeholder product name.
   if (developmentBuild) {
-    app.setName('DSH Desktop Dev')
-    app.setPath('userData', join(app.getPath('appData'), 'dsh-desktop-dev'))
+    app.setName('TinTin Dev')
+    app.setPath('userData', join(app.getPath('appData'), 'tintin-dev'))
     return
   }
 
-  app.setName('DSH Desktop')
-  // Keep the historical lowercase directory stable across product-name and
-  // branding changes. Harness stores workspaces, sessions, credentials, and
-  // custom presets below userData, so deriving this path from app.getName()
-  // would make an ordinary upgrade look like a fresh installation.
-  app.setPath('userData', join(app.getPath('appData'), 'dsh-desktop'))
+  app.setName('TinTin')
+  app.setPath('userData', join(app.getPath('appData'), 'tintin'))
 }
 
 async function syncNativeTheme(window: BrowserWindow): Promise<void> {
@@ -1025,10 +1027,10 @@ function ensureTray(): void {
 
   const locale = harnessLocale()
   tray = new Tray(desktopIconPath())
-  tray.setToolTip('DSH Desktop')
+  tray.setToolTip('TinTin')
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: locale === 'zh' ? '显示 DSH Desktop' : 'Show DSH Desktop', click: restoreMainWindow },
+      { label: locale === 'zh' ? '显示 TinTin' : 'Show TinTin', click: restoreMainWindow },
       { type: 'separator' },
       { label: locale === 'zh' ? '退出' : 'Exit', click: () => app.quit() }
     ])
@@ -1915,8 +1917,8 @@ async function showAbout(window: BrowserWindow): Promise<void> {
   const checkForUpdatesLabel = locale === 'zh' ? '检查更新' : 'Check for Updates'
   const result = await dialog.showMessageBox(window, {
     type: 'info',
-    title: 'DSH Desktop',
-    message: locale === 'zh' ? '关于 DSH Desktop' : 'About DSH Desktop',
+    title: 'TinTin',
+    message: locale === 'zh' ? '关于 TinTin' : 'About TinTin',
     detail: aboutDetail(
       app.getVersion(),
       bundledHarnessVersion(app.getAppPath()),
@@ -2066,7 +2068,7 @@ async function waitForPluginRecoveryAction(options: {
 
 function showUnexpectedError(error: unknown): void {
   const message = error instanceof Error ? error.stack ?? error.message : String(error)
-  dialog.showErrorBox('DSH Desktop encountered an error', message)
+  dialog.showErrorBox('TinTin encountered an error', message)
 }
 
 async function showPluginRecovery(options?: {
@@ -3168,7 +3170,7 @@ function installMenu(): void {
           label: app.name,
           submenu: [
             {
-              label: isChinese ? '关于 DSH Desktop' : 'About DSH Desktop',
+              label: isChinese ? '关于 TinTin' : 'About TinTin',
               click: () => {
                 if (mainWindow && !mainWindow.isDestroyed()) {
                   void showAbout(mainWindow).catch(showUnexpectedError)
