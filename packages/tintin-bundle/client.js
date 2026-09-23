@@ -1,6 +1,9 @@
-window.__ModuleLoader__.load({
-  id: 'tintin-bundle',
-  factory: () => {
+// Executes at script-eval time — every module factory (including
+// tintin-media-bundle's window.__tintinViews registration) runs only after
+// ALL bootstrap scripts' top levels, so installing the chrome and polyfill
+// here is deterministic; apply()-time installation raced that registration
+// and lost non-deterministically (observed dev17 ok / dev18 missing).
+const tintinClient = (() => {
 
     // ── TinTin 顶部 Tab 栏 + 视图切换（2026-09-23 用户实测修正）─────────────
     // 原 conversation.session.header.actions 挂法有三个缺陷：仅会话内存在、
@@ -300,13 +303,15 @@ window.__ModuleLoader__.load({
       console.info('[tintin] window.tintin polyfill installed')
     }
 
+    // Install now (see header comment): the media bundle's factory registers
+    // its view provider against __tintinViews, which must already exist.
+    installTintinChrome()
+    installTintinBridge()
+
     return {
       name: 'tintin-bundle',
       inject: [],
-      apply(ctx) {
-        installTintinChrome()
-        installTintinBridge()
-
+      apply() {
         // P0-V3 probe: proves this client module executed inside the workbench
         // renderer and that same-origin host routing answers it.
         fetch('/tintin/ping')
@@ -317,5 +322,9 @@ window.__ModuleLoader__.load({
           )
       },
     }
-  },
+})()
+
+window.__ModuleLoader__.load({
+  id: 'tintin-bundle',
+  factory: () => tintinClient,
 })

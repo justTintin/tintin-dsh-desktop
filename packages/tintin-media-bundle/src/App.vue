@@ -240,3 +240,12 @@ onMounted(() => {
 .tm-fade-enter-from { opacity: 0; transform: translateY(12px); }
 .tm-fade-leave-to { opacity: 0; transform: translateY(-6px); }
 </style>
+
+<style>
+/* 非 scoped：向导内的 <teleport to="body"> 弹层（产品选择/分镜选择等）传送到
+   body 后脱离 .tintin-media-scope，且默认 z-index 低于宿主视图覆盖层
+   （tintin-view-overlay 9998）与 Tab 栏（9999）——被盖住不可见（实测：
+   选择产品点击后弹层在但看不到）。提到两者之上；body 直接子级的
+   .modal-mask 只有 TinTin 弹层使用，不泄漏宿主。 */
+body > .modal-mask { z-index: 12000; }
+</style>
