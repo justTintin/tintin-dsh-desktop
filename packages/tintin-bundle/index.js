@@ -260,6 +260,24 @@ export async function apply(ctx) {
     ...createFfmpegGateApi({ ffmpegPath: resolveBinary('ffmpeg'), ffprobePath: resolveBinary('ffprobe') }),
     ...createMontageVoiceApi(montageDeps),
     ...createMontageFinalApi(montageDeps),
+    // env:log — renderer business log relay (C-6 closure, 2026-09-23).
+    // Source chain: clientError → env:log → logger.logError → main.log 落盘
+    // + hooks auto-POST /api/logs/upload. Here: ctx.logger lands harness.log
+    // via log-bridge; error level additionally reports to the service merge
+    // endpoint (silent failure — logging must never block business, 铁律 7).
+    'env:log': (args) => {
+      const e = args?.[0]
+      const level = e?.level === 'error' ? 'error' : (e?.level === 'warn' ? 'warn' : 'info')
+      const tag = String(e?.tag ?? 'renderer').slice(0, 120)
+      const text = String(e?.message ?? '').slice(0, 500)
+      ctx.logger[level](`[tintin:${tag}] ${text}${e?.stack ? '\n' + String(e.stack).slice(0, 20000) : ''}`)
+      if (level === 'error') {
+        void httpRequest('POST', '/api/logs/upload', {
+          body: { level, event: tag, message: text, ...(e?.stack ? { stack: String(e.stack).slice(0, 20000) } : {}), client_ts: new Date().toISOString() },
+        }).catch((err) => ctx.logger.warn('tintin-bundle: error report upload failed: %s', err?.message ?? err))
+      }
+      return { ok: true }
+    },
   }
 
   // tintinBridge: the host service the media/ops plugins inject (WP-1 契约).

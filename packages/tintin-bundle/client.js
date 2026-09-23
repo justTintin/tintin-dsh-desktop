@@ -317,10 +317,22 @@ const tintinClient = (() => {
       const ffmpeg = namespaced('ffmpeg', {})
       const liveclip = namespaced('liveclip', {})
 
-      // env/config 故意不装：clientLog 的 t?.env?.log 判空后退化 console.*
-      // （预览无桥同路径），ensureServerUrl 对 env.serverPing 可选链后按相对
-      // URL 下载，hasConfig() 为 false 时 readCfg 走默认值——与源项目
-      // “预览/无桥环境”的降级分支一致，避免半通通道制造静默错误数据。
+      // ── env.log：渲染层业务日志回流 host（C-6 闭环，2026-09-23 补）──────
+      // 源链路 clientError → env:log IPC → logger.logError → 落盘+服务端上报；
+      // 无 env 命名空间时 clientLog 退化 console.*（浏览器 DevTools，不落盘）。
+      // 这里把 env.log 指到宿主 env:log 通道：host ctx.logger.error 落
+      // harness.log（log-bridge），error 级再由 host 自动 POST /api/logs/upload。
+      const env = namespaced('env', {
+        log: (entry) => call('env:log', {
+          args: [{
+            level: entry?.level ?? 'info',
+            tag: entry?.tag ?? 'renderer',
+            message: entry?.message ?? '',
+            ...(entry?.stack ? { stack: entry.stack } : {}),
+          }],
+        }),
+      })
+
       window.tintin = {
         __dshPolyfill: true,
         server,
@@ -328,6 +340,7 @@ const tintinClient = (() => {
         shell,
         ffmpeg,
         liveclip,
+        env,
       }
       console.info('[tintin] window.tintin polyfill installed')
     }
