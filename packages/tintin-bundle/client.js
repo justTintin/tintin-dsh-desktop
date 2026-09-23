@@ -143,31 +143,76 @@ window.__ModuleLoader__.load({
           return (...args) => call(`${ns}:${prop}`, { args: forwardArgs(args) })
         },
       })
+      // Multipart upload: XHR gives native FormData multipart + real
+      // upload progress (fetch cannot); host route /tintin/upload forwards
+      // the body verbatim to the service. onProgress(ratio 0..1) optional.
+      const serverUpload = (path, fields, onProgress) => new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest()
+        xhr.open('POST', `/tintin/upload?path=${encodeURIComponent(path)}`)
+        if (typeof onProgress === 'function') {
+          xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
+        }
+        xhr.onload = () => {
+          let j = null
+          try { j = JSON.parse(xhr.responseText) } catch { /* non-json */ }
+          if (xhr.status >= 200 && xhr.status < 300) resolve(j ? j.result : j)
+          else reject(Object.assign(new Error((j && j.error) || `HTTP ${xhr.status}`), { status: xhr.status }))
+        }
+        xhr.onerror = () => reject(new Error('upload network error'))
+        xhr.send(fields)
+      })
       const server = namespaced('server', {
         get: (path, params) => call('server:get', { path, params }),
         post: (path, body, headers, timeout) => call('server:post', { path, body, headers, timeout }),
         put: (path, body, headers) => call('server:put', { path, body, headers }),
         delete: (path, params) => call('server:delete', { path, params }),
-        // Multipart upload: XHR gives native FormData multipart + real
-        // upload progress (fetch cannot); host route /tintin/upload forwards
-        // the body verbatim to the service. onProgress(ratio 0..1) optional.
-        upload: (path, fields, onProgress) => new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest()
-          xhr.open('POST', `/tintin/upload?path=${encodeURIComponent(path)}`)
-          if (typeof onProgress === 'function') {
-            xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
-          }
-          xhr.onload = () => {
-            let j = null
-            try { j = JSON.parse(xhr.responseText) } catch { /* non-json */ }
-            if (xhr.status >= 200 && xhr.status < 300) resolve(j ? j.result : j)
-            else reject(Object.assign(new Error((j && j.error) || `HTTP ${xhr.status}`), { status: xhr.status }))
-          }
-          xhr.onerror = () => reject(new Error('upload network error'))
-          xhr.send(fields)
-        }),
+        upload: serverUpload,
         // sse lands when a ported card needs it (job polling covers progress).
         sse: () => Promise.reject(new Error('tintin sse not yet bridged (WP-2)')),
+
+        // ── 命名通道（对照源 preload server 域逐个映射，2026-09-23 WP-1 续）──
+        // 两类：HTTP 封装（方法+路径，与源 preload 同参）与 multipart 上传封装
+        // （源 handler 把 payload 字段转 FormData——File/Blob 直接进 FormData，
+        // 标量转字符串；对照 server-proxy.js montage:split L845-871 的字段表）。
+        // 本地原生通道（final:mix/jianying:export/voice:dubVideos 等）不在
+        // 此列——它们走 Proxy 转发 /tintin/ipc，待宿主路由落地。
+        llmChat: (payload) => call('server:post', { path: '/llm/chat/completions', body: payload }),
+        llmModels: () => call('server:get', { path: '/llm/models' }),
+        llmAdjustCopywriting: (payload) => call('server:post', { path: '/script/adjust-copywriting', body: payload }),
+        copywritingVoiceover: (payload) => call('server:post', { path: '/copywriting/voiceover', body: payload }),
+        materialList: (params) => call('server:get', { path: '/material/list', params: params ?? {} }),
+        materialStockSearch: (payload) => call('server:post', { path: '/material/stock_search', body: payload }),
+        audioGenBgm: (payload) => call('server:post', { path: '/audio/gen/bgm', body: payload }),
+        audioGenSfx: (payload) => call('server:post', { path: '/audio/gen/sfx', body: payload }),
+        viralCloneAnalyze: (payload) => call('server:post', { path: '/viral/clone/analyze', body: payload }),
+        viralClonePlan: (payload) => call('server:post', { path: '/viral/clone/plan', body: payload }),
+        viralCloneFlow: (payload) => call('server:post', { path: '/viral/clone/flow', body: payload }),
+        viralCloneGenerate: (payload) => call('server:post', { path: '/viral/clone/generate', body: payload }),
+        viralCloneMontage: (payload) => call('server:post', { path: '/viral/clone/montage', body: payload }),
+        viralCloneReview: (payload) => call('server:post', { path: '/viral/clone/review', body: payload }),
+        listServerWorkflows: (scope) => call('server:get', { path: '/workflows', params: { scope } }),
+        serverWorkflowStatus: (taskId) => call('server:get', { path: `/workflows/task/${encodeURIComponent(taskId)}` }),
+        // multipart 上传族：payload 字段 → FormData（File/Blob 原样，标量转字符串）
+        ...(() => {
+          const uploadNamed = (path) => (payload, onProgress) => {
+            const fd = new FormData()
+            const p = payload ?? {}
+            for (const [k, v] of Object.entries(p)) {
+              if (v === undefined || v === null) continue
+              if (typeof File !== 'undefined' && v instanceof File) fd.append(k, v)
+              else if (typeof Blob !== 'undefined' && v instanceof Blob) fd.append(k, v, k)
+              else fd.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v))
+            }
+            return serverUpload(path, fd, onProgress)
+          }
+          return {
+            montageSplit: uploadNamed('/montage/split'),
+            montageConcat: uploadNamed('/montage/concat'),
+            montageBgm: uploadNamed('/montage/bgm'),
+            promptVideo: uploadNamed('/prompt/video'),
+            materialOcr: uploadNamed('/material/ocr'),
+          }
+        })(),
         // 进度事件订阅不落桥（主方案 §3.1：进度走 jobId 轮询）。返回 no-op
         // 退订函数，保持源调用点 offXxx?.() 清理语义；无事件到达时调用方
         // 按各自兜底路径（轮询/完成态回写）推进。
