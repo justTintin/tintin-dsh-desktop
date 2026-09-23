@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 
 const PING_PATH = '/tintin/ping'
 const PROBE_FILE_PATH = '/tintin/probe/file'
@@ -67,7 +68,27 @@ export async function apply(ctx) {
   // registry that drives the /tintin/jobs/<id> polling contract.
   const jobs = new Map()
 
-  ctx.inject(['webServer'], (webCtx) => webCtx.effect(() => {
+  // V9: minimal tool so the agent can invoke it on its own, proving the
+  // bundle -> defineTool -> agent orchestration seam (主方案 §3.5a 机制证明).
+  const pingServerTool = defineTool({
+    name: 'ping_server',
+    description: 'Ping the TinTin bridge host and report liveness (pid and server time). Use to verify the TinTin host plugin is reachable.',
+    parameters: {},
+    output: {
+      schema: { type: 'object', additionalProperties: false, properties: {
+        ok: { type: 'boolean', required: true }, pid: { type: 'integer', required: true }, time: { type: 'integer', required: true },
+      } },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+    },
+    isConcurrencySafe: () => true,
+    presentCall: () => ({ card: 'generic', kind: 'execute', title: 'Ping TinTin host', rawInput: {} }),
+    async execute() {
+      return { ok: true, pid: process.pid, time: Date.now() }
+    },
+  })
+
+  ctx.inject(['webServer', 'tools'], (webCtx) => webCtx.effect(() => {
+    webCtx.tools.register(pingServerTool)
     const disposePing = webCtx.webServer.register({
       kind: 'exact',
       path: PING_PATH,

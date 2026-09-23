@@ -72,9 +72,9 @@ DSH_HOME=%TEMP%/tintin-p0-dsh npm run dev    # harness dev 端口 ⚠️ 43130�
 
 | # | 验证点 | 步骤 | 通过标准 |
 | --- | --- | --- | --- |
-| V9 | agent 调工具 | bundle 内 `defineTool` 注册 `ping_server`（写法照 ✅ `dsh-image-generation/index.js:19-62,87`），会话中让 agent 自主调用 | 工具被调用且返回呈现 |
-| V10 | 工作区读写 | 工具读/写会话工作区 `task.json` | 写入后可读回 |
-| V11 | 模型接入 | harness provider `base_url=http://<TinTin服务器>/llm`，model `deepseek-v4-flash`（⚠️ 2026-09-12 实测 200/0.75s，重验一次） | 会话正常推理；**前置：P0-S ①② 已过**（流式 + tool-calling 通了 agent 才可能工作） |
+| V9 | agent 调工具 | bundle 内 `defineTool` 注册 `ping_server`（写法照 ✅ `dsh-image-generation/index.js:19-62,87`），会话中让 agent 自主调用 | ✅ 2026-09-23（完整壳 + TinTin provider + tintin-workspace）：轨迹显示 `工具 ping_server {} → {"ok":true,"pid":…}`，agent 自主调用并回读 liveness；bundle→defineTool→agent 编排接缝（§3.5a）机制证明成立 |
+| V10 | 工作区读写 | 工具/agent 读写会话工作区文件 | ✅ 2026-09-23：agent 经 `write` 工具写 `Documents\tintin-workspace\task.json` 并读回；磁盘实测内容 `{"hello":"tintin"}` 正确（铁律 2：验到磁盘值，不只看轨迹） |
+| V11 | 模型接入 | harness provider `base_url=http://<TinTin服务器>/llm`，model `deepseek-v4-flash` | ✅ 2026-09-23 **端到端通过**（完整壳 npm run dev，tintin-dev 档）：契约层 curl 流式+tool-calling 全绿（P0-S①）；接入层自定义提供方 TinTin（tintin-server，baseURL `/llm`，openai-completions，密钥 env `TINTIN_SERVER_API_KEY`）创建成功且 **`agent-default-model` 已指向它**（settings.yaml 实证）；**端到端推理成功**：tintin-workspace 工作区建会话发消息，agent 正常应答（1s/12000 tok/s），工作区沙箱上下文正确装配。**工作区默认目录落实**：`C:\Users\Administrator\Documents\tintin-workspace`（2026-09-23 用户裁决，经 RPC `workspace/create` 注册——顺带绕开了 B9 目录桥问题）。注：onboarding 默认 DeepSeek 提供方密钥格式校验宽松可占位通过 |
 | V12 | 安装路 | `npm pack packages/tintin-bundle` → 隔离 `DSH_HOME` 下 `node node_modules/@deepseek-ai/dsh/bin.js plugin --profile web install ./tintin-bundle-0.1.0.tgz` → 重启加载 | generation 投影成功且 ping 通；Windows 下补 junction/物理路径验证（根 AGENTS.md §3） |
 | V13 | machine-id 连续性 | host 进程跑移植后的 machine-id 逻辑，与老客户端同机产出比对 | 同一 ID（X-Machine-ID 租户数据连续的前提；理论输入为 os/mac，✅ 已实读） |
 | V14 | zh 词典跨包注册 | **降级（A4 优先级裁决）：P0-V4 勘察时顺带验证，不作过闸条件**——client module 里 `ctx.locale.register` 为上游 UI key 注册一条 zh 数据，切语言看是否生效（机制事实：locale 引擎含 fallback 链 + 语言设置行 + zh 合法码，✅ 已实读 dsh-client-locale） | 记录可行性结论供词典启动时用；不影响 P0 判定 |
@@ -87,8 +87,8 @@ dsh 侧已实证（0.1.5-rc.3 node_modules 实读）：provider 走 `dsh-llm-dee
 
 | # | 事项 | 验收 |
 | --- | --- | --- |
-| ① | `/llm/chat/completions` 补齐完整 OpenAI 兼容：`tools`/`tool_choice` 透传且模型真执行 function calling、`tool_calls` 流式增量、parallel tool calls、SSE `stream:true`、稳定 `usage`。旧工作台只走过纯补全，这两条路大概率未验过 | curl 双路径（带 tools 的流式 + 非流式）各返回结构合法的 `tool_calls`/`usage` |
-| ② | 修复 `/v1/chat/completions`（2026-09-12 实测 500/挂起，约 0.5d） | 标准 OpenAI 客户端可直连 |
+| ① | `/llm/chat/completions` 补齐完整 OpenAI 兼容：`tools`/`tool_choice` 透传且模型真执行 function calling、`tool_calls` 流式增量、parallel tool calls、SSE `stream:true`、稳定 `usage`。旧工作台只走过纯补全，这两条路大概率未验过 | ✅ 2026-09-23 实测（192.168.111.31:8000，curl 直连）：流式 SSE 标准（delta 增量/finish_reason/usage/[DONE]）✅；tool-calling 非流式返回标准 `tool_calls[].function.{name,arguments}` + `finish_reason:"tool_calls"` ✅；**流式 tool_calls 增量分片**（id/name 骨架先行、arguments 逐字）✅。parallel tool calls 未单独验（组合已覆盖主路径） |
+| ② | 修复 `/v1/chat/completions`（2026-09-12 实测 500/挂起，约 0.5d） | 待服务端修复（标准 OpenAI 生态兼容与双路径冗余） |
 | ③ | `/llm` 加 Bearer 鉴权（key 随激活下发，复用 `/system/license/*` 体系）；无 key 拒绝 | 无 key 401，provider 配 key 后通 |
 | ④ | per-key 限流 + 用量审计（落 `/llm/records`/`/llm/stats`） | 超限 429；审计可查单机用量 |
 
@@ -205,6 +205,7 @@ UI 落点：简单键值走 schema 卡；整分区可选 `settings.section`（ma
 
 - **范围裁决链（2026-09-23，A1）**：智能混剪永久不移植（功能本就计划过期）；**P1 = 文案混剪 + 剪映模板 + 会话内设置及其依赖（地基/桥/契约链）**；其余媒体卡 P2 占位等排期；**运营工具 6 卡 P3**。命名已落定：产品名文案混剪，代码前缀 `copywriting-montage`。
 - 工作台聊天 UI 不移植（harness 会话 UI 替代）；映射表见架构文档 §4。
+- **默认工作区（2026-09-23 用户裁决）**：运行时默认工作区 = 当前用户文档目录下 `C:\Users\Administrator\Documents\tintin-workspace`（按用户实际 Documents 路径派生，非硬编码绝对路径）。P0 经 RPC `workspace/create` 注册实现；WP-1/WP-5 落地为首启自动建目录 + 注册（含不存在时创建）。
 - **官方渠道切断（2026-09-23 实施，用户发现更新弹窗官方 v0.9.0 触发）**：① `desktop-service/index.ts checkDesktopUpdate` 直返 `{updateAvailable:false}`——上游策略服务器硬编码校验 feedUrl 为官方归档 URL（service.ts:134），本产品永远不可能合法经它更新，切断到策略层为止；② crash 遥测发往 dshdesktop.com 的同意弹窗改为静默丢弃（fork 数据不外流官方）；③ `build.publish` URL 换占位 `https://updates.tintin.example.com/desktop/`（inert，策略层切断后永不被请求）。**品牌清扫（同日）**：工作台侧栏名与会话首页徽标换上槽位（dsh-desktop-client-ui 不再引用上游 BrandWordmark/FishLogo，侧栏文字排版 "TinTin"、会话首页保留壳自有 window-mark）；壳内用户可见 "DSH Desktop" 字样清零（托盘/关于/恢复向导/错误框）；CI 产物与烟雾测试命名同步（release.yml，ModelScope 镜像仓 alexyaojin/dsh-desktop 为第三方托管仓保留）。配套测试更新：desktop-client-ui（槽位断言换品牌）、release（契约 fixture 换名）。**TinTin 真实更新端点接入属于 A3 发版前残留项**（届时换 strategy/feed/TERM 占位）。
 - 成本三通道与四条护栏见架构文档 §4.5；工具输出摘要化是 P2 工具的硬性验收项。
 - dsh 升级：跟 `latest`/`next` 通道、跳过 alpha（现状：已锁 next 的 `0.1.5-rc.3`）；流程 = 架构文档 §5 + 本仓库 `docs/harness-*-upgrade.md` runbook；每次升级加跑 V1~V3/V9 冒烟子集。**0.1.6 前瞻**（alpha.2 实测，升 0.1.6-rc 时复核）：`dsh-client-modules` 发现协议内部重构（526 行差异）是最大敞口，V3 冒烟第一项抓牢；`dsh-tools` 为 schema 演进式改动；webServer 路由/settings 面未动。
@@ -269,9 +270,20 @@ UI 落点：简单键值走 schema 卡；整分区可选 `settings.section`（ma
 - **A4 重大修正**：上游 UI **自带中文词典**（"新建会话/搜索会话/选择工作区/稍后配置"等字符串在上游包内，之前静态 grep `'zh'` 键漏判）；工作台跟随系统语言已全中文，语言选择器在位。zh 词典工作量从"全界面翻译"缩为"补齐缺口"（词典行仍后置，启动时先差量盘点上游已覆盖/未覆盖的键）。内测声明弹窗与模型接入引导里残留 "DeepSeek Harness" 字样——品牌文案项（非 slot 问题）。
 - 中文字体渲染与上游 font-family 一致（A4-⑦ 实测通过，无需补字体资产）。
 
-## 附录 B：升级成本备忘（P0-V8 回填）
+## 附录 B：升级成本备忘（P0-V8 回填，2026-09-23）
 
-（待 P0 产出：patch 冲突面清单 / 演练记录 / 建议 follow 节奏）
+**实战演练素材**：合并上游 `origin/main` 69705b2（#539 删 Green Pulse PPT 模板 + #530 重做插件恢复页/安全模式管理器）。
+
+| 项 | 实测结果 | 经验 |
+| --- | --- | --- |
+| 补丁重放（28 个） | **28/28 干净套用，零重做**——上游改动集中在 `packages/ppt-runtime`，不触及任何补丁覆盖的上游 `node_modules/@deepseek-ai/*` 包 | 补丁面与上游"插件内改动"天然隔离；真正的升级风险在补丁打到的上游包被改时（届时逐个重做，不机械修上下文） |
+| 源码合并冲突 | 4 文件交集，1 个真冲突（恢复页文案区），git 自动合掉 3 个 | fork 定制面（品牌/身份/渠道字符串）与上游结构改动天然错开；冲突点可预料 |
+| lockfile | 1 冲突块（PPT tarball integrity）；正确解法 = **取上游 lockfile + npm install 补回 tintin-bundle 链接**，勿手工解 | file: tarball 升级后必须强制重装刷新 node_modules 缓存（npm 对 tarball 不自动刷新——本次 ppt-activation 假失败的根因） |
+| 合并后验证 | 补丁重放 + typecheck + 全量测试回基线（9 环境性失败/1114 通过，零新增） | 合并后门禁矩阵全跑一遍即可定位回归 |
+
+**升级节奏建议**：跟随 latest/next 通道；每次升级按 docs/harness-*-upgrade.md runbook + 本附录流程（补丁重放 → 冲突面评估 → 强制重装 file: tarball → 全量门禁）。
+
+## V13 记录（2026-09-23）：machine-id 派生输入实读 SRC `machine-id.js` = hostname + networkInterfaces(MAC) + platform + createHash，**无应用名参与**——同机新老客户端理论同 ID（X-Machine-ID 租户连续性成立）。实机端到端比对（老客户端产出 vs 移植后 host 产出）留待 WP-1 machine-id 模块搬运后实测。
 
 ## 附录 C：SRC 模块地图（搬运索引）
 
@@ -379,3 +391,4 @@ UI 落点：简单键值走 schema 卡；整分区可选 `settings.section`（ma
 | B6 | machine-id 连续性：同机新老客户端同 ID（输入为 os/mac，理论稳定） | P0 实测项 V13 | 待实测 |
 | B7 | renderer 性能预算：agent 回路+Vue 子应用+媒体流内存水位、大素材列表 | WP-3 验收加观测 | 未测 |
 | B8 | zh 词典跨包注册可行性：插件身份为上游 UI key 注册 zh 数据是否生效（A4 前置闸门；不生效则中文化改走 patch，需重新裁决） | **P0-V14** | **范围缩减（2026-09-23 实机勘察）：上游已自带中文，词典降级为补缺口；跨包注册验证仍留作词典启动前置** |
+| B9 | 工作区目录桥在 harness http 页面不可用：壳 preload 注入 `window.dshDesktopDirectoryPicker`（src/preload/index.ts:151），但 harness UI（loadURL http://127.0.0.1）页里报 "bridge is unavailable"（补丁改的 directory-picker-native client.js:60-64 检测）。纯 web 实例与完整壳（npm run dev，sandbox:true preload）**均复现**。**2026-09-23 已通过默认工作区旁路**：用户裁决默认工作区 `Documents\tintin-workspace`，经 RPC `workspace/create`（payload `{args:{request:{path}}}`）直接注册，绕过 UI 目录选择器——会话/推理/沙箱全部可用。GUI 目录选择器的桥修复降为独立项（P1 用户自选目录时仍需） | GUI 桥定位（P1 再修） | **已旁路（默认工作区）；GUI 桥修复待 P1** |
