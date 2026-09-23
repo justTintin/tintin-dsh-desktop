@@ -37,6 +37,7 @@ describe('patch hunk counts', () => {
     expect(patch).toContain('+    "dsh-image-generation": "0.1.0",')
     expect(patch).toContain('+    "dsh-desktop-log-bridge": "0.1.0",')
     expect(patch).toContain('+    "tintin-bundle": "0.1.0",')
+    expect(patch).toContain('+    "tintin-media-bundle": "0.1.0",')
   })
 
   it('rejects a dsh hunk header that undercounts the merged dependency lines', async () => {
@@ -44,7 +45,7 @@ describe('patch hunk counts', () => {
       path.join(projectRoot, 'patches/@deepseek-ai+dsh+0.1.5-rc.3.patch'),
       'utf8'
     )
-    const broken = patch.replace('@@ -28,6 +28,14 @@', '@@ -28,6 +28,13 @@')
+    const broken = patch.replace('@@ -28,6 +28,15 @@', '@@ -28,6 +28,14 @@')
     expect(broken).not.toBe(patch)
     expect(() => parsePatchFile(broken)).toThrow(/hunk header integrity check failed/)
   })

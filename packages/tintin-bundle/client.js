@@ -72,9 +72,9 @@ window.__ModuleLoader__.load({
     function TintinOpsEntry(props) {
       return h(ToolEntry, { ...props, label: props.t ? props.t('opsTools') : zh.opsTools, hint: props.t ? props.t('opsHint') : zh.opsHint })
     }
-    function TintinMediaEntry(props) {
-      return h(ToolEntry, { ...props, label: props.t ? props.t('mediaTools') : zh.mediaTools, hint: props.t ? props.t('mediaHint') : zh.mediaHint })
-    }
+    // 媒体工具 entry now belongs to tintin-media-bundle (its panel hosts the
+    // Vue sub-application); this bundle keeps 运营工具 until the ops bundle
+    // lands in P3.
 
     // ── WP-2 window.tintin polyfill ─────────────────────────────────────────
     // Rebuild the old client's preload bridge with identical signatures so the
@@ -125,11 +125,7 @@ window.__ModuleLoader__.load({
             { name: 'conversation.session.header.actions', id: 'tintin-ops-tools', order: 30, locale: 'tintin' },
             TintinOpsEntry,
           )
-          const reg2 = ctx.slots.register(
-            { name: 'conversation.session.header.actions', id: 'tintin-media-tools', order: 31, locale: 'tintin' },
-            TintinMediaEntry,
-          )
-          return () => { reg1(); reg2() }
+          return () => { reg1() }
         })
 
         // P0-V3 probe: proves this client module executed inside the workbench

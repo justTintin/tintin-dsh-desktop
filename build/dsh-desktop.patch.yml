@@ -38,6 +38,12 @@
     - id: tintin-bundle
       name: tintin-bundle
 
+    # TinTin media tools (媒体工具): Vue sub-application behind a thin React
+    # shell, injected on tintinBridge. Must compose after tintin-bundle so the
+    # service it injects is provided first.
+    - id: tintin-media-bundle
+      name: tintin-media-bundle
+
     # DSH PPT owns one direct PPTD workflow and one standard Composer client.
     # The package contains no Tencent editor runtime or SlideP route.
     - id: dsh-ppt-composer
