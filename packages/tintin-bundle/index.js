@@ -34,6 +34,14 @@ const IPC_SERVER_ROUTES = {
   'server:llmModels': { method: 'GET', endpoint: API_ENDPOINTS.llm.models },
   'server:materialList': { method: 'POST', endpoint: API_ENDPOINTS.material.list },
   'server:materialSearch': { method: 'POST', endpoint: API_ENDPOINTS.material.search },
+  // WP-2 generic passthrough: window.tintin.server.get/post/... forward an
+  // arbitrary service path. Path is constrained to the TinTin API surface
+  // (leading '/', no protocol/authority) so the bridge cannot be turned into
+  // an open relay (B1).
+  'server:get': { method: 'GET', generic: true },
+  'server:post': { method: 'POST', generic: true },
+  'server:put': { method: 'PUT', generic: true },
+  'server:delete': { method: 'DELETE', generic: true },
 }
 
 // ── WP-1 media binaries ────────────────────────────────────────────────────
@@ -212,6 +220,22 @@ export async function apply(ctx) {
         const err = new Error(`Unknown TinTin bridge channel: ${channel}`)
         err.code = 'unknown-channel'
         throw err
+      }
+      // Generic passthrough: the client supplies the path. Constrain it to the
+      // TinTin API surface so the bridge cannot become an open relay (B1).
+      if (route.generic) {
+        const p = payload?.path
+        if (typeof p !== 'string' || !p.startsWith('/') || /^\/\//.test(p) || /^[a-z]+:/i.test(p)) {
+          const err = new Error(`Invalid bridge path: ${String(p)}`)
+          err.code = 'invalid-path'
+          throw err
+        }
+        const params = payload?.params
+        const qs = params && typeof params === 'object'
+          ? (() => { const q = new URLSearchParams(); for (const [k, v] of Object.entries(params)) { if (Array.isArray(v)) v.forEach((x) => q.append(k, String(x))); else if (v != null) q.set(k, String(v)) } const s = q.toString(); return s ? (p.includes('?') ? '&' : '?') + s : '' })()
+          : ''
+        const result = await httpRequest(route.method, p + qs, { body: route.method === 'GET' || route.method === 'DELETE' ? undefined : payload?.body, headers: payload?.headers, timeout: payload?.timeout })
+        return result.data
       }
       const path = resolveEndpoint(route.endpoint, payload?.params ?? payload)
       const result = await httpRequest(route.method, path, { body: route.method === 'GET' ? undefined : payload?.body ?? payload })

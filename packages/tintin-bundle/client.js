@@ -76,10 +76,49 @@ window.__ModuleLoader__.load({
       return h(ToolEntry, { ...props, label: props.t ? props.t('mediaTools') : zh.mediaTools, hint: props.t ? props.t('mediaHint') : zh.mediaHint })
     }
 
+    // ── WP-2 window.tintin polyfill ─────────────────────────────────────────
+    // Rebuild the old client's preload bridge with identical signatures so the
+    // ported Vue views run unmodified. server.* forwards to /tintin/ipc/*;
+    // event-style subscriptions (progress) become jobId polling (主方案 §3.1).
+    function installTintinBridge() {
+      if (window.tintin && window.tintin.__dshPolyfill) return // idempotent
+      const call = (channel, payload) =>
+        // 通道名（server:get）的冒号是路径的一部分，不编码——host 按
+        // /tintin/ipc/server:get 匹配（encodeURIComponent 会把 : 编成 %3A 失配）。
+        fetch(`/tintin/ipc/${channel}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload ?? {}),
+        }).then(async (r) => {
+          const j = await r.json().catch(() => ({}))
+          if (!r.ok) throw Object.assign(new Error(j.error ?? `HTTP ${r.status}`), { status: r.status })
+          return j.result
+        })
+      const server = {
+        get: (path, params) => call('server:get', { path, params }),
+        post: (path, body, headers, timeout) => call('server:post', { path, body, headers, timeout }),
+        put: (path, body, headers) => call('server:put', { path, body, headers }),
+        delete: (path, params) => call('server:delete', { path, params }),
+        // upload/sse land in WP-2 follow-up (multipart + job progress channel).
+        upload: () => Promise.reject(new Error('tintin upload not yet bridged (WP-2)')),
+        sse: () => Promise.reject(new Error('tintin sse not yet bridged (WP-2)')),
+      }
+      window.tintin = {
+        __dshPolyfill: true,
+        server,
+        // dialog/shell/app and the rest are stubbed to explicit errors so an
+        // unbridged call surfaces loudly instead of failing silently (铁律 7).
+        dialog: new Proxy({}, { get: () => () => Promise.reject(new Error('tintin dialog not yet bridged (WP-2)')) }),
+        shell: new Proxy({}, { get: () => () => Promise.reject(new Error('tintin shell not yet bridged (WP-2)')) }),
+      }
+      console.info('[tintin] window.tintin polyfill installed')
+    }
+
     return {
       name: 'tintin-bundle',
       inject: ['slots', 'locale'],
       apply(ctx) {
+        installTintinBridge()
         ctx.effect(() => ctx.locale.register('tintin', { zh, en }), 'tintin: dictionaries')
         ctx.slots.inject('conversation.session.header.actions', () => {
           const reg1 = ctx.slots.register(
