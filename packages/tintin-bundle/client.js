@@ -346,6 +346,9 @@ const tintinClient = (() => {
         // 2026-09-24 补链：serverPing（SRC env-ipc.js pingServer 契约）——
         // context.ts/useAudioGen 等经它取服务端地址做媒体直连基址。
         serverPing: () => call('env:serverPing', { args: [] }),
+        // 固定缓存目录（$DSH_HOME/tintin/cache，2026-09-23 裁决不做设置项）——
+        // 渲染层 readCacheDir 的数据源。
+        cacheDir: () => call('env:cacheDir', { args: [] }),
       })
 
       window.tintin = {

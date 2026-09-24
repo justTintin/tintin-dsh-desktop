@@ -357,7 +357,7 @@ export async function apply(ctx) {
     },
     // env:serverPing — 服务端连通探测 + 当前地址回显（SRC env-ipc.js pingServer
     // 契约：{online,url,status?,latencyMs?}，永不 reject）。渲染层经它拿媒体
-    // 直连基址（context.ts ensureServerUrl / useAudioGen 等）。GET <server>/。
+    // 直连基址（context.ts ensureServerUrl / useAudioGen 等）。
     'env:serverPing': async () => {
       const url = getServerUrl()
       const started = Date.now()
@@ -367,6 +367,17 @@ export async function apply(ctx) {
       } catch (err) {
         return { online: false, url }
       }
+    },
+    // env:cacheDir — 固定缓存目录（2026-09-23 裁决：SRC 的 local.cacheDir 设置项
+    // 不移植，媒体域本地缓存统一落在 $DSH_HOME/tintin/cache，由宿主保证目录存在）。
+    'env:cacheDir': () => {
+      const home = process.env.DSH_HOME
+      if (!home) return { error: 'DSH_HOME 未设置' }
+      const dir = join(home, 'tintin', 'cache')
+      try { mkdirSync(dir, { recursive: true }) } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+      return { dir }
     },
     // env:log — renderer business log relay (C-6 closure, 2026-09-23).
     // Source chain: clientError → env:log → logger.logError → main.log 落盘

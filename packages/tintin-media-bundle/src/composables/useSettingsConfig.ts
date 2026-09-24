@@ -43,7 +43,17 @@ export async function writeCfg(key: string, val: any): Promise<boolean> {
   }
 }
 
-/** 读缓存目录（local.cacheDir；下载消费端默认保存路径用，对齐原 local_config.cache_dir） */
+/** 读缓存目录（2026-09-23 裁决落地：SRC 的 local.cacheDir 设置项不移植——
+ *  固定 $DSH_HOME/tintin/cache，由宿主 env:cacheDir 解析并保证目录存在；
+ *  首次取回后进程内缓存。返回空串 = 宿主不可达/未设 DSH_HOME，调用方走
+ *  各自的"路径无效"兜底。 */
+let cachedCacheDir = ''
 export async function readCacheDir(): Promise<string> {
-  return String((await readCfg('local.cacheDir', '')) || '')
+  if (cachedCacheDir) return cachedCacheDir
+  try {
+    const res = await getTintin()?.env?.cacheDir?.()
+    const dir = String(res?.dir || '')
+    if (dir) cachedCacheDir = dir
+  } catch (_) { /* 宿主不可达：返回空走调用方兜底 */ }
+  return cachedCacheDir
 }

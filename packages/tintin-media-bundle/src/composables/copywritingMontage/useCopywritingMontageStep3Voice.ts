@@ -1101,7 +1101,7 @@ function clearVoiceProgressListener(): void {
     // 落盘：本地缓存 copy-montage/voice/（无视频目录可用；主进程 mkdirSync recursive 建目录）
     const cacheDir = await readCacheDir()
     if (!cacheDir) {
-      notify('路径无效', '本地缓存目录未配置，请先到「设置」页配置缓存目录。')
+      notify('路径无效', '本地缓存目录不可用（固定为安装数据目录下 tintin\cache），请重启应用后重试。')
       return
     }
     const now = new Date()
