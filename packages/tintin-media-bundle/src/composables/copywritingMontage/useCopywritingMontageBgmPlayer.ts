@@ -7,6 +7,7 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import { clientError } from '../../utils/clientLog'
+import { toFileUrl } from '../../utils/fileUrl'
 import { notify, errText } from './context'
 
 export interface MontageBgmPlayerContext {
@@ -29,7 +30,8 @@ export function useCopywritingMontageBgmPlayer(ctx: MontageBgmPlayerContext) {
     try {
       if (!bgmAudioEl || bgmAudioEl.dataset.src !== bgmPath.value) {
         bgmAudioEl?.pause()
-        bgmAudioEl = new Audio('file:///' + encodeURI(bgmPath.value.replace(/\\/g, '/')).replace(/#/g, '%23'))
+        // 2026-09-24：统一走 utils/fileUrl 的 toFileUrl（移植版经宿主媒体路由流式供给）
+        bgmAudioEl = new Audio(toFileUrl(bgmPath.value))
         bgmAudioEl.dataset.src = bgmPath.value
         bgmAudioEl.ontimeupdate = () => { bgmPosMs.value = (bgmAudioEl?.currentTime || 0) * 1000 }
         bgmAudioEl.onloadedmetadata = () => { bgmDurMs.value = (bgmAudioEl?.duration || 0) * 1000 }

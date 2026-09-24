@@ -16,9 +16,12 @@ import { pathBasename } from '@/composables/copywritingMontageLogic'
 const shell = inject(copywritingMontageShellKey)!
 const { setRowBgm, bgmPath, bgmName, downloadLibraryBgm, applyLibraryBgm } = shell.s
 
-/** 本地路径 → file URL（面板内私有拷贝） */
+/** 本地路径 → 可播放 URL：统一走 utils/fileUrl 的 toFileUrl（polyfill 环境
+ *  经宿主 /tintin/media 流式供给，不再 file:/// 直出——2026-09-24 修复） */
 function toFileUrl(p: string): string {
-  return 'file:///' + encodeURI(String(p).replace(/\\/g, '/')).replace(/#/g, '%23')
+  if (!p) return ''
+  if (/^(https?|blob|data|file):/i.test(p)) return p
+  return `/tintin/media?path=${encodeURIComponent(p)}`
 }
 
 // ── Step4 BGM 选择弹窗 + AI 生成 BGM（2026-09-09 用户裁决：复用音频生成页域，

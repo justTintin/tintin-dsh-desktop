@@ -243,9 +243,12 @@ async function matchSfxFromLibrary(): Promise<void> {
   }
 }
 
-/** 本地路径 → file URL（previewFinalVideo 同口径） */
+/** 本地路径 → 可播放 URL：统一走 utils/fileUrl 的 toFileUrl（polyfill 环境
+ *  经宿主 /tintin/media 流式供给，不再 file:/// 直出——2026-09-24 修复） */
 function toFileUrl(p: string): string {
-  return 'file:///' + encodeURI(String(p).replace(/\\/g, '/')).replace(/#/g, '%23')
+  if (!p) return ''
+  if (/^(https?|blob|data|file):/i.test(p)) return p
+  return `/tintin/media?path=${encodeURIComponent(p)}`
 }
 
 // ── 音效包装（2026-09-22 用户裁决）：按分镜脚本逐镜「音效建议」提示词，AI 生成音效

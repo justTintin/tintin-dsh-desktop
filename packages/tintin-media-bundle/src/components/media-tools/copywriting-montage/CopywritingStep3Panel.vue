@@ -10,6 +10,7 @@ import TButton from '@/components/common/TButton.vue'
 import TSelect from '@/components/common/TSelect.vue'
 import VdStepBar from '../VdStepBar.vue'
 import { useFilePicker } from '@/composables/useFilePicker'
+import { toFileUrl } from '@/utils/fileUrl'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 import CopywritingStoryboard from './CopywritingStoryboard.vue'
 
@@ -49,10 +50,8 @@ const {
   pathBasename,
 } = shell.s
 
-/** 本地路径 → file URL（面板内私有拷贝，Shell 版供 Step4 簇） */
-function toFileUrl(p: string): string {
-  return 'file:///' + encodeURI(String(p).replace(/\\/g, '/')).replace(/#/g, '%23')
-}
+/** 本地路径 → 可播放 URL（2026-09-24：统一走 utils/fileUrl 的 toFileUrl——
+ *  移植版 http 页面禁止 file:/// 子资源，本地媒体经宿主 /tintin/media 流式供给） */
 
 /** TTS 引擎下拉选项（2026-09-20 服务端 TTS 统一入口上线：QwenTTS 启用，
  *  value 对齐契约 engine=qwen3；修正历史拼写 idexttts→indextts） */
