@@ -368,16 +368,31 @@ export async function apply(ctx) {
         return { online: false, url }
       }
     },
-    // env:cacheDir — 固定缓存目录（2026-09-23 裁决：SRC 的 local.cacheDir 设置项
-    // 不移植，媒体域本地缓存统一落在 $DSH_HOME/tintin/cache，由宿主保证目录存在）。
+    // env:cacheDir — 固定缓存目录。2026-09-24 用户裁决（覆盖 09-23 的
+    // $DSH_HOME/tintin/cache 方案）：默认地址 = 本机工作区目录
+    // Documents/tintin-workspace（与默认工作区同源，TINTIN_WORKSPACE_DIR
+    // 可覆盖）；由宿主保证目录存在。
     'env:cacheDir': () => {
-      const home = process.env.DSH_HOME
-      if (!home) return { error: 'DSH_HOME 未设置' }
-      const dir = join(home, 'tintin', 'cache')
+      const dir = process.env.TINTIN_WORKSPACE_DIR
+        || join(process.env.USERPROFILE || process.env.HOME || '.', 'Documents', 'tintin-workspace')
       try { mkdirSync(dir, { recursive: true }) } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
       return { dir }
+    },
+    // shell:openItem — 用系统默认方式打开文件/目录（SRC main.js: shell.openPath；
+    // harness 子进程无 electron shell，按平台落 explorer/open/xdg-open）。
+    'shell:openItem': (args) => {
+      const p = String(args?.[0] ?? '')
+      if (!p) return { error: 'shell:openItem requires path' }
+      try {
+        const bin = process.platform === 'win32' ? 'explorer'
+          : process.platform === 'darwin' ? 'open' : 'xdg-open'
+        spawn(bin, [p], { detached: true, stdio: 'ignore' }).unref()
+        return { ok: true }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
     },
     // env:clearCache — 清空固定缓存目录内容（保留目录本身）。被占用的条目
     // force 删除失败即跳过。

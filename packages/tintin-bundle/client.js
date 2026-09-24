@@ -502,7 +502,13 @@ const tintinClient = (() => {
       // 避免 void 调用点产生 unhandled rejection 噪音。
       const shell = namespaced('shell', {
         openExternal: (url) => { if (/^https?:\/\//i.test(String(url))) window.open(url, '_blank', 'noopener') },
-        openItem: (path) => { if (/^https?:\/\//i.test(String(path))) window.open(path, '_blank', 'noopener') },
+        openItem: (path) => {
+          const s = String(path || '')
+          // 2026-09-24 修复：此前仅支持 http（本地目录点击无反应）——本地路径
+          // 转发宿主 shell:openItem（explorer/open/xdg-open 按平台）。
+          if (/^https?:\/\//i.test(s)) { window.open(s, '_blank', 'noopener'); return Promise.resolve({ ok: true }) }
+          return call('shell:openItem', { args: [s] })
+        },
         revealInFolder: () => {},
         showNotification: (title, body) => {
           try {
@@ -587,19 +593,12 @@ window.__ModuleLoader__.load({
       const [url, setUrl] = React.useState('')
       const [state, setState] = React.useState('loading') // loading|ready|saving|saved|error
       const [error, setError] = React.useState('')
-      // 本地配置（2026-09-24 用户裁决：设置卡增补缓存目录展示与清理，参考原版本地配置卡；
-      // 目录固定 $DSH_HOME/tintin/cache，只读展示不可改）
-      const [cacheDir, setCacheDir] = React.useState('')
-      const [clearState, setClearState] = React.useState('idle') // idle|clearing|cleared|error
       React.useEffect(() => {
         tintinClient.settingsRpc('settings/describe', {}).then((all) => {
           const ns = (all?.namespaces ?? []).find((n) => n.ns === 'tintin-bundle')
           setUrl(String(ns?.value?.server?.url ?? ''))
           setState('ready')
         }).catch((e) => { setError(String(e?.message ?? e)); setState('error') })
-        window.tintin?.env?.cacheDir?.().then((res) => {
-          if (res?.dir) setCacheDir(String(res.dir))
-        }).catch(() => {})
       }, [])
       const save = () => {
         setState('saving'); setError('')
@@ -609,15 +608,6 @@ window.__ModuleLoader__.load({
         })
           .then(() => setState('saved'))
           .catch((e) => { setError(String(e?.message ?? e)); setState('error') })
-      }
-      const clearCache = () => {
-        setClearState('clearing')
-        window.tintin?.env?.clearCache?.().then((res) => {
-          setClearState(res && !res.error ? 'cleared' : 'error')
-        }).catch(() => setClearState('error'))
-      }
-      const openCacheDir = () => {
-        if (cacheDir) window.tintin?.shell?.openItem?.(cacheDir)
       }
       return h('div', { style: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' } },
         h('div', { style: { fontSize: '15px', fontWeight: 600 } }, 'TinTin 服务器'),
@@ -645,8 +635,29 @@ window.__ModuleLoader__.load({
         state === 'error' && h('span', { style: { fontSize: '12px', color: '#f87171' } }, `保存失败：${error}`),
         h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #888)' } },
           'AI 推理服务地址（FastAPI）。修改后模型提供方的 API 地址需在「设置 → 模型 → TinTin」同步更新。'),
-        // ── 本地配置（参考原版本地配置卡：缓存目录 + 缓存清理）────────────
-        h('div', { style: { height: '0.5px', background: 'var(--dsw-alias-border-l4, #555)', margin: '4px 0' } }),
+      )
+    }
+
+    // 本地配置卡（2026-09-24 用户裁决：挂在「通用设置」页 settings.general.item
+    // 插槽；缓存目录 = 默认工作区目录，固定不可改，参考原版本地配置卡）。
+    function LocalConfigCard() {
+      const [cacheDir, setCacheDir] = React.useState('')
+      const [clearState, setClearState] = React.useState('idle') // idle|clearing|cleared|error
+      React.useEffect(() => {
+        window.tintin?.env?.cacheDir?.().then((res) => {
+          if (res?.dir) setCacheDir(String(res.dir))
+        }).catch(() => {})
+      }, [])
+      const clearCache = () => {
+        setClearState('clearing')
+        window.tintin?.env?.clearCache?.().then((res) => {
+          setClearState(res && !res.error ? 'cleared' : 'error')
+        }).catch(() => setClearState('error'))
+      }
+      const openCacheDir = () => {
+        if (cacheDir) window.tintin?.shell?.openItem?.(cacheDir)
+      }
+      return h('div', { style: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' } },
         h('div', { style: { fontSize: '15px', fontWeight: 600 } }, '本地配置'),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
           h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },
@@ -694,6 +705,10 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
           name: 'settings.plugin.item', key: 'tintin-bundle', order: -90,
         }, TintinSettingsCard))
+        // 本地配置（缓存目录/清理）挂「通用设置」页（2026-09-24 用户裁决）
+        ctx.slots.inject('settings.general.item', () => ctx.slots.register({
+          name: 'settings.general.item', id: 'tintin-local-config', order: -90,
+        }, LocalConfigCard))
 
         // First-boot setup wizard (2026-09-24 user ruling): prompt for the
         // SERVER ADDRESS (host:port), not an API key — probe it host-side
