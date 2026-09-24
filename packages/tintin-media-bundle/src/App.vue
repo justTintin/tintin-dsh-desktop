@@ -246,12 +246,12 @@ onMounted(() => {
 </style>
 
 <style>
-/* 非 scoped：向导内的 <teleport to="body"> 弹层（产品选择/分镜选择/高级脚本设置/
-   删除确认等）传送到 body 后脱离 .tintin-media-scope，且默认 z-index 低于宿主视图
-   覆盖层（tintin-view-overlay 9998）与 Tab 栏（9999）——被盖住不可见。这里必须用
-   !important：各组件的 scoped 规则 .modal-mask[data-v-x] { z-index:1002 } 特异度
-   (0,2,0) 高于本规则的 (0,1,1)，不加 !important 会被覆盖、弹窗"弹了但看不见"
-   （2026-09-24 用户报障：高级脚本设置/选择分镜脚本点击无反应即此因）。
-   body 直接子级的 .modal-mask 只有 TinTin 弹层使用，不泄漏宿主。 */
-body > .modal-mask { z-index: 12000 !important; }
+/* 弹层定位说明（2026-09-24 二次修正）：向导弹层（高级脚本设置/选择分镜脚本/
+   素材选择/删除确认等）teleport 到 `.tintin-media-scope` 根元素——不再用 body。
+   原因：teleport 到 body 会脱离 .tintin-media-scope 令牌作用域，var(--card) 等
+   全部解析为空 → 弹窗背景透明（第一版 body>modal-mask z-index 覆盖还曾因
+   特异度低于 scoped 规则而失效，弹窗被覆盖层压住不可见）。改挂到 scope 根后
+   令牌/暗色/全局样式自动继承；弹层 fixed 全屏、z 1002 在覆盖层堆叠上下文内
+   高于向导内容。已知取舍：顶部 Tab 栏（9999）仍高于弹层蒙层，弹窗打开时
+   Tab 栏不被蒙住（原版为全窗变暗，此处为作用域化的必要让步）。 */
 </style>

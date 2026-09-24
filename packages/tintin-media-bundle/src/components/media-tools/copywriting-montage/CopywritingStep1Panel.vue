@@ -105,7 +105,7 @@ onMounted(() => { void loadScriptProviders() })
       />
 
       <!-- 高级脚本设置弹窗（2026-09-21 用户裁决：改弹出窗；表单项实时绑定即时生效） -->
-      <teleport to="body">
+      <teleport to=".tintin-media-scope">
         <div v-if="showAdvDlg" class="modal-mask" @click.self="showAdvDlg = false">
           <div class="modal modal--adv">
             <span class="modal-title">高级脚本设置</span>
@@ -148,7 +148,7 @@ onMounted(() => { void loadScriptProviders() })
       </teleport>
 
       <!-- 预览最终提示词弹窗（只读展示 system + user 两条消息） -->
-      <teleport to="body">
+      <teleport to=".tintin-media-scope">
         <div v-if="promptPreviewDlg.show" class="modal-mask" @click.self="closePromptPreview">
           <div class="modal modal-wide">
             <span class="modal-title">预览最终提示词</span>
