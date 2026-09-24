@@ -7,7 +7,7 @@
 // ═══════════════════════════════════════════════════════════════
 
 import { ref } from 'vue'
-import { toFileUrl } from '@/utils/fileUrl'
+import { toFileUrl, filePathOf } from '@/utils/fileUrl'
 
 export interface FileDialogFilter {
   name: string
@@ -54,9 +54,10 @@ export function useFilePicker(opts: UseFilePickerOptions) {
   function onDrop(e: DragEvent): void {
     isDragging.value = false
     const f = e.dataTransfer?.files?.[0]
-    // Electron 在 File 对象上暴露 path 属性
-    if (f && (f as File & { path?: string }).path) {
-      setFile((f as File & { path: string }).path)
+    // 2026-09-24：Electron 43 移除 File.path，改经桌面 preload webUtils 桥解析
+    if (f) {
+      const p = filePathOf(f)
+      if (p) setFile(p)
     }
   }
   function onDragOver(): void {

@@ -477,7 +477,17 @@ const tintinClient = (() => {
         document.body.appendChild(input)
         input.click()
       })
-      const pickedPath = (f) => (f && f.path) || ''
+      // 2026-09-24 修复：Electron 43 移除 File.path（拖拽/文件选择拿不到路径，
+      // 全部静默失效）——桌面 preload 已暴露 dshDesktopFilePath.forFile
+      // （webUtils.getPathForFile 封装），这里经桥解析绝对路径。
+      const pickedPath = (f) => {
+        if (!f) return ''
+        try {
+          const viaBridge = window.dshDesktopFilePath?.forFile?.(f)
+          if (typeof viaBridge === 'string' && viaBridge) return viaBridge
+        } catch { /* 桥缺失走降级 */ }
+        return f.path || ''
+      }
       const dialog = namespaced('dialog', {
         openFile: async (params) => pickedPath((await pickInputFiles({ filters: params?.filters }))[0]) || null,
         openFiles: async (params) => {

@@ -6,6 +6,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { ref, reactive, computed, watch } from 'vue'
 import { clientError } from '../../utils/clientLog'
+import { filePathOf } from '../../utils/fileUrl'
 import { readCacheDir } from '../useSettingsConfig'
 import {
   parseSplitResponse,
@@ -128,7 +129,7 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     for (const f of Array.from(files)) {
       const remaining = MAX_SOURCE_VIDEOS - srcVideos.value.length
       if (remaining <= 0) { splitError.value = `素材已达上限（${MAX_SOURCE_VIDEOS}）`; return }
-      const p = (f as File & { path?: string }).path
+      const p = filePathOf(f)
       if (!p) continue
       // 目录→collectVideos 递归展开；文件路径→主进程 isDirectory 检查不通过返回 []，回退原路径
       const expanded = await window.tintin.dialog.collectVideos({

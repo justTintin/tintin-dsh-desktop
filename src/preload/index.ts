@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AvailableRelease, UpdateStatus } from '../shared/contracts'
 import { setupDesktopStoragePersistence } from './desktop-storage'
 import {
@@ -153,6 +153,20 @@ contextBridge.exposeInMainWorld('dshDesktopDirectoryPicker', {
   // local-config card) can label the native folder picker properly.
   pick: (title?: string): Promise<string | null> =>
     ipcRenderer.invoke('directory-picker:open', typeof title === 'string' && title.trim() ? title.trim() : undefined)
+})
+
+// 2026-09-24 (TinTin port): Electron 43 removed File.path — dragged/injected
+// File objects carry no path and plugins cannot resolve one without webUtils.
+// Expose the canonical resolver so plugin pages can recover absolute paths
+// from dropped or picked files (media ingestion, voice-clone samples, ...).
+contextBridge.exposeInMainWorld('dshDesktopFilePath', {
+  forFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file) || ''
+    } catch {
+      return ''
+    }
+  }
 })
 
 /**
