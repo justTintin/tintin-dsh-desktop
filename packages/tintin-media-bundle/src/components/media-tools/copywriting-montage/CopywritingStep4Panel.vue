@@ -382,6 +382,11 @@ function onAnnotateAdd(planKey: string, word: string): void {
 function onAnnotateRemove(planKey: string, word: string): void {
   removeManualKeyword(planKey, word)
 }
+// 2026-09-24 用户裁决：Step4 逐视频 BGM 行对应每个脚本——一行一分镜，
+// 键 = plan:{tabId}（与导出 bgmPaths 的 rowBgmForCandidate(planKey) 同键对齐）
+const scriptBgmRows = computed(() =>
+  storyboards.value.map((t) => ({ key: `plan:${t.id}`, name: t.name }))
+)
 watch(textFxStyleSamples, async () => {
   textFxExpanded.value = false
   await nextTick()
@@ -647,18 +652,21 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
         <!-- 2026-09-18 用户裁决：逐视频 BGM 指派列表（上一步整个视频列表）——默认最多 10 行高，
              多则滚动、少则不撑满；每行 = 序号+视频名 + BGM 输入框（点击选本地文件）+ 选择BGM 按钮 -->
         <div class="vd4-rowbgm">
+          <!-- 2026-09-24 用户裁决：逐视频 BGM 行对应每个脚本（分镜）——一行一分镜，
+               键 = plan:{tabId}（与导出 bgmPaths 的 rowBgmForCandidate(planKey) 同键），
+               未设置 BGM 的分镜跟随上方全局 BGM -->
           <div class="vd4-rowbgm-title">逐视频 BGM（未设置的行跟随上方全局 BGM）</div>
           <div class="vd4-rowbgm-list">
-            <div v-for="(c, i) in step4Candidates" :key="c" class="vd4-rowbgm-item">
-              <span class="vd4-rowbgm-name" :title="c">{{ i + 1 }}. {{ pathBasename(c) }}</span>
-              <input :value="rowBgmName(c)" readonly class="input grow vd4-rowbgm-input"
-                placeholder="跟随全局 BGM（点击选本地文件）" @click="pickRowBgm(c)" />
-              <audio v-if="rowBgmAudioSrc(c)" :src="rowBgmAudioSrc(c)" controls preload="none"
-                class="vd4-rowbgm-audio" :title="`试听该行生效 BGM（${rowBgmName(c) ? '逐行指派' : '跟随全局'}）`" />
-              <TButton label="选择BGM" size="small" variant="secondary" @click="openBgmPickDlg(c)" />
-              <TButton v-if="rowBgmName(c)" label="清除" size="small" plain @click="clearRowBgm(c)" />
+            <div v-for="(c, i) in scriptBgmRows" :key="c.key" class="vd4-rowbgm-item">
+              <span class="vd4-rowbgm-name" :title="c.key">{{ i + 1 }}. {{ c.name }}</span>
+              <input :value="rowBgmName(c.key)" readonly class="input grow vd4-rowbgm-input"
+                placeholder="跟随全局 BGM（点击选本地文件）" @click="pickRowBgm(c.key)" />
+              <audio v-if="rowBgmAudioSrc(c.key)" :src="rowBgmAudioSrc(c.key)" controls preload="none"
+                class="vd4-rowbgm-audio" :title="`试听该行生效 BGM（${rowBgmName(c.key) ? '逐行指派' : '跟随全局'}）`" />
+              <TButton label="选择BGM" size="small" variant="secondary" @click="openBgmPickDlg(c.key)" />
+              <TButton v-if="rowBgmName(c.key)" label="清除" size="small" plain @click="clearRowBgm(c.key)" />
             </div>
-            <div v-if="!step4Candidates.length" class="muted vd4-rowbgm-empty">暂无视频，请先完成上一步镜头重组与口播配音</div>
+            <div v-if="!scriptBgmRows.length" class="muted vd4-rowbgm-empty">暂无分镜脚本：请先在「文案编写」页生成或选择分镜脚本</div>
           </div>
         </div>
 
