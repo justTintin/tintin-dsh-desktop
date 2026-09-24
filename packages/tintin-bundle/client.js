@@ -189,6 +189,10 @@ const tintinClient = (() => {
         jyTemplatesList: (p) => call('jytpl:list', { args: [p] }),
         jyTemplatesSync: (p) => call('jytpl:sync', { args: [p] }),
         jyTemplatesDeleteServer: (p) => call('jytpl:deleteServer', { args: [p] }),
+        // 剪映模板页「字体（剪映）」分类（SRC preload jyfonts 域，2026-09-24 随卡片启用补映射）
+        jyfontsScan: () => call('jyfonts:scan', { args: [] }),
+        jyfontsServerList: () => call('jyfonts:serverList', { args: [] }),
+        jyfontsUpload: (p) => call('jyfonts:upload', { args: [p] }),
         editorExportJianyingPackage: (p) => call('editor:exportJianyingPackage', { args: [p] }),
         bgmDownloadUrl: (p) => call('bgm:downloadUrl', { args: [p] }),
         voiceScanDir: (p) => call('voice:scanDir', { args: [p] }),

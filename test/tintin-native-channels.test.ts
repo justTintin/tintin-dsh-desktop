@@ -122,13 +122,14 @@ describe('voice-ipc native channels', () => {
 })
 
 describe('final-ipc native channels', () => {
-  it('registers the 12 source channels plus the jianying-audio-sync trio', () => {
+  it('registers the 12 source channels plus the jianying-audio-sync trio and the jyfonts trio', () => {
     const { deps } = makeDeps()
     const api = createMontageFinalApi(deps)
     expect(Object.keys(api).sort()).toEqual([
       'bgm:downloadUrl', 'editor:exportJianyingPackage', 'final:collectOutputs', 'final:findSrt',
       'final:listResults', 'final:mix', 'final:readTiming', 'jianying:export', 'jyaudio:setEnabled',
-      'jyaudio:status', 'jyaudio:syncNow', 'jytpl:deleteServer', 'jytpl:list', 'jytpl:sync', 'lut:list',
+      'jyaudio:status', 'jyaudio:syncNow', 'jyfonts:scan', 'jyfonts:serverList', 'jyfonts:upload',
+      'jytpl:deleteServer', 'jytpl:list', 'jytpl:sync', 'lut:list',
     ])
   })
 

@@ -8,6 +8,9 @@
 // 后续如需保留状态可升级 Transition>KeepAlive>component 模式）。
 import { computed, onMounted, ref } from 'vue'
 import CopywritingMontage from './components/media-tools/copywriting-montage/CopywritingMontage.vue'
+// 剪映模板卡启用（2026-09-24 用户裁决：去掉「建设中」，可用）：组/子类目两级浏览 +
+// 从剪映同步（预设/文字模板/花字/贴纸/转场/音频）+ 字体（剪映）上传
+import JianYingTemplates from './components/media-tools/JianYingTemplates.vue'
 
 type ToolId = 'copywriting-montage' | 'jianying-templates'
 
@@ -22,7 +25,7 @@ interface ToolCard {
 
 const TOOLS: ToolCard[] = [
   { id: 'copywriting-montage', title: '文案混剪', desc: '按文案自动匹配素材，快速生成混剪成片', emoji: '📝', accent: 'linear-gradient(135deg,#10B981 0%,#0EA5E9 100%)' },
-  { id: 'jianying-templates', title: '剪映模板', desc: '从剪映同步的预设/文字模板/花字/贴纸/转场/音频，按分类浏览', emoji: '🎞️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#8B5CF6 100%)', disabled: true },
+  { id: 'jianying-templates', title: '剪映模板', desc: '从剪映同步的预设/文字模板/花字/贴纸/转场/音频，按分类浏览', emoji: '🎞️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#8B5CF6 100%)' },
 ]
 
 const active = ref<ToolId | null>(null)
@@ -97,6 +100,7 @@ onMounted(() => {
           </div>
         </div>
         <CopywritingMontage v-if="active === 'copywriting-montage'" />
+        <JianYingTemplates v-else-if="active === 'jianying-templates'" />
       </div>
     </Transition>
   </div>

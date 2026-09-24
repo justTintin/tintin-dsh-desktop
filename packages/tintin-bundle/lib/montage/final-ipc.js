@@ -36,6 +36,9 @@ import * as JY from '../jianying/jianying-exporter.js'
 // 剪映音频素材自动同步（内置定时任务，2026-09-22 用户裁决：自动把本机剪映音频
 // 素材同步到服务端音频库，不再依赖手动「从剪映同步」）
 import { initJianyingAudioSync, startJianyingAudioSyncTimer } from '../jianying/jianying-audio-sync.js'
+// 剪映模板页「字体（剪映）」分类域（jyfonts:scan/serverList/upload）——与 SRC
+// server-proxy.js:889 同源的接线点迁移：final 工厂持有 ipcMain 适配注册表。
+import { createJianyingFontsIpc } from '../jianying/jianying-fonts-ipc.js'
 // 特效烧制（2026-09-09 裁决：字幕/花字特效自配音链迁 Step4 统一烧制，
 // 与配音链同一构建器 voice-tts-logic.buildEffectBurnArgs 保证样式/时机一致）
 import * as L from './voice-tts-logic.js'
@@ -706,6 +709,8 @@ function createMontageFinalApi({ httpRequest, isExpectedOfflineError, getServerU
   }
   const jyAudioSyncCtrl = initJianyingAudioSync({ ipcMain: ipcMainRegistrar, httpRequest, getServerUrl, probeMedia })
   startJianyingAudioSyncTimer(jyAudioSyncCtrl)
+  // jyfonts:*（剪映字体扫描/服务端清单/批量上传）——同一张注册表
+  createJianyingFontsIpc(ipcMainRegistrar, { httpRequest, isExpectedOfflineError })
 
   // ── final:mix — 最终合成（特效烧制 + BGM 混音）──
   // tasks: [{videoPath, outPath}]；bgmPath/bgmVolume(0-200)；进度经 progressChannel 推送。
