@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
@@ -268,10 +268,93 @@ export async function apply(ctx) {
   // 注入面与源 createMontageVoiceIpc/createMontageFinalIpc 工厂参数一致。
   // jyaudio:*（剪映音频自动同步定时任务）随 final 工厂一并注册。
   const montageDeps = { httpRequest, isExpectedOfflineError, getServerUrl }
+
+  // multipart POST 到服务端（SRC buildMultipartBody 口径）：part 为标量
+  // {name,value}、本地文件 {name,path} 或内存字节 {name,buffer,filename}。
+  // 渲染层无法读取 {path} 指向的本地音频（浏览器无该文件句柄），所以样本
+  // 上传/转写和原版一样由宿主（=主进程）读盘组装——2026-09-24 用户报障
+  // Step2「无样本可选」的补链通道即走这里。
+  async function multipartPost(endpoint, parts, timeout = 120000) {
+    const boundary = '----TintinForm' + Math.random().toString(16).slice(2)
+    const chunks = []
+    for (const part of parts) {
+      if (part.path !== undefined) {
+        const buf = readFileSync(part.path)
+        chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${part.name}"; filename="${basename(part.path).replace(/"/g, '')}"\r\nContent-Type: ${part.contentType ?? 'application/octet-stream'}\r\n\r\n`))
+        chunks.push(buf, Buffer.from('\r\n'))
+      } else if (part.buffer !== undefined) {
+        chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${part.name}"; filename="${String(part.filename ?? part.name).replace(/"/g, '')}"\r\nContent-Type: ${part.contentType ?? 'application/octet-stream'}\r\n\r\n`))
+        chunks.push(part.buffer, Buffer.from('\r\n'))
+      } else {
+        chunks.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${part.name}"\r\n\r\n${part.value}\r\n`))
+      }
+    }
+    chunks.push(Buffer.from(`--${boundary}--\r\n`))
+    const res = await httpRequest('POST', endpoint, {
+      body: Buffer.concat(chunks),
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      timeout,
+    })
+    return res.data
+  }
+  // 音频扩展名 → multipart Content-Type（服务端转写/样本接口按扩展与类型识别）。
+  const audioMimeOf = (file) => ({
+    '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4',
+    '.flac': 'audio/flac', '.aac': 'audio/aac', '.ogg': 'audio/ogg',
+  }[String(extname(file)).toLowerCase()] ?? 'application/octet-stream')
+
   const nativeChannels = {
     ...createFfmpegGateApi({ ffmpegPath: resolveBinary('ffmpeg'), ffprobePath: resolveBinary('ffprobe') }),
     ...createMontageVoiceApi(montageDeps),
     ...createMontageFinalApi(montageDeps),
+    // tts:uploadSample — multipart POST /voice/samples（file 音频 + name 必填 +
+    // text 可选）。载荷是渲染层的 {path} 包装（preload ttsUploadSample 契约），
+    // 本地读盘在这里完成；离线 → null、其余失败 → {error}（IpcError 形态）。
+    'tts:uploadSample': async (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        const filePath = p.file?.path ?? (typeof p.file === 'string' ? p.file : '')
+        if (!filePath) throw new Error('tts:uploadSample requires `file`')
+        if (!p.name || !String(p.name).trim()) throw new Error('tts:uploadSample requires `name`')
+        return await multipartPost(API_ENDPOINTS.tts.voicesSamples, [
+          { name: 'file', path: filePath, contentType: audioMimeOf(filePath) },
+          { name: 'name', value: String(p.name).trim() },
+          ...(p.text ? [{ name: 'text', value: String(p.text) }] : []),
+        ])
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
+      }
+    },
+    // asr:transcribe — POST /whisper/transcribe（multipart: file 必填 +
+    // language/fmt；契约无 {url} JSON 分支——url 时先 GET 取回字节再上传，
+    // SRC 2026-09-06 422 修复口径）。p.format 兼容映射 fmt。
+    'asr:transcribe': async (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        if (!p.audio && !p.url) throw new Error('asr:transcribe missing `audio` Blob 或 `url` 字段（二选一）')
+        const fields = []
+        if (p.language) fields.push({ name: 'language', value: String(p.language) })
+        const fmt = p.fmt || p.format
+        if (fmt) fields.push({ name: 'fmt', value: String(fmt) })
+        if (p.word_timestamps !== undefined) fields.push({ name: 'word_timestamps', value: String(Boolean(p.word_timestamps)) })
+        let filePart
+        if (p.audio) {
+          const filePath = p.audio.path ?? (typeof p.audio === 'string' ? p.audio : '')
+          if (!filePath) throw new Error('asr:transcribe 的 audio 缺少本地路径')
+          filePart = { name: 'file', path: filePath, contentType: audioMimeOf(filePath) }
+        } else {
+          const res = await httpRequest('GET', String(p.url), { timeout: 60000 })
+          const buf = res.raw ?? (Buffer.isBuffer(res.data) ? res.data : null)
+          if (!buf || !buf.length) throw new Error('样本音频下载失败：响应非音频数据')
+          const ct = String(res.headers?.['content-type'] ?? '').split(';')[0].trim()
+          const ext = extname(String(p.url).split('?')[0]) || (ct.includes('mpeg') ? '.mp3' : '.wav')
+          filePart = { name: 'file', buffer: buf, filename: `sample${ext.toLowerCase()}`, contentType: ct || audioMimeOf(ext) }
+        }
+        return await multipartPost(API_ENDPOINTS.asr.transcribe, [...fields, filePart])
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
+      }
+    },
     // env:log — renderer business log relay (C-6 closure, 2026-09-23).
     // Source chain: clientError → env:log → logger.logError → main.log 落盘
     // + hooks auto-POST /api/logs/upload. Here: ctx.logger lands harness.log

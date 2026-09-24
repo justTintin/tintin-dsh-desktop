@@ -211,6 +211,15 @@ const tintinClient = (() => {
         llmModels: () => call('server:get', { path: '/llm/models' }),
         llmAdjustCopywriting: (payload) => call('server:post', { path: '/script/adjust-copywriting', body: payload }),
         copywritingVoiceover: (payload) => call('server:post', { path: '/copywriting/voiceover', body: payload }),
+        // 声音样本域（2026-09-24 补链：此前 ttsVoicesSamples 未映射 → Step2
+        // 永远「无样本可选」）。列表/音色是纯 GET 走通用通道；上传与转写的
+        // 载荷含 {path} 本地文件包装，浏览器读不了盘，转发宿主原生通道
+        // （tts:uploadSample / asr:transcribe 由宿主读盘组 multipart）。
+        ttsVoicesSamples: (params) => call('server:get', { path: '/voice/samples', params: params ?? {} }),
+        ttsQwen3Voices: () => call('server:get', { path: '/indextts/qwen3/voices' }),
+        ttsUploadSample: (p, _onProgress) => call('tts:uploadSample', { args: [p] }),
+        asrTranscribe: (p, _onProgress) => call('asr:transcribe', { args: [p] }),
+        tasksUnifiedItem: (id) => call('server:get', { path: `/tasks/unified/${encodeURIComponent(String(id ?? ''))}` }),
         materialList: (params) => call('server:get', { path: '/material/list', params: params ?? {} }),
         materialStockSearch: (payload) => call('server:post', { path: '/material/stock_search', body: payload }),
         audioGenBgm: (payload) => call('server:post', { path: '/audio/gen/bgm', body: payload }),
