@@ -163,6 +163,20 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
   //  词表优先级=手工 → 产品关联 → LLM 补足（命中判定沿用 matchKeywordHits 词表序）──
   const MANUAL_KW_LS_KEY = 'copywriting-montage.textfx.manualKeywords'
   const manualKeywords = ref<Record<string, string[]>>(loadManualKeywords())
+  // 取消黑名单（2026-09-24 用户报障「取消标注后还是没有取消状态」）：彩色词可能
+  // 来自产品关联或 LLM 补足——仅从手工列表移除挡不住它们，刷新后马上被重新捞回。
+  // 取消即把词拉黑（按 planKey 维度持久化），加回（重新标注）则解除拉黑。
+  const BLOCKED_KW_LS_KEY = 'copywriting-montage.textfx.blockedKeywords'
+  const blockedKeywords = ref<Record<string, string[]>>(loadBlockedKeywords())
+  function loadBlockedKeywords(): Record<string, string[]> {
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(BLOCKED_KW_LS_KEY) || '{}')
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, string[]>) : {}
+    } catch (_) { return {} }
+  }
+  function persistBlockedKeywords(): void {
+    try { localStorage.setItem(BLOCKED_KW_LS_KEY, JSON.stringify(blockedKeywords.value)) } catch (_) {}
+  }
   function loadManualKeywords(): Record<string, string[]> {
     try {
       const parsed: unknown = JSON.parse(localStorage.getItem(MANUAL_KW_LS_KEY) || '{}')
@@ -175,18 +189,28 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
   function addManualKeyword(planKey: string, word: string): boolean {
     const w = String(word || '').trim().slice(0, 30)
     if (!w || !planKey) return false
+    const blocked = (blockedKeywords.value[planKey] || []).filter((x) => x.toLowerCase() !== w.toLowerCase())
+    blockedKeywords.value = { ...blockedKeywords.value, [planKey]: blocked }
+    persistBlockedKeywords()
     const list = manualKeywords.value[planKey] || []
-    if (list.some((x) => x === w)) return false
+    if (list.some((x) => x === w)) { scheduleManualKwRefresh(); return false }
     manualKeywords.value = { ...manualKeywords.value, [planKey]: [...list, w].slice(0, 30) }
     persistManualKeywords()
     scheduleManualKwRefresh()
     return true
   }
   function removeManualKeyword(planKey: string, word: string): boolean {
+    const w = String(word || '').trim()
     const list = manualKeywords.value[planKey] || []
-    const next = list.filter((x) => x !== word)
+    const next = list.filter((x) => x !== w)
     manualKeywords.value = { ...manualKeywords.value, [planKey]: next }
     persistManualKeywords()
+    // 拉黑：产品关联/LLM 补足不再把这个词捞回来（词表与命中双侧过滤）
+    const blocked = blockedKeywords.value[planKey] || []
+    if (!blocked.some((x) => x.toLowerCase() === w.toLowerCase())) {
+      blockedKeywords.value = { ...blockedKeywords.value, [planKey]: [...blocked, w].slice(0, 100) }
+      persistBlockedKeywords()
+    }
     scheduleManualKwRefresh()
     return next.length !== list.length
   }
@@ -211,8 +235,10 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
     const rows = buildSubtitleRows(String(text || '').trim(), timing, 0)
     if (!rows.length) return { rows: [], hits: [], words: [] }
     const pool = currentMatchTemplateIds()
-    const manual = (manualKeywords.value[planKey] || []).map((w) => String(w || '').trim()).filter(Boolean)
-    const owned = sharedProductInfo.value.keywords.map((w) => String(w || '').trim()).filter(Boolean)
+    // 黑名单（取消标注的词）双侧过滤：词表不进、命中不落
+    const blockedSet = new Set((blockedKeywords.value[planKey] || []).map((w) => w.toLowerCase()))
+    const manual = (manualKeywords.value[planKey] || []).map((w) => String(w || '').trim()).filter((w) => w && !blockedSet.has(w.toLowerCase()))
+    const owned = sharedProductInfo.value.keywords.map((w) => String(w || '').trim()).filter((w) => w && !blockedSet.has(w.toLowerCase()))
     let words = [...new Set([...manual, ...owned])]
     let hits = matchKeywordHits(words, rows, pool)
     const want = Math.min(3, rows.length)
@@ -223,12 +249,13 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
         llm = await llmExtractKeywords(key)
         if (llm.length) llmKeywordsCache.set(key, llm)
       }
-      const extra = llm.filter((w) => !words.some((x) => x.toLowerCase() === w.toLowerCase()))
+      const extra = llm.filter((w) => !words.some((x) => x.toLowerCase() === w.toLowerCase()) && !blockedSet.has(w.toLowerCase()))
       if (extra.length) {
         words = [...words, ...extra]
         hits = matchKeywordHits(words, rows, pool)
       }
     }
+    hits = hits.filter((h) => !blockedSet.has(String(h.text ?? '').toLowerCase()))
     return { rows, hits, words }
   }
   async function resolveKeywordHits(text: string, timingPath: string, planKey = ''): Promise<KeywordHit[]> {
