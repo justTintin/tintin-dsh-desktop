@@ -189,12 +189,20 @@ export function buildBoundaryTransitions(
 ): string[] {
   const pool = RANDOM_TRANSITION_POOL
   const out: string[] = []
+  // 2026-09-24 用户裁决：每个合成视频包含三个不同的随机转场——按分镜轮转池内
+  // 三种转场（起点随机），同视频连续镜间不重样；镜内片间仍为硬切。
+  let planBoundary = 0
+  let rotation = Math.floor(rnd() * pool.length)
   for (let j = 1; j < segs.length; j++) {
     if (!segs[j].planFirst) { out.push('none'); continue }
     const m = modeOf ? (modeOf(segs[j]) || mode) : mode
-    out.push(m === 'random'
-      ? pool[Math.floor(rnd() * pool.length) % pool.length]
-      : m)
+    if (m === 'random') {
+      out.push(pool[(rotation + planBoundary) % pool.length])
+      planBoundary++
+    } else {
+      out.push(m)
+      planBoundary++
+    }
   }
   return out
 }

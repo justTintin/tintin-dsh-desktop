@@ -1150,8 +1150,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
       })
       totalDurationUs += clips[clips.length - 1].durationUs
     }
-    // 总时长包含片段间隔（除最后一个片段外，每个片段后加半秒）
-    if (clips.length > 1) totalDurationUs += (clips.length - 1) * VIDEO_GAP_US
+    // 总时长=各片段时长之和（2026-09-24：段间不再留半秒空隙——相邻才生效转场）
     const canvasWidth = clips[0].width
     const canvasHeight = clips[0].height
 
@@ -1226,7 +1225,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
       // 下一个窗口起点（含半秒间隔），音乐跨窗口连续（源游标续播）不断音。
       bgmWindows.push({
         startUs: cursorUs,
-        durUs: clip.durationUs + (i < clips.length - 1 ? VIDEO_GAP_US : 0),
+        durUs: clip.durationUs,
         bgmPath: (Array.isArray(bgmPaths) && bgmPaths[i]) ? String(bgmPaths[i]) : '',
       })
       // 静音判定（2026-09-22 虚拟时间轴）：muteVideoAudio=true 全片视频段静音（旁白
@@ -1262,8 +1261,9 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
         })
       }
       cursorUs += clip.durationUs
-      // 除最后一个片段外，每个片段后添加半秒间隔
-      if (i < clips.length - 1) cursorUs += VIDEO_GAP_US
+      // 2026-09-24 用户裁决：片段紧密相接（不再留半秒空隙）——空隙会让剪映转场
+      // 无法生效（转场需要相邻片段），且黑场 flash 破坏连续观感。旧半秒间隔设计
+      // 废弃；BGM 窗口随之自然连续。
     })
     const tracks = [videoTrack]
 
