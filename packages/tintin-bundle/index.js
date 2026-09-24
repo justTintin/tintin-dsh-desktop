@@ -429,6 +429,59 @@ export async function apply(ctx) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
     },
+    // dialog:collectVideos — 递归收集目录内视频文件（SRC main.js:808 逐字移植，
+    // 2026-09-24 用户报障：拖入文件夹只进文件夹本身——polyfill 的 collectVideos
+    // 此前是恒 [] 的占位，渲染层回退把目录路径当素材推入）。契约：{root, exts,
+    // limit} → 绝对路径数组；跳过隐藏/系统/混剪派生目录；自然序排序。
+    'dialog:collectVideos': (args) => {
+      const params = args?.[0] ?? {}
+      const root = params?.root || ''
+      if (!root || !existsSync(root) || !statSync(root).isDirectory()) return []
+      const exts = new Set(
+        (params?.exts || ['.mp4', '.mov', '.avi', '.mkv', '.flv', '.webm', '.m4v'])
+          .map((e) => (e.startsWith('.') ? e.toLowerCase() : '.' + e.toLowerCase()))
+      )
+      const limit = Math.min(Number(params?.limit) || 500, 5000)
+      const derivedDirs = new Set(params?.skipDirs || [
+        'splits', 'output', 'outputs', 'final', 'dubbed', 'bgm', 'temp', 'montage_cache',
+      ])
+      const found = []
+      const walk = (dir) => {
+        if (found.length >= limit) return
+        let entries
+        try { entries = readdirSync(dir, { withFileTypes: true }) } catch (_) { return }
+        for (const ent of entries) {
+          if (found.length >= limit) return
+          const full = join(dir, ent.name)
+          if (ent.isDirectory()) {
+            // 跳过隐藏/系统目录与混剪派生目录
+            if (ent.name.startsWith('.') || ent.name.startsWith('$')) continue
+            if (derivedDirs.has(ent.name.toLowerCase())) continue
+            walk(full)
+          } else if (ent.isFile()) {
+            const ext = extname(ent.name).toLowerCase()
+            if (exts.has(ext)) found.push(full)
+          }
+        }
+      }
+      walk(root)
+      found.sort((a, b) => {
+        const natKey = (p) => {
+          const base = basename(p).toLowerCase()
+          const parts = base.split(/(\d+)/)
+          return [dirname(p).toLowerCase(), ...parts.map((s, i) => (i % 2 ? String(Number(s)).padStart(10, '0') : s))]
+        }
+        const ka = natKey(a)
+        const kb = natKey(b)
+        const len = Math.max(ka.length, kb.length)
+        for (let i = 0; i < len; i++) {
+          const cmp = String(ka[i] || '').localeCompare(String(kb[i] || ''), undefined, { numeric: true })
+          if (cmp !== 0) return cmp
+        }
+        return 0
+      })
+      return found.slice(0, limit)
+    },
     // ── tts / audio 域补链（2026-09-24 声音克隆移植）────────────────────────
     // tts:generate — POST /indextts/tts（SRC media-proxy-ipc.js:151 契约：text 必填
     // + sample_id/prompt_audio/engine/ref_text/lang/duration_factor/emo_text/emo_alpha/resp；

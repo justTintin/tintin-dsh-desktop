@@ -506,9 +506,10 @@ const tintinClient = (() => {
         // 浏览器无保存对话框：恒 null（=取消）。a[download] 拿不到用户选择的
         // 目标路径，消费端按路径继续本地 ffmpeg 流程，假路径只会后移失败点。
         saveFile: async () => null,
-        // 渲染层无 fs 遍历能力：恒 []（调用方提示“未找到视频文件”）。
-        // 目录递归收集随宿主文件系统通道落地后改为转发。
-        collectVideos: async () => [],
+        // 渲染层无 fs 遍历能力：转发宿主 dialog:collectVideos（递归收集目录内
+        // 视频，自然序排序；2026-09-24 用户报障”拖入文件夹只进文件夹本身”——
+        // 此前此处恒 []，渲染层回退把目录路径当素材推入）。
+        collectVideos: (p) => call('dialog:collectVideos', { args: [p] }),
       })
 
       // ── shell：浏览器可承载的轻量动作；本地路径类动作无等价能力 ──────────
