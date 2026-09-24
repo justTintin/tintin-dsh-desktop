@@ -69,11 +69,60 @@ const tintinClient = (() => {
             container.textContent = ''
             renderPending('视图加载失败，请重试切换')
           }
+        } else if (activeId === 'ops') {
+          // 运营工具分组占位（2026-09-24 用户裁决：与原客户端 OpsTools.vue 同分组）。
+          // 卡片全部为建设中占位——真实工具随 tintin-ops-bundle(P3) 注册 'ops'
+          // 视图提供方后由上方 provider 分支接管。
+          renderOpsGrid()
         } else {
-          renderPending(activeId === 'media'
-            ? '媒体工具界面搬运中（视图提供方未注册）'
-            : '运营工具随 P3 接入（产品资料、反推提示词、视频运营）')
+          renderPending('媒体工具界面搬运中（视图提供方未注册）')
         }
+      }
+
+      function renderOpsGrid() {
+        const GROUPS = [
+          { group: '产品知识', tools: [
+            { title: '产品资料', desc: '品类/品牌/型号树状管理，服务端同步', emoji: '📦', accent: 'linear-gradient(135deg,#8B5CF6 0%,#EC4899 100%)' },
+            { title: '我的知识库', desc: '风格化画像 + 参考素材蒸馏', emoji: '📚', accent: 'linear-gradient(135deg,#0EA5E9 0%,#06B6D4 100%)' },
+          ] },
+          { group: '提示词', tools: [
+            { title: '图片反推提示词', desc: '上传图片，AI 生成绘画提示词', emoji: '🖼️', accent: 'linear-gradient(135deg,#10B981 0%,#14B8A6 100%)' },
+            { title: '视频反推提示词', desc: '上传视频，框选片段生成提示词', emoji: '🎬', accent: 'linear-gradient(135deg,#3B82F6 0%,#8B5CF6 100%)' },
+          ] },
+          { group: '视频运营', tools: [
+            { title: '视频评价预测', desc: '关键帧 → 视觉模型预测视频表现', emoji: '📈', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)' },
+            { title: '视频营销检测', desc: '研判是否营销视频 + 品类 + 改进建议', emoji: '🎯', accent: 'linear-gradient(135deg,#10B981 0%,#14B8A6 100%)' },
+          ] },
+        ]
+        const root = document.createElement('div')
+        root.style.cssText = 'width:100%;min-height:100%;padding:28px 32px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1,#141416);'
+        const head = document.createElement('div')
+        head.style.cssText = 'margin-bottom:20px;'
+        head.innerHTML = '<div style="font-size:24px;font-weight:700;color:var(--dsw-alias-label-primary,#e8e8e6)">运营工具</div>' +
+          '<div style="font-size:14px;color:var(--dsw-alias-label-tertiary,#8b8b88)">产品知识与运营辅助能力</div>'
+        root.appendChild(head)
+        for (const g of GROUPS) {
+          const block = document.createElement('div')
+          block.style.cssText = 'margin-bottom:24px;'
+          const label = document.createElement('div')
+          label.textContent = g.group
+          label.style.cssText = 'font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--dsw-alias-label-tertiary,#8b8b88);margin-bottom:10px;'
+          block.appendChild(label)
+          const grid = document.createElement('div')
+          grid.style.cssText = 'display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));'
+          for (const t of g.tools) {
+            const card = document.createElement('div')
+            card.style.cssText = 'position:relative;border-radius:14px;padding:18px;background:var(--dsw-alias-bg-layer-2,#1e1e20);border:0.5px solid var(--dsw-alias-border-l4,#555);'
+            card.innerHTML = '<span style="position:absolute;top:10px;right:12px;font-size:11px;color:var(--dsw-alias-label-tertiary,#8b8b88);border:1px dashed var(--dsw-alias-border-l4,#555);border-radius:999px;padding:2px 10px">建设中</span>' +
+              '<div style="width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;background:' + t.accent + '">' + t.emoji + '</div>' +
+              '<div style="margin-top:10px;font-size:16px;font-weight:700;color:var(--dsw-alias-label-primary,#e8e8e6)">' + t.title + '</div>' +
+              '<div style="margin-top:4px;font-size:13px;color:var(--dsw-alias-label-tertiary,#8b8b88)">' + t.desc + '</div>'
+            grid.appendChild(card)
+          }
+          block.appendChild(grid)
+          root.appendChild(block)
+        }
+        container.appendChild(root)
       }
 
       function renderPending(text) {
@@ -355,6 +404,13 @@ const tintinClient = (() => {
         ttsQwen3Voices: () => call('server:get', { path: '/indextts/qwen3/voices' }),
         ttsUploadSample: (p, _onProgress) => call('tts:uploadSample', { args: [p] }),
         asrTranscribe: (p, _onProgress) => call('asr:transcribe', { args: [p] }),
+        // TTS 生成（resp=json 模式）+ 音频落盘/下载 + 音频库上传（声音克隆域）
+        ttsGenerate: (p) => call('tts:generate', { args: [p] }),
+        ttsSaveAudio: (p) => call('tts:saveAudio', { args: [p] }),
+        audioLibraryUpload: (p) => call('audio:libraryUpload', { args: [p] }),
+        downloadResult: (path, savePath) => call('server:downloadResult', { args: [path, savePath] }),
+        // 服务端任务进度轮询（SRC tasks:progress → GET /tasks/{id}）
+        tasksProgress: (id) => call('server:get', { path: `/tasks/${encodeURIComponent(String(id ?? ''))}` }),
         tasksUnifiedItem: (id) => call('server:get', { path: `/tasks/unified/${encodeURIComponent(String(id ?? ''))}` }),
         materialList: (params) => call('server:get', { path: '/material/list', params: params ?? {} }),
         materialStockSearch: (payload) => call('server:post', { path: '/material/stock_search', body: payload }),

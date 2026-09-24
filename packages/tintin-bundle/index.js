@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, extname, join } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
@@ -379,8 +379,8 @@ export async function apply(ctx) {
       }
       return { dir }
     },
-    // env:clearCache — 清空固定缓存目录内容（保留目录本身）。向导运行中的任务
-    // 文件句柄由各消费方短持有，Windows 上被占用的条目 force 删除失败即跳过。
+    // env:clearCache — 清空固定缓存目录内容（保留目录本身）。被占用的条目
+    // force 删除失败即跳过。
     'env:clearCache': () => {
       const home = process.env.DSH_HOME
       if (!home) return { error: 'DSH_HOME 未设置' }
@@ -391,6 +391,84 @@ export async function apply(ctx) {
         return { ok: true }
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+    // ── tts / audio 域补链（2026-09-24 声音克隆移植）────────────────────────
+    // tts:generate — POST /indextts/tts（SRC media-proxy-ipc.js:151 契约：text 必填
+    // + sample_id/prompt_audio/engine/ref_text/lang/duration_factor/emo_text/emo_alpha/resp；
+    // 任务队列排队 + 推理耗时长，超时 300s）。调用方（声音克隆）固定 resp:'json' →
+    // 响应为 JSON；二进制 WAV 模式会撑爆 JSON 桥，显式拒绝并提示。
+    'tts:generate': async (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        if (!p.text) throw new Error('tts:generate missing `text`')
+        const body = {
+          text: p.text,
+          ...(p.sample_id ? { sample_id: p.sample_id } : {}),
+          ...(p.prompt_audio ? { prompt_audio: p.prompt_audio } : {}),
+          ...(p.engine ? { engine: String(p.engine) } : {}),
+          ...(p.ref_text ? { ref_text: String(p.ref_text) } : {}),
+          ...(p.lang ? { lang: p.lang } : {}),
+          ...(p.duration_factor !== undefined ? { duration_factor: p.duration_factor } : {}),
+          ...(p.emo_text ? { emo_text: p.emo_text } : {}),
+          ...(p.emo_alpha !== undefined ? { emo_alpha: p.emo_alpha } : {}),
+          ...(p.resp ? { resp: p.resp } : {}),
+        }
+        const res = await httpRequest('POST', API_ENDPOINTS.tts.indextts, { body, timeout: 300000 })
+        if (Buffer.isBuffer(res.data)) return { error: '二进制 WAV 响应不支持：请使用 resp=json 模式' }
+        return res.data
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
+      }
+    },
+    // tts:saveAudio — base64 音频落盘 / fromPath 复制（SRC media-proxy-ipc.js:233；
+    // 相对路径解析基准由 userData 改为 $DSH_HOME——harness 子进程无 electron app）
+    'tts:saveAudio': (args) => {
+      const { base64, savePath, fromPath } = args?.[0] ?? {}
+      try {
+        if (!savePath || (!base64 && !fromPath)) throw new Error('tts:saveAudio requires `savePath` and `base64`/`fromPath`')
+        const home = process.env.DSH_HOME
+        const resolveRooted = (p) => {
+          const s = String(p || '')
+          return isAbsolute(s) ? s : join(home || '', s)
+        }
+        const target = resolveRooted(savePath)
+        const dir = dirname(target)
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+        if (fromPath) copyFileSync(resolveRooted(fromPath), target)
+        else writeFileSync(target, Buffer.from(String(base64), 'base64'))
+        return target
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+    // audio:libraryUpload — multipart file+category+tags（SRC server-proxy.js:955）
+    'audio:libraryUpload': async (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        if (!p.filePath) throw new Error('audio:libraryUpload requires filePath')
+        if (!existsSync(p.filePath)) throw new Error(`文件不存在: ${p.filePath}`)
+        return await multipartPost(API_ENDPOINTS.audio.libraryUpload, [
+          { name: 'file', path: p.filePath, contentType: audioMimeOf(p.filePath) },
+          { name: 'category', value: String(p.category || '') },
+          { name: 'tags', value: String(p.tags || '') },
+        ])
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
+      }
+    },
+    // server:downloadResult — 服务端文件下载落盘（SRC server-proxy.js:545；超时 600s
+    // 对齐原版长任务产物）。位置参数 [path, savePath]（preload downloadResult 契约）。
+    'server:downloadResult': async (args) => {
+      const [path, savePath] = args ?? []
+      try {
+        const res = await httpRequest('GET', String(path || ''), { timeout: 600000 })
+        const dir = dirname(String(savePath))
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+        writeFileSync(String(savePath), res.raw)
+        return savePath
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
       }
     },
     // env:log — renderer business log relay (C-6 closure, 2026-09-23).

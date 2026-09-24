@@ -1,35 +1,65 @@
 <script setup lang="ts">
-// 媒体工具视图根组件（WP-3）：卡片网格 + 内嵌工具展开（全页视图，非弹窗）。
-// 网格视图对照源项目 views/MediaTools.vue 的卡片语言（emoji 图标 + accent
-// 渐变 + 标题/描述/箭头，2026-09-19 用户裁决的「文案混剪」卡位）；本包只
-// 落两张卡：文案混剪（真实四步向导，内嵌展开非弹窗）与剪映模板（灰显，
-// JianYingTemplates.vue 随后续工作包接入）。与源 Launcher 的差异：
-// 无路由/分组（视图内直开）、KeepAlive 缓存未搬（v-if 切回网格状态重置，
-// 后续如需保留状态可升级 Transition>KeepAlive>component 模式）。
+// 媒体工具视图根组件（WP-3）：分组卡片网格 + 内嵌工具展开（全页视图，非弹窗）。
+// 2026-09-24 用户裁决：分组对齐原客户端 views/MediaTools.vue（文案脚本模板/图形/
+// 音频/视频 四组；智能混剪按 A1 裁决永久不移植故不列卡）；未移植卡以「建设中」
+// 角标占位（不可点，恢复一张加一张卡）。已可用：文案混剪、剪映模板、声音克隆。
 import { computed, onMounted, ref } from 'vue'
 import CopywritingMontage from './components/media-tools/copywriting-montage/CopywritingMontage.vue'
 // 剪映模板卡启用（2026-09-24 用户裁决：去掉「建设中」，可用）：组/子类目两级浏览 +
 // 从剪映同步（预设/文字模板/花字/贴纸/转场/音频）+ 字体（剪映）上传
 import JianYingTemplates from './components/media-tools/JianYingTemplates.vue'
-
-type ToolId = 'copywriting-montage' | 'jianying-templates'
+// 声音克隆（2026-09-24 用户裁决移植）：样本库/Qwen3 音色/克隆合成/批量克隆
+import VoiceClone from './components/media-tools/VoiceClone.vue'
 
 interface ToolCard {
-  id: ToolId
+  id: string
   title: string
   desc: string
   emoji: string
   accent: string
+  /** 建设中占位：不可点 */
   disabled?: boolean
 }
 
-const TOOLS: ToolCard[] = [
-  { id: 'copywriting-montage', title: '文案混剪', desc: '按文案自动匹配素材，快速生成混剪成片', emoji: '📝', accent: 'linear-gradient(135deg,#10B981 0%,#0EA5E9 100%)' },
-  { id: 'jianying-templates', title: '剪映模板', desc: '从剪映同步的预设/文字模板/花字/贴纸/转场/音频，按分类浏览', emoji: '🎞️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#8B5CF6 100%)' },
+const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
+  {
+    group: '文案脚本模板',
+    tools: [
+      { id: 'storyboard', title: '分镜脚本创作', desc: '文案 → 分镜 → 引用素材 → 保存脚本库', emoji: '🎬', accent: 'linear-gradient(135deg,#F97316 0%,#EC4899 100%)', disabled: true },
+      { id: 'jianying-templates', title: '剪映模板', desc: '从剪映同步的预设/文字模板/花字/贴纸/转场/音频，按分类浏览', emoji: '🎞️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#8B5CF6 100%)' },
+      { id: 'video-transcribe', title: '视频转文字', desc: '视频语音自动转写', emoji: '📄', accent: 'linear-gradient(135deg,#6366F1 0%,#A855F7 100%)', disabled: true },
+    ],
+  },
+  {
+    group: '图形',
+    tools: [
+      { id: 'cover-design', title: '封面制作', desc: '商品封面图快速制作', emoji: '🎨', accent: 'linear-gradient(135deg,#EC4899 0%,#F43F5E 100%)', disabled: true },
+      { id: 'image-matting', title: '图像抠图', desc: '智能抠图 / 去除背景', emoji: '✂️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#06B6D4 100%)', disabled: true },
+    ],
+  },
+  {
+    group: '音频',
+    tools: [
+      { id: 'audio-gen', title: '音频生成', desc: 'AI 生成 BGM / 音效，一键入库', emoji: '🔊', accent: 'linear-gradient(135deg,#14B8A6 0%,#0EA5E9 100%)', disabled: true },
+      { id: 'voice-clone', title: '声音克隆', desc: '克隆音色生成配音', emoji: '🎵', accent: 'linear-gradient(135deg,#8B5CF6 0%,#EC4899 100%)' },
+    ],
+  },
+  {
+    group: '视频',
+    tools: [
+      { id: 'copywriting-montage', title: '文案混剪', desc: '按文案自动匹配素材，快速生成混剪成片', emoji: '📝', accent: 'linear-gradient(135deg,#10B981 0%,#0EA5E9 100%)' },
+      { id: 'viral-clone', title: '仿爆款', desc: '拆解爆款→复刻脚本→替换本店产品', emoji: '🔥', accent: 'linear-gradient(135deg,#F43F5E 0%,#F59E0B 100%)', disabled: true },
+      { id: 'live-slice', title: '直播切片', desc: '视频分析热点发现→切片与封面生成', emoji: '📡', accent: 'linear-gradient(135deg,#EF4444 0%,#DC2626 100%)', disabled: true },
+      { id: 'video-repair', title: '视频修复', desc: '画质修复 / 工作流处理', emoji: '🛠️', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)', disabled: true },
+      { id: 'subtitle-removal', title: '视频去水印字幕', desc: '去除字幕 / 台标水印', emoji: '🔤', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)', disabled: true },
+      { id: 'video-download', title: '参考视频下载', desc: '粘贴 YouTube/B 站 链接选档位下载', emoji: '⬇️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#6366F1 100%)', disabled: true },
+    ],
+  },
 ]
 
-const active = ref<ToolId | null>(null)
-const activeTool = computed(() => TOOLS.find((t) => t.id === active.value) ?? null)
+const ALL_TOOLS = GROUPS.flatMap((g) => g.tools)
+const active = ref<string | null>(null)
+const activeTool = computed(() => ALL_TOOLS.find((t) => t.id === active.value) ?? null)
 
 function openTool(t: ToolCard): void {
   if (t.disabled) return
@@ -55,17 +85,19 @@ onMounted(() => {
           <div class="title">媒体工具</div>
           <div class="sub">选择需要执行的 AI 生产能力</div>
         </div>
-        <div class="grid">
-          <button
-            v-for="t in TOOLS"
-            :key="t.id"
-            type="button"
-            class="card"
-            :class="{ 'is-disabled': t.disabled }"
-            :style="{ '--card-accent': t.accent }"
-            :disabled="t.disabled"
-            @click="openTool(t)"
-          >
+        <div v-for="g in GROUPS" :key="g.group" class="group-block">
+          <div class="group-label">{{ g.group }}</div>
+          <div class="grid">
+            <button
+              v-for="t in g.tools"
+              :key="t.id"
+              type="button"
+              class="card"
+              :class="{ 'is-disabled': t.disabled }"
+              :style="{ '--card-accent': t.accent }"
+              :disabled="t.disabled"
+              @click="openTool(t)"
+            >
             <span v-if="t.disabled" class="badge">即将上线</span>
             <div class="card-top">
               <div class="icon" :style="{ background: t.accent }"><span>{{ t.emoji }}</span></div>
@@ -81,6 +113,7 @@ onMounted(() => {
               </span>
             </div>
           </button>
+          </div>
         </div>
       </div>
 
@@ -101,6 +134,7 @@ onMounted(() => {
         </div>
         <CopywritingMontage v-if="active === 'copywriting-montage'" />
         <JianYingTemplates v-else-if="active === 'jianying-templates'" />
+        <VoiceClone v-else-if="active === 'voice-clone'" />
       </div>
     </Transition>
   </div>
@@ -121,6 +155,14 @@ onMounted(() => {
 .head { margin-bottom: var(--space-5); }
 .title { margin: 0 0 var(--space-1); font-size: 24px; font-weight: 700; line-height: 1.2; color: var(--foreground); }
 .sub { margin: 0; font-size: var(--font-size-body); color: var(--muted-foreground); }
+
+/* 分组（2026-09-24 对齐原 MediaTools 分组 Launcher） */
+.group-block { margin-bottom: var(--space-6); }
+.group-block:last-child { margin-bottom: 0; }
+.group-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted-foreground); margin-bottom: var(--space-3);
+}
 
 /* 全宽自适应列（宽屏两卡铺开，窄屏自动单列） */
 .grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
