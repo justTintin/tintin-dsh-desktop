@@ -1206,22 +1206,28 @@ function clearVoiceProgressListener(): void {
   const fontFacePending = new Set<string>()
   const fontFacesVersion = ref(0)
 
-  /** 预载服务端字体文件并注册 FontFace（voice:fontFile → GET /config/fonts/{id}/file） */
+  /**
+   * 预载服务端字体文件并注册 FontFace（GET /config/fonts/{id}/file）。
+   * 2026-09-24 修复：不再走 voice:fontFile 桥通道——字体是二进制大对象，
+   * 桥的 sendJson 会把字节 JSON.stringify 成数字数组文本（几十 MB 字体 →
+   * 数百 MB 字符串，超 V8 上限抛 Invalid string length，渲染层解析该响应
+   * 连带冻结主线程：症状=字幕字体下拉首次渲染时整个页面无响应，用户报障
+   * 「选择分镜脚本点击没反应」正是弹窗渲染触发字体预载所致）。改渲染层
+   * 直连服务端音频/字体 URL（样本试听 2026-09-07 同款裁决：媒体栈自加载，
+   * 无 base64/JSON 中间环节），FontFace 接受 url 引用，按 fid 派生去重。
+   */
   async function ensureServerFontFace(fid: string): Promise<void> {
     if (!fid || fontFaceLoaded.has(fid) || fontFacePending.has(fid)) return
     fontFacePending.add(fid)
     try {
-      const res = await window.tintin?.server?.voiceFontFile?.(fid)
-      const buf = res && !('error' in res) && res.data ? res.data : null
-      if (buf) {
-        // 断言说明：IPC 结构化克隆后的字节载体必为普通 ArrayBuffer（非 SharedArrayBuffer），
-        //  TS 泛型 ArrayBufferLike 无法窄化，故这里显式断言为 BufferSource
-        const ff = new FontFace(`stfont_${fid}`, buf as unknown as BufferSource)
-        await ff.load()
-        document.fonts.add(ff)
-        fontFaceLoaded.add(fid)
-        fontFacesVersion.value++
-      }
+      const base = await ensureServerUrl()
+      if (!base) return
+      const url = `${String(base).replace(/\/$/, '')}/config/fonts/${encodeURIComponent(fid)}/file`
+      const ff = new FontFace(`stfont_${fid}`, `url(${JSON.stringify(url)})`)
+      await ff.load()
+      document.fonts.add(ff)
+      fontFaceLoaded.add(fid)
+      fontFacesVersion.value++
     } catch (_) {
       // 字体文件拉取失败：保留族名回退链，不阻断 UI
     } finally {

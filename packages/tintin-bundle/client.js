@@ -339,6 +339,9 @@ const tintinClient = (() => {
             ...(entry?.stack ? { stack: entry.stack } : {}),
           }],
         }),
+        // 2026-09-24 补链：serverPing（SRC env-ipc.js pingServer 契约）——
+        // context.ts/useAudioGen 等经它取服务端地址做媒体直连基址。
+        serverPing: () => call('env:serverPing', { args: [] }),
       })
 
       window.tintin = {

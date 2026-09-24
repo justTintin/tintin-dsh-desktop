@@ -355,6 +355,19 @@ export async function apply(ctx) {
         return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
       }
     },
+    // env:serverPing — 服务端连通探测 + 当前地址回显（SRC env-ipc.js pingServer
+    // 契约：{online,url,status?,latencyMs?}，永不 reject）。渲染层经它拿媒体
+    // 直连基址（context.ts ensureServerUrl / useAudioGen 等）。GET <server>/。
+    'env:serverPing': async () => {
+      const url = getServerUrl()
+      const started = Date.now()
+      try {
+        const res = await httpRequest('GET', '/', { timeout: 3000 })
+        return { online: true, url, status: res.status, latencyMs: Date.now() - started }
+      } catch (err) {
+        return { online: false, url }
+      }
+    },
     // env:log — renderer business log relay (C-6 closure, 2026-09-23).
     // Source chain: clientError → env:log → logger.logError → main.log 落盘
     // + hooks auto-POST /api/logs/upload. Here: ctx.logger lands harness.log
