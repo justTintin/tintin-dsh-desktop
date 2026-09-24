@@ -381,16 +381,31 @@ export async function apply(ctx) {
       return { dir }
     },
     // shell:openItem — 用系统默认方式打开文件/目录（SRC main.js: shell.openPath；
-    // harness 子进程无 electron shell，按平台落 explorer/open/xdg-open）。
+    // harness 子进程无 electron shell，按平台落 start/open/xdg-open）。
+    // Windows 用 `cmd /c start "" <path>`：start 的第一个带引号参数是窗口标题，
+    // 必须给空占位；这是打开目录窗口最可靠的方式（explorer <path> 在部分场景
+    // 静默无效）。每次调用落 harness.log（2026-09-24 用户报障点击无反应）。
     'shell:openItem': (args) => {
       const p = String(args?.[0] ?? '')
       if (!p) return { error: 'shell:openItem requires path' }
       try {
-        const bin = process.platform === 'win32' ? 'explorer'
-          : process.platform === 'darwin' ? 'open' : 'xdg-open'
-        spawn(bin, [p], { detached: true, stdio: 'ignore' }).unref()
+        if (!existsSync(p)) {
+          ctx.logger.warn('shell:openItem: 路径不存在 %s', p)
+          return { error: `路径不存在: ${p}` }
+        }
+        ctx.logger.info('shell:openItem -> %s', p)
+        if (process.platform === 'win32') {
+          const child = spawn('cmd.exe', ['/c', 'start', '', p], { detached: true, stdio: 'ignore' })
+          child.on('error', (e) => ctx.logger.warn('shell:openItem spawn error: %s', e.message))
+          child.unref()
+        } else if (process.platform === 'darwin') {
+          spawn('open', [p], { detached: true, stdio: 'ignore' }).unref()
+        } else {
+          spawn('xdg-open', [p], { detached: true, stdio: 'ignore' }).unref()
+        }
         return { ok: true }
       } catch (err) {
+        ctx.logger.warn('shell:openItem failed: %s', err instanceof Error ? err.message : String(err))
         return { error: err instanceof Error ? err.message : String(err) }
       }
     },
