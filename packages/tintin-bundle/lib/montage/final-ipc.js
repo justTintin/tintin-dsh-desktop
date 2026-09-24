@@ -1196,6 +1196,7 @@ function createMontageFinalApi({ httpRequest, isExpectedOfflineError, getServerU
             bgmPaths: Array.isArray(p.bgmPaths) ? p.bgmPaths : null,
             bgmVolume: Number(p.bgmVolume) || 50,
             srtPaths: p.srtPaths,
+            srtLimitUs: Array.isArray(p.srtLimitUs) ? p.srtLimitUs : null,
             fxWords: p.fxWords,
             fxKinds: p.fxKinds,
             // M2a：文字入场动画/花字效果随剪映导出（textAnim=入场动画名，fancyEffectId/tplEffectId=花字效果 id）

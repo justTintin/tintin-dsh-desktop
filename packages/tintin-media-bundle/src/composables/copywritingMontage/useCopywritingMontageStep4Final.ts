@@ -508,6 +508,8 @@ async function exportAllToJianyingDraft(): Promise<void> {
     videoPaths?: string[]
     srtPath?: string
     srtPaths?: Array<string | null>
+    /** 每条 SRT 的字幕窗口上限（µs，2026-09-24）：与 srtPaths 对齐；null=该段自身时长 */
+    srtLimitUs?: Array<number | null>
     /** 逐边界转场（2026-09-22 虚拟时间轴：镜间=转场设置、镜内=none 硬切） */
     transitions?: string | string[]
     bgmPath?: string
@@ -736,6 +738,8 @@ async function exportAllToJianyingDraft(): Promise<void> {
         const ex = await window.tintin?.liveclip?.fileExists?.({ path: hit })
         if (ex?.exists) return hit
       }
+      clientError('copywriting-montage', '字幕资产未找到',
+        `aligned=${aligned || '(空)'} 与 srt 目录候选均不存在（srtKey=${candidate}，text 长度=${String(text || '').length}）`)
       return ''
     } catch (_) {
       return ''
@@ -857,7 +861,15 @@ async function exportAllToJianyingDraft(): Promise<void> {
     const voiceClips: Array<Array<{ path: string; startUs: number; durUs: number }>> = []
     const fancyEvents: Array<Array<{ word: string; startUs: number; durUs: number }>> = []
     const sfxClips: Array<Array<{ path: string; startUs: number; durUs: number }>> = []
-    let noSubClips = 0
+    // 各方案总时长（µs）：整段旁白 SRT 的字幕窗口（2026-09-24 修复：曾限首段时长致 4s 后字幕全丢）
+    const planDurUsByPlanIdx = new Map<number, number>()
+    for (const m of segs) {
+      planDurUsByPlanIdx.set(m.planIdx, Math.max(planDurUsByPlanIdx.get(m.planIdx) || 0, m.c1))
+    }
+    const srtLimitUs: Array<number | null> = []
+    // 口播挂载登记（2026-09-23 用户裁决：口播=每分镜一条整段旁白挂分镜首片段——
+    //  其余片段共享该旁白属设计，完成提示改按「分镜」口径提示缺失，不再按段误报）
+    const planVoiceOk = new Set<number>()
     for (let i = 0; i < segsReady.length; i++) {
       const m = segsReady[i]
       exportStage.value = `生成字幕资产（${i + 1}/${segsReady.length}）...`
@@ -865,8 +877,13 @@ async function exportAllToJianyingDraft(): Promise<void> {
       // 字幕 SRT：仅每分镜首片段携带（SRT=该分镜旁白整段时间轴，2026-09-18 后处理资产口径）
       {
         const srtFile = m.planFirst && m.text ? await ensureProcessedSrt(m.text, m.voicePath, m.srtKey) : ''
-        if (srtFile) srtPaths.push(srtFile)
-        else { noSubClips++; srtPaths.push(null) }
+        if (srtFile) {
+          srtPaths.push(srtFile)
+          srtLimitUs.push(Math.round((planDurUsByPlanIdx.get(m.planIdx) || 0) * 1e6))
+        } else {
+          srtPaths.push(null)
+          srtLimitUs.push(null)
+        }
       }
       const hits = planHits[m.planIdx] || []
       // 命中按本片段时间窗重定位（片段=镜时间轴的 [c0,c1) 区间）
@@ -887,8 +904,12 @@ async function exportAllToJianyingDraft(): Promise<void> {
       }
       // 口播轨（每分镜一段整条克隆声音，挂在该分镜首片段上）
       const voiceDurUs = Math.round((voiceDurByPlan.get(m.planIdx) || 0) * 1e6)
+      if (m.planFirst && (!m.text || !m.voicePath)) {
+        clientError('copywriting-montage', '口播首片段缺文案/声音', `text 长度=${String(m.text || '').length}，voicePath=${m.voicePath || '(空)'}——该分镜将无字幕轨`)
+      }
       if (m.planFirst && m.voicePath && voiceDurUs > 0) {
         voiceClips.push([{ path: m.voicePath, startUs: 0, durUs: voiceDurUs }])
+        planVoiceOk.add(m.planIdx)
       } else {
         voiceClips.push([])
       }
@@ -927,6 +948,12 @@ async function exportAllToJianyingDraft(): Promise<void> {
     }
     const transition = concatTransition.value || 'fade'
     const finalName = timelineDraftName()
+    // 缺口播的分镜清单（2026-09-23 用户裁决：按分镜口径提示，替代旧按段误报）
+    const missingPlanNote = vPlans
+      .map((pl, pi) => ({ pl, pi, ok: planVoiceOk.has(pi) }))
+      .filter((x) => !x.ok)
+      .map((x) => `第 ${x.pi + 1} 条分镜「${x.pl.outputName || '未命名'}」未生成口播——回第三步克隆后重新导出`)
+      .join('；')
     exportStage.value = '组装剪映时间轴草稿（转场/口播/字幕/BGM 各轨）...'
     exportProgress.value = 85
     exportStage.value = '组装剪映时间轴草稿（转场/口播/字幕/BGM 各轨）...'
@@ -940,6 +967,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
       videoDurations,
       muteVideoAudio: true,
       srtPaths,
+      srtLimitUs,
       // 逐边界转场：镜间=转场设置、镜内=硬切（导出器 normalizeTransitions 数组口径）
       transitions: transitionsArr,
       ...jianyingFxParams(),
@@ -965,7 +993,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
         ? joinPath(resolveOutMontageDir(voiceDirInput.value), 'sfx')
         : joinPath(await readCacheDir(), 'montage_cache', 'sfx'),
       draftName: finalName,
-      successBody: (name: string) => '已按原始轨道结构导出 ' + cands.length + ' 段候选视频（转场：' + transition + '，含口播/字幕/关键词/BGM 轨）！\n项目名称：' + name + (noSubClips ? '\n（注：' + noSubClips + ' 段无口播文案，未出字幕/关键词轨）' : ''),
+      successBody: (name: string) => '已按原始轨道结构导出 ' + cands.length + ' 段候选视频（转场：' + transition + '，含口播/字幕/关键词/BGM 轨）！\n项目名称：' + name + (missingPlanNote ? '\n（注：' + missingPlanNote + '）' : ''),
     })
     if (ok) {
       exportProgress.value = 100
@@ -979,7 +1007,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
       const sfxN = sfxClips.filter((s) => s.length > 0).length
       trackReport.push(`视频轨 ${cands.length} 段`)
       if (voicedN) trackReport.push(`口播轨 ${voicedN} 段`)
-      if (srtN) trackReport.push(`字幕轨 ${srtN} 条`)
+      trackReport.push(`字幕轨 ${srtN} 条`)
       if (tplN) trackReport.push(`文字模板轨 ${tplN} 段`)
       if (fancyN) trackReport.push(`花字轨 ${fancyN} 词条`)
       if (bgmPath.value) trackReport.push(`BGM ✓`)
@@ -992,7 +1020,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
       // 「打开草稿目录」按钮内嵌该提示行（自底部结果区移入）；2026-09-20（用户反馈）：带草稿名
       exportDoneMsg.value = '完成： 剪映时间轴草稿导出完成！项目名称：' + finalName
         + '\n轨道校验：' + trackReport.join(' / ')
-        + (noSubClips ? '\n（注：' + noSubClips + ' 段无口播文案，未出字幕/关键词轨）' : '')
+        + (missingPlanNote ? '\n（注：' + missingPlanNote + '）' : '')
       statusText.value = exportDoneMsg.value
     } else {
       statusText.value = '注意： 剪映时间轴导出失败（详见弹窗通知）'

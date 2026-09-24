@@ -185,11 +185,17 @@ function confirmStopAndReselect(): void {
   srcStopConfirm.value = false
   srcDlg.value = true
 }
+const pendingSplit = computed(() => srcVideos.value.some((v) => splitStatusOf(v) !== 'done'))
+const confirmLabel = computed(() => {
+  if (!hasSelected.value) return '选择完成，开始智能镜头分割'
+  return pendingSplit.value ? '选择完成，重新分割' : '确定'
+})
 function confirmSrcDlg(): void {
   srcDlg.value = false
   hasSelected.value = true
-  // 断点续分：已完成的素材自动跳过，只分割未完成的（重新选择=只补分割新素材）
-  if (srcVideos.value.length) void runSplit()
+  // 2026-09-23 用户裁决：确认语义分态——首次/有未分割新素材才自动分割；
+  // 全部已分割时「确定」仅关弹窗（重切走弹窗内「开始智能镜头分割」按钮）
+  if (srcVideos.value.length && pendingSplit.value) void runSplit()
 }
 
 function libMid(it: PickerItem): string {
@@ -467,11 +473,20 @@ async function applyAssignment(matchIds?: string[]): Promise<void> {
       // 一镜多片装填（2026-09-22 用户裁决开工：方案C——主片按镜标×0.9 封镜，末端超长
       // 裁剪到剩余量；每镜绑定组写 tab.clipGroups，确认预合成按组渲染/拼接）
       const groups: number[][] = []
+      // 2026-09-24 用户裁决：本分镜有声音时，各镜目标时长按旁白时长等比分摊
+      // （Σ镜目标=旁白实际时长，视频轨填满整条旁白；镜标只决定分摊比例）；
+      // 装填按放大后的目标继续多片拼接补齐，池内素材不足时欠装明示
+      const voiceScale = (() => {
+        const vd = Number(tab.voiceDurSec) || 0
+        const sum = tab.shots.reduce((a, sh) => a + (Number(sh.duration) || 0), 0)
+        return vd > 0 && sum > 0 ? Math.max(0.2, Math.min(4, vd / sum)) : 1
+      })()
       tab.shots.forEach((shot, si) => {
-        const fill = planShotGroup(shot, idxs[si] ?? -1, pool)
+        const shim = voiceScale !== 1 ? { ...shot, duration: Math.max(0.1, (Number(shot.duration) || 0) * voiceScale) } : shot
+        const fill = planShotGroup(shim, idxs[si] ?? -1, pool)
         groups.push(fill.idxs)
         coveredAll += fill.coveredSec
-        targetAll += Math.max(0, Number(shot.duration) || 0)
+        targetAll += Math.max(0, (Number(shot.duration) || 0) * voiceScale)
         const first = pool.find((pc) => pc.scene.idx === (fill.idxs[0] ?? -1))
         if (first && shot) {
           shot.material_path = first.scene.clipUrl || first.scene.name || ''
@@ -485,7 +500,8 @@ async function applyAssignment(matchIds?: string[]): Promise<void> {
     const fallback = total - aiHit
     const failNote = failedTabs.length ? `；脚本「${failedTabs.join('」「')}」LLM 不可用已整组兜底` : ''
     assignMsg.value = `智能匹配完成：${tabs.length} 个分镜脚本共 ${total} 镜，AI 命中 ${aiHit}、循环兜底 ${fallback}；装填后画面 Σ${coveredAll.toFixed(1)}s（镜标设计 Σ${targetAll.toFixed(1)}s，素材池去重后 ${pool.length} 段）${failNote}`
-    void syncStoryboardsToServer()
+    // 2026-09-23 用户裁决：匹配为探索动作不再触发同步——脚本库同步点收敛到
+    // 「生成剪辑方案」定稿时（onConfirmCompose await sync）
   } finally {
     smartAssignBusy.value = false
   }
@@ -500,7 +516,7 @@ async function onConfirmCompose(): Promise<void> {
     notify('镜头分割进行中', '素材池尚未完整，请等分割完成后再生成剪辑方案。')
     return
   }
-  const tabs = storyboards.value.map((s) => ({ id: s.id, name: s.name, narrative: s.narrative, shots: s.shots, clipGroups: s.clipGroups.map((g) => g.slice()) }))
+  const tabs = storyboards.value.map((s) => ({ id: s.id, name: s.name, narrative: s.narrative, voiceDurSec: s.voiceDurSec, shots: s.shots, clipGroups: s.clipGroups.map((g) => g.slice()) }))
   const ok = await runConcatFromAllStoryboards(tabs)
   // 2026-09-23 用户裁决：生成剪辑方案成功后同步脚本到服务端（await 确保确定性执行，
   // 同步进行中的重复触发由尾随合并守卫合并，不再静默丢弃）
@@ -772,7 +788,7 @@ function scoreClass(score: number | undefined): string {
             </div>
             <div class="modal-actions">
               <TButton label="取消" plain @click="srcDlg = false" />
-              <TButton :label="hasSelected ? '选择完成，重新分割' : '选择完成，开始智能镜头分割'"
+              <TButton :label="confirmLabel"
                 :disabled="!srcVideos.length && !filteredScenes.length" @click="confirmSrcDlg" />
             </div>
           </div>
@@ -832,7 +848,7 @@ function scoreClass(score: number | undefined): string {
         <div class="row duel-row">
           <TButton :label="hasSelected ? '重新选择素材' : '选择素材'" class="duel-half"
             title="选择素材来源（本地上传 / 素材库）" @click="openSrcDlg" />
-          <TButton label="智能匹配到分镜脚本" icon="check" class="duel-half" :loading="smartAssignBusy"
+          <TButton label="智能匹配到分镜脚本" :icon="tabsAllBound ? 'check' : ''" class="duel-half" :loading="smartAssignBusy"
             :disabled="splitBusy || !filteredScenes.length || !storyboards.length"
             :title="splitBusy ? '镜头分割进行中：素材池尚未完整，请等分割完成后再智能匹配' : '选择要匹配的分镜脚本，按分镜镜头的景别/时长/画面语义，从已分割素材中智能匹配并绑定素材'" @click="openMatchDlg" />
         </div>

@@ -53,6 +53,26 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
   const minSceneLen = ref(0.5)     // 最小镜头秒（原版 L76 默认 0.5，范围 0.1-60）
   const imageDuration = ref(3)     // 精华时长（原版 L85 默认 3；无法分割的视频自动挑出多长的精华片段）
   const scenes = ref<SplitSceneRow[]>([])
+  // ── 素材池持久化（2026-09-23 用户报障：重启后分镜卡全部「未绑定素材」）——
+  //  分镜的 clipGroups 绑定已随 A5 持久化恢复，但素材池（scenes）此前是内存态，
+  //  重启即空 → 绑定引用悬空。现持久化素材池与原始视频清单：启动时恢复，
+  //  分割/清空/入池变化即保存（deep watch）。清空缓存入口会显式清空本键。──
+  const POOL_LS_KEY = 'copywriting-montage.pool'
+  const SRC_LS_KEY = 'copywriting-montage.srcVideos'
+  try {
+    const savedPool: unknown = JSON.parse(localStorage.getItem(POOL_LS_KEY) || '[]')
+    if (Array.isArray(savedPool) && savedPool.length) {
+      scenes.value = (savedPool as SplitSceneRow[]).filter((r) => r && r.idx != null && (r.serverPath || r.clipUrl || r.clipLocalPath))
+    }
+    const savedSrc: unknown = JSON.parse(localStorage.getItem(SRC_LS_KEY) || '[]')
+    if (Array.isArray(savedSrc) && savedSrc.length) srcVideos.value = savedSrc as string[]
+  } catch (_) { /* 恢复失败走空池 */ }
+  watch(scenes, (list) => {
+    try { localStorage.setItem(POOL_LS_KEY, JSON.stringify(list)) } catch (_) { /* 超限静默 */ }
+  }, { deep: true })
+  watch(srcVideos, (list) => {
+    try { localStorage.setItem(SRC_LS_KEY, JSON.stringify(list)) } catch (_) {}
+  })
   const scoreFilter = ref(0)       // 默认不过滤（0=全部显示；原版 L116 默认 ≥6，用户要求默认不过滤）
   const splitBusy = ref(false)
   const splitError = ref('')
@@ -131,7 +151,11 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
   }
 
   /** 混剪任务缓存索引（原版 _montage_job_id = uuid4hex；本轮分割生成一次） */
-  const splitsJobId = ref('')
+  // 2026-09-23 用户裁决：任务 ID 持久化——重启沿用同一任务目录，消除
+  //  「持久化恢复老任务状态 + 分割又生成新目录」的资产错位；清空缓存时清除
+  const splitsJobId = ref((() => {
+    try { return localStorage.getItem('copywriting-montage.splitJobId') || '' } catch (_) { return '' }
+  })())
   const splitsDownloading = ref(false)
   /** 解析进度 0-100（对照原版 step1_split_controller _progress：按素材数推进，每素材开始前更新） */
   const splitProgress = ref(0)
@@ -160,6 +184,7 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     // （后续步骤按新 jobId 找成片 =「合成丢失」）。jobId 改在分割启动时即生成，
     // 合成中途产物始终落当前任务目录
     splitsJobId.value = (crypto?.randomUUID?.() || `${Date.now()}_${Math.floor(Math.random() * 1e8)}`).replace(/-/g, '')
+    try { localStorage.setItem('copywriting-montage.splitJobId', splitsJobId.value) } catch (_) {}
     // 断点续分：上一轮「停止分割」已完成的素材跳过（其镜头行已保留在 scenes 中，
     // rows 从已完成素材的镜头行起步，避免重复分割/丢行）
     splitStopRequested.value = false
@@ -453,6 +478,7 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
    *  全部任务目录，不触碰原始素材；本端同口径删本地缓存目录 + 清会话内镜头清单） */
   async function clearSplitCache(): Promise<void> {
     scenes.value = []
+    try { localStorage.removeItem('copywriting-montage.splitJobId') } catch (_) {}
     splitResolution.value = ''
     splitFps.value = 0
     splitError.value = ''
