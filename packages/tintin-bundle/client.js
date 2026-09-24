@@ -639,23 +639,38 @@ window.__ModuleLoader__.load({
     }
 
     // 本地配置卡（2026-09-24 用户裁决：挂在「通用设置」页 settings.general.item
-    // 插槽；缓存目录 = 默认工作区目录，固定不可改，参考原版本地配置卡）。
+    // 插槽；缓存目录默认 = 本机工作区目录，「更改」弹目录选择器持久化到
+    // local.cacheDir——对齐原客户端 CardLocalConfig/useSettingsIntegration 流程）。
     function LocalConfigCard() {
       const [cacheDir, setCacheDir] = React.useState('')
+      const [pickHint, setPickHint] = React.useState('')
       const [clearState, setClearState] = React.useState('idle') // idle|clearing|cleared|error
       React.useEffect(() => {
         window.tintin?.env?.cacheDir?.().then((res) => {
           if (res?.dir) setCacheDir(String(res.dir))
         }).catch(() => {})
       }, [])
+      const pickCacheDir = async () => {
+        const r = await window.tintin?.dialog?.openDir?.({ title: '选择本地缓存目录' })
+        const d = typeof r === 'string' ? r : (Array.isArray(r?.filePaths) ? r.filePaths[0] : (r?.filePaths ?? r?.path))
+        if (!d) return // 取消
+        try {
+          await tintinClient.settingsRpc('settings/mutate', {
+            ns: 'tintin-bundle',
+            ops: [{ op: 'set', path: ['local', 'cacheDir'], value: String(d) }],
+          })
+          setCacheDir(String(d))
+          setPickHint('缓存目录已保存')
+        } catch (e) {
+          setPickHint(`保存失败：${String(e?.message ?? e)}`)
+        }
+        setTimeout(() => setPickHint(''), 2000)
+      }
       const clearCache = () => {
         setClearState('clearing')
         window.tintin?.env?.clearCache?.().then((res) => {
           setClearState(res && !res.error ? 'cleared' : 'error')
         }).catch(() => setClearState('error'))
-      }
-      const openCacheDir = () => {
-        if (cacheDir) window.tintin?.shell?.openItem?.(cacheDir)
       }
       return h('div', { style: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' } },
         h('div', { style: { fontSize: '15px', fontWeight: 600 } }, '本地配置'),
@@ -663,20 +678,21 @@ window.__ModuleLoader__.load({
           h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },
             h('span', { style: { fontSize: '13px', fontWeight: 500 } }, '缓存目录'),
             h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #888)' } },
-              '智能混剪、分割等生成的中间文件统一存放目录（固定，不可更改）'),
+              '智能混剪、分割等生成的中间文件统一存放目录（默认为本机工作区目录，可更改）'),
             cacheDir && h('span', {
               title: cacheDir,
               style: { fontSize: '12px', fontFamily: 'monospace', color: 'var(--dsw-alias-label-secondary, #aaa)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
             }, cacheDir),
+            pickHint && h('span', { style: { fontSize: '12px', color: '#4ade80' } }, pickHint),
           ),
           h('button', {
-            type: 'button', onClick: openCacheDir, disabled: !cacheDir, title: '在资源管理器中打开缓存目录',
+            type: 'button', onClick: pickCacheDir, title: '选择新的缓存目录',
             style: {
-              appearance: 'none', font: 'inherit', padding: '0 14px', height: '32px', cursor: cacheDir ? 'pointer' : 'default',
+              appearance: 'none', font: 'inherit', padding: '0 14px', height: '32px', cursor: 'pointer',
               border: '0.5px solid var(--dsw-alias-border-l4, #555)', borderRadius: '8px',
               background: 'var(--dsw-alias-bg-layer-3, transparent)', color: 'inherit',
             },
-          }, '打开目录'),
+          }, cacheDir ? '更改' : '浏览…'),
         ),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
           h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },

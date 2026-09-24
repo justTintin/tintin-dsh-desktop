@@ -89,6 +89,11 @@ const TintinConfig = z.object({
     // address through the setup overlay (probe → models → provider config).
     provisioned: z.boolean().default(false),
   }).default({}),
+  // 本地配置（2026-09-24 用户裁决：恢复原客户端「更改」能力——缓存目录可选）；
+  // 空 = 使用默认（本机工作区目录 Documents/tintin-workspace）。
+  local: z.object({
+    cacheDir: z.string().default(''),
+  }).default({}),
 }).default({})
 
 export const name = 'tintin-bundle'
@@ -368,12 +373,13 @@ export async function apply(ctx) {
         return { online: false, url }
       }
     },
-    // env:cacheDir — 固定缓存目录。2026-09-24 用户裁决（覆盖 09-23 的
-    // $DSH_HOME/tintin/cache 方案）：默认地址 = 本机工作区目录
-    // Documents/tintin-workspace（与默认工作区同源，TINTIN_WORKSPACE_DIR
-    // 可覆盖）；由宿主保证目录存在。
+    // env:cacheDir — 缓存目录解析（2026-09-24 用户裁决：恢复原客户端「更改」能力）。
+    // 优先级：设置 local.cacheDir（通用设置·本地配置卡「更改」写入）> 默认本机
+    // 工作区目录 Documents/tintin-workspace；由宿主保证目录存在。
     'env:cacheDir': () => {
-      const dir = process.env.TINTIN_WORKSPACE_DIR
+      const configured = String(tintinSettings.get()?.local?.cacheDir || '').trim()
+      const dir = configured
+        || process.env.TINTIN_WORKSPACE_DIR
         || join(process.env.USERPROFILE || process.env.HOME || '.', 'Documents', 'tintin-workspace')
       try { mkdirSync(dir, { recursive: true }) } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
