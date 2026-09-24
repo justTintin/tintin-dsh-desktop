@@ -654,11 +654,21 @@ window.__ModuleLoader__.load({
           if (res?.dir) setCacheDir(String(res.dir))
         }).catch(() => {})
       }, [])
+      const clearCache = () => {
+        setClearState('clearing')
+        window.tintin?.env?.clearCache?.().then((res) => {
+          setClearState(res && !res.error ? 'cleared' : 'error')
+        }).catch(() => setClearState('error'))
+      }
+      // 更改（2026-09-24 用户裁决：与原客户端一致——弹出原生文件夹选择框，
+      // 选择后持久化为新的缓存目录。桌面端经 dshDesktopDirectoryPicker 出
+      // 原生对话框，选定路径经 settings/mutate 持久化，立即生效。）
       const pickCacheDir = async () => {
-        const r = await window.tintin?.dialog?.openDir?.({ title: '选择本地缓存目录' })
-        const d = typeof r === 'string' ? r : (Array.isArray(r?.filePaths) ? r.filePaths[0] : (r?.filePaths ?? r?.path))
-        if (!d) return // 取消
+        const picker = window.dshDesktopDirectoryPicker
+        if (!picker?.pick) return
         try {
+          const d = await picker.pick('选择本地缓存目录')
+          if (!d) return // 取消
           await tintinClient.settingsRpc('settings/mutate', {
             ns: 'tintin-bundle',
             ops: [{ op: 'set', path: ['local', 'cacheDir'], value: String(d) }],
@@ -670,13 +680,7 @@ window.__ModuleLoader__.load({
         }
         setTimeout(() => setPickHint(''), 2000)
       }
-      const clearCache = () => {
-        setClearState('clearing')
-        window.tintin?.env?.clearCache?.().then((res) => {
-          setClearState(res && !res.error ? 'cleared' : 'error')
-        }).catch(() => setClearState('error'))
-      }
-      return h('div', { style: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' } },
+      return h('div', { style: { padding: '14px 0', display: 'flex', flexDirection: 'column', gap: '10px' } },
         h('div', { style: { fontSize: '15px', fontWeight: 600 } }, '本地配置'),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
           h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },

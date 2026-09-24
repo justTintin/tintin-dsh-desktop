@@ -3446,7 +3446,9 @@ async function bootstrap(): Promise<void> {
     appVersion: () => app.getVersion()
   })
 
-  ipcMain.handle('directory-picker:open', async (event) => {
+  // 2026-09-24: callers may label the dialog (TinTin local-config uses
+  // 选择本地缓存目录); default keeps the workspace-picker wording.
+  ipcMain.handle('directory-picker:open', async (event, title?: unknown) => {
     if (
       !mainWindow ||
       mainWindow.isDestroyed() ||
@@ -3456,8 +3458,14 @@ async function bootstrap(): Promise<void> {
       throw new Error('Directory picker requests are only allowed from the main Harness window')
     }
 
+    const dialogTitle =
+      typeof title === 'string' && title.trim()
+        ? title.trim()
+        : harnessLocale() === 'zh'
+          ? '选择工作区目录'
+          : 'Select Workspace Directory'
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: harnessLocale() === 'zh' ? '选择工作区目录' : 'Select Workspace Directory',
+      title: dialogTitle,
       properties: ['openDirectory']
     })
     return result.canceled ? null : result.filePaths[0] ?? null

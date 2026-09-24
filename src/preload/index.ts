@@ -149,7 +149,10 @@ function runDomSync(): void {
 }
 
 contextBridge.exposeInMainWorld('dshDesktopDirectoryPicker', {
-  pick: (): Promise<string | null> => ipcRenderer.invoke('directory-picker:open')
+  // 2026-09-24: optional dialog title so plugin surfaces (e.g. the TinTin
+  // local-config card) can label the native folder picker properly.
+  pick: (title?: string): Promise<string | null> =>
+    ipcRenderer.invoke('directory-picker:open', typeof title === 'string' && title.trim() ? title.trim() : undefined)
 })
 
 /**
