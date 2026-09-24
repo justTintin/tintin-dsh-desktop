@@ -687,7 +687,9 @@ function appendSfxTrackFromEvents(tracks, materials, events, offsetUs, limitEndU
   }
   const gainDb = Number(opts.gainDb)
   const volume = Number.isFinite(gainDb) ? Math.min(1, Math.max(0, Math.pow(10, gainDb / 20))) : 1.0
-  const sfxTrack = newTrack('audio')
+  // 2026-09-24 用户裁决：音效尽量合并到一条轨——贪心分配到「末尾 ≤ 起点」的既有
+  // 轨，真重叠才开新轨；sfxTrackPool 由调用方持有（跨视频复用同一池）
+  const sfxTrackPool = Array.isArray(opts.sfxTrackPool) ? opts.sfxTrackPool : []
   list.forEach((ev, idx) => {
     const sfxPath = String(pool[(base + idx) % pool.length])
     // 段长=min(素材实际时长, 事件窗)——音效素材 <2s，事件窗更长时按素材长落段
@@ -700,7 +702,9 @@ function appendSfxTrackFromEvents(tracks, materials, events, offsetUs, limitEndU
     materials.audios.push(mat)
     const ssp = speedMaterial(1.0)
     if (Array.isArray(materials.speeds)) materials.speeds.push(ssp)
-    sfxTrack.segments.push({
+    let slot = sfxTrackPool.find((tp) => tp.lastEnd <= startUs)
+    if (!slot) { slot = { track: newTrack('audio'), lastEnd: 0 }; sfxTrackPool.push(slot) }
+    slot.track.segments.push({
       ...baseSegmentFields(mat.id, startUs, durUs),
       source_timerange: { start: 0, duration: durUs },
       speed: 1.0,
@@ -710,8 +714,8 @@ function appendSfxTrackFromEvents(tracks, materials, events, offsetUs, limitEndU
       clip: null,
       hdr_settings: null,
     })
+    slot.lastEnd = startUs + durUs
   })
-  if (sfxTrack.segments.length) tracks.push(sfxTrack)
 }
 
 /** 音效轨·镜级显式指派（2026-09-22 用户裁决「音效包装对齐剪映导出」）：音效包装按镜
@@ -733,7 +737,10 @@ function appendSfxTrackFromClips(tracks, materials, clips, offsetUs, limitEndUs,
   }
   const gainDb = Number(opts.gainDb)
   const volume = Number.isFinite(gainDb) ? Math.min(1, Math.max(0, Math.pow(10, gainDb / 20))) : 1.0
-  const sfxTrack = newTrack('audio')
+  // 2026-09-24 用户裁决：音效尽量合并到一条轨——段按起点排序后贪心分配到
+  // 「末尾 ≤ 起点」的既有轨，真重叠才开新轨；sfxTrackPool 由调用方持有复用
+  const sfxTrackPool = Array.isArray(opts.sfxTrackPool) ? opts.sfxTrackPool : []
+  list.sort((a, b) => a.startUs - b.startUs)
   list.forEach((c) => {
     const sfxDurUs = Math.round(Math.max(0.05, probeDur(c.path) || 0.5) * 1e6)
     const startUs = offsetUs + c.startUs
@@ -744,7 +751,9 @@ function appendSfxTrackFromClips(tracks, materials, clips, offsetUs, limitEndUs,
     materials.audios.push(mat)
     const ssp = speedMaterial(1.0)
     if (Array.isArray(materials.speeds)) materials.speeds.push(ssp)
-    sfxTrack.segments.push({
+    let slot = sfxTrackPool.find((tp) => tp.lastEnd <= startUs)
+    if (!slot) { slot = { track: newTrack('audio'), lastEnd: 0 }; sfxTrackPool.push(slot) }
+    slot.track.segments.push({
       ...baseSegmentFields(mat.id, startUs, durUs),
       source_timerange: { start: 0, duration: durUs },
       speed: 1.0,
@@ -754,8 +763,8 @@ function appendSfxTrackFromClips(tracks, materials, clips, offsetUs, limitEndUs,
       clip: null,
       hdr_settings: null,
     })
+    slot.lastEnd = startUs + durUs
   })
-  if (sfxTrack.segments.length) tracks.push(sfxTrack)
 }
 
 
@@ -1275,6 +1284,9 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
       .map((s) => String(s || '')).filter((s) => s && fs.existsSync(s))
     let sfxEventCursor = 0
     const sfxProbeCache = new Map()
+    // 音效轨池（2026-09-24 用户裁决：音效合并尽量一条轨——跨视频共享贪心分配，
+    // 段重叠才开新轨；循环结束后统一入轨）
+    const sfxTrackPool = []
     const appendSfxForVideo = (i, offsetUs, limitEndUs) => {
       // 镜级显式指派优先（2026-09-22 用户裁决「音效包装对齐导出」）：音效包装产物
       // （AI 按镜提示词生成）直接按镜时间轴落段；无显式指派 → 事件池轨原口径
@@ -1284,6 +1296,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
           appendSfxTrackFromClips(tracks, materials, explicit, offsetUs, limitEndUs, {
             gainDb: sfxGainDb,
             probeCache: sfxProbeCache,
+            sfxTrackPool,
             probeDur: (fp) => (deps && typeof deps.probeMedia === 'function' ? (deps.probeMedia(fp).durationSec || 0) : 0),
           })
         } catch (_) { /* 音效轨失败不阻断导出 */ }
@@ -1298,6 +1311,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
             eventOffset: sfxEventCursor,
             gainDb: sfxGainDb,
             probeCache: sfxProbeCache,
+            sfxTrackPool,
             probeDur: (fp) => (deps && typeof deps.probeMedia === 'function' ? (deps.probeMedia(fp).durationSec || 0) : 0),
           })
         } catch (_) { /* 音效轨失败不阻断导出 */ }
@@ -1415,6 +1429,12 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
 
     // 6.5 口播音频轨（有段才入轨；音频域三轨=口播/BGM/音效）
     if (voiceTrack.segments.length) tracks.push(voiceTrack)
+
+    // 音效轨池入轨（2026-09-24 用户裁决：音效尽量合并一条轨——贪心分配后
+    // 按首段起点排序入轨，重叠的段自然落到备用轨）
+    for (const slot of sfxTrackPool) {
+      if (slot.track.segments.length) tracks.push(slot.track)
+    }
 
     // 7. BGM 轨（最后一条）：2026-09-18 用户裁决——逐视频窗落段（第一段截断于
     //    第一个视频结尾，不是整条时间轴；间隔期静音），源游标跨窗连续、超素材时长回环。
