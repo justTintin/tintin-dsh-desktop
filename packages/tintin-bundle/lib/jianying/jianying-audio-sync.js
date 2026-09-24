@@ -124,9 +124,19 @@ function initJianyingAudioSync(deps) {
     const results = { added: 0, skipped: 0, failed: 0, total: 0, errors: [] }
     try {
       await httpRequest('GET', '/health', { timeout: 5000 }).catch(() => { throw new Error('服务端不可达（OFFLINE）') })
-      const libRes = await httpRequest('GET', '/audio/library?page=1&page_size=1000', { timeout: 15000 })
-      const libItems = (libRes && libRes.data && Array.isArray(libRes.data.items)) ? libRes.data.items : []
-      const excludeNames = new Set(libItems.map((x) => String(x.filename || '').toLowerCase()))
+      // 增量比对基线（2026-09-24 修复：参数名是 size 不是 page_size——page_size 被
+      // 服务端忽略、按默认页大小只回 50 条，库一大于 50 条去重名单就缺项，本地
+      // 剪映缓存被误判为"新"反复上传、全被 409 弹回，每轮同步刷满日志）。
+      // 按返回的 total 翻页取全量，再建排除名单。
+      const excludeNames = new Set()
+      for (let page = 1; ; page++) {
+        const libRes = await httpRequest('GET', `/audio/library?page=${page}&size=100`, { timeout: 15000 })
+          .catch(() => null)
+        const items = (libRes && libRes.data && Array.isArray(libRes.data.items)) ? libRes.data.items : []
+        for (const x of items) excludeNames.add(String(x.filename || '').toLowerCase())
+        const total = Number(libRes && libRes.data && libRes.data.total) || 0
+        if (items.length === 0 || excludeNames.size >= total) break
+      }
       const files = listAudioCacheFiles(jianyingRoot())
       const nameByPath = buildDraftAudioNameMap(jianyingRoot())
       const items = collectNewAudioItems({ files, nameByPath, excludeNames })
@@ -146,8 +156,13 @@ function initJianyingAudioSync(deps) {
             body,
             headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary },
             timeout: 120000,
-          }).catch((e) => ({ error: e.message }))
-          if (up && up.error) throw new Error(up.error)
+          }).catch((e) => ({ error: e.message, status: e.status }))
+          if (up && up.error) {
+            // 409=服务端已有同名音频（增量竞态：列表拉取后到上传前被其他端同步）：
+            // 按跳过计，不算失败、不进错误列表刷日志
+            if (up.status === 409) { results.skipped++; continue }
+            throw new Error(up.error)
+          }
           results.added++
         } catch (e) {
           results.failed++

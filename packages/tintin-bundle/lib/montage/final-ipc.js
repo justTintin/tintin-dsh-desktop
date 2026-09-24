@@ -1420,7 +1420,9 @@ function createMontageFinalApi({ httpRequest, isExpectedOfflineError, getServerU
         syncedToServer: false,
       }))
       try {
-        const libRes = await httpRequest('GET', '/audio/library?page=1&page_size=1000', { timeout: 10000 })
+        // 2026-09-24 修复：分页参数是 size（page_size 被服务端忽略、按默认 50 条截断，
+        // 库一超过 50 条徽标就大面积误报"未同步"）
+        const libRes = await httpRequest('GET', '/audio/library?page=1&size=1000', { timeout: 10000 })
         const libItems = (libRes && libRes.data && Array.isArray(libRes.data.items)) ? libRes.data.items : []
         const serverNames = new Set(libItems.map((x) => String(x.filename || '').toLowerCase()))
         for (const a of audioItems) {
