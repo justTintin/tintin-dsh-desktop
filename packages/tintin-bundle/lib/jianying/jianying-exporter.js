@@ -1212,7 +1212,14 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
       materials.videos.push(videoMaterialFields({ ...clip, materialId }))
       const sp = speedMaterial(1.0)
       speeds.push(sp)
-      bgmWindows.push({ startUs: cursorUs, durUs: clip.durationUs, bgmPath: (Array.isArray(bgmPaths) && bgmPaths[i]) ? String(bgmPaths[i]) : '' })
+      // 2026-09-24 用户报障修复：BGM 窗口原先与视频段等长——视频轨的半秒间隔处
+      // BGM 静音，整条 BGM 轨被切成"音乐/静音"交替的碎块。现让每个窗口覆盖到
+      // 下一个窗口起点（含半秒间隔），音乐跨窗口连续（源游标续播）不断音。
+      bgmWindows.push({
+        startUs: cursorUs,
+        durUs: clip.durationUs + (i < clips.length - 1 ? VIDEO_GAP_US : 0),
+        bgmPath: (Array.isArray(bgmPaths) && bgmPaths[i]) ? String(bgmPaths[i]) : '',
+      })
       // 静音判定（2026-09-22 虚拟时间轴）：muteVideoAudio=true 全片视频段静音（旁白
       //  覆盖口径）；数组=逐段静音标记；行级口播段沿用原判定
       const segMuted = muteVideoAudio === true
