@@ -1453,6 +1453,25 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
     tracks.forEach((track, order) => {
       for (const seg of track.segments) seg.render_index = order
     })
+    // 2026-09-24 用户裁决：音频与视频同长——口播/BGM 等音频轨超出视频轨末尾的
+    // 部分一律截断（旁白尾段超出视频时同样截断，保证时间线上音频不拖出视频）
+    const videoTotalUs = clips.reduce((acc, c) => acc + c.durationUs, 0)
+    for (const t of tracks) {
+      if (t.type !== 'audio') continue
+      t.segments = t.segments.flatMap((s) => {
+        const tr = s.target_timerange
+        if (!tr) return [s]
+        if (tr.start >= videoTotalUs) return []
+        if (tr.start + tr.duration <= videoTotalUs) return [s]
+        const dur = videoTotalUs - tr.start
+        const trimmed = { ...s, target_timerange: { start: tr.start, duration: dur } }
+        if (s.source_timerange) trimmed.source_timerange = { start: s.source_timerange.start, duration: dur }
+        return [trimmed]
+      })
+    }
+    tracks.forEach((track, order) => {
+      for (const seg of track.segments || []) seg.render_index = order
+    })
     content.tracks = tracks
 
     fs.writeFileSync(path.join(draftFolder, 'draft_content.json'), JSON.stringify(content, null, 2), 'utf-8')
