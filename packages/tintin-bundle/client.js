@@ -442,7 +442,10 @@ const tintinClient = (() => {
             return serverUpload(path, fd, onProgress)
           }
           return {
-            montageSplit: uploadNamed('/montage/split'),
+            // 2026-09-24 修复：分割的 file 字段是 {path} 本地文件包装，浏览器读
+            // 不了盘——转发宿主 montage:split 通道由宿主读盘组 multipart
+            // （此前 JSON.stringify 成字符串上传，服务端 422 Expected UploadFile）。
+            montageSplit: (p, _onProgress) => call('montage:split', { args: [p] }),
             montageConcat: uploadNamed('/montage/concat'),
             montageBgm: uploadNamed('/montage/bgm'),
             promptVideo: uploadNamed('/prompt/video'),

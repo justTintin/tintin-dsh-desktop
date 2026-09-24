@@ -273,6 +273,11 @@ export async function apply(ctx) {
   // 注入面与源 createMontageVoiceIpc/createMontageFinalIpc 工厂参数一致。
   // jyaudio:*（剪映音频自动同步定时任务）随 final 工厂一并注册。
   const montageDeps = { httpRequest, isExpectedOfflineError, getServerUrl }
+  // 视频扩展名 → multipart Content-Type（分割上传用）
+  const VIDEO_MIME = {
+    '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.mkv': 'video/x-matroska',
+    '.avi': 'video/x-msvideo', '.flv': 'video/x-flv', '.webm': 'video/webm', '.m4v': 'video/x-m4v',
+  }
 
   // multipart POST 到服务端（SRC buildMultipartBody 口径）：part 为标量
   // {name,value}、本地文件 {name,path} 或内存字节 {name,buffer,filename}。
@@ -481,6 +486,40 @@ export async function apply(ctx) {
         return 0
       })
       return found.slice(0, limit)
+    },
+    // montage:split — 智能镜头分割上传（SRC server-proxy.js:845 逐字段移植）。
+    // 2026-09-24 用户报障「素材解析失败 HTTP 422 Expected UploadFile received str」：
+    // 渲染层把 {path} 包装对象 JSON.stringify 塞进 multipart 的 file 字段，服务端
+    // 要的是真实文件流。宿主读盘组装（file 必填，material_id/clip_url 二选一兼容）。
+    'montage:split': async (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        const hasFile = !!p.file
+        const hasMat = !!p.material_id
+        const hasUrl = !!p.clip_url
+        if ((hasFile ? 1 : 0) + (hasMat ? 1 : 0) + (hasUrl ? 1 : 0) !== 1) {
+          throw new Error('montage:split 需要且仅需要一个来源：file / material_id / clip_url 三选一')
+        }
+        const parts = []
+        if (p.file !== undefined) {
+          const fp = p.file?.path ?? (typeof p.file === 'string' ? p.file : '')
+          if (!fp) throw new Error('montage:split 的 file 缺少本地路径')
+          parts.push({ name: 'file', path: fp, contentType: VIDEO_MIME[extname(fp).toLowerCase()] || 'video/mp4' })
+        }
+        if (p.material_id !== undefined) parts.push({ name: 'material_id', value: String(p.material_id) })
+        if (p.clip_url !== undefined) parts.push({ name: 'clip_url', value: String(p.clip_url) })
+        if (p.threshold !== undefined) parts.push({ name: 'threshold', value: String(p.threshold) })
+        if (p.min_scene_len !== undefined) parts.push({ name: 'min_scene_len', value: String(p.min_scene_len) })
+        if (p.dedup !== undefined) parts.push({ name: 'dedup', value: String(Boolean(p.dedup)) })
+        if (p.dedup_threshold !== undefined) parts.push({ name: 'dedup_threshold', value: String(p.dedup_threshold) })
+        if (p.product_mode !== undefined) parts.push({ name: 'product_mode', value: String(Boolean(p.product_mode)) })
+        if (p.analyze !== undefined) parts.push({ name: 'analyze', value: String(Boolean(p.analyze)) })
+        if (p.image_duration !== undefined) parts.push({ name: 'image_duration', value: String(p.image_duration) })
+        // 分割含逐帧分析，耗时长；超时对齐 SRC multipartUpload 宽松口径
+        return await multipartPost(API_ENDPOINTS.montage.split, parts, 600000)
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
+      }
     },
     // ── tts / audio 域补链（2026-09-24 声音克隆移植）────────────────────────
     // tts:generate — POST /indextts/tts（SRC media-proxy-ipc.js:151 契约：text 必填

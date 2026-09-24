@@ -27,15 +27,17 @@ function listSourceFiles(dir: string, ext = /\.(ts|vue|tsx)$/): string[] {
 const GENERIC_METHODS = new Set(['get', 'post', 'put', 'delete', 'upload'])
 
 // Named methods still unmapped ON PURPOSE: the local-montage family (ffmpeg
-// edge trim / concat-clips / final validation) and the download/audio upload
-// family are scheduled with the WP-3 Step2-4 on-machine integration work
-// package (docs/tintin-port-execution-plan.zh.md) — before those steps ship,
-// each entry here must gain a real mapping and leave this set. Everything
-// else must map immediately; this audit exists because an unmapped name
-// 404s silently (2026-09-24 incident: ttsVoicesSamples → Step2 no samples).
+// edge trim / concat-clips / final validation) and the remaining audio
+// download family are scheduled with the WP-3 Step2-4 on-machine integration
+// work package (docs/tintin-port-execution-plan.zh.md) — before those steps
+// ship, each entry here must gain a real mapping and leave this set.
+// Everything else must map immediately; this audit exists because an unmapped
+// name 404s silently (2026-09-24 incident: ttsVoicesSamples → Step2 no
+// samples). downloadResult/audioLibraryUpload left the list when the
+// voice-clone port landed (they are mapped via host channels now).
 const PENDING_METHODS = new Set([
   'trimEdgeClips', 'clearMontageCache', 'montageConcatClips', 'montageValidateFinal', 'montageDeleteBadFinal',
-  'downloadResult', 'audioArchiveGen', 'audioBgmUpload', 'audioLibraryUpload', 'audioDownloadTemp',
+  'audioArchiveGen', 'audioBgmUpload', 'audioDownloadTemp',
 ])
 
 /** Named methods referenced as .server.<name>(...) across media sources. */
@@ -68,8 +70,9 @@ function collectMappedMethods(): Set<string> {
     if (key !== undefined) mapped.add(key)
   }
   // Upload helpers built inside the IIFE spread (montageSplit & co.) sit at a
-  // deeper indent; catch them too.
-  for (const match of block.matchAll(/^\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*uploadNamed/gm)) {
+  // deeper indent; catch them too (both uploadNamed(...) and direct call(...)
+  // arrow forms).
+  for (const match of block.matchAll(/^\s{10,}([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(?:\([^)]*\)\s*=>\s*(?:uploadNamed|call)|uploadNamed)/gm)) {
     const key = match[1]
     if (key !== undefined) mapped.add(key)
   }
