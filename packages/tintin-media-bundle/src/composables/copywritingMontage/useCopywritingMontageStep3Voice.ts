@@ -129,7 +129,7 @@ export function useCopywritingMontageStep3Voice(ctx: CopywritingMontageStep3Cont
     textFxPreviewTracks, textFxStyleSamples, srvBase, loadTextTemplates,
     textFxAnnotate, addManualKeyword, removeManualKeyword,
     resolveKeywordHits, currentMatchTemplateIds, refreshTextFxTracks,
-    scheduleManualKwRefresh,
+    scheduleManualKwRefresh, addManualAnnot, removeManualAnnot, annotsFor,
   } = tfx
 
   // AI 改写（_show_ai_rewrite_settings：ai_rewrite_temperature 默认 0.5 → 自由度 50%）
@@ -1490,7 +1490,7 @@ function clearVoiceProgressListener(): void {
     lutListLoading, textTemplateId, textRandomCount, textKeywordDensity, textTemplates,
     textTemplatesLoading, activeTextPool, activeTextCount, textTemplateOptions,
     textFxPreviewTracks, textFxStyleSamples, srvBase, rewriteTemp, aiRewriteDlg,
-    textFxAnnotate, addManualKeyword, removeManualKeyword,
+    textFxAnnotate, addManualKeyword, removeManualKeyword, addManualAnnot, removeManualAnnot, annotsFor,
     ttsEngine, ttsDurationFactor, ttsEmoText, ttsEmoAlpha, ttsPauseMs, cloneParamsDlg,
     editDlg, voiceBusy, rewriteBusy, voiceProgress,
     loadLuts, loadCatalogLanes, resolveKeywordHits,

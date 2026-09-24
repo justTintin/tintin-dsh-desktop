@@ -60,7 +60,7 @@ const {
   TEXT_RANDOM_COUNT_OPTIONS,
   TEXT_KEYWORD_DENSITY_OPTIONS,
   textFxPreviewTracks,
-  textFxAnnotate, addManualKeyword, removeManualKeyword,
+  textFxAnnotate, addManualKeyword, removeManualKeyword, addManualAnnot, removeManualAnnot,
   textFxStyleSamples,
   loadTextTemplates,
   FANCY_STYLE_OPTIONS,
@@ -376,8 +376,11 @@ async function toggleTextFxStyles(): Promise<void> {
   await nextTick()
   measureTextFxStyles()
 }
-function onAnnotateAdd(planKey: string, word: string): void {
-  addManualKeyword(planKey, word)
+function onAnnotateAdd(planKey: string, rowStart: number, word: string): void {
+  addManualAnnot(planKey, rowStart, word)
+}
+function onAnnotateRemoveOcc(planKey: string, rowStart: number, word: string): void {
+  removeManualAnnot(planKey, rowStart, word)
 }
 function onAnnotateRemove(planKey: string, word: string): void {
   removeManualKeyword(planKey, word)
@@ -582,7 +585,7 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
                  每视频一块字幕文本（时间戳+字级对齐），命中词彩色标注；
                  选中文字右键标注为关键词，右键彩色词取消；词表=手工→产品关联→LLM≥3 -->
             <div class="style-preview-canvas textfx-tracks">
-              <KeywordAnnotateRows :tracks="textFxAnnotate" @add="onAnnotateAdd" @remove="onAnnotateRemove" />
+              <KeywordAnnotateRows :tracks="textFxAnnotate" @add="onAnnotateAdd" @remove-occ="onAnnotateRemoveOcc" @remove="onAnnotateRemove" />
             </div>
           </div>
         </div>

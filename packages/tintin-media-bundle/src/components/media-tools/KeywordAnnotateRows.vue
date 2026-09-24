@@ -12,10 +12,13 @@ export interface KeywordAnnotateTrack {
   rows: Array<{ text: string; start: number; end: number }>
   hits: Array<{ text: string; start: number; end: number }>
   words: string[]
+  /** 按位置的手工标注（2026-09-24 用户裁决①②）：只作用于选中位置 */
+  occs: Array<{ rowStart: number; text: string }>
 }
 const props = defineProps<{ tracks: KeywordAnnotateTrack[] }>()
 const emit = defineEmits<{
-  (e: 'add', planKey: string, word: string): void
+  (e: 'add', planKey: string, rowStart: number, word: string): void
+  (e: 'removeOcc', planKey: string, rowStart: number, word: string): void
   (e: 'remove', planKey: string, word: string): void
 }>()
 
@@ -59,28 +62,59 @@ function seg(row: { text: string }, words: string[]): { pre: string; kw: string;
 }
 
 // ── 右键菜单：标注 / 取消标注 ──
-const menu = ref({ show: false, x: 0, y: 0, planKey: '', word: '', mode: 'add' as 'add' | 'remove' })
-function openAdd(planKey: string, rowText: string, e: MouseEvent): void {
+const menu = ref({ show: false, x: 0, y: 0, planKey: '', word: '', rowStart: 0, mode: 'add' as 'add' | 'removeOcc' | 'remove' })
+function openAdd(planKey: string, rowStart: number, rowText: string, e: MouseEvent): void {
   const sel = (window.getSelection?.()?.toString() || '').trim()
   // 必须是本段文本的非空子串（跨段选择不算），长度限 30
   if (!sel || sel.length > 30 || !rowText.includes(sel)) { menu.value.show = false; return }
-  menu.value = { show: true, x: e.clientX, y: e.clientY, planKey, word: sel, mode: 'add' }
+  menu.value = { show: true, x: e.clientX, y: e.clientY, planKey, word: sel, rowStart, mode: 'add' }
 }
 function openRemove(planKey: string, word: string, e: MouseEvent): void {
-  menu.value = { show: true, x: e.clientX, y: e.clientY, planKey, word, mode: 'remove' }
+  menu.value = { show: true, x: e.clientX, y: e.clientY, planKey, word, rowStart: 0, mode: 'remove' }
 }
 function confirmMenu(): void {
-  const { planKey, word, mode } = menu.value
-  // 乐观更新本地词表（立即变色/褪色），再上报父层持久化
+  const { planKey, word, mode, rowStart } = menu.value
+  // 乐观更新本地词表（立即褪色），再上报父层持久化。add 走按位置标注（occ），
+  // 不进词表——词表是全局着色（产品/LLM），会连带其它位置（2026-09-24 裁决①）。
   const cur = wordsByKey[planKey] || []
-  if (mode === 'add' && !cur.some((x) => x === word)) wordsByKey[planKey] = [...cur, word]
   if (mode === 'remove') wordsByKey[planKey] = cur.filter((x) => x !== word)
-  if (mode === 'add') emit('add', planKey, word)
+  if (mode === 'add') emit('add', planKey, rowStart, word)
+  else if (mode === 'removeOcc') emit('removeOcc', planKey, rowStart, word)
   else emit('remove', planKey, word)
   menu.value.show = false
   try { window.getSelection?.()?.removeAllRanges?.() } catch (_) {}
 }
 function closeMenu(): void { menu.value.show = false }
+// ── 按位置的手工标注（2026-09-24 用户裁决①②）────────────────────────
+// 渲染：行上有手工标注（rowStart 匹配）→ 该行按标注文本着色（优先于词级命中）；
+// 无标注的行 → 词级命中着色（产品/LLM 词，全局）。同词不同位置互不影响。
+// 右键：行有手工标注 → 「取消本位置」；否则彩色词 → 「取消标注（拉黑该词）」；
+// 纯文本 → 「标注为关键词（本位置）」。
+function occForRow(tr: KeywordAnnotateTrack, rowStart: number): { rowStart: number; text: string } | undefined {
+  return (tr.occs || []).find((o) => Math.abs(o.rowStart - rowStart) < 0.02)
+}
+interface RowPart { t: string; kw: boolean; kind: '' | 'occ' | 'word' }
+function rowSegs(tr: KeywordAnnotateTrack, row: { text: string }): RowPart[] {
+  const t = String(row.text || '')
+  const occ = occForRow(tr, row.start)
+  if (occ) {
+    const i = occ.text ? t.indexOf(occ.text) : -1
+    if (i >= 0) return [{ t: t.slice(0, i), kw: false, kind: '' }, { t: occ.text, kw: true, kind: 'occ' }, { t: t.slice(i + occ.text.length), kw: false, kind: '' }]
+  }
+  const s = seg(row, wordsOf(tr.key, tr.words))
+  if (s.kw) return [{ t: s.pre, kw: false, kind: '' }, { t: s.kw, kw: true, kind: 'word' }, { t: s.post, kw: false, kind: '' }]
+  return [{ t, kw: false, kind: '' }]
+}
+function rowRightClick(tr: KeywordAnnotateTrack, row: { text: string; start: number }, e: MouseEvent): void {
+  const occ = occForRow(tr, row.start)
+  if (occ) {
+    menu.value = { show: true, x: e.clientX, y: e.clientY, planKey: tr.key, word: occ.text, rowStart: occ.rowStart, mode: 'removeOcc' }
+    return
+  }
+  const w = hitWord(row, wordsOf(tr.key, tr.words))
+  if (w) { openRemove(tr.key, w, e); return }
+  openAdd(tr.key, row.start, String(row.text || ''), e)
+}
 onMounted(() => document.addEventListener('click', closeMenu))
 onUnmounted(() => document.removeEventListener('click', closeMenu))
 </script>
@@ -97,10 +131,9 @@ onUnmounted(() => document.removeEventListener('click', closeMenu))
         <!-- 字幕段横向平铺：一段一个[时间戳+文本]，从左到右自动换行 -->
         <div class="kwar-flow">
           <span v-for="(row, ri) in tr.rows" :key="ri" class="kwar-seg"
-            @contextmenu.prevent="openAdd(tr.key, String(row.text || ''), $event)">
-            <span class="kwar-ts">[{{ fmt(row.start) }}]</span><template v-if="seg(row, wordsOf(tr.key, tr.words)).kw"><span>{{ seg(row, wordsOf(tr.key, tr.words)).pre }}</span><span class="kwar-kw"
-              :title="'已标注：' + seg(row, wordsOf(tr.key, tr.words)).kw + '（右键取消标注）'"
-              @contextmenu.prevent.stop="openRemove(tr.key, hitWord(row, wordsOf(tr.key, tr.words)), $event)">{{ seg(row, wordsOf(tr.key, tr.words)).kw }}</span><span>{{ seg(row, wordsOf(tr.key, tr.words)).post }}</span></template><template v-else>{{ row.text }}</template>
+            @contextmenu.prevent="rowRightClick(tr, row, $event)">
+            <span class="kwar-ts">[{{ fmt(row.start) }}]</span><template v-for="(part, pi) in rowSegs(tr, row)"><span v-if="part.kw" :key="'k' + pi" class="kwar-kw"
+              :title="'已标注（本位置）：' + part.t + '（右键取消标注）'">{{ part.t }}</span><span v-else :key="'p' + pi">{{ part.t }}</span></template>
           </span>
           <span v-if="!tr.rows.length" class="kwar-empty">该视频暂无字幕行（未配音或未生成 timing）</span>
         </div>
@@ -110,8 +143,8 @@ onUnmounted(() => document.removeEventListener('click', closeMenu))
     <!-- 右键菜单（固定定位跟鼠标；点击页面其他处关闭） -->
     <div v-if="menu.show" class="kwar-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
       @click.stop @contextmenu.prevent>
-      <button class="kwar-menu-item" :class="{ danger: menu.mode === 'remove' }" @click="confirmMenu">
-        {{ menu.mode === 'add' ? `标注为关键词：「${menu.word}」` : `取消标注：「${menu.word}」` }}
+      <button class="kwar-menu-item" :class="{ danger: menu.mode !== 'add' }" @click="confirmMenu">
+        {{ menu.mode === 'add' ? `标注为关键词（本位置）：「${menu.word}」` : menu.mode === 'removeOcc' ? `取消标注（本位置）：「${menu.word}」` : `取消标注（该词全部位置）：「${menu.word}」` }}
       </button>
     </div>
   </div>

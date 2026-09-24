@@ -147,6 +147,8 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
     rows: Array<{ text: string; start: number; end: number }>
     hits: KeywordHit[]
     words: string[]
+    /** 按位置的手工标注（2026-09-24）：rowStart=字幕行起始秒，text=标注文本 */
+    occs: Array<{ rowStart: number; text: string }>
   }
   const textFxAnnotate = ref<TextFxAnnotateTrack[]>([])
   let textFxTrackSeq = 0
@@ -219,6 +221,41 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
     if (manualKwTimer) clearTimeout(manualKwTimer)
     manualKwTimer = setTimeout(() => { void refreshTextFxTracks() }, 300)
   }
+  // ── 按位置的手工标注（2026-09-24 用户裁决①②：标注只作用于选中位置——同一词
+    //  出现在别处不连带；各标注互相独立，新增不影响已有标注）。存储 = 每条分镜
+    //  {rowStart, text}（rowStart=字幕行起始秒，行定位键），随 localStorage 持久化。
+  const MANUAL_ANNOT_LS_KEY = 'copywriting-montage.textfx.manualAnnot'
+  const manualAnnots = ref<Record<string, Array<{ rowStart: number; text: string }>>>(loadManualAnnots())
+  function loadManualAnnots(): Record<string, Array<{ rowStart: number; text: string }>> {
+    try {
+      const parsed: unknown = JSON.parse(localStorage.getItem(MANUAL_ANNOT_LS_KEY) || '{}')
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, Array<{ rowStart: number; text: string }>>) : {}
+    } catch (_) { return {} }
+  }
+  function persistManualAnnots(): void {
+    try { localStorage.setItem(MANUAL_ANNOT_LS_KEY, JSON.stringify(manualAnnots.value)) } catch (_) {}
+  }
+  function addManualAnnot(planKey: string, rowStart: number, text: string): boolean {
+    const t = String(text || '').trim().slice(0, 30)
+    if (!t || !planKey) return false
+    const list = manualAnnots.value[planKey] || []
+    if (list.some((x) => x.rowStart === rowStart && x.text === t)) return false
+    manualAnnots.value = { ...manualAnnots.value, [planKey]: [...list, { rowStart, text: t }] }
+    persistManualAnnots()
+    scheduleManualKwRefresh()
+    return true
+  }
+  function removeManualAnnot(planKey: string, rowStart: number, text: string): boolean {
+    const list = manualAnnots.value[planKey] || []
+    const next = list.filter((x) => !(x.rowStart === rowStart && x.text === text))
+    manualAnnots.value = { ...manualAnnots.value, [planKey]: next }
+    persistManualAnnots()
+    scheduleManualKwRefresh()
+    return next.length !== list.length
+  }
+  function annotsFor(planKey: string): Array<{ rowStart: number; text: string }> {
+    return manualAnnots.value[planKey] || []
+  }
   /** 关键词判定 v2（2026-09-23 用户裁决，与智能混剪同款）：词表优先级=手工标注
    *  （planKey 维度）→ 产品关联词 → LLM 补足；命中词覆盖不足 min(3, 行数) 时自动
    *  追加 LLM 提取词重匹配（保证每条至少 3 词可命中）。门面保留只返回 hits。 */
@@ -256,6 +293,16 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
       }
     }
     hits = hits.filter((h) => !blockedSet.has(String(h.text ?? '').toLowerCase()))
+    // 按位置的手工标注命中（2026-09-24 用户裁决①②）：覆盖同行的词级命中——
+    // 行定位 rowStart（±0.02s 容差），段内定位选中文本；互不影响其它位置
+    for (const occ of (manualAnnots.value[planKey] || [])) {
+      const row = rows.find((r) => Math.abs(r.start - occ.rowStart) < 0.02)
+      if (!row) continue
+      if (!row.text.includes(occ.text)) continue
+      hits = hits.filter((h) => Math.abs(h.start - row.start) > 0.02) // 同行词级命中让位
+      hits = [...hits, ...matchKeywordHits([occ.text], [row], pool)]
+    }
+    hits.sort((a, b) => a.start - b.start)
     return { rows, hits, words }
   }
   async function resolveKeywordHits(text: string, timingPath: string, planKey = ''): Promise<KeywordHit[]> {
@@ -294,7 +341,7 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
       for (const pl of plans) {
         try {
           const st = await resolveKeywordState(pl.text, pl.timingPath, pl.key)
-          annotate.push({ key: pl.key, name: pl.name, durationSec: pl.durationSec, rows: st.rows, hits: st.hits, words: st.words })
+          annotate.push({ key: pl.key, name: pl.name, durationSec: pl.durationSec, rows: st.rows, hits: st.hits, words: st.words, occs: annotsFor(pl.key) })
         } catch (_) {
           const prev = textFxAnnotate.value.find((a) => a.key === pl.key)
           if (prev) annotate.push(prev)
@@ -460,6 +507,7 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
     activeTextPool, activeTextCount, textTemplateOptions, catalogTextLanes, loadCatalogLanes,
     textFxPreviewTracks, textFxStyleSamples, srvBase, loadTextTemplates,
     resolveKeywordHits, currentMatchTemplateIds, refreshTextFxTracks,
-    textFxAnnotate, addManualKeyword, removeManualKeyword, scheduleManualKwRefresh,
+    textFxAnnotate, addManualKeyword, removeManualKeyword, scheduleManualKwRefresh, annotsFor,
+    addManualAnnot, removeManualAnnot,
   }
 }
