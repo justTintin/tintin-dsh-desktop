@@ -6,6 +6,7 @@
 // on purpose; WP-1 replaces them with the real seam handlers.
 import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync, rmSync, createReadStream } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, normalize, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -519,6 +520,73 @@ export async function apply(ctx) {
         return await multipartPost(API_ENDPOINTS.montage.split, parts, 600000)
       } catch (err) {
         return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
+      }
+    },
+    // ── liveclip 本地文件 I/O 域（SRC liveclip-ipc.js 整体移植：渲染层策略 +
+    //  宿主无决策文件操作。导出字幕 SRT 定位/写入、资产存在性探测、选择池判重
+    //  hash 都走这里——2026-09-24 用户报障导出被阻断的根因即 fileExists 未落地）──
+    'liveclip:fileExists': (args) => {
+      const p = String(args?.[0]?.path || '')
+      if (!p) return { error: '缺少 path' }
+      try {
+        return { ok: true, exists: existsSync(p) && statSync(p).size > 0 }
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) }
+      }
+    },
+    'liveclip:writeTextFile': (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        const ext = extname(String(p.path || '')).toLowerCase()
+        if (!['.srt', '.txt'].includes(ext)) return { error: '仅支持 .srt/.txt 字幕文件' }
+        const content = typeof p.content === 'string' ? p.content : ''
+        if (!content) return { error: '缺少字幕内容' }
+        mkdirSync(dirname(p.path), { recursive: true })
+        writeFileSync(p.path, content, 'utf8')
+        return { ok: true, path: p.path }
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) }
+      }
+    },
+    'liveclip:hashFile': (args) => {
+      const p = String(args?.[0]?.path || '')
+      if (!p) return { error: '缺少 path' }
+      if (!existsSync(p)) return { error: '文件不存在' }
+      try {
+        const hash = createHash('md5')
+        hash.update(readFileSync(p))
+        return { ok: true, path: p, hash: hash.digest('hex') }
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) }
+      }
+    },
+    'liveclip:writeTempText': (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        const base = basename(String(p.basename || ''))
+        if (!base || base === '.' || base === '..' || /[\\/]/.test(base)) return { error: '非法文件名' }
+        if (!base.toLowerCase().endsWith('.srt')) return { error: '临时字幕仅支持 .srt' }
+        const content = typeof p.content === 'string' ? p.content : ''
+        if (!content) return { error: '缺少字幕内容' }
+        const filePath = join(tmpdir(), base)
+        writeFileSync(filePath, content, 'utf8')
+        return { path: filePath }
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) }
+      }
+    },
+    'liveclip:writeImageFile': (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        const ext = extname(String(p.path || '')).toLowerCase()
+        if (!['.jpg', '.jpeg', '.png'].includes(ext)) return { error: '仅支持 .jpg/.jpeg/.png 封面文件' }
+        const buf = Buffer.from(String(p.base64 || '').replace(/^data:[^,]*,/, ''), 'base64')
+        if (!buf.length) return { error: '缺少图片数据' }
+        mkdirSync(dirname(p.path), { recursive: true })
+        writeFileSync(p.path, buf)
+        return { ok: true, path: p.path }
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) }
       }
     },
     // ── tts / audio 域补链（2026-09-24 声音克隆移植）────────────────────────
