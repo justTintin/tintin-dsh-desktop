@@ -5,9 +5,9 @@
 // (V5 local file write, V6 external process, V7 job channel) and stay minimal
 // on purpose; WP-1 replaces them with the real seam handlers.
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync, rmSync, createReadStream } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, extname, isAbsolute, join } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, normalize, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
@@ -686,6 +686,74 @@ export async function apply(ctx) {
     // NATIVE_CHANNELS) run the ported local handlers first; server:* channels
     // forward to the FastAPI service through the bridge; failure keeps
     // status + message (铁律 7).
+    // ── /tintin/media — 本地媒体流式供给（WP-1 media streaming）────────────
+    // 移植版页面经 http 提供，<audio>/<video src="file:///..."> 被 Chromium
+    // 禁止（原客户端页面走 file:// 不受限）——本地媒体（克隆配音/分割预览/
+    // 音效等）统一经本路由流式回源。受信 GET（仅回环）；path 限定在缓存目录/
+    // 默认工作区内，防任意文件读取；支持 Range（音频拖动进度条必需）。
+    const MEDIA_PATH = '/tintin/media'
+    const MEDIA_CT = {
+      '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.flac': 'audio/flac',
+      '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/opus',
+      '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
+    }
+    const disposeMedia = webCtx.webServer.register({
+      kind: 'prefix',
+      path: MEDIA_PATH,
+      handler: async (req, res) => {
+        if (req.method !== 'GET' || !isTrustedRequest(req)) {
+          sendJson(res, req.method === 'GET' ? 403 : 405, { error: 'Request rejected.' })
+          return
+        }
+        const url = new URL(req.url, 'http://localhost')
+        if (url.pathname !== MEDIA_PATH) { sendJson(res, 404, { error: 'Not found.' }); return }
+        const requested = String(url.searchParams.get('path') || '')
+        const resolved = normalize(requested)
+        // 白名单 = 生效缓存目录 + 默认工作区 + 过渡期旧缓存目录
+        const home = process.env.DSH_HOME || ''
+        const configured = String(tintinSettings.get()?.local?.cacheDir || '').trim()
+        const roots = [
+          configured,
+          process.env.TINTIN_WORKSPACE_DIR || join(process.env.USERPROFILE || process.env.HOME || '.', 'Documents', 'tintin-workspace'),
+          home ? join(home, 'tintin', 'cache') : '',
+        ].filter(Boolean).map((r) => normalize(r).toLowerCase())
+        const low = resolved.toLowerCase()
+        const allowed = roots.some((r) => low === r || low.startsWith(r.endsWith(sep) ? r : r + sep))
+        if (!allowed) { sendJson(res, 403, { error: 'Path outside allowed media roots.' }); return }
+        let st
+        try { st = statSync(resolved) } catch { sendJson(res, 404, { error: 'Not found.' }); return }
+        if (!st.isFile()) { sendJson(res, 404, { error: 'Not a file.' }); return }
+        const ct = MEDIA_CT[extname(resolved).toLowerCase()] || 'application/octet-stream'
+        const range = String(req.headers.range || '')
+        const baseHeaders = {
+          'content-type': ct,
+          'accept-ranges': 'bytes',
+          'cache-control': 'no-store',
+        }
+        if (/^bytes=\d*-\d*$/.test(range)) {
+          const [startStr, endStr] = range.slice(6).split('-')
+          let start = Number(startStr) || 0
+          let end = endStr ? Number(endStr) : st.size - 1
+          if (start > end || start >= st.size) {
+            res.writeHead(416, { 'content-range': `bytes */${st.size}` })
+            res.end()
+            return
+          }
+          end = Math.min(end, st.size - 1)
+          res.writeHead(206, {
+            ...baseHeaders,
+            'content-range': `bytes ${start}-${end}/${st.size}`,
+            'content-length': end - start + 1,
+          })
+          createReadStream(resolved, { start, end }).pipe(res)
+          return
+        }
+        res.writeHead(200, { ...baseHeaders, 'content-length': st.size })
+        createReadStream(resolved).pipe(res)
+      },
+    })
+
     const disposeIpc = webCtx.webServer.register({
       kind: 'prefix',
       path: IPC_PATH,
@@ -805,6 +873,7 @@ export async function apply(ctx) {
       disposeJobStatus()
       disposeIpc()
       disposeUpload()
+      disposeMedia()
       disposeSetupProbe()
     }
   }, 'tintin-bundle: probe routes'))

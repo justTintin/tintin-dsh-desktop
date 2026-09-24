@@ -47,10 +47,12 @@ window.__ModuleLoader__!.load({
   factory: () => {
     let app: VueApp | null = null
 
-    // 视图生命周期挂接：mount 幂等（重复 mount 先卸旧实例），unmount 清干净。
+    // 视图生命周期挂接（2026-09-24 Tab 状态机裁决）：chrome 为每个视图持有
+    // 常驻子元素，mount 每视图仅调一次、切走只隐藏不销毁（KeepAlive 语义）——
+    // 已打开的工具卡/向导步骤/表单输入切回后原样保留。
     window.__tintinViews?.register('media', {
       mount(el: HTMLElement) {
-        app?.unmount()
+        if (app) return
         app = createApp(App)
         app.mount(el)
       },

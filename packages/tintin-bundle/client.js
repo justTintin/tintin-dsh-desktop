@@ -19,7 +19,10 @@ const tintinClient = (() => {
       ]
       const providers = new Map()
       let activeId = 'workbench'
-      let mountedProvider = null
+      // 2026-09-24 用户裁决：Tab 切换状态机——每个视图一个常驻子元素，切走
+      // 仅 display:none（KeepAlive 语义），切回原样保留（已打开的工具卡、
+      // 向导步骤、表单输入全部不丢）。provider.mount 每视图只调一次；不销毁。
+      const viewEls = new Map()
 
       window.__tintinViews = {
         register(id, provider) {
@@ -49,37 +52,45 @@ const tintinClient = (() => {
       document.body.appendChild(overlay)
 
       function mountActive() {
-        if (mountedProvider) {
-          try { mountedProvider.unmount?.() } catch (e) { console.error('[tintin] view unmount failed', e) }
-          mountedProvider = null
-        }
-        container.textContent = ''
         if (activeId === 'workbench') {
           overlay.style.display = 'none'
           return
         }
         overlay.style.display = 'block'
-        const provider = providers.get(activeId)
-        if (provider) {
-          try {
-            provider.mount(container)
-            mountedProvider = provider
-          } catch (e) {
-            console.error('[tintin] view mount failed', e)
-            container.textContent = ''
-            renderPending('视图加载失败，请重试切换')
+        let el = viewEls.get(activeId)
+        if (!el) {
+          el = document.createElement('div')
+          el.style.cssText = 'width:100%;min-height:100%;box-sizing:border-box;'
+          container.appendChild(el)
+          viewEls.set(activeId, el)
+          const provider = providers.get(activeId)
+          if (provider) {
+            try {
+              provider.mount(el)
+            } catch (e) {
+              console.error('[tintin] view mount failed', e)
+              renderPendingInto(el, '视图加载失败，请重试切换')
+            }
+          } else if (activeId === 'ops') {
+            // 运营工具分组占位（2026-09-24 用户裁决：与原客户端 OpsTools.vue 同分组）。
+            // 卡片全部为建设中占位——真实工具随 tintin-ops-bundle(P3) 注册 'ops'
+            // 视图提供方后由上方 provider 分支接管。
+            renderOpsGrid(el)
+          } else {
+            renderPendingInto(el, '媒体工具界面搬运中（视图提供方未注册）')
           }
-        } else if (activeId === 'ops') {
-          // 运营工具分组占位（2026-09-24 用户裁决：与原客户端 OpsTools.vue 同分组）。
-          // 卡片全部为建设中占位——真实工具随 tintin-ops-bundle(P3) 注册 'ops'
-          // 视图提供方后由上方 provider 分支接管。
-          renderOpsGrid()
-        } else {
-          renderPending('媒体工具界面搬运中（视图提供方未注册）')
         }
+        for (const [id, e] of viewEls) e.style.display = id === activeId ? '' : 'none'
       }
 
-      function renderOpsGrid() {
+      function renderPendingInto(el, text) {
+        const p = document.createElement('div')
+        p.style.cssText = 'padding:48px 32px;color:var(--dsw-alias-label-tertiary,#8b8b88);font-size:14px;'
+        p.textContent = text
+        el.appendChild(p)
+      }
+
+      function renderOpsGrid(el) {
         const GROUPS = [
           { group: '产品知识', tools: [
             { title: '产品资料', desc: '品类/品牌/型号树状管理，服务端同步', emoji: '📦', accent: 'linear-gradient(135deg,#8B5CF6 0%,#EC4899 100%)' },
@@ -122,14 +133,7 @@ const tintinClient = (() => {
           block.appendChild(grid)
           root.appendChild(block)
         }
-        container.appendChild(root)
-      }
-
-      function renderPending(text) {
-        const p = document.createElement('div')
-        p.style.cssText = 'padding:48px 32px;color:var(--dsw-alias-label-tertiary,#8b8b88);font-size:14px;'
-        p.textContent = text
-        container.appendChild(p)
+        el.appendChild(root)
       }
 
       function render() {

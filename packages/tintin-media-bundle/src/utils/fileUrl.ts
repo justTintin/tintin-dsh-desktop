@@ -1,14 +1,18 @@
 /**
- * 本地文件路径 → file:/// URL（三斜杠 + 逐段 percent 编码，盘符冒号保留）。
+ * 本地文件路径 → 可播放 URL。
  *
- * 2026-09-10 定案：media:// 自定义协议链路（基于「dev 页面禁止 file://」假设引入）
- * 已回退——该假设被实测推翻（用户打包版 file:// 页面本不受限），且协议链路从未经
- * 打包版实测，风险大于收益；file:/// 三斜杠是 9 日包实测可播的已知良好状态
- * （WHATWG 对 file://X:/ 与 file:///X:/ 规范化等价，但三斜杠语义明确不依赖隐式行为）。
+ * 移植版（DSH Desktop，2026-09-24）：页面经 http://127.0.0.1 提供，http 页面
+ * 引用 file:/// 子资源被 Chromium 禁止——原客户端（file:// 页面）不受限的
+ * 行为在移植版失效，批量克隆后声音无法播放即此因。检测到 TinTin polyfill
+ * 时，本地媒体统一改经宿主受信路由 /tintin/media 流式供给（同源回环 GET，
+ * Range 支持进度条拖动）；非移植环境保留 file:/// 兜底（原客户端口径）。
  */
 export function toFileUrl(p: string): string {
   if (!p) return ''
   if (/^(https?|blob|data|file):/i.test(p)) return p
+  if (typeof window !== 'undefined' && (window as any).tintin?.__dshPolyfill) {
+    return `/tintin/media?path=${encodeURIComponent(p)}`
+  }
   const normalized = p.replace(/\\/g, '/')
   const encoded = normalized
     .split('/')
