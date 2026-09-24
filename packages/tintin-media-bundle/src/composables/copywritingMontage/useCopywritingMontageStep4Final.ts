@@ -122,6 +122,9 @@ export function useCopywritingMontageStep4Final(ctx: MontageStep4Context) {
   // 2026-09-18 用户裁决：导出完成提示行（仿声音克隆完成提示形态：状态行「完成：…」），
   // 「打开草稿目录」按钮内嵌该提示（自底部结果区移入）；重导时清空
   const exportDoneMsg = ref('')
+  // 2026-09-24 用户裁决：缺少关键轨道时**不导出**——橙色提示先检查。非空 = 上次
+  // 尝试被阻断（对应 UI 橙色警示行）
+  const exportWarnMsg = ref('')
   const finalSelIdx = ref(-1)      // 列表选中项（原版 currentItem，默认取第一个）
   const finalPreviewUrl = ref('')  // 右侧内嵌预览（打包后 file:// 源直读本地文件）
   const finalPreviewTitle = ref(' 视频预览')
@@ -494,6 +497,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
     exportProgress.value = 5
     exportStage.value = '正在扫描候选素材...'
     exportDoneMsg.value = ''
+    exportWarnMsg.value = ''
     try {
       await exportMontageTracksDraft('螺丝钉剪辑_轨道时间轴')
     } finally {
@@ -948,6 +952,22 @@ async function exportAllToJianyingDraft(): Promise<void> {
     }
     const transition = concatTransition.value || 'fade'
     const finalName = timelineDraftName()
+    // 导出前轨道完整性门禁（2026-09-24 用户裁决：有缺少时**不导出**，橙色提示
+    // 先检查——此前是导出完成后事后 ⚠ 提示，草稿已落盘才发现缺轨）
+    const preVoiced = voiceClips.filter((v) => v.length > 0).length
+    const preSrt = srtPaths.filter(Boolean).length
+    const preMissing: string[] = []
+    if (!preVoiced) preMissing.push('口播')
+    if (!preSrt) preMissing.push('字幕')
+    if (preMissing.length) {
+      exportWarnMsg.value = `⚠ 未导出：缺少${preMissing.join('、')}轨——请检查声音克隆与字幕资产后再导出`
+      clientError('copywriting-montage', '导出阻断：缺少关键轨道', preMissing.join('、'))
+      notify('未导出：缺少关键轨道', `缺少：${preMissing.join('、')}。请检查声音克隆与字幕资产后重新导出。`)
+      exportBusy.value = false
+      exportProgress.value = -1
+      exportStage.value = ''
+      return
+    }
     // 缺口播的分镜清单（2026-09-23 用户裁决：按分镜口径提示，替代旧按段误报）
     const missingPlanNote = vPlans
       .map((pl, pi) => ({ pl, pi, ok: planVoiceOk.has(pi) }))
@@ -1090,7 +1110,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
 
   return {
     bgmPath, bgmName, bgmVolume, rowBgm, finalMode, exportBusy, exportProgress, exportStage,
-    lastExportDraftPath, exportDoneMsg, finalSelIdx, finalPreviewUrl, finalPreviewTitle,
+    lastExportDraftPath, exportDoneMsg, exportWarnMsg, finalSelIdx, finalPreviewUrl, finalPreviewTitle,
     bgmSource, bgmGenPrompt, bgmGenStyle, bgmGenDuration, bgmGenBusy, bgmGenError, bgmGenUrl,
     bgmGenMeta, bgmPreviewUrl, bgmPlaying, bgmPosMs, bgmDurMs, lastComposeTasks,
     generateBgm, downloadLibraryBgm, applyLibraryBgm, pickBgm, rowBgmName, setRowBgm,

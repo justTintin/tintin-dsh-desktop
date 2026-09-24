@@ -79,7 +79,7 @@ const {
   exportProgress,
   exportStage,
   lastExportDraftPath,
-  exportDoneMsg,
+  exportDoneMsg, exportWarnMsg,
   exportJianyingPackageDraft,
   finalVideoList,
   finalSelIdx,
@@ -742,6 +742,8 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
                紧跟方案一按钮（不放到服务端合成下面）；2026-09-20 用户反馈：进度条与按钮拉开间距 -->
           <div v-if="exportBusy" class="pbar" style="margin-top:8px"><div class="pbar-inner" :style="{ width: exportProgress + '%' }"></div></div>
           <div v-if="exportBusy && exportStage" class="muted" style="margin-top:4px;font-size:12px">{{ exportStage }}</div>
+          <!-- 2026-09-24 用户裁决：缺少关键轨道时不导出——橙色警示行（提示先检查） -->
+          <div v-if="exportWarnMsg" class="export-warn-bar">⚠ {{ exportWarnMsg }}</div>
           <!-- 2026-09-22 用户裁决：导出完成提示样式对齐智能混剪（export-done-bar：✓圆标 +
                绿底横条 + 打开草稿目录按钮右侧归位），替换原裸 concat-status-line 行 -->
           <div v-if="exportDoneMsg" class="export-done-bar">
@@ -1133,6 +1135,14 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
   padding: var(--space-3); margin-top: var(--space-3);
   background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3);
   border-radius: var(--radius-md);
+}
+/* 缺少关键轨道的橙色警示行（2026-09-24 用户裁决：有缺少不导出、先检查） */
+.export-warn-bar {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-3); margin-top: var(--space-3);
+  background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.45);
+  border-radius: var(--radius-md);
+  color: #f59e0b; font-size: 13px; font-weight: 600;
 }
 .export-done-icon {
   display: inline-flex; align-items: center; justify-content: center;

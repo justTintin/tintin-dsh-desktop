@@ -413,7 +413,7 @@ export function useCopywritingMontage() {
   })
   const {
     bgmPath, bgmName, bgmVolume, rowBgm, finalMode, exportBusy, exportProgress, exportStage,
-    lastExportDraftPath, exportDoneMsg, finalSelIdx, finalPreviewUrl, finalPreviewTitle,
+    lastExportDraftPath, exportDoneMsg, exportWarnMsg, finalSelIdx, finalPreviewUrl, finalPreviewTitle,
     bgmSource, bgmGenPrompt, bgmGenStyle, bgmGenDuration, bgmGenBusy, bgmGenError, bgmGenUrl,
     bgmGenMeta, bgmPreviewUrl, bgmPlaying, bgmPosMs, bgmDurMs, lastComposeTasks,
     generateBgm, downloadLibraryBgm, applyLibraryBgm, pickBgm, rowBgmName, setRowBgm,
