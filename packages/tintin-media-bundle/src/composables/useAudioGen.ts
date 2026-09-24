@@ -84,7 +84,7 @@ export interface AudioListItem {
   scene: string
 }
 
-const KIND_TEXT: Record<string, string> = { sfx: '音效', voice: '配音', music: '音乐' }
+const KIND_TEXT: Record<string, string> = { sfx: '音效', voice: '配音', music: '音乐', other: '其它', ui: 'UI' }
 
 // ── 行内分类本地覆盖（2026-09-04 用户裁决：行内分类可改）──
 // 2026-09-05 更新：服务端音频分流 audio_library 表后 category 已是四值枚举字段，
@@ -460,13 +460,28 @@ export function useAudioGen() {
 
   const listQuery = ref('')
   const listTag = ref('')
-  const listKind = ref('')
-  const LIST_KIND_OPTIONS = [
+  const listKind = ref('music')
+  // 分类字典（2026-09-24 用户裁决：对齐服务端真实字典）——GET /audio/categories
+  // 返回 {name,count}（音乐/音效/配音/其它/UI…，随库增长变化），启动时拉取、
+  // 每次打开选择弹窗刷新；label 带条数，value = 服务端 category 过滤 slug。
+  const LIST_KIND_OPTIONS = ref<Array<{ label: string; value: string }>>([
     { label: '全部', value: '' },
-    { label: '音效（场景/氛围音）', value: 'sfx' },
-    { label: '配音（口播/旁白）', value: 'voice' },
-    { label: '音乐（BGM/配乐）', value: 'music' },
-  ] as const
+  ])
+  const CATEGORY_SLUGS: Record<string, string> = { 音乐: 'music', 音效: 'sfx', 配音: 'voice', UI: 'ui', 其它: 'other' }
+  async function refreshKindOptions(): Promise<void> {
+    try {
+      const d = await (window as any).tintin?.server?.get?.('/audio/categories', {})
+      const cats = Array.isArray(d) ? d : (Array.isArray(d?.categories) ? d.categories : [])
+      const opts: Array<{ label: string; value: string }> = [{ label: '全部', value: '' }]
+      for (const c of cats) {
+        const name = String(c?.name || '').trim()
+        if (!name) continue
+        const slug = CATEGORY_SLUGS[name] || name
+        opts.push({ label: c.count !== undefined ? `${name}（${c.count}）` : name, value: slug })
+      }
+      LIST_KIND_OPTIONS.value = opts
+    } catch (_) { /* 字典拉取失败保留上一份/默认 全部 */ }
+  }
   const listRows = ref<AudioListItem[]>([])
   const listLoading = ref(false)
   const listError = ref('')
@@ -494,6 +509,8 @@ export function useAudioGen() {
     if (c === '音乐' || c === '配乐' || c === 'BGM' || c === 'music') return 'music'
     if (c === '音效' || c === 'sfx') return 'sfx'
     if (c === '配音' || c === 'voice') return 'voice'
+    if (c === '其它' || c === 'other') return 'other'
+    if (c === 'UI' || c === 'ui') return 'ui'
     return ''
   }
 
@@ -574,6 +591,10 @@ export function useAudioGen() {
       const query = listQuery.value.trim()
       if (tag) params.tag = tag
       if (query) params.query = query
+      // 2026-09-24 用户裁决：分类过滤下沉到服务端（实测 category=music→音乐
+      // 51 / category=sfx→音效 299；服务端无 kind 参数）。此前仅本地过滤——
+      // 库被其它类灌大后，每页 20 条里命中的音乐只剩个位数，看似"字典不对"。
+      if (listKind.value) params.category = listKind.value
       const data = await serverGet('/audio/library', params)
       const rows = (data.items || []) as Record<string, unknown>[]
       const total = Number(data.total ?? rows.length)
@@ -619,7 +640,7 @@ export function useAudioGen() {
     // 播放辅助
     toAbsolute,
     // 音频列表（原「全部」tab）
-    listQuery, listTag, listKind, LIST_KIND_OPTIONS,
+    listQuery, listTag, listKind, LIST_KIND_OPTIONS, refreshKindOptions,
     listRows, listLoading, listError, listStat, listPageSize,
     pageLabel, canPrevPage, canNextPage,
     doSearch, goPrevPage, goNextPage,

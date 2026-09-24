@@ -29,7 +29,7 @@ const {
   bgmStyle, bgmStyleOptions, bgmDuration, bgmBusy, bgmResultLabel, bgmUrl, bgmSaving,
   bgmLocal, generateBgm, saveBgmToLib, openBgmLocation,
   bgmMood, bgmMoodOptions, bgmScene, bgmSceneOptions,
-  listQuery, listTag, listKind, LIST_KIND_OPTIONS,
+  listQuery, listTag, listKind, LIST_KIND_OPTIONS, refreshKindOptions,
   listRows, listLoading, listError, listStat, listPageSize,
   pageLabel, canPrevPage, canNextPage,
   doSearch, goPrevPage, goNextPage, loadBgmTags,
@@ -63,7 +63,9 @@ function openBgmPickDlg(target = ''): void {
   bgmPickDlg.value.pickedMid = ''
   bgmPickDlg.value.error = ''
   // 2026-09-10 用户裁决：BGM 选择弹窗默认分类「音乐」（列表状态与音频生成页共享，
-  // 仅在打开弹窗时置分类并刷新，不影响音频生成页自身默认「全部」）
+  // 仅在打开弹窗时置分类并刷新，不影响音频生成页自身默认「全部」）；
+  // 2026-09-24：打开时顺带刷新分类字典（/audio/categories，随库增长变化）
+  void refreshKindOptions()
   if (listKind.value !== 'music') {
     listKind.value = 'music'
     doSearch()
@@ -116,7 +118,7 @@ defineExpose({ show: openBgmPickDlg })
           </div>
           <div class="row">
             <label class="label">分类:</label>
-            <TSelect v-model="listKind" class="bgm-kind-select" :options="[...LIST_KIND_OPTIONS]" :disabled="listLoading" @update:model-value="doSearch()" />
+            <TSelect v-model="listKind" class="bgm-kind-select" :options="LIST_KIND_OPTIONS" :disabled="listLoading" @update:model-value="doSearch()" />
             <input v-model="listTag" class="input bgm-tag-input" placeholder="情绪/场景标签" :disabled="listLoading" @keydown.enter="doSearch()" />
           </div>
           <div class="bgm-pick-rows">
