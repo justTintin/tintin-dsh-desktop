@@ -349,6 +349,8 @@ const tintinClient = (() => {
         // 固定缓存目录（$DSH_HOME/tintin/cache，2026-09-23 裁决不做设置项）——
         // 渲染层 readCacheDir 的数据源。
         cacheDir: () => call('env:cacheDir', { args: [] }),
+        // 清空固定缓存目录内容（设置卡「本地配置 → 立即清理」用）。
+        clearCache: () => call('env:clearCache', { args: [] }),
       })
 
       window.tintin = {
@@ -396,12 +398,19 @@ window.__ModuleLoader__.load({
       const [url, setUrl] = React.useState('')
       const [state, setState] = React.useState('loading') // loading|ready|saving|saved|error
       const [error, setError] = React.useState('')
+      // 本地配置（2026-09-24 用户裁决：设置卡增补缓存目录展示与清理，参考原版本地配置卡；
+      // 目录固定 $DSH_HOME/tintin/cache，只读展示不可改）
+      const [cacheDir, setCacheDir] = React.useState('')
+      const [clearState, setClearState] = React.useState('idle') // idle|clearing|cleared|error
       React.useEffect(() => {
         tintinClient.settingsRpc('settings/describe', {}).then((all) => {
           const ns = (all?.namespaces ?? []).find((n) => n.ns === 'tintin-bundle')
           setUrl(String(ns?.value?.server?.url ?? ''))
           setState('ready')
         }).catch((e) => { setError(String(e?.message ?? e)); setState('error') })
+        window.tintin?.env?.cacheDir?.().then((res) => {
+          if (res?.dir) setCacheDir(String(res.dir))
+        }).catch(() => {})
       }, [])
       const save = () => {
         setState('saving'); setError('')
@@ -411,6 +420,15 @@ window.__ModuleLoader__.load({
         })
           .then(() => setState('saved'))
           .catch((e) => { setError(String(e?.message ?? e)); setState('error') })
+      }
+      const clearCache = () => {
+        setClearState('clearing')
+        window.tintin?.env?.clearCache?.().then((res) => {
+          setClearState(res && !res.error ? 'cleared' : 'error')
+        }).catch(() => setClearState('error'))
+      }
+      const openCacheDir = () => {
+        if (cacheDir) window.tintin?.shell?.openItem?.(cacheDir)
       }
       return h('div', { style: { padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '10px' } },
         h('div', { style: { fontSize: '15px', fontWeight: 600 } }, 'TinTin 服务器'),
@@ -438,6 +456,45 @@ window.__ModuleLoader__.load({
         state === 'error' && h('span', { style: { fontSize: '12px', color: '#f87171' } }, `保存失败：${error}`),
         h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #888)' } },
           'AI 推理服务地址（FastAPI）。修改后模型提供方的 API 地址需在「设置 → 模型 → TinTin」同步更新。'),
+        // ── 本地配置（参考原版本地配置卡：缓存目录 + 缓存清理）────────────
+        h('div', { style: { height: '0.5px', background: 'var(--dsw-alias-border-l4, #555)', margin: '4px 0' } }),
+        h('div', { style: { fontSize: '15px', fontWeight: 600 } }, '本地配置'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },
+            h('span', { style: { fontSize: '13px', fontWeight: 500 } }, '缓存目录'),
+            h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #888)' } },
+              '智能混剪、分割等生成的中间文件统一存放目录（固定，不可更改）'),
+            cacheDir && h('span', {
+              title: cacheDir,
+              style: { fontSize: '12px', fontFamily: 'monospace', color: 'var(--dsw-alias-label-secondary, #aaa)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+            }, cacheDir),
+          ),
+          h('button', {
+            type: 'button', onClick: openCacheDir, disabled: !cacheDir, title: '在资源管理器中打开缓存目录',
+            style: {
+              appearance: 'none', font: 'inherit', padding: '0 14px', height: '32px', cursor: cacheDir ? 'pointer' : 'default',
+              border: '0.5px solid var(--dsw-alias-border-l4, #555)', borderRadius: '8px',
+              background: 'var(--dsw-alias-bg-layer-3, transparent)', color: 'inherit',
+            },
+          }, '打开目录'),
+        ),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          h('div', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' } },
+            h('span', { style: { fontSize: '13px', fontWeight: 500 } }, '缓存清理'),
+            h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #888)' } },
+              '释放临时文件与预览缓存占用的空间（下载结果默认存于上方缓存目录）'),
+            clearState === 'cleared' && h('span', { style: { fontSize: '12px', color: '#4ade80' } }, '已清理'),
+            clearState === 'error' && h('span', { style: { fontSize: '12px', color: '#f87171' } }, '清理失败：部分文件可能正被使用，请稍后重试'),
+          ),
+          h('button', {
+            type: 'button', onClick: clearCache, disabled: clearState === 'clearing',
+            style: {
+              appearance: 'none', font: 'inherit', padding: '0 14px', height: '32px', cursor: 'pointer',
+              border: '0.5px solid var(--dsw-alias-border-l4, #555)', borderRadius: '8px',
+              background: 'var(--dsw-alias-bg-layer-3, transparent)', color: 'inherit',
+            },
+          }, clearState === 'clearing' ? '清理中…' : '立即清理'),
+        ),
       )
     }
 

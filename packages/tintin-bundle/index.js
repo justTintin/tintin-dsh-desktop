@@ -5,7 +5,7 @@
 // (V5 local file write, V6 external process, V7 job channel) and stay minimal
 // on purpose; WP-1 replaces them with the real seam handlers.
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -378,6 +378,20 @@ export async function apply(ctx) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
       return { dir }
+    },
+    // env:clearCache — 清空固定缓存目录内容（保留目录本身）。向导运行中的任务
+    // 文件句柄由各消费方短持有，Windows 上被占用的条目 force 删除失败即跳过。
+    'env:clearCache': () => {
+      const home = process.env.DSH_HOME
+      if (!home) return { error: 'DSH_HOME 未设置' }
+      const dir = join(home, 'tintin', 'cache')
+      try {
+        if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+        mkdirSync(dir, { recursive: true })
+        return { ok: true }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
     },
     // env:log — renderer business log relay (C-6 closure, 2026-09-23).
     // Source chain: clientError → env:log → logger.logError → main.log 落盘
