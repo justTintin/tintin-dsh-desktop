@@ -246,10 +246,12 @@ onMounted(() => {
 </style>
 
 <style>
-/* 非 scoped：向导内的 <teleport to="body"> 弹层（产品选择/分镜选择等）传送到
-   body 后脱离 .tintin-media-scope，且默认 z-index 低于宿主视图覆盖层
-   （tintin-view-overlay 9998）与 Tab 栏（9999）——被盖住不可见（实测：
-   选择产品点击后弹层在但看不到）。提到两者之上；body 直接子级的
-   .modal-mask 只有 TinTin 弹层使用，不泄漏宿主。 */
-body > .modal-mask { z-index: 12000; }
+/* 非 scoped：向导内的 <teleport to="body"> 弹层（产品选择/分镜选择/高级脚本设置/
+   删除确认等）传送到 body 后脱离 .tintin-media-scope，且默认 z-index 低于宿主视图
+   覆盖层（tintin-view-overlay 9998）与 Tab 栏（9999）——被盖住不可见。这里必须用
+   !important：各组件的 scoped 规则 .modal-mask[data-v-x] { z-index:1002 } 特异度
+   (0,2,0) 高于本规则的 (0,1,1)，不加 !important 会被覆盖、弹窗"弹了但看不见"
+   （2026-09-24 用户报障：高级脚本设置/选择分镜脚本点击无反应即此因）。
+   body 直接子级的 .modal-mask 只有 TinTin 弹层使用，不泄漏宿主。 */
+body > .modal-mask { z-index: 12000 !important; }
 </style>
