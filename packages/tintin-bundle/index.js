@@ -25,7 +25,7 @@ import {
 import { createFfmpegGateApi } from './lib/montage/ffmpeg-gate.js'
 import { createMontageVoiceApi } from './lib/montage/voice-ipc.js'
 import { createMontageFinalApi } from './lib/montage/final-ipc.js'
-import { createRembgApi, createAudioArchiveApi } from './lib/media-proxy.js'
+import { createRembgApi, createAudioArchiveApi, createVsrApi } from './lib/media-proxy.js'
 import { loopbackCall, readLoopbackConfig, summarizeExtract } from './lib/loopback-helpers.js'
 import { createTintinAgentTools } from './lib/agent-tools.js'
 import { createContextTaskApi, defaultWorkspaceDir } from './lib/context-task.js'
@@ -357,6 +357,8 @@ export async function apply(ctx) {
     }),
     // audio:downloadTemp / audio:archiveGen / audio:bgmUpload — 音频生成域
     // （2026-09-25 随音频生成卡移植，SRC server-proxy.js:938-1032 契约，见 lib/media-proxy.js）
+    // vsr:remove — 去水印字幕（去水印字幕卡链路）
+    ...createVsrApi({ multipartPost, isExpectedOfflineError }),
     ...createAudioArchiveApi({
       httpRequest,
       getServerUrl,

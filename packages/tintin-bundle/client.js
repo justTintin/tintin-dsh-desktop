@@ -823,6 +823,16 @@ const tintinClient = (() => {
         materialStockSearch: (payload) => call('server:post', { path: '/material/stock_search', body: payload }),
         audioGenBgm: (payload) => call('server:post', { path: '/audio/gen/bgm', body: payload }),
         audioGenSfx: (payload) => call('server:post', { path: '/audio/gen/sfx', body: payload }),
+        // 仿爆款：multipart 上传本地视频到服务端 output/upload 区，返回 video_path（SRC preload viralCloneUpload；走通用 /tintin/upload + serverUpload 进度）
+        viralCloneUpload: (p, onProgress) => {
+          const fd = new FormData()
+          for (const [k, v] of Object.entries(p || {})) {
+            if (v === undefined || v === null) continue
+            if (typeof File !== 'undefined' && v instanceof File) fd.append(k, v)
+            else fd.append(k, String(v))
+          }
+          return serverUpload('/viral/clone/upload', fd, onProgress)
+        },
         viralCloneAnalyze: (payload) => call('server:post', { path: '/viral/clone/analyze', body: payload }),
         viralClonePlan: (payload) => call('server:post', { path: '/viral/clone/plan', body: payload }),
         viralCloneFlow: (payload) => call('server:post', { path: '/viral/clone/flow', body: payload }),
@@ -830,6 +840,7 @@ const tintinClient = (() => {
         viralCloneMontage: (payload) => call('server:post', { path: '/viral/clone/montage', body: payload }),
         viralCloneReview: (payload) => call('server:post', { path: '/viral/clone/review', body: payload }),
         listServerWorkflows: (scope) => call('server:get', { path: '/workflows', params: { scope } }),
+        runServerWorkflow: (payload) => call('server:post', { path: '/workflows/run', body: payload }),
         serverWorkflowStatus: (taskId) => call('server:get', { path: `/workflows/task/${encodeURIComponent(taskId)}` }),
         // multipart 上传族：payload 字段 → FormData（File/Blob 原样，标量转字符串）
         ...(() => {
@@ -848,6 +859,8 @@ const tintinClient = (() => {
             // 2026-09-24 修复：分割的 file 字段是 {path} 本地文件包装，浏览器读
             // 不了盘——转发宿主 montage:split 通道由宿主读盘组 multipart
             // （此前 JSON.stringify 成字符串上传，服务端 422 Expected UploadFile）。
+            // 去水印字幕（SRC preload vsr:remove 契约；进度事件不落桥）
+            vsrRemove: (p, _onProgress) => call('vsr:remove', { args: [p] }),
             montageSplit: (p, _onProgress) => call('montage:split', { args: [p] }),
             // Step2-4 本地合成族（2026-09-25 出清 PENDING：宿主 final-ipc.js 通道已就绪）
             trimEdgeClips: (p) => call('montage:trimEdgeClips', { args: [p] }),

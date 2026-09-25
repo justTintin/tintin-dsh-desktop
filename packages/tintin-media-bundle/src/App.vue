@@ -19,6 +19,16 @@ import AudioGen from './components/media-tools/AudioGen.vue'
 // 参考视频下载（2026-09-25 用户裁决移植）：YouTube/Bilibili 链接解析 → 档位下载
 // （yt-dlp 门 + 浏览器登录态 cookies）
 import VideoDownload from './components/media-tools/VideoDownload.vue'
+// 分镜脚本创作（2026-09-25 P2 恢复）：文案→分镜→引用素材→保存脚本库；消费产品资料卡草案信号
+import OtStoryboard from './components/media-tools/OtStoryboard.vue'
+// 视频转文字（2026-09-25 P2 恢复）：批量转写队列 + 听悟式字幕工作台 + 洗稿 + 四格式导出
+import VideoTranscribe from './components/media-tools/VideoTranscribe.vue'
+// 去水印字幕（2026-09-25 P2 恢复）：预览帧四点框选 + /vsr/remove
+import SubtitleRemoval from './components/media-tools/SubtitleRemoval.vue'
+// 仿爆款（2026-09-25 P2 恢复）：本地视频上传→flow/analyze 拆解→工作流编辑→复刻脚本
+import ViralClone from './components/media-tools/ViralClone.vue'
+// 直播切片（2026-09-25 P2 恢复）：热点发现→切片→封面/字幕（whisper+llmChat+liveclip 文件 I/O）
+import LiveClip from './components/media-tools/LiveClip.vue'
 // 封面制作（2026-09-25 用户裁决移植）：图层编辑 → /workflow/run + SSE 进度 →
 // 结果画廊；AI 文案（/llm/chat/completions）可用，「开始生成」待服务端补
 // cover 工作流端点（组件头注登记实测缺口）
@@ -38,9 +48,9 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
   {
     group: '文案脚本模板',
     tools: [
-      { id: 'storyboard', title: '分镜脚本创作', desc: '文案 → 分镜 → 引用素材 → 保存脚本库', emoji: '🎬', accent: 'linear-gradient(135deg,#F97316 0%,#EC4899 100%)', disabled: true },
+      { id: 'storyboard', title: '分镜脚本创作', desc: '文案 → 分镜 → 引用素材 → 保存脚本库', emoji: '🎬', accent: 'linear-gradient(135deg,#F97316 0%,#EC4899 100%)' },
       { id: 'jianying-templates', title: '剪映模板', desc: '从剪映同步的预设/文字模板/花字/贴纸/转场/音频，按分类浏览', emoji: '🎞️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#8B5CF6 100%)' },
-      { id: 'video-transcribe', title: '视频转文字', desc: '视频语音自动转写', emoji: '📄', accent: 'linear-gradient(135deg,#6366F1 0%,#A855F7 100%)', disabled: true },
+      { id: 'video-transcribe', title: '视频转文字', desc: '视频语音自动转写', emoji: '📄', accent: 'linear-gradient(135deg,#6366F1 0%,#A855F7 100%)' },
     ],
   },
   {
@@ -61,10 +71,10 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
     group: '视频',
     tools: [
       { id: 'copywriting-montage', title: '文案混剪', desc: '按文案自动匹配素材，快速生成混剪成片', emoji: '📝', accent: 'linear-gradient(135deg,#10B981 0%,#0EA5E9 100%)' },
-      { id: 'viral-clone', title: '仿爆款', desc: '拆解爆款→复刻脚本→替换本店产品', emoji: '🔥', accent: 'linear-gradient(135deg,#F43F5E 0%,#F59E0B 100%)', disabled: true },
-      { id: 'live-slice', title: '直播切片', desc: '视频分析热点发现→切片与封面生成', emoji: '📡', accent: 'linear-gradient(135deg,#EF4444 0%,#DC2626 100%)', disabled: true },
+      { id: 'viral-clone', title: '仿爆款', desc: '拆解爆款→复刻脚本→替换本店产品', emoji: '🔥', accent: 'linear-gradient(135deg,#F43F5E 0%,#F59E0B 100%)' },
+      { id: 'live-slice', title: '直播切片', desc: '视频分析热点发现→切片与封面生成', emoji: '📡', accent: 'linear-gradient(135deg,#EF4444 0%,#DC2626 100%)' },
       { id: 'video-repair', title: '视频修复', desc: '画质修复 / 工作流处理', emoji: '🛠️', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)', disabled: true },
-      { id: 'subtitle-removal', title: '视频去水印字幕', desc: '去除字幕 / 台标水印', emoji: '🔤', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)', disabled: true },
+      { id: 'subtitle-removal', title: '视频去水印字幕', desc: '去除字幕 / 台标水印', emoji: '🔤', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)' },
       { id: 'video-download', title: '参考视频下载', desc: '粘贴 YouTube/B 站 链接选档位下载', emoji: '⬇️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#6366F1 100%)' },
     ],
   },

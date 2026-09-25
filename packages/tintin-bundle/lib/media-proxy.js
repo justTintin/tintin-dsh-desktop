@@ -76,6 +76,46 @@ function resolveServerUrl(getServerUrl, url) {
   return u
 }
 
+// vsr:remove — 视频去水印字幕（SRC media-proxy-ipc.js vsr:remove 一比一，基线 9ca9050）：
+// multipart file+可选八参（inpaint_mode/sub_areas/purpose/watermark_text/mode/
+// mask_dilate/mask_expand_y/sttn_max_load_num，sub_areas='' 表示智能识别）；
+// 5xx/422 细节透出（对照原客户端「服务端返回 {status}: {text[:300]}」口径）。
+// 进度事件不落桥（同族口径）。offline → null、其余失败 → {error}。
+export function createVsrApi({ multipartPost, isExpectedOfflineError }) {
+  return {
+    'vsr:remove': async (args) => {
+      const p = (args && args[0]) || {}
+      try {
+        if (!p.video) throw new Error('vsr:remove missing `video`')
+        const parts = []
+        // { path } 包装 → multipartPost 按本地路径读文件（字段名必须为 file）
+        if (typeof p.video === 'string') parts.push({ name: 'file', path: p.video })
+        else if (p.video && p.video.path) parts.push({ name: 'file', path: p.video.path })
+        else throw new Error('vsr:remove 的 video 需为本地路径')
+        if (p.inpaint_mode) parts.push({ name: 'inpaint_mode', value: String(p.inpaint_mode) })
+        if (p.sub_areas !== undefined && p.sub_areas !== null) parts.push({ name: 'sub_areas', value: String(p.sub_areas) })
+        if (p.purpose) parts.push({ name: 'purpose', value: String(p.purpose) })
+        if (p.watermark_text) parts.push({ name: 'watermark_text', value: String(p.watermark_text) })
+        if (p.mode) parts.push({ name: 'mode', value: String(p.mode) })
+        if (p.mask_dilate !== undefined) parts.push({ name: 'mask_dilate', value: String(p.mask_dilate) })
+        if (p.mask_expand_y !== undefined) parts.push({ name: 'mask_expand_y', value: String(p.mask_expand_y) })
+        if (p.sttn_max_load_num !== undefined) parts.push({ name: 'sttn_max_load_num', value: String(p.sttn_max_load_num) })
+        try {
+          return await multipartPost('/vsr/remove', parts)
+        } catch (err) {
+          if (err && err.status) {
+            const detail = err.response ? JSON.stringify(err.response).slice(0, 300) : ''
+            throw new Error(detail ? ('服务端返回 ' + err.status + ': ' + detail) : ('服务端返回 ' + err.status))
+          }
+          throw err
+        }
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: (err && err.message) || String(err) }
+      }
+    },
+  }
+}
+
 export function createAudioArchiveApi({ httpRequest, getServerUrl, multipartPost, isExpectedOfflineError, tmpDir }) {
   return {
     // audio:downloadTemp — 下载服务端音频到临时目录（原 GUI 侧 requests.get 落临时

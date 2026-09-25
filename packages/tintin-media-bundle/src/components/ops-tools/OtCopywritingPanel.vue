@@ -49,7 +49,7 @@ watch(
 /** 携带文案→分镜卡（goToStoryboard 写入 pendingStoryboard 信号；分镜卡 P2 消费） */
 function goStoryboard(): void {
   if (!C.goToStoryboard()) return
-  C.status.value = '文案已暂存；分镜脚本创作卡尚未移植（P2），可先复制备用。'
+  C.status.value = '文案已暂存——打开「媒体工具 → 分镜脚本创作」即可继续（草案已自动带入）。'
 }
 </script>
 
