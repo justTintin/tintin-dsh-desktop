@@ -1741,8 +1741,182 @@ function createMontageFinalApi({ httpRequest, isExpectedOfflineError, getServerU
     }
   }
 
+  // ── montage-proxy 域五通道实现（SRC montage-proxy-ipc.js 逐字移植）────────
+  /** 秒 → SRT 时间戳 HH:MM:SS,mmm（逐行对照 utils_media.py format_seconds_to_srt_timestamp） */
+  function formatSrtTimestamp(seconds) {
+    let hours = Math.floor(seconds / 3600)
+    let minutes = Math.floor((seconds % 3600) / 60)
+    let secs = Math.floor(seconds % 60)
+    let ms = Math.round((seconds - Math.floor(seconds)) * 1000)
+    if (ms >= 1000) {
+      ms -= 1000
+      secs += 1
+      if (secs >= 60) {
+        secs -= 60
+        minutes += 1
+        if (minutes >= 60) {
+          minutes -= 60
+          hours += 1
+        }
+      }
+    }
+    const p2 = (n) => String(n).padStart(2, '0')
+    return `${p2(hours)}:${p2(minutes)}:${p2(secs)},${String(ms).padStart(3, '0')}`
+  }
+  /** 裁剪后新文件名（对照 EdgeClipTrimWorker._build_path：_shot_%03d 段替换时间戳） */
+  function buildTrimmedPath(oldPath, idx, startSec, endSec, desc) {
+    const dirName = path.dirname(oldPath)
+    const baseName = path.basename(oldPath)
+    const idxStr = `_shot_${String(idx).padStart(3, '0')}`
+    let prefix
+    if (baseName.includes(idxStr)) {
+      prefix = baseName.split(idxStr)[0]
+    } else {
+      prefix = baseName.replace(/\.[^.]+$/, '')
+      if (prefix.includes('_shot_')) prefix = prefix.split('_shot_')[0]
+    }
+    const startStr = formatSrtTimestamp(startSec).replace(/:/g, '-')
+    const endStr = formatSrtTimestamp(endSec).replace(/:/g, '-')
+    return desc
+      ? path.join(dirName, `${prefix}${idxStr}_${startStr}_${endStr}_${desc}.mp4`)
+      : path.join(dirName, `${prefix}${idxStr}_${startStr}_${endStr}.mp4`)
+  }
+  /** ffmpeg 运行（180s 超时，SRC montage-proxy runFfmpeg 口径） */
+  function montageRunFfmpeg(args) {
+    return new Promise((resolve) => {
+      const proc = spawn(getFfmpegPath(), args, { windowsHide: true })
+      let stderr = ''
+      proc.stderr.on('data', (c) => { stderr += c })
+      const timer = setTimeout(() => { try { proc.kill() } catch (_) {} }, 180 * 1000)
+      proc.on('close', (code) => { clearTimeout(timer); resolve({ code, stderr }) })
+      proc.on('error', (e) => { clearTimeout(timer); resolve({ code: -1, stderr: String(e) }) })
+    })
+  }
+  /** 出入场超长片段裁剪（对照 EdgeClipTrimWorker）：取中间段重编码替换，返回 renamed/skipped */
+  function montageTrimEdgeClips(payload) {
+    const p = payload || {}
+    const maxSec = Number(p.maxSec) > 0 ? Number(p.maxSec) : 4.0
+    const jobs = Array.isArray(p.jobs) ? p.jobs : []
+    const renamed = []
+    let skipped = 0
+    for (const job of jobs) {
+      let tmp = ''
+      try {
+        const src = String((job || {}).path || '')
+        if (!src || !fs.existsSync(src)) { skipped++; continue }
+        const startSec = Number(job.startSec)
+        const endSec = Number(job.endSec)
+        const dur = endSec - startSec
+        if (!(dur > 0) || dur <= maxSec + 0.01) { skipped++; continue }
+        // 取中间时间段：产品通常在镜头中间段（头部是环境铺垫、尾部是收尾）
+        const pad = (dur - maxSec) / 2.0
+        const kStart = startSec + pad
+        const kEnd = endSec - pad
+        const keep = kEnd - kStart
+        if (keep <= 0.2) { skipped++; continue }
+        tmp = src + '.trim_tmp.mp4'
+        montageRunFfmpeg([
+          '-y', '-ss', kStart.toFixed(3), '-i', src,
+          '-t', keep.toFixed(3),
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+          '-c:a', 'aac', '-avoid_negative_ts', 'make_zero', tmp,
+        ])
+        if (!fs.existsSync(tmp) || fs.statSync(tmp).size < 1024) {
+          try { fs.unlinkSync(tmp) } catch (_) {}
+          skipped++
+          continue
+        }
+        const newPath = buildTrimmedPath(src, Number(job.idx) || 0, kStart, kEnd, String(job.desc || ''))
+        if (path.resolve(newPath) !== path.resolve(src)) {
+          fs.renameSync(tmp, newPath)
+          try { fs.unlinkSync(src) } catch (_) {}
+        } else {
+          fs.renameSync(tmp, src)
+        }
+        renamed.push([src, newPath, Number(keep.toFixed(3))])
+      } catch (e) {
+        if (tmp) { try { fs.unlinkSync(tmp) } catch (_) {} }
+        skipped++
+      }
+    }
+    return { renamed, skipped }
+  }
+  /** 镜内硬切拼接：concat demuxer 拼接重编码产出一镜一文件 */
+  function montageConcatClips(payload) {
+    const p = payload || {}
+    const clips = Array.isArray(p.clips) ? p.clips.filter((c) => c && fs.existsSync(c)) : []
+    const outPath = String(p.outPath || '')
+    if (!clips.length || !outPath) return { error: 'concatClips 需要 clips 与 outPath' }
+    const listPath = outPath + '.list.txt'
+    try {
+      fs.mkdirSync(path.dirname(outPath), { recursive: true })
+      const lines = clips
+        .map((c) => `file '${path.resolve(c).replace(/\\/g, '/').replace(/'/g, "'\\''")}'`)
+        .join('\n')
+      fs.writeFileSync(listPath, lines, 'utf-8')
+      const r = montageRunFfmpeg([
+        '-y', '-f', 'concat', '-safe', '0', '-i', listPath,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+        '-c:a', 'aac', '-avoid_negative_ts', 'make_zero', outPath,
+      ])
+      if (!fs.existsSync(outPath) || fs.statSync(outPath).size < 1024) {
+        return { error: `ffmpeg concat 失败` }
+      }
+      return { path: outPath }
+    } catch (err) {
+      return { error: err && err.message }
+    } finally {
+      try { fs.unlinkSync(outPath + '.list.txt') } catch (_) {}
+    }
+  }
+  /** 成片完整性校验：>1KB 且 ffprobe 能读出时长>0 视为完整 */
+  function montageValidateFinal(payload) {
+    const p = String((payload || {}).path || '')
+    try {
+      const hasFile = !!p && fs.existsSync(p) && fs.statSync(p).size >= 1024
+      if (!hasFile) return { ok: false, hasFile: false }
+      if (getFfprobePath() === 'ffprobe') return { ok: true, hasFile: true }
+      return { ok: getMediaDuration(p) > 0, hasFile: true }
+    } catch (err) {
+      return { ok: false, hasFile: fs.existsSync(p), error: err && err.message }
+    }
+  }
+  /** 删除校验未通过的坏成片（防误删：目标必须包含 montage_cache 段） */
+  function montageDeleteBadFinal(payload) {
+    const p = String((payload || {}).path || '')
+    if (!p || !p.includes('montage_cache')) {
+      return { error: '拒绝删除：目标不在混剪缓存目录（montage_cache）内' }
+    }
+    try {
+      if (fs.existsSync(p)) fs.unlinkSync(p)
+      return { ok: true }
+    } catch (err) {
+      return { error: err && err.message }
+    }
+  }
+  /** 清空混剪任务缓存（防误删：目标路径必须包含 montage_cache 段） */
+  function montageClearCache(payload) {
+    const dir = String((payload || {}).dir || '')
+    if (!dir || !dir.includes('montage_cache')) {
+      return { error: '拒绝清理：目标目录不是混剪缓存目录（montage_cache）' }
+    }
+    try {
+      if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
+      return { ok: true }
+    } catch (err) {
+      return { error: err && err.message }
+    }
+  }
+
   // ── 通道注册表（client polyfill {args:[...]} 位置参 → 具名函数）──────────
   channels['final:mix'] = (args, ctx) => finalMix(...args, ctx)
+  // montage-proxy 域五通道（2026-09-24 落地：出入场裁剪/镜内拼接/成片校验/
+  // 坏片删除/清空混剪缓存——SRC montage-proxy-ipc.js createMontageProxyIpc 移植）
+  channels['montage:trimEdgeClips'] = (args, ctx) => montageTrimEdgeClips(...args, ctx)
+  channels['montage:concatClips'] = (args, ctx) => montageConcatClips(...args, ctx)
+  channels['montage:validateFinal'] = (args, ctx) => montageValidateFinal(...args, ctx)
+  channels['montage:deleteBadFinal'] = (args, ctx) => montageDeleteBadFinal(...args, ctx)
+  channels['montage:clearCache'] = (args, ctx) => montageClearCache(...args, ctx)
   channels['final:collectOutputs'] = (args, ctx) => finalCollectOutputs(...args, ctx)
   channels['final:findSrt'] = (args, ctx) => finalFindSrt(...args, ctx)
   channels['final:readTiming'] = (args, ctx) => finalReadTiming(...args, ctx)

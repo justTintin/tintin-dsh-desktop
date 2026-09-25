@@ -34,5 +34,14 @@ export function createHttpRequest(deps?: HttpRequestDeps): (
   options?: { body?: unknown; headers?: Record<string, string>; timeout?: number },
 ) => Promise<HttpResult>
 
+/**
+ * 打开 SSE 上游流（SRC server:sse 传输半边）：GET + Accept: text/event-stream +
+ * X-Machine-ID；2xx resolve 出响应流（调用方 pipe / destroy），非 2xx 缓冲
+ * 摘要后带 status reject。无超时——事件流长连接，销毁流即断开。
+ */
+export function createOpenSseStream(deps?: HttpRequestDeps): (
+  fullPath: string,
+) => Promise<import('node:http').IncomingMessage>
+
 /** 「外部服务未部署/不可达」的正常错误判定（montage 域离线回退 null 契约共用）。 */
 export function isExpectedOfflineError(err: unknown): boolean

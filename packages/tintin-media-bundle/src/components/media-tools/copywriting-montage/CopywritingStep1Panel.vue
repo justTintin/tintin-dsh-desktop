@@ -45,19 +45,21 @@ onMounted(() => { void loadScriptProviders() })
       <section class="card">
         <VdStepBar :step="step" :steps="steps" @go="go" />
 
-        <!-- 选择产品（公共弹窗；选中产品显示在其右侧，写入 sharedProductInfo 供本页生成与后续链路共用） -->
+        <!-- 选择产品（公共弹窗；选中产品显示在其右侧，写入 sharedProductInfo 供本页生成与后续链路共用）
+             2026-09-25 用户裁决：「高级脚本设置」入口移到本行右对齐 -->
         <div class="row product-row">
           <TButton label="选择产品" icon="search" @click="pickDlgVisible = true" />
           <template v-if="productLabel">
             <span class="product-chip" :title="productLabel">当前产品：{{ productLabel }}</span>
             <button class="product-clear" title="清除已选产品" @click="clearScriptProduct">×</button>
           </template>
+          <span class="spacer"></span>
+          <TButton label="高级脚本设置" icon="settings" variant="secondary" @click="showAdvDlg = true" />
         </div>
 
-        <!-- 高级脚本设置入口（弹窗）+ 场景选择（2026-09-21 用户裁决：高级设置改弹窗，
-             场景选择放在入口之后；场景指令并入发给 LLM 的系统提示词） -->
+        <!-- 场景选择行（2026-09-21 用户裁决：场景选择在高级设置入口之后；2026-09-25 入口移走后本行保留场景/时长/AI 生成）
+             场景指令并入发给 LLM 的系统提示词 -->
         <div class="row adv-row">
-          <TButton label="高级脚本设置" icon="settings" variant="secondary" @click="showAdvDlg = true" />
           <label class="field-label">场景</label>
           <span class="info-i" title="场景指令与产品信息会并入系统提示词一并发给大模型（「预览最终提示词」可查看合并结果）">ⓘ</span>
           <TSelect v-model="scriptScene" :options="SCRIPT_SCENE_OPTIONS" class="scene-select" />

@@ -17,6 +17,7 @@ import { findLegacyConfigDir, planLegacyMigration } from './lib/legacy-config.js
 import {
   createServerUrlResolver,
   createHttpRequest,
+  createOpenSseStream,
   isExpectedOfflineError,
   resolveEndpoint,
   API_ENDPOINTS,
@@ -24,6 +25,11 @@ import {
 import { createFfmpegGateApi } from './lib/montage/ffmpeg-gate.js'
 import { createMontageVoiceApi } from './lib/montage/voice-ipc.js'
 import { createMontageFinalApi } from './lib/montage/final-ipc.js'
+import { createRembgApi, createAudioArchiveApi } from './lib/media-proxy.js'
+import { loopbackCall, readLoopbackConfig, summarizeExtract } from './lib/loopback-helpers.js'
+import { createTintinAgentTools } from './lib/agent-tools.js'
+import { createContextTaskApi, defaultWorkspaceDir } from './lib/context-task.js'
+import { createYtdlpApi } from './lib/ytdlp.js'
 
 const PING_PATH = '/tintin/ping'
 const PROBE_FILE_PATH = '/tintin/probe/file'
@@ -267,6 +273,12 @@ export async function apply(ctx) {
     log: (...a) => ctx.logger.info(...a),
     warn: (...a) => ctx.logger.warn(...a),
   })
+  const openSseStream = createOpenSseStream({
+    getServerUrl,
+    getMachineId,
+    log: (...a) => ctx.logger.info(...a),
+    warn: (...a) => ctx.logger.warn(...a),
+  })
 
   // NATIVE_CHANNELS（montage 域本地原生通道）：ffmpeg 族二进制经 resolveBinary
   // 注入（TINTIN_BIN_DIR；voice/final 模块内 getBinDir 同源读取该 env），
@@ -314,10 +326,66 @@ export async function apply(ctx) {
     '.flac': 'audio/flac', '.aac': 'audio/aac', '.ogg': 'audio/ogg',
   }[String(extname(file)).toLowerCase()] ?? 'application/octet-stream')
 
+  // 缓存目录解析（env:cacheDir 与 ytdlp 门共用）：设置 local.cacheDir（通用设置
+  // 卡「更改」写入）> 默认本机工作区目录 Documents/tintin-workspace。
+  const resolveCacheDir = () => {
+    const configured = String(tintinSettings.get()?.local?.cacheDir || '').trim()
+    return configured
+      || process.env.TINTIN_WORKSPACE_DIR
+      || join(process.env.USERPROFILE || process.env.HOME || '.', 'Documents', 'tintin-workspace')
+  }
+
+  // yt-dlp 二进制链（SRC resolveYtDlpPath 收敛为 TINTIN_BIN_DIR 链）：打包
+  // resources/bin（TINTIN_BIN_DIR）> 系统 PATH。yt-dlp 不随包分发时 available=false，
+  // 卡片呈现「未部署」态。
+  const ytdlpBin = (() => {
+    const dir = getBinDir()
+    const candidate = dir ? join(dir, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp') : null
+    return candidate && existsSync(candidate) ? candidate : 'yt-dlp'
+  })()
+
   const nativeChannels = {
     ...createFfmpegGateApi({ ffmpegPath: resolveBinary('ffmpeg'), ffprobePath: resolveBinary('ffprobe') }),
     ...createMontageVoiceApi(montageDeps),
     ...createMontageFinalApi(montageDeps),
+    // rembg:submit — 图像抠图（SRC media-proxy-ipc.js 逐字段移植，见 lib/media-proxy.js）：
+    // multipart POST /matting 同步回 PNG 二进制，宿主落盘原图同目录返 {path, bytes}。
+    ...createRembgApi({
+      multipartPost,
+      isExpectedOfflineError,
+      log: (tag, msg) => ctx.logger.info('tintin-bundle: %s %s', tag, msg),
+    }),
+    // audio:downloadTemp / audio:archiveGen / audio:bgmUpload — 音频生成域
+    // （2026-09-25 随音频生成卡移植，SRC server-proxy.js:938-1032 契约，见 lib/media-proxy.js）
+    ...createAudioArchiveApi({
+      httpRequest,
+      getServerUrl,
+      multipartPost,
+      isExpectedOfflineError,
+      tmpDir: tmpdir(),
+    }),
+    // ytdlp:status/probe/download/saveAs — 参考视频下载门（SRC ytdlp-gate.js 移植，
+    // 见 lib/ytdlp.js）。cookies 从壳层交接目录读（<DSH_HOME>/tintin/browser/cookies），
+    // 进度事件不落桥（阻塞到终态）。ffmpeg/ffprobe 经 resolveBinary 注入（归一化）。
+    ...createYtdlpApi({
+      ytdlpPath: ytdlpBin,
+      ffmpegPath: resolveBinary('ffmpeg'),
+      ffprobePath: resolveBinary('ffprobe'),
+      ffmpegDir: getBinDir() || '',
+      cookiesDir: () => join(process.env.DSH_HOME || '', 'tintin', 'browser', 'cookies'),
+      cacheDir: resolveCacheDir,
+      log: (...a) => ctx.logger.info('tintin-bundle:', ...a),
+      warn: (...a) => ctx.logger.warn('tintin-bundle:', ...a),
+    }),
+    // context:writeTask — 会话上下文条 → 工作区 task.json（WP-5b，2026-09-25
+    // 用户裁决：不改 dsh 底层，业务上下文经 UI 层注入）。工厂见 lib/context-task.js
+    // （可测：test/tintin-context-task.test.ts）；工作区目录与 /tintin/media
+    // 白名单根同源同值。
+    ...createContextTaskApi({
+      resolveWorkspaceDir: defaultWorkspaceDir,
+      log: (...a) => ctx.logger.info('tintin-bundle:', ...a),
+      warn: (...a) => ctx.logger.warn('tintin-bundle:', ...a),
+    }),
     // tts:uploadSample — multipart POST /voice/samples（file 音频 + name 必填 +
     // text 可选）。载荷是渲染层的 {path} 包装（preload ttsUploadSample 契约），
     // 本地读盘在这里完成；离线 → null、其余失败 → {error}（IpcError 形态）。
@@ -379,14 +447,22 @@ export async function apply(ctx) {
         return { online: false, url }
       }
     },
+    // env:getMachineId — 机器码（SRC env-ipc.js env:getMachineId 契约：
+    // {ok,machineId}，异常 {ok:false,machineId:'',error}）。产品资料域以它拼
+    // /api/product-library/clients/<machine_id> 请求路径——与 httpRequest 注入的
+    // X-Machine-ID 头同源同值（index.js 顶部同一个 getMachineId 闭包）。
+    'env:getMachineId': () => {
+      try {
+        return { ok: true, machineId: String(getMachineId() || '') }
+      } catch (err) {
+        return { ok: false, machineId: '', error: err instanceof Error ? err.message : String(err) }
+      }
+    },
     // env:cacheDir — 缓存目录解析（2026-09-24 用户裁决：恢复原客户端「更改」能力）。
     // 优先级：设置 local.cacheDir（通用设置·本地配置卡「更改」写入）> 默认本机
     // 工作区目录 Documents/tintin-workspace；由宿主保证目录存在。
     'env:cacheDir': () => {
-      const configured = String(tintinSettings.get()?.local?.cacheDir || '').trim()
-      const dir = configured
-        || process.env.TINTIN_WORKSPACE_DIR
-        || join(process.env.USERPROFILE || process.env.HOME || '.', 'Documents', 'tintin-workspace')
+      const dir = resolveCacheDir()
       try { mkdirSync(dir, { recursive: true }) } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
@@ -421,6 +497,33 @@ export async function apply(ctx) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
     },
+    // shell:revealInFolder — 在系统文件管理器中定位文件（SRC main.js:
+    // shell.showItemInFolder）。Windows `explorer /select,"<path>"`、macOS
+    // `open -R`；Linux 无选中语义退化为打开所在目录。每次调用落 harness.log。
+    'shell:revealInFolder': (args) => {
+      const p = String(args?.[0] ?? '')
+      if (!p) return { error: 'shell:revealInFolder requires path' }
+      try {
+        if (!existsSync(p)) {
+          ctx.logger.warn('shell:revealInFolder: 路径不存在 %s', p)
+          return { error: `路径不存在: ${p}` }
+        }
+        ctx.logger.info('shell:revealInFolder -> %s', p)
+        if (process.platform === 'win32') {
+          const child = spawn('explorer.exe', [`/select,${p}`], { detached: true, stdio: 'ignore' })
+          child.on('error', (e) => ctx.logger.warn('shell:revealInFolder spawn error: %s', e.message))
+          child.unref()
+        } else if (process.platform === 'darwin') {
+          spawn('open', ['-R', p], { detached: true, stdio: 'ignore' }).unref()
+        } else {
+          spawn('xdg-open', [dirname(p)], { detached: true, stdio: 'ignore' }).unref()
+        }
+        return { ok: true }
+      } catch (err) {
+        ctx.logger.warn('shell:revealInFolder failed: %s', err instanceof Error ? err.message : String(err))
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    },
     // env:clearCache — 清空固定缓存目录内容（保留目录本身）。被占用的条目
     // force 删除失败即跳过。
     'env:clearCache': () => {
@@ -434,6 +537,25 @@ export async function apply(ctx) {
       } catch (err) {
         return { error: err instanceof Error ? err.message : String(err) }
       }
+    },
+    // media:unlock — 见上方 mediaUnlocked 注记。契约：绝对路径、必须存在的
+    // 单个文件；成功 {ok:true}、失败 {error}（永不 reject，fire-and-forget 调用点）。
+    'media:unlock': (args) => {
+      const p = String(args?.[0] ?? '')
+      if (!p || !isAbsolute(p)) return { error: 'media:unlock requires absolute path' }
+      try {
+        if (!existsSync(p) || !statSync(p).isFile()) return { error: `路径不存在或不是文件: ${p}` }
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+      if (!mediaUnlocked.has(p)) {
+        if (mediaUnlocked.size >= MEDIA_UNLOCK_CAP) {
+          const oldest = mediaUnlocked.values().next().value
+          if (oldest !== undefined) mediaUnlocked.delete(oldest)
+        }
+        mediaUnlocked.add(p)
+      }
+      return { ok: true }
     },
     // dialog:collectVideos — 递归收集目录内视频文件（SRC main.js:808 逐字移植，
     // 2026-09-24 用户报障：拖入文件夹只进文件夹本身——polyfill 的 collectVideos
@@ -741,6 +863,104 @@ export async function apply(ctx) {
   ctx.inject(['webServer', 'tools'], (webCtx) => webCtx.effect(() => {
     webCtx.tools.register(pingServerTool)
     webCtx.tools.register(ffmpegProbeTool)
+
+    // ── 浏览器域 agent 工具（架构文档 §浏览器域三层形态第2/3层）：
+    // 经壳层回环服务（loopback.json 握手，token 鉴权）驱动独立浏览器引擎。
+    // 输出摘要化（架构 §4.5 成本护栏）：只回 agent 决策所需字段。
+    webCtx.tools.register(defineTool({
+      name: 'browser_open',
+      description: '打开 TinTin 内置浏览器独立窗口并导航到平台首页（douyin/bilibili/kuaishou/xiaohongshu/weixin/youtube/jimeng/fxg/web）。各平台登录态独立隔离。用例：需要用户登录平台或打开平台页面前置。',
+      parameters: {
+        type: 'object', properties: { platform: { type: 'string', description: '平台 id：douyin/bilibili/kuaishou/xiaohongshu/weixin/youtube/jimeng/fxg/web' } }, required: ['platform'],
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {
+          ok: { type: 'boolean', required: true }, error: { type: 'string' },
+        } },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+      },
+      isConcurrencySafe: () => false,
+      presentCall: () => ({ card: 'generic', kind: 'execute', title: '打开内置浏览器', rawInput: {} }),
+      async execute(args) {
+        return loopbackCall('/tintin-browser/open', { platform: args.platform })
+      },
+    }))
+
+    webCtx.tools.register(defineTool({
+      name: 'page_extract',
+      description: '在 TinTin 内置浏览器中运行平台抽取脚本，抽取当前页面的结构化内容（标题/作者/正文/媒体链接等，视平台而定）。前置：先用 browser_open 打开对应平台。抽取失败会返回结构化原因（NEED_LOGIN=需先登录 / RISK_CAPTCHA=触发验证码 / DOM_MISMATCH=页面结构变化）。',
+      parameters: {
+        type: 'object', properties: { platform: { type: 'string', description: '平台 id（douyin/bilibili/kuaishou/xiaohongshu/weixin）' } }, required: ['platform'],
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {
+          ok: { type: 'boolean', required: true }, summary: { type: 'string' }, error: { type: 'string' },
+        } },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+      },
+      isConcurrencySafe: () => false,
+      presentCall: () => ({ card: 'generic', kind: 'execute', title: '抽取平台页面内容', rawInput: {} }),
+      async execute(args) {
+        const res = await loopbackCall('/tintin-browser/extract', { platform: args.platform })
+        return summarizeExtract(res)
+      },
+    }))
+
+    webCtx.tools.register(defineTool({
+      name: 'browser_login_status',
+      description: '查询 TinTin 内置浏览器各平台的登录状态（cookie 条数）。用例：下载/抽取前判断平台是否已登录；count>0 视为有登录痕迹。',
+      parameters: {},
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {
+          ok: { type: 'boolean', required: true }, counts: { type: 'string' }, error: { type: 'string' },
+        } },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+      },
+      isConcurrencySafe: () => true,
+      presentCall: () => ({ card: 'generic', kind: 'execute', title: '查询平台登录状态', rawInput: {} }),
+      async execute() {
+        const res = await loopbackCall('/tintin-browser/login/status', {})
+        if (res && res.ok === false) return res
+        const counts = res && res.counts ? res.counts : {}
+        const summary = Object.entries(counts).map(([k, v]) => k + ':' + v).join(' ') || '（无）'
+        return { ok: true, counts: summary }
+      },
+    }))
+
+    webCtx.tools.register(defineTool({
+      name: 'hotspot_capture',
+      description: '采集今日各平台热榜（抖音/小红书/B站，隐藏窗口采集，约 15-25 秒）。清单落盘 userData/hotspots/hotspots_sync.json 并返回本次采集条数。用例：选题/热点文案创作前获取实时热榜。',
+      parameters: {},
+      output: {
+        schema: { type: 'object', additionalProperties: false, properties: {
+          ok: { type: 'boolean', required: true }, count: { type: 'number' }, message: { type: 'string' },
+        } },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+      },
+      isConcurrencySafe: () => false,
+      presentCall: () => ({ card: 'generic', kind: 'execute', title: '采集今日热点', rawInput: {} }),
+      async execute() {
+        const res = await loopbackCall('/tintin-browser/hotspot/capture', {})
+        if (Array.isArray(res)) {
+          const [ok, data] = res
+          return { ok: !!ok, count: typeof data === 'number' ? data : 0, message: typeof data === 'string' ? data : '' }
+        }
+        return { ok: false, count: 0, message: '回环服务未返回结果' }
+      },
+    }))
+    // WP-5 agent 工具组（2026-09-25 用户裁决：拆解路由服务端 + 合理使用服务端
+    // 能力 + 聚焦业务；dsh 底层零改动，defineTool 为上游插件 API）。montage
+    // 工具经 callNative 复用 NATIVE_CHANNELS 已移植通道；识图/规划走 /llm 与
+    // /workflow/plan 服务端契约（2026-09-25 实测在）。
+    for (const def of createTintinAgentTools({
+      httpRequest,
+      callNative: (channel, args) => nativeChannels[channel]?.(args),
+      readFile: async (p) => readFileSync(p),
+      log: (...a) => ctx.logger.info('tintin-bundle:', ...a),
+      warn: (...a) => ctx.logger.warn('tintin-bundle:', ...a),
+    })) {
+      webCtx.tools.register(defineTool(def))
+    }
     const disposePing = webCtx.webServer.register({
       kind: 'exact',
       path: PING_PATH,
@@ -852,6 +1072,15 @@ export async function apply(ctx) {
     // 音效等）统一经本路由流式回源。受信 GET（仅回环）；path 限定在缓存目录/
     // 默认工作区内，防任意文件读取；支持 Range（音频拖动进度条必需）。
     const MEDIA_PATH = '/tintin/media'
+    // media:unlock — 用户显式选择的任意位置文件预览解锁。白名单根只覆盖缓存/
+    // 工作区目录，而用户自选目录（桌面等）的文件——如图像抠图的原图与落盘在
+    // 原图旁的 `_matting.png` 结果——预览会被 403。渲染层在文件选中/结果产生
+    // 处经受信 POST 登记单个文件（绝对路径 + 存在性 + isFile 校验，FIFO 上限
+    // 512 防无限增长），/tintin/media GET 对已登记路径放行。信任面评估（B1）：
+    // 读范围 = 用户刚刚亲手选过/业务刚落盘的文件，登记只能由受信渲染层发起，
+    // 不构成任意路径读取（白名单根仍然是主通道）。
+    const mediaUnlocked = new Set()
+    const MEDIA_UNLOCK_CAP = 512
     const MEDIA_CT = {
       '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.flac': 'audio/flac',
       '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/opus',
@@ -880,6 +1109,7 @@ export async function apply(ctx) {
         ].filter(Boolean).map((r) => normalize(r).toLowerCase())
         const low = resolved.toLowerCase()
         const allowed = roots.some((r) => low === r || low.startsWith(r.endsWith(sep) ? r : r + sep))
+          || mediaUnlocked.has(resolved)
         if (!allowed) { sendJson(res, 403, { error: 'Path outside allowed media roots.' }); return }
         let st
         try { st = statSync(resolved) } catch { sendJson(res, 404, { error: 'Not found.' }); return }
@@ -985,6 +1215,44 @@ export async function apply(ctx) {
       },
     })
 
+    // WP-2 sse passthrough: the polyfill's server.sse(path, onEvent, onError)
+    // fetches this route and parses the event stream renderer-side. The host
+    // only relays: GET → upstream GET (Accept: text/event-stream +
+    // X-Machine-ID) → pipe the body verbatim. SRC shipped this as ipcMain
+    // 'server:sse' with main-process parsing + event channels; the web route
+    // topology replaces that plumbing (offline arrives as HTTP 502 instead of
+    // the 'OFFLINE' sentinel). Path validation mirrors /tintin/upload.
+    const disposeSse = webCtx.webServer.register({
+      kind: 'exact',
+      path: '/tintin/sse',
+      handler: async (req, res) => {
+        const url = new URL(req.url, 'http://localhost')
+        const targetPath = url.searchParams.get('path')
+        if (req.method !== 'GET' || !isTrustedRequest(req) || typeof targetPath !== 'string'
+          || !targetPath.startsWith('/') || /^\/\//.test(targetPath) || /^[a-z]+:/i.test(targetPath)) {
+          sendJson(res, 400, { error: 'Request rejected.' })
+          return
+        }
+        let upstream
+        try {
+          upstream = await openSseStream(targetPath)
+        } catch (error) {
+          ctx.logger.warn('tintin-bundle: sse %s failed: %s', targetPath, error?.message ?? error)
+          sendJson(res, error?.status ?? 502, { error: error?.message ?? String(error) })
+          return
+        }
+        res.writeHead(upstream.statusCode, {
+          'content-type': upstream.headers['content-type'] || 'text/event-stream',
+          'cache-control': 'no-cache',
+        })
+        // Browser unsubscribe (fetch abort) closes res → tear down upstream.
+        res.on('close', () => {
+          try { upstream.destroy() } catch { /* already gone */ }
+        })
+        upstream.pipe(res)
+      },
+    })
+
     // First-boot setup wizard probe: the browser cannot reach an arbitrary LAN
     // address directly (cross-origin), so the host probes the candidate server
     // (health + model list) on its behalf and returns what the provider config
@@ -1034,6 +1302,7 @@ export async function apply(ctx) {
       disposeIpc()
       disposeUpload()
       disposeMedia()
+      disposeSse()
       disposeSetupProbe()
     }
   }, 'tintin-bundle: probe routes'))

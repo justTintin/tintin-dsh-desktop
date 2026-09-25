@@ -122,7 +122,7 @@ describe('voice-ipc native channels', () => {
 })
 
 describe('final-ipc native channels', () => {
-  it('registers the 12 source channels plus the jianying-audio-sync trio and the jyfonts trio', () => {
+  it('registers the 12 source channels plus the jianying-audio-sync trio, the jyfonts trio and the local-montage quintet', () => {
     const { deps } = makeDeps()
     const api = createMontageFinalApi(deps)
     expect(Object.keys(api).sort()).toEqual([
@@ -130,6 +130,8 @@ describe('final-ipc native channels', () => {
       'final:listResults', 'final:mix', 'final:readTiming', 'jianying:export', 'jyaudio:setEnabled',
       'jyaudio:status', 'jyaudio:syncNow', 'jyfonts:scan', 'jyfonts:serverList', 'jyfonts:upload',
       'jytpl:deleteServer', 'jytpl:list', 'jytpl:sync', 'lut:list',
+      // 本地 montage 族（Step2-4 工作包宿主侧：裁边/拼接/成片校验/坏片删除/清缓存）
+      'montage:clearCache', 'montage:concatClips', 'montage:deleteBadFinal', 'montage:trimEdgeClips', 'montage:validateFinal',
     ])
   })
 

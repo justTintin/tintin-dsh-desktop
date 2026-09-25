@@ -1,3 +1,16 @@
+﻿; 2026-09-25 根修（用户实机 7 个孤儿进程实锤）：默认 _CHECK_APP_RUNNING 只杀主
+; 进程，detached 的 harness 子进程（捆绑 Node）不随之死，继续持有会话写入句柄
+; → 新实例恢复会话报 SessionAlreadyOwnedError (gateway/internal)。覆盖为：
+; ① taskkill /T 连树强杀；② 按捆绑 Node 独有签名路径清扫历史孤儿
+; （*\resources\app\node_modules\node\bin\node.exe 仅本应用使用，误伤面为零；
+; PowerShell 用 EncodedCommand 规避 NSIS 引号/转义）。装与卸两侧共用。
+!macro customCheckAppRunning
+  nsExec::Exec 'taskkill /T /F /IM ${APP_EXECUTABLE_FILENAME}'
+  nsExec::ExecToLog '"$PowerShellPath" -NonInteractive -NoProfile -EncodedCommand RwBlAHQALQBQAHIAbwBjAGUAcwBzACAAbgBvAGQAZQAgAC0ARQByAHIAbwByAEEAYwB0AGkAbwBuACAAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAgAHwAIABXAGgAZQByAGUALQBPAGIAagBlAGMAdAAgAHsAIAAkAF8ALgBQAGEAdABoACAALQBsAGkAawBlACAAJwAqAFwAcgBlAHMAbwB1AHIAYwBlAHMAXABhAHAAcABcAG4AbwBkAGUAXwBtAG8AZAB1AGwAZQBzAFwAbgBvAGQAZQBcAGIAaQBuAFwAbgBvAGQAZQAuAGUAeABlACcAIAB9ACAAfAAgAFMAdABvAHAALQBQAHIAbwBjAGUAcwBzACAALQBGAG8AcgBjAGUAIAAtAEUAcgByAG8AcgBBAGMAdABpAG8AbgAgAFMAaQBsAGUAbgB0AGwAeQBDAG8AbgB0AGkAbgB1AGUA'
+  Pop $0
+  Sleep 600
+!macroend
+
 !ifndef BUILD_UNINSTALLER
   !ifndef ONE_CLICK
     !include "LogicLib.nsh"
@@ -100,6 +113,19 @@
       ${IfNot} ${Silent}
         ExecShell "runas" 'powershell.exe' '-NonInteractive -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Add-MpPreference -ExclusionPath \"$INSTDIR\" -ErrorAction SilentlyContinue; Add-MpPreference -ExclusionPath \"$APPDATA\dsh-desktop\" -ErrorAction SilentlyContinue; Set-ItemProperty -Path \"HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem\" -Name \"LongPathsEnabled\" -Value 1 -ErrorAction SilentlyContinue"'
       ${EndIf}
+      ; 孤儿 harness 清扫（customCheckAppRunning 仅在应用运行时触发；此处覆盖
+      ; "应用未运行但历史孤儿残留"的安装路径，同签名零误伤）
+      nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NonInteractive -NoProfile -EncodedCommand RwBlAHQALQBQAHIAbwBjAGUAcwBzACAAbgBvAGQAZQAgAC0ARQByAHIAbwByAEEAYwB0AGkAbwBuACAAUwBpAGwAZQBuAHQAbAB5AEMAbwBuAHQAaQBuAHUAZQAgAHwAIABXAGgAZQByAGUALQBPAGIAagBlAGMAdAAgAHsAIAAkAF8ALgBQAGEAdABoACAALQBsAGkAawBlACAAJwAqAFwAcgBlAHMAbwB1AHIAYwBlAHMAXABhAHAAcABcAG4AbwBkAGUAXwBtAG8AZAB1AGwAZQBzAFwAbgBvAGQAZQBcAGIAaQBuAFwAbgBvAGQAZQAuAGUAeABlACcAIAB9ACAAfAAgAFMAdABvAHAALQBQAHIAbwBjAGUAcwBzACAALQBGAG8AcgBjAGUAIAAtAEUAcgByAG8AcgBBAGMAdABpAG8AbgAgAFMAaQBsAGUAbgB0AGwAeQBDAG8AbgB0AGkAbgB1AGUA'
+      Pop $0
+      ; TinTin 内部分发（2026-09-25 用户裁决授权，固化到所有分发机）：静默关闭
+      ; Windows 游戏集成链路，根治"启动应用即弹 ms-gamingoverlay 商店搜索"——
+      ; 分发机精简掉 Xbox Game Bar 后协议处理者缺失，而系统游戏检测（对
+      ; Chromium/Electron 形态应用误判 + 手柄接入检测）仍尝试激活该协议。
+      ; 三条均为用户级（HKCU，无需管理员）且可逆：改回 1 或删除值即恢复原状。
+      ; 卸载时不回写：分发机关闭游戏捕获是期望状态（恢复会复发弹窗）。
+      WriteRegDWORD HKCU "SOFTWARE\Microsoft\GameBar" "UseNexusForGameBarEnabled" 0
+      WriteRegDWORD HKCU "System\GameConfigStore" "GameDVR_Enabled" 0
+      WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\GameDVR" "AppCaptureEnabled" 0
       ; CHECK_APP_RUNNING force-kills the previous process, so will-quit never
       ; clears the session marker. Same-version overwrite would otherwise look
       ; like an unclean-exit. Delete is a no-op when the file is absent.

@@ -174,6 +174,7 @@ import { upgradeMarketInSharedTree, upgradePluginToGeneration } from './state/pl
 import { aboutDetail, bundledHarnessVersion } from './version-info'
 import { windowsMenuViewBounds } from './windows-menu-view'
 import { shouldKeepRunningInBackground } from './close-to-tray'
+import { registerBrowserService } from './tintin/browser/browser-service'
 import {
   MAIN_WINDOW_RECOVERY_RELOAD_COOLDOWN_MS,
   shouldReloadAfterMainWindowRendererLoss
@@ -3448,6 +3449,9 @@ async function bootstrap(): Promise<void> {
 
   // 2026-09-24: callers may label the dialog (TinTin local-config uses
   // 选择本地缓存目录); default keeps the workspace-picker wording.
+  // 浏览器域壳层引擎（2026-09-25 提前移植首片）：三形态 spike + 平台分区 cookies
+  // 导出（参考视频下载 yt-dlp 的登录态来源，交接目录 <userData>/harness/tintin/browser/cookies）。
+  if (mainWindow) registerBrowserService(mainWindow)
   ipcMain.handle('directory-picker:open', async (event, title?: unknown) => {
     if (
       !mainWindow ||
@@ -3469,6 +3473,42 @@ async function bootstrap(): Promise<void> {
       properties: ['openDirectory']
     })
     return result.canceled ? null : result.filePaths[0] ?? null
+  })
+
+  // 2026-09-25 (TinTin port): native save dialog for plugin pages — the audio
+  // gen card's per-row download (SRC dialog:saveFile contract: title /
+  // defaultPath / filters → picked absolute path or null on cancel). Same
+  // main-window-only guard as the directory picker; renderer-supplied filters
+  // are validated so an unknown shape cannot reach Electron's dialog options.
+  ipcMain.handle('save-file-picker:open', async (event, options?: unknown) => {
+    if (
+      !mainWindow ||
+      mainWindow.isDestroyed() ||
+      event.sender !== mainWindow.webContents ||
+      event.senderFrame !== mainWindow.webContents.mainFrame
+    ) {
+      throw new Error('Save file picker requests are only allowed from the main Harness window')
+    }
+    const opts = (options ?? {}) as {
+      title?: unknown
+      defaultPath?: unknown
+      filters?: unknown
+    }
+    const filters = Array.isArray(opts.filters)
+      ? opts.filters
+        .filter((f): f is { name: string; extensions: string[] } => {
+          const cand = f as { name?: unknown; extensions?: unknown }
+          return typeof cand?.name === 'string' && Array.isArray(cand.extensions)
+            && cand.extensions.every((e) => typeof e === 'string')
+        })
+      : undefined
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: typeof opts.title === 'string' && opts.title.trim() ? opts.title.trim() : 'Save File',
+      defaultPath: typeof opts.defaultPath === 'string' && opts.defaultPath ? opts.defaultPath : undefined,
+      ...(filters && filters.length ? { filters } : {}),
+      properties: ['createDirectory', 'showOverwriteConfirmation']
+    })
+    return result.canceled ? null : result.filePath ?? null
   })
   ipcMain.handle('mobile:open-pairing', () => showMobilePairing())
   ipcMain.handle('mobile:status', () => ({ connected: mobileBridge.snapshot().connected }))

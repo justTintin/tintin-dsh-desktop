@@ -84,6 +84,8 @@ describe('profile-plugin-command', () => {
   })
 
   it('observes a fast command exit before sampling a large profile tree', async () => {
+    // 预算 30s（默认 10s）：全量并行/打包机负载下 bundled Node 采样链路超预算
+    // （2026-09-25 打包实测）；断言是"先观察到退出再采样"，放宽预算不改变校验。
     const profileDirectory = join(testDir, 'profiles', 'web')
     const dshEntryPath = join(testDir, 'fast-dsh.mjs')
     await mkdir(join(profileDirectory, 'node_modules'), { recursive: true })
@@ -104,7 +106,7 @@ describe('profile-plugin-command', () => {
       },
       '@example/plugin'
     )).resolves.toEqual({ ok: true })
-  }, 10_000)
+  }, 30_000)
 })
 
 describe('profile pnpm shim and failure reporting', () => {

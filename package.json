@@ -28,6 +28,9 @@
     "build": "npm run tintin:media --silent && electron-vite build",
     "tintin:media": "vite build -c packages/tintin-media-bundle/vite.config.mts",
     "tintin:presets": "node scripts/build-tintin-presets.mjs",
+    "contract:gen": "openapi-typescript http://192.168.111.31:8000/openapi.json -o packages/tintin-media-bundle/src/types/api-contract.generated.ts",
+    "contract:gen-local": "openapi-typescript packages/tintin-media-bundle/openapi-latest.json -o packages/tintin-media-bundle/src/types/api-contract.generated.ts",
+    "verify:contract": "node packages/tintin-media-bundle/scripts/verify-contract.cjs",
     "icons:generate": "node scripts/generate-app-icons.mjs",
     "loader:generate": "node scripts/generate-loader-gifs.mjs",
     "preview": "electron-vite preview",
@@ -271,6 +274,7 @@
     "@deepseek-ai/dsh-workflow-worker-thread": "0.1.5-rc.3",
     "@deepseek-ai/dsh-workspace": "0.1.5-rc.3",
     "@deepseek-ai/schemastery": "3.18.2",
+    "adm-zip": "0.5.16",
     "dsh-desktop-client-ui": "file:packages/dsh-desktop-client-ui",
     "dsh-desktop-hmr-fallback": "file:packages/dsh-desktop-hmr-fallback",
     "dsh-desktop-log-bridge": "file:packages/dsh-desktop-log-bridge",
@@ -280,6 +284,7 @@
     "dsh-ppt": "file:packages/ppt-bundles/dsh-ppt-0.1.1-rc.2-desktop-20260906.tgz",
     "dsh-ppt-composer": "file:packages/ppt-bundles/dsh-ppt-composer-0.1.1-rc.2-desktop-20260906.tgz",
     "electron-updater": "^6.8.9",
+    "exceljs": "4.4.0",
     "node": "24.9.0",
     "pnpm": "10.34.5",
     "qrcode": "^1.5.4",
@@ -297,6 +302,7 @@
     "electron": "43.4.0",
     "electron-builder": "26.15.3",
     "electron-vite": "5.0.0",
+    "openapi-typescript": "^7.13.0",
     "patch-package": "^8.0.1",
     "plyr": "^3.8.4",
     "typescript": "5.9.3",
@@ -361,6 +367,14 @@
       {
         "from": "resources/bin",
         "to": "bin"
+      },
+      {
+        "from": "build/extractors",
+        "to": "extractors"
+      },
+      {
+        "from": "build/ext-assets",
+        "to": "ext-assets"
       },
       {
         "from": "build/app-icon.png",

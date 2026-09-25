@@ -1,7 +1,6 @@
 // 为了让 TintinBridgeServer 下的业务级方法直接对齐 server-api.ts 命名空间类型，
 // 先在顶部 import 该文件的命名空间与公共类型（declare global 前可用 import type）。
 import type {
-  HealthAPI,
   StatsAPI,
   LLMAPI,
   CopywritingAPI,
@@ -22,7 +21,6 @@ import type {
   SystemAPI,
   CapabilityRegistryItem,
   PaginatedResponse,
-  ArtifactItem,
 } from './server-api'
 
 // --------------------------------------------------------------------
@@ -118,52 +116,13 @@ declare interface TintinBridgeServer {
   downloadResult(path: string, savePath: string): Promise<string | null>
 
   // ---------- health / stats ----------
-  healthCapabilities(): Promise<IpcError<HealthAPI.CapabilitiesResponse>>
+  // healthCapabilities 已移除（/health/capabilities 服务端从未实现，声明即陷阱）
   statsWorkbench(): Promise<IpcError<StatsAPI.WorkbenchResponse>>
 
   // ---------- agent ----------
+  // 服务端 /agent/* 编排（tasks/submit/action/artifacts）已于 2026-09-25 退役，
+  // 对应桥方法随之移除；仅能力目录保留（MCP/仪表盘消费、P2 工具化数据源）。
   agentRegistry(): Promise<IpcError<CapabilityRegistryItem[]>>
-  agentTaskList(params?: { page?: number; page_size?: number }): Promise<IpcError<{ tasks: any[]; total?: number }>>
-  agentSubmitTask(
-    payload: AgentAPI.SubmitTaskRequest
-  ): Promise<IpcError<AgentAPI.SubmitTaskResponse>>
-  agentTaskAction(params: {
-    id: string
-    action: 'confirm' | 'pause' | 'resume' | 'retry' | 'cancel'
-    reason?: string
-    /** 人审决策点字段（PRD-human-in-loop-choices）：confirm body 透传——
-     *  提交 {decision_id, choice:[...]} / 拒绝 {decision_id, action:'reject', reason} */
-    decision?: Record<string, unknown>
-  }): Promise<IpcError<any>>
-  agentRegisterArtifact(
-    payload: AgentAPI.RegisterArtifactRequest
-  ): Promise<IpcError<ArtifactItem>>
-
-  // ---------- agent chat（工作台 AI 对话真实链路 P1）----------
-  /** GET /agent/agents（智能体列表；离线 null / 5xx {error}，解析见 workbenchChatContext.parseAgentsResponse） */
-  agentAgents(): Promise<IpcError<AgentAPI.AgentsResponse>>
-  /** POST /agent/chat（max_rounds 默认 3、stream:false；sessionId 续接服务端会话；离线 null / 5xx {error}） */
-  agentChat(
-    payload: AgentAPI.ChatIpcRequest
-  ): Promise<IpcError<AgentAPI.ChatResponse>>
-  /** GET /agent/sessions?machine_id=&limit=（machine_id 主进程注入） */
-  agentSessions(params?: {
-    limit?: number
-  }): Promise<IpcError<AgentAPI.SessionsResponse>>
-  /** DELETE /agent/sessions/{id}（素材池一并清理） */
-  agentSessionDelete(id: string): Promise<IpcError<{ ok: boolean }>>
-  /** GET /agent/sessions/{id}/attachments（会话素材池列表） */
-  agentSessionAttachments(
-    id: string
-  ): Promise<IpcError<AgentAPI.SessionAttachmentsResponse>>
-  /** POST /agent/sessions/{id}/attachments（materialId 引用素材库 | filePath 上传本地附件） */
-  agentSessionAttachmentAdd(payload: {
-    id: string
-    materialId?: number | string
-    filePath?: string
-  }, onProgress?: (percent: number) => void): Promise<IpcError<AgentAPI.SessionAttachmentAddResponse>>
-  /** DELETE /agent/sessions/{id}/attachments/{key}（key=入池返回的 file_ref） */
-  agentSessionAttachmentRemove(id: string, key: string): Promise<IpcError<{ ok: boolean }>>
 
   // ---------- tasks ----------
   tasksUnifiedList(
@@ -930,12 +889,48 @@ declare interface TintinBridgePrediction {
   }): Promise<{ ok?: boolean; error?: string }>
 }
 
+/** 环境通道（env:*；polyfill 2026-09-23 起逐项落地，对齐 SRC env-ipc 契约） */
+declare interface TintinBridgeEnv {
+  log(entry: { level?: string; tag?: string; message?: string; stack?: string }): unknown
+  serverPing(): Promise<{ online: boolean; url: string; status?: number; latencyMs?: number }>
+  cacheDir(): Promise<{ dir?: string; error?: string }>
+  clearCache(): Promise<{ ok?: boolean; error?: string }>
+  /** SRC env:getMachineId 契约 {ok,machineId}；产品资料域以 machineId 拼
+   *  /api/product-library/clients/<machine_id> 请求路径（与 X-Machine-ID 同值） */
+  getMachineId(): Promise<{ ok: boolean; machineId: string; error?: string }>
+}
+
+/** 预览解锁（media:unlock）：用户自选目录单文件登记后 /tintin/media 放行；
+ *  永不 reject（fire-and-forget 调用点） */
+declare interface TintinBridgeMedia {
+  unlock(path: string): Promise<{ ok?: boolean; error?: string } | undefined>
+}
+
+/** 会话上下文条 → 工作区 task.json（WP-5b，2026-09-25）：
+ *  不改 dsh 底层的业务上下文注入——上下文条选中条目后整体写入，agent 经
+ *  自带 read 工具消费。载荷形状见 composables/contextTaskLogic.ts
+ *  （TintinTaskContext；宿主派生路径并防御解析，超限截断）。 */
+declare interface TintinBridgeContext {
+  writeTask(task: {
+    product?: Record<string, unknown> | null
+    materials?: Record<string, unknown>[]
+    scripts?: Record<string, unknown>[]
+    audios?: Record<string, unknown>[]
+  }): Promise<{ ok?: boolean; path?: string; error?: string }>
+}
+
 declare interface TintinBridge {
   app: TintinBridgeApp
   dialog: TintinBridgeDialog
   downloads: TintinBridgeDownloads
   server: TintinBridgeServer
   ffmpeg: TintinBridgeFfmpeg
+  // 环境通道（env:*：log/serverPing/cacheDir/clearCache/getMachineId）
+  env: TintinBridgeEnv
+  // 预览解锁（media:unlock——用户自选目录单文件登记后 /tintin/media 放行）
+  media: TintinBridgeMedia
+  // 会话上下文注入（context:writeTask——工作区 task.json，WP-5b）
+  context: TintinBridgeContext
     // 参考视频下载（yt-dlp 单引擎：YouTube/Bilibili，OpenCreator download 架构）
     ytdlp: TintinBridgeYtdlp
   // M9 直播切片（封面/导出字幕/临时烧字幕 SRT）

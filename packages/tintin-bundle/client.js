@@ -16,6 +16,7 @@ const tintinClient = (() => {
         { id: 'workbench', label: '工作台' },
         { id: 'ops', label: '运营工具' },
         { id: 'media', label: '媒体工具' },
+        { id: 'browser', label: '浏览器' },
       ]
       const providers = new Map()
       let activeId = 'workbench'
@@ -40,6 +41,37 @@ const tintinClient = (() => {
         `display:flex;gap:2px;align-items:flex-end;height:${BAR_H};padding:0 6px;`
       document.body.appendChild(bar)
 
+      // 动画层（2026-09-25 用户报障「整个客户端缺少原客户端动画效果」）：
+      // ①tab 切换视图入场（slide-up，SRC MediaTools/OpsTools 页面过渡口径 0.2s/12px）
+      // ②卡片交错入场 stagger（SRC global.css .stagger-item：0.35s + 35ms 步进延迟）
+      // ③占位网格卡片 hover 抬升（SRC OtToolCard hover 口径）。
+      // chrome 在 .tintin-media-scope 令牌作用域之外，缓动用字面量兜底。
+      // KeepAlive 语义不变：display none↔'' 切换时 CSS animation 自动重放，状态不丢。
+      const animStyle = document.createElement('style')
+      animStyle.textContent = [
+        '@keyframes tintin-view-in{from{opacity:0;transform:translateY(12px)}}',
+        '.tintin-view-el{animation:tintin-view-in .22s cubic-bezier(0,0,.2,1)}',
+        '@keyframes tintin-stagger-in{from{opacity:0;transform:translateY(12px)}}',
+        // backwards 填充：延迟期显示 from 态，播完交还 transform 给 hover 抬升
+        '.tintin-stagger-item{animation:tintin-stagger-in .35s cubic-bezier(0,0,.2,1) backwards}',
+        '.tintin-stagger-item:nth-child(1){animation-delay:0ms}',
+        '.tintin-stagger-item:nth-child(2){animation-delay:35ms}',
+        '.tintin-stagger-item:nth-child(3){animation-delay:70ms}',
+        '.tintin-stagger-item:nth-child(4){animation-delay:105ms}',
+        '.tintin-stagger-item:nth-child(5){animation-delay:140ms}',
+        '.tintin-stagger-item:nth-child(6){animation-delay:175ms}',
+        '.tintin-stagger-item:nth-child(7){animation-delay:210ms}',
+        '.tintin-stagger-item:nth-child(8){animation-delay:245ms}',
+        '.tintin-stagger-item:nth-child(9){animation-delay:280ms}',
+        '.tintin-stagger-item:nth-child(10){animation-delay:315ms}',
+        '.tintin-stagger-item:nth-child(11){animation-delay:350ms}',
+        '.tintin-stagger-item:nth-child(12){animation-delay:385ms}',
+        '.tintin-grid-card{transition:transform .18s cubic-bezier(0,0,.2,1),box-shadow .18s cubic-bezier(0,0,.2,1),background .12s}',
+        '.tintin-grid-card:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.12);background:var(--dsw-alias-bg-layer-3,#2a2a2c)}',
+      ].join('\n')
+      document.head.appendChild(animStyle)
+
+
       const overlay = document.createElement('div')
       overlay.id = 'tintin-view-overlay'
       overlay.style.cssText =
@@ -60,6 +92,7 @@ const tintinClient = (() => {
         let el = viewEls.get(activeId)
         if (!el) {
           el = document.createElement('div')
+          el.className = 'tintin-view-el'
           el.style.cssText = 'width:100%;min-height:100%;box-sizing:border-box;'
           container.appendChild(el)
           viewEls.set(activeId, el)
@@ -73,9 +106,16 @@ const tintinClient = (() => {
             }
           } else if (activeId === 'ops') {
             // 运营工具分组占位（2026-09-24 用户裁决：与原客户端 OpsTools.vue 同分组）。
-            // 卡片全部为建设中占位——真实工具随 tintin-ops-bundle(P3) 注册 'ops'
-            // 视图提供方后由上方 provider 分支接管。
+            // 2026-09-25 起媒体包已注册 'ops' 视图提供方（产品资料卡先行，随图像
+            // 抠图一并移植），本占位网格仅在提供方缺失时兜底显示；P3 tintin-ops-bundle
+            // 落地时接管同名 'ops' 注册。
             renderOpsGrid(el)
+          } else if (activeId === 'browser') {
+            // 浏览器 tab（2026-09-25 用户裁决提前移植浏览器域首片）：平台登录态
+            // 管理 + 打开独立浏览器窗口。壳层引擎在 src/main/tintin/browser/
+            // （dshDesktopBrowser 桥）；参考视频下载的 yt-dlp cookies 从这里
+            // 导出到约定目录。
+            renderBrowserPanel(el)
           } else {
             renderPendingInto(el, '媒体工具界面搬运中（视图提供方未注册）')
           }
@@ -123,7 +163,9 @@ const tintinClient = (() => {
           grid.style.cssText = 'display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));'
           for (const t of g.tools) {
             const card = document.createElement('div')
-            card.style.cssText = 'position:relative;border-radius:14px;padding:18px;background:var(--dsw-alias-bg-layer-2,#1e1e20);border:0.5px solid var(--dsw-alias-border-l4,#555);'
+            // 入场 stagger + hover 抬升（SRC OtToolCard 口径，2026-09-25 动画层补齐）
+            card.className = 'tintin-grid-card tintin-stagger-item'
+            card.style.cssText = 'position:relative;border-radius:14px;padding:18px;background:var(--dsw-alias-bg-layer-2,#1e1e20);border:0.5px solid var(--dsw-alias-border-l4,#555);cursor:default;'
             card.innerHTML = '<span style="position:absolute;top:10px;right:12px;font-size:11px;color:var(--dsw-alias-label-tertiary,#8b8b88);border:1px dashed var(--dsw-alias-border-l4,#555);border-radius:999px;padding:2px 10px">建设中</span>' +
               '<div style="width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:24px;background:' + t.accent + '">' + t.emoji + '</div>' +
               '<div style="margin-top:10px;font-size:16px;font-weight:700;color:var(--dsw-alias-label-primary,#e8e8e6)">' + t.title + '</div>' +
@@ -134,6 +176,301 @@ const tintinClient = (() => {
           root.appendChild(block)
         }
         el.appendChild(root)
+      }
+
+      // ── 浏览器 tab 面板（2026-09-25 用户裁决：独立窗口形态）────────────────
+      // 登录态管理：每平台一张卡（cookie 条数=登录状态 + 「打开」按钮）+
+      // 「导出登录态」。独立浏览器窗口内导航到平台 seed URL（分区 persist:tintin-<id>
+      // 隔离登录态）；cookies 由壳层导出到 <userData>/harness/tintin/browser/cookies/
+      // （Netscape），供宿主 ytdlp 门 --cookies 消费（参考视频下载的登录态来源）。
+      // 平台表数据源 = 壳侧 browser:platforms（platform-meta 单一权威）。
+      function renderBrowserPanel(el) {
+        const bridge = window.dshDesktopBrowser
+        let platforms = []
+
+        const root = document.createElement('div')
+        root.style.cssText = 'width:100%;min-height:100%;padding:24px 32px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1,#141416);'
+        const head = document.createElement('div')
+        head.style.cssText = 'margin-bottom:16px;'
+        head.innerHTML = '<div style="font-size:24px;font-weight:700;color:var(--dsw-alias-label-primary,#e8e8e6)">浏览器</div>' +
+          '<div style="font-size:13px;color:var(--dsw-alias-label-tertiary,#8b8b88);margin-top:4px">平台登录态（独立浏览器窗口 · 各平台独立分区）——登录后点「导出登录态」，参考视频下载即可用登录信息下载</div>'
+        root.appendChild(head)
+
+        const cookieRow = document.createElement('div')
+        cookieRow.style.cssText = 'display:flex;gap:10px;align-items:flex-start;margin-bottom:16px;'
+        const cookieBtn = document.createElement('button')
+        cookieBtn.type = 'button'
+        cookieBtn.textContent = '导出登录态'
+        cookieBtn.style.cssText = 'height:32px;padding:0 16px;border-radius:8px;border:none;background:#4f7cff;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0;'
+        const cookieInfo = document.createElement('span')
+        cookieInfo.style.cssText = 'font-size:12px;color:var(--dsw-alias-label-tertiary,#8b8b88);word-break:break-all;align-self:center;'
+        cookieBtn.onclick = async () => {
+          if (!bridge) { cookieInfo.textContent = '桌面桥不可用（需完整壳）'; return }
+          cookieInfo.textContent = '导出中…'
+          try {
+            const counts = await bridge.exportCookies()
+            const st = await bridge.loginStatus()
+            const parts = Object.entries(counts).filter(([, n]) => n > 0).map(([p, n]) => `${p}:${n}`).join('  ')
+            cookieInfo.textContent = `已导出 → ${parts || '（各平台均未登录）'}\n目录：${st.cookiesDir}`
+          } catch (e) { cookieInfo.textContent = `导出失败：${(e && e.message) || e}` }
+        }
+        cookieRow.appendChild(cookieBtn)
+        cookieRow.appendChild(cookieInfo)
+        root.appendChild(cookieRow)
+
+        // 抖店工作台入口（fxg 分区不进平台组——SRC 同；自动上架载体，2026-09-25）
+        const fxgRow = document.createElement('div')
+        fxgRow.style.cssText = 'display:flex;gap:10px;align-items:center;margin-bottom:16px;'
+        const fxgBtn = document.createElement('button')
+        fxgBtn.type = 'button'
+        fxgBtn.textContent = '打开抖店工作台'
+        fxgBtn.style.cssText = 'height:32px;padding:0 16px;border-radius:8px;border:0.5px solid var(--dsw-alias-border-l4,#555);background:var(--dsw-alias-bg-layer-2,#1e1e20);color:var(--dsw-alias-label-primary,#e8e8e6);font:inherit;font-size:13px;font-weight:600;cursor:pointer;'
+        fxgBtn.onclick = async () => {
+          if (!bridge) return
+          fxgBtn.disabled = true
+          try { const r = await bridge.open('fxg'); fxgBtn.textContent = r && r.ok ? '已打开 ✓' : '打开失败' } catch (e) { fxgBtn.textContent = '打开失败' }
+          setTimeout(() => { fxgBtn.disabled = false; fxgBtn.textContent = '打开抖店工作台' }, 2000)
+        }
+        fxgRow.appendChild(fxgBtn)
+        root.appendChild(fxgRow)
+        // 抽取结果区（2026-09-25 平台 DOM 抽取移植：SRC browser:extractDOM 结果展示）
+        const extractBox = document.createElement('div')
+        extractBox.style.cssText = 'display:none;margin-bottom:16px;padding:12px 14px;border-radius:10px;background:var(--dsw-alias-bg-layer-2,#1e1e20);border:0.5px solid var(--dsw-alias-border-l4,#555);max-height:320px;overflow:auto;'
+        const extractTitle = document.createElement('div')
+        extractTitle.style.cssText = 'font-size:13px;font-weight:700;color:var(--dsw-alias-label-primary,#e8e8e6);margin-bottom:6px;'
+        const extractBody = document.createElement('pre')
+        extractBody.style.cssText = 'margin:0;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary,#c6c6c4);white-space:pre-wrap;word-break:break-all;font-family:inherit;'
+        extractBox.appendChild(extractTitle)
+        extractBox.appendChild(extractBody)
+        root.appendChild(extractBox)
+
+        function showExtractResult(platformName, result) {
+          extractBox.style.display = 'block'
+          if (result && result.ok) {
+            extractTitle.textContent = `${platformName} · 抽取成功`
+            let data = result.data
+            try { data = JSON.stringify(data, null, 2) } catch { /* 原样展示 */ }
+            extractBody.textContent = String(data).slice(0, 4000)
+          } else {
+            const err = (result && result.error) || {}
+            extractTitle.textContent = `${platformName} · 抽取失败（${err.type || '?'}）`
+            extractBody.textContent = `${err.message || '抽取失败'}${err.hint ? '\n提示：' + err.hint : ''}`
+          }
+        }
+
+        async function extractPlatform(p) {
+          if (!bridge) { extractBox.style.display = 'block'; extractTitle.textContent = '抽取失败'; extractBody.textContent = '桌面桥不可用（需完整壳）'; return }
+          extractBox.style.display = 'block'
+          extractTitle.textContent = `${p.name} · 抽取中…`
+          extractBody.textContent = '打开独立浏览器窗口并解析当前页面…'
+          try {
+            // 先开窗口（未打开时抽取报 NOT_ATTACHED），再抽取
+            const open = await bridge.open(p.id)
+            if (!(open && open.ok)) { showExtractResult(p.name, { ok: false, error: { type: 'NOT_ATTACHED', message: '打开浏览器窗口失败', hint: (open && open.error) || '' } }); return }
+            const result = await bridge.extractDOM(p.id)
+            showExtractResult(p.name, result)
+          } catch (e) { showExtractResult(p.name, { ok: false, error: { type: 'EXTRACTOR_ERROR', message: String((e && e.message) || e) } }) }
+        }
+
+        const grid = document.createElement('div')
+        grid.style.cssText = 'display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));'
+        root.appendChild(grid)
+
+        // ── 扩展管理区（2026-09-25 ext-manager 移植：内置预装 + crx/zip 安装/卸载）──
+        const extBox = document.createElement('div')
+        extBox.style.cssText = 'margin-top:8px;padding:14px 16px;border-radius:10px;background:var(--dsw-alias-bg-layer-2,#1e1e20);border:0.5px solid var(--dsw-alias-border-l4,#555);'
+        const extHead = document.createElement('div')
+        extHead.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:8px;'
+        extHead.innerHTML = '<span style="font-size:14px;font-weight:700;color:var(--dsw-alias-label-primary,#e8e8e6)">浏览器扩展</span>'
+        const extListEl = document.createElement('div')
+        extListEl.style.cssText = 'display:flex;flex-direction:column;gap:6px;'
+        const extInstallBtn = document.createElement('button')
+        extInstallBtn.type = 'button'
+        extInstallBtn.textContent = '安装扩展（crx/zip）'
+        extInstallBtn.style.cssText = 'height:30px;margin-left:auto;padding:0 12px;border-radius:8px;border:0.5px solid var(--dsw-alias-border-l4,#555);background:var(--dsw-alias-bg-layer-3,#2a2a2c);color:var(--dsw-alias-label-primary,#e8e8e6);font:inherit;font-size:12px;font-weight:600;cursor:pointer;'
+        const extStatus = document.createElement('span')
+        extStatus.style.cssText = 'font-size:12px;color:var(--dsw-alias-label-tertiary,#8b8b88);'
+        extHead.appendChild(extStatus)
+        extHead.appendChild(extInstallBtn)
+        extBox.appendChild(extHead)
+        extBox.appendChild(extListEl)
+        root.appendChild(extBox)
+
+        function renderExtensions(list) {
+          extListEl.textContent = ''
+          for (const e of list) {
+            const row = document.createElement('div')
+            row.style.cssText = 'display:flex;align-items:center;gap:10px;font-size:13px;color:var(--dsw-alias-label-primary,#e8e8e6);'
+            const name = document.createElement('span')
+            name.textContent = `${e.name} v${e.version}${e.builtin ? '（预装）' : ''}`
+            name.title = e.description || ''
+            const spacer = document.createElement('span')
+            spacer.style.cssText = 'flex:1'
+            const op = document.createElement('button')
+            op.type = 'button'
+            op.style.cssText = 'height:26px;padding:0 10px;border-radius:6px;border:0.5px solid var(--dsw-alias-border-l4,#555);background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b88);font:inherit;font-size:12px;cursor:pointer;'
+            if (e.builtin) {
+              op.textContent = '预装'
+              op.disabled = true
+            } else {
+              op.textContent = '卸载'
+              op.onclick = async () => {
+                op.disabled = true
+                try {
+                  const r = await bridge.extensionUninstall(e.id)
+                  extStatus.textContent = r && r.success ? r.message : (r && r.message) || '卸载失败'
+                } catch (err) { extStatus.textContent = '卸载失败：' + String((err && err.message) || err) }
+                op.disabled = false
+              }
+            }
+            row.appendChild(name)
+            row.appendChild(spacer)
+            row.appendChild(op)
+            extListEl.appendChild(row)
+          }
+          if (!list.length) {
+            const empty = document.createElement('div')
+            empty.textContent = '暂无扩展'
+            empty.style.cssText = 'font-size:12px;color:var(--dsw-alias-label-tertiary,#8b8b88);'
+            extListEl.appendChild(empty)
+          }
+        }
+
+        // ── 下载与采集记录（2026-09-25 download-manager/media-storage 移植：记录展示 + 清空）──
+        const recordsBox = document.createElement('div')
+        recordsBox.style.cssText = 'margin-top:10px;padding:12px 14px;border-radius:10px;background:var(--dsw-alias-bg-layer-2,#1e1e20);border:0.5px solid var(--dsw-alias-border-l4,#555);'
+        const recordsHead = document.createElement('div')
+        recordsHead.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:6px;'
+        recordsHead.innerHTML = '<span style="font-size:14px;font-weight:700;color:var(--dsw-alias-label-primary,#e8e8e6)">下载与采集记录</span>'
+        const recordsClear = document.createElement('button')
+        recordsClear.type = 'button'
+        recordsClear.textContent = '清空记录'
+        recordsClear.style.cssText = 'height:26px;margin-left:auto;padding:0 10px;border-radius:6px;border:0.5px solid var(--dsw-alias-border-l4,#555);background:transparent;color:var(--dsw-alias-label-tertiary,#8b8b88);font:inherit;font-size:12px;cursor:pointer;'
+        const recordsList = document.createElement('div')
+        recordsList.style.cssText = 'display:flex;flex-direction:column;gap:4px;max-height:180px;overflow:auto;'
+        recordsHead.appendChild(recordsClear)
+        recordsBox.appendChild(recordsHead)
+        recordsBox.appendChild(recordsList)
+        root.appendChild(recordsBox)
+
+        function renderRecords(downloads, sniffed) {
+          recordsList.textContent = ''
+          const rows = [
+            ...downloads.slice(0, 30).map((d) => ({ text: '⬇ ' + (d.name || d.id) + '（' + (d.size ? (d.size / 1048576).toFixed(1) + 'MB' : '?') + '）' })),
+            ...sniffed.slice(0, 20).map((m) => ({ text: '◎ ' + (m.name || m.url) })),
+          ]
+          for (const row of rows) {
+            const el = document.createElement('div')
+            el.textContent = row.text
+            el.style.cssText = 'font-size:12px;color:var(--dsw-alias-label-secondary,#c6c6c4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+            recordsList.appendChild(el)
+          }
+          if (!rows.length) {
+            const empty = document.createElement('div')
+            empty.textContent = '暂无记录（抽取/下载后在此显示）'
+            empty.style.cssText = 'font-size:12px;color:var(--dsw-alias-label-tertiary,#8b8b88);'
+            recordsList.appendChild(empty)
+          }
+        }
+
+        async function refreshRecords() {
+          if (!bridge) return
+          try {
+            const dl = await bridge.mediaStorageGetDownloads()
+            const sn = await bridge.mediaStorageGetSniffed()
+            renderRecords((dl && dl.data) || [], (sn && sn.data) || [])
+          } catch { /* 桥不可用静默 */ }
+        }
+        recordsClear.onclick = async () => {
+          if (!bridge) return
+          try { await bridge.mediaStorageClearHistory({ type: "all" }); await refreshRecords() } catch { /* ignore */ }
+        }
+        extInstallBtn.onclick = async () => {
+          if (!bridge) { extStatus.textContent = '桌面桥不可用（需完整壳）'; return }
+          try {
+            const picked = await window.tintin.dialog.openFile({
+              title: '选择扩展包（crx/zip）',
+              filters: [{ name: '扩展包', extensions: ['crx', 'zip'] }],
+            })
+            if (!picked) return
+            extStatus.textContent = '安装中…'
+            const r = await bridge.extensionInstall(picked)
+            extStatus.textContent = (r && r.message) || (r && r.success ? '已安装' : '安装失败')
+          } catch (e) { extStatus.textContent = '安装失败：' + String((e && e.message) || e) }
+        }
+
+        const statusEls = new Map()
+        function paintStatus(counts) {
+          for (const [id, el] of statusEls) {
+            const n = counts[id]
+            el.textContent = n > 0 ? `已登录（${n} 条 cookie）` : '未登录'
+            el.style.color = n > 0 ? '#4ade80' : 'var(--dsw-alias-label-tertiary,#8b8b88)'
+          }
+        }
+
+        el.appendChild(root)
+        if (!bridge) {
+          cookieInfo.textContent = '桌面桥不可用（需完整壳，纯浏览器预览无此能力）'
+          return
+        }
+        void bridge.platforms().then(async (list) => {
+          platforms = Array.isArray(list) ? list : []
+          for (const p of platforms) {
+            const card = document.createElement('div')
+            // 入场 stagger + hover 抬升（SRC OtToolCard 口径，2026-09-25 动画层补齐）
+            card.className = 'tintin-grid-card tintin-stagger-item'
+            card.style.cssText = 'border-radius:14px;padding:16px;background:var(--dsw-alias-bg-layer-2,#1e1e20);border:0.5px solid var(--dsw-alias-border-l4,#555);display:flex;flex-direction:column;gap:8px;'
+            const title = document.createElement('div')
+            title.textContent = p.name
+            title.style.cssText = 'font-size:16px;font-weight:700;color:var(--dsw-alias-label-primary,#e8e8e6);'
+            const status = document.createElement('div')
+            status.textContent = '检测中…'
+            status.style.cssText = 'font-size:12px;color:var(--dsw-alias-label-tertiary,#8b8b88);'
+            statusEls.set(p.id, status)
+            const openBtn = document.createElement('button')
+            openBtn.type = 'button'
+            openBtn.textContent = '打开浏览器'
+            openBtn.style.cssText = 'height:32px;margin-top:2px;padding:0 14px;border-radius:8px;border:none;background:#4f7cff;color:#fff;font:inherit;font-size:13px;font-weight:600;cursor:pointer;align-self:flex-start;'
+            openBtn.onclick = async () => {
+              openBtn.disabled = true
+              openBtn.textContent = '打开中…'
+              try {
+                const r = await bridge.open(p.id)
+                openBtn.textContent = r && r.ok ? '已打开 ✓' : '打开失败'
+                if (!(r && r.ok)) cookieInfo.textContent = `打开失败：${(r && r.error) || '?'}`
+              } catch (e) { openBtn.textContent = '打开失败'; cookieInfo.textContent = `打开失败：${(e && e.message) || e}` }
+              setTimeout(() => { openBtn.disabled = false; openBtn.textContent = '打开浏览器' }, 2000)
+            }
+            card.appendChild(title)
+            card.appendChild(status)
+            // 按钮行：打开浏览器 + 抽取当前页（2026-09-25 平台 DOM 抽取移植）
+            const btnRow = document.createElement('div')
+            btnRow.style.cssText = 'display:flex;gap:8px;'
+            openBtn.style.marginTop = '2px'
+            const extractBtn = document.createElement('button')
+            extractBtn.type = 'button'
+            extractBtn.textContent = '抽取当前页'
+            extractBtn.style.cssText = 'height:32px;margin-top:2px;padding:0 14px;border-radius:8px;border:0.5px solid var(--dsw-alias-border-l4,#555);background:var(--dsw-alias-bg-layer-3,#2a2a2c);color:var(--dsw-alias-label-primary,#e8e8e6);font:inherit;font-size:13px;font-weight:600;cursor:pointer;'
+            extractBtn.onclick = () => {
+              extractBtn.disabled = true
+              extractBtn.textContent = '抽取中…'
+              void extractPlatform(p).finally(() => { extractBtn.disabled = false; extractBtn.textContent = '抽取当前页' })
+            }
+            btnRow.appendChild(openBtn)
+            btnRow.appendChild(extractBtn)
+            card.appendChild(btnRow)
+            grid.appendChild(card)
+          }
+          paintStatus((await bridge.loginStatus().catch(() => ({ counts: {} }))).counts)
+          // 扩展清单（ext-manager）+ 变更广播订阅（SRC browser:extensions-changed）
+          try {
+            const el = await bridge.extensionList()
+            renderExtensions((el && el.data && el.data.extensions) || [])
+          } catch { renderExtensions([]) }
+          bridge.onExtensionsChanged((payload) => { renderExtensions(payload.extensions) })
+          void refreshRecords()
+          void refreshRecords()
+        }).catch(() => { cookieInfo.textContent = '平台表加载失败（需完整壳）' })
       }
 
       function render() {
@@ -155,7 +492,8 @@ const tintinClient = (() => {
         btn.textContent = v.label
         btn.style.cssText =
           'appearance:none;font:inherit;font-size:13px;line-height:1;cursor:pointer;' +
-          'padding:9px 16px;border:0;background:transparent;'
+          'padding:9px 16px;border:0;background:transparent;' +
+          'transition:background .15s,color .15s,border-color .15s;'
         btn.onclick = () => { activeId = v.id; render() }
         bar.appendChild(btn)
       }
@@ -354,8 +692,53 @@ const tintinClient = (() => {
         put: (path, body, headers) => call('server:put', { path, body, headers }),
         delete: (path, params) => call('server:delete', { path, params }),
         upload: serverUpload,
-        // sse lands when a ported card needs it (job polling covers progress).
-        sse: () => Promise.reject(new Error('tintin sse not yet bridged (WP-2)')),
+        // SSE progress streams (2026-09-25, 封面制作卡首发)：渲染层 fetch 宿主
+        // 透传路由 /tintin/sse（宿主把上游 text/event-stream body 原样转发）。
+        // 解析语义对齐 SRC server:sse（L556-601）：只认 `data:` 行、[DONE] →
+        // {done:true}、JSON 解析失败透传原始字符串、流结束补 {done:true}。
+        // 退订 abort fetch → 宿主检测连接关闭销毁上游（SRC 只移除监听不关上游，
+        // 这里按更严格语义关连接）。服务端离线表现为非 2xx fetch → onError。
+        // 注意用具名 pump 而非 async IIFE 收尾——polyfill-coverage 审计以 IIFE
+        // 立即调用序列定位 server 块结束，块内注释/代码不得提前出现该序列。
+        sse: (path, onEvent, onError) => {
+          const ctrl = new AbortController()
+          const emit = typeof onEvent === 'function' ? onEvent : () => {}
+          const pump = async () => {
+            try {
+              const resp = await fetch(`/tintin/sse?path=${encodeURIComponent(path)}`, {
+                signal: ctrl.signal,
+                headers: { Accept: 'text/event-stream' },
+              })
+              if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
+              const reader = resp.body.getReader()
+              const decoder = new TextDecoder()
+              let buffer = ''
+              for (;;) {
+                const { done, value } = await reader.read()
+                if (done) break
+                buffer += decoder.decode(value, { stream: true })
+                const lines = buffer.split('\n')
+                buffer = lines.pop() ?? ''
+                for (const line of lines) {
+                  if (!line.startsWith('data:')) continue
+                  const data = line.slice(5).trim()
+                  if (data === '[DONE]') {
+                    emit({ done: true })
+                    try { await reader.cancel() } catch { /* already closed */ }
+                    return
+                  }
+                  try { emit(JSON.parse(data)) } catch { emit(data) }
+                }
+              }
+              emit({ done: true })
+            } catch (err) {
+              if (ctrl.signal.aborted) return
+              if (typeof onError === 'function') onError(err instanceof Error ? err : new Error(String(err)))
+            }
+          }
+          pump().catch(() => { /* pump 已自捕获；兜底 onError 自身抛错 */ })
+          return () => ctrl.abort()
+        },
 
         // ── 命名通道（对照源 preload server 域逐个映射，2026-09-23 WP-1 续）──
         // 三类：HTTP 封装（方法+路径）、multipart 上传封装（File/Blob 进
@@ -413,6 +796,26 @@ const tintinClient = (() => {
         ttsSaveAudio: (p) => call('tts:saveAudio', { args: [p] }),
         audioLibraryUpload: (p) => call('audio:libraryUpload', { args: [p] }),
         downloadResult: (path, savePath) => call('server:downloadResult', { args: [path, savePath] }),
+        // 音频生成域三通道（2026-09-25 随音频生成卡出清 PENDING 白名单）：下载临时/
+        // 归档落盘走宿主 httpRequest+fs（渲染层无请求能力），BGM 入库 multipart 由
+        // 宿主读盘组装（相对 URL 的服务端基址解析在宿主 downloadTemp/archiveGen 内，
+        // 生成结果的 /output 改写由 useAudioGen.toAbsolute 承担）。
+        audioDownloadTemp: (p) => call('audio:downloadTemp', { args: [p] }),
+        audioArchiveGen: (p) => call('audio:archiveGen', { args: [p] }),
+        audioBgmUpload: (p) => call('audio:bgmUpload', { args: [p] }),
+        // 图像抠图域（2026-09-25 随卡片启用补映射，SRC preload rembg 域）：
+        // 模型列表走通用 GET，SRC rembg:models 的 {models} 归一化在此复刻
+        // （离线 null/失败 → 组件用静态兜底，ImageMatting onMounted 同口径）；
+        // 抠图提交是「multipart 上传 + 二进制 PNG 回包」，浏览器读不了 {path}
+        // 本地文件、JSON 桥也驮不动二进制（字体冻结教训 5ee336c）——转发宿主
+        // rembg:submit（读盘组 multipart、PNG 落盘原图旁、返 {path,bytes}）。
+        // 上传进度事件不落桥（同 montage:split 口径），上传指示停在排队态直到完成。
+        mattingModels: async () => {
+          const res = await call('server:get', { path: '/matting/models' })
+          const list = Array.isArray(res) ? res : (res && Array.isArray(res.models) ? res.models : [])
+          return { models: list }
+        },
+        rembgSubmit: (p, _onProgress) => call('rembg:submit', { args: [p] }),
         // 服务端任务进度轮询（SRC tasks:progress → GET /tasks/{id}）
         tasksProgress: (id) => call('server:get', { path: `/tasks/${encodeURIComponent(String(id ?? ''))}` }),
         tasksUnifiedItem: (id) => call('server:get', { path: `/tasks/unified/${encodeURIComponent(String(id ?? ''))}` }),
@@ -446,6 +849,12 @@ const tintinClient = (() => {
             // 不了盘——转发宿主 montage:split 通道由宿主读盘组 multipart
             // （此前 JSON.stringify 成字符串上传，服务端 422 Expected UploadFile）。
             montageSplit: (p, _onProgress) => call('montage:split', { args: [p] }),
+            // Step2-4 本地合成族（2026-09-25 出清 PENDING：宿主 final-ipc.js 通道已就绪）
+            trimEdgeClips: (p) => call('montage:trimEdgeClips', { args: [p] }),
+            montageConcatClips: (p) => call('montage:concatClips', { args: [p] }),
+            montageValidateFinal: (path) => call('montage:validateFinal', { args: [{ path }] }),
+            montageDeleteBadFinal: (path) => call('montage:deleteBadFinal', { args: [{ path }] }),
+            clearMontageCache: (dir) => call('montage:clearCache', { args: [{ dir }] }),
             montageConcat: uploadNamed('/montage/concat'),
             montageBgm: uploadNamed('/montage/bgm'),
             promptVideo: uploadNamed('/prompt/video'),
@@ -508,7 +917,16 @@ const tintinClient = (() => {
         },
         // 浏览器无保存对话框：恒 null（=取消）。a[download] 拿不到用户选择的
         // 目标路径，消费端按路径继续本地 ffmpeg 流程，假路径只会后移失败点。
-        saveFile: async () => null,
+        // 2026-09-25（音频生成卡行内下载）：桌面壳原生保存对话框可用时转发
+        // （dialog.showSaveDialog 经 dshDesktopSaveFilePicker 桥，模式同
+        // dshDesktopDirectoryPicker）；桥缺失（纯浏览器/旧壳）保持 null=取消。
+        saveFile: async (params) => {
+          try {
+            const picked = await window.dshDesktopSaveFilePicker?.pick?.(params)
+            if (typeof picked === 'string' && picked) return picked
+          } catch { /* 桥缺失/异常走取消 */ }
+          return null
+        },
         // 渲染层无 fs 遍历能力：转发宿主 dialog:collectVideos（递归收集目录内
         // 视频，自然序排序；2026-09-24 用户报障”拖入文件夹只进文件夹本身”——
         // 此前此处恒 []，渲染层回退把目录路径当素材推入）。
@@ -527,7 +945,11 @@ const tintinClient = (() => {
           if (/^https?:\/\//i.test(s)) { window.open(s, '_blank', 'noopener'); return Promise.resolve({ ok: true }) }
           return call('shell:openItem', { args: [s] })
         },
-        revealInFolder: () => {},
+        // 2026-09-25 补实：转发宿主 shell:revealInFolder（Windows explorer
+        // /select、macOS open -R、Linux 打开所在目录）。源调用点为
+        // fire-and-forget 锦上添花动作，catch 掉避免 void 调用点 unhandled
+        // rejection 噪音。
+        revealInFolder: (path) => call('shell:revealInFolder', { args: [path] }).catch(() => {}),
         showNotification: (title, body) => {
           try {
             if (typeof Notification === 'function') void new Notification(String(title ?? ''), { body: String(body ?? '') })
@@ -540,6 +962,18 @@ const tintinClient = (() => {
       // catch/兜底显示（时长列 —、缩略图占位等），不阻断向导。
       const ffmpeg = namespaced('ffmpeg', {})
       const liveclip = namespaced('liveclip', {})
+      // ── ytdlp：参考视频下载门（2026-09-25 随卡移植，SRC preload ytdlp 域）──
+      // 策略在宿主 lib/ytdlp-logic.js、I/O 在 lib/ytdlp.js；cookies 由壳层浏览器
+      // 引擎导出到交接目录后宿主自动前置 --cookies。进度事件不落桥（同
+      // montage:split 口径）：download 阻塞到终态，onProgress 返回 no-op 退订
+      // 保持源调用点 off() 语义。
+      const ytdlp = namespaced('ytdlp', {
+        status: () => call('ytdlp:status', { args: [] }),
+        probe: (payload) => call('ytdlp:probe', { args: [payload] }),
+        download: (payload) => call('ytdlp:download', { args: [payload] }),
+        saveAs: (payload) => call('ytdlp:saveAs', { args: [payload] }),
+        onProgress: () => () => {},
+      })
 
       // ── env.log：渲染层业务日志回流 host（C-6 闭环，2026-09-23 补）──────
       // 源链路 clientError → env:log IPC → logger.logError → 落盘+服务端上报；
@@ -563,6 +997,25 @@ const tintinClient = (() => {
         cacheDir: () => call('env:cacheDir', { args: [] }),
         // 清空固定缓存目录内容（设置卡「本地配置 → 立即清理」用）。
         clearCache: () => call('env:clearCache', { args: [] }),
+        // 机器码（SRC env:getMachineId 契约 {ok,machineId}）——产品资料域以它拼
+        // /api/product-library/clients/<machine_id> 路径（与 X-Machine-ID 头同值）。
+        getMachineId: () => call('env:getMachineId', { args: [] }),
+      })
+
+      // ── media：预览解锁（2026-09-25 图像抠图卡引入）─────────────────────
+      // /tintin/media 白名单根只覆盖缓存/工作区，用户自选目录的文件（原图与
+      // 落盘在原图旁的抠图结果）预览需先经 media:unlock 单文件登记（存在性
+      // 校验，宿主侧 FIFO 上限）。unlock 永不 reject——调用点全部 fire-and-forget。
+      const media = namespaced('media', {
+        unlock: (p) => call('media:unlock', { args: [p] }).catch(() => {}),
+      })
+
+      // ── context：会话上下文条 → 工作区 task.json（WP-5b，2026-09-25）────
+      // 不改 dsh 底层的业务上下文注入：上下文条（conversation.input.accessory
+      // slot）选中产品/素材/脚本后调用；宿主派生路径（TINTIN_WORKSPACE_DIR 或
+      // Documents\tintin-workspace）并防御解析，agent 经自带 read 工具消费。
+      const context = namespaced('context', {
+        writeTask: (task) => call('context:writeTask', { args: [task] }),
       })
 
       window.tintin = {
@@ -572,7 +1025,10 @@ const tintinClient = (() => {
         shell,
         ffmpeg,
         liveclip,
+        ytdlp,
         env,
+        media,
+        context,
       }
       console.info('[tintin] window.tintin polyfill installed')
     }

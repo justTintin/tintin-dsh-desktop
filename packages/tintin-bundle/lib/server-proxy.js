@@ -73,7 +73,9 @@ export function makeFixGenUrls(fixOutputUrl) {
  * path string in the dispatch layer (铁律 6).
  */
 export const API_ENDPOINTS = {
-  health: { capabilities: '/health/capabilities', check: '/health/check' },
+  // capabilities：服务端从未实现（声明即 404 陷阱），2026-09-25 移除；
+  // 首启探测实际依赖 check + llm.models
+  health: { check: '/health/check' },
   stats: { workbench: '/stats/workbench' },
   llm: { chatCompletions: '/llm/chat/completions', adjustCopywriting: '/script/adjust-copywriting', list: '/script/list', models: '/llm/models' },
   copywriting: { voiceover: '/copywriting/voiceover' },
@@ -94,15 +96,11 @@ export const API_ENDPOINTS = {
   vision: { reversePrompt: '/vision/reverse-prompt' },
   digitalHuman: { generate: '/digital-human/generate', listModels: '/digital-human/models' },
   storyboard: { scripts: '/api/storyboard/scripts', scriptItem: (id) => `/api/storyboard/scripts/${id}` },
+  // /agent/* 编排已于 2026-09-25 服务端退役（chat/tasks/sessions/artifacts 全部
+  // 下线，调用一律 404）；仅能力目录 registry 保留（MCP 与仪表盘仍在消费，
+  // 后续 P2 defineTool 工具化的数据源）。与 SRC 的 API_PATHS 同步在此处有意分叉。
   agent: {
-    registry: '/agent/registry', agents: '/agent/agents', tasks: '/agent/tasks',
-    taskItem: (id) => `/agent/tasks/${id}`, taskConfirm: (id) => `/agent/tasks/${id}/confirm`,
-    taskPause: (id) => `/agent/tasks/${id}/pause`, taskResume: (id) => `/agent/tasks/${id}/resume`,
-    taskRetry: (id) => `/agent/tasks/${id}/retry`, taskCancel: (id) => `/agent/tasks/${id}/cancel`,
-    artifacts: '/agent/artifacts', taskArtifacts: (id) => `/agent/tasks/${id}/artifacts`,
-    chat: '/agent/chat', sessions: '/agent/sessions', sessionItem: (id) => `/agent/sessions/${id}`,
-    sessionAttachments: (id) => `/agent/sessions/${id}/attachments`,
-    sessionAttachmentItem: (id, key) => `/agent/sessions/${id}/attachments/${key}`,
+    registry: '/agent/registry',
   },
   tasks: {
     list: '/tasks', unifiedList: '/tasks/unified', unifiedItem: (id) => `/tasks/unified/${id}`,
@@ -216,12 +214,61 @@ export function createHttpRequest({ getServerUrl, getMachineId, log = () => {}, 
 }
 
 /**
+ * Open a raw SSE upstream (SRC server:sse transport half, L556-601): GET with
+ * Accept: text/event-stream + X-Machine-ID, resolving with the response
+ * stream so the host route pipes it to the browser verbatim. 2xx resolves;
+ * non-2xx buffers the body snippet and rejects with err.status. No request
+ * timeout — event streams are long-lived; the caller destroys the stream to
+ * close (browser disconnect / unsubscribe).
+ */
+export function createOpenSseStream({ getServerUrl, getMachineId, log = () => {}, warn = () => {} } = {}) {
+  return function openSseStream(fullPath) {
+    return new Promise((resolve, reject) => {
+      const baseUrl = getServerUrl()
+      const url = new URL(fullPath.startsWith('http') ? fullPath : baseUrl + fullPath)
+      try { log('http', `→ SSE ${fullPath}`) } catch { /* ignore */ }
+      const isHttps = url.protocol === 'https:'
+      const lib = isHttps ? https : http
+      const req = lib.request({
+        hostname: url.hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: url.pathname + url.search,
+        method: 'GET',
+        headers: {
+          Accept: 'text/event-stream',
+          'X-Machine-ID': getMachineId(),
+          'Cache-Control': 'no-cache',
+        },
+      }, (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(res)
+          return
+        }
+        const chunks = []
+        res.on('data', (c) => chunks.push(c))
+        res.on('end', () => {
+          const bodySnippet = Buffer.concat(chunks).toString('utf-8').slice(0, 300)
+          try { warn('http', `✗ SSE ${fullPath} ${res.statusCode}`) } catch { /* ignore */ }
+          const err = new Error(`HTTP ${res.statusCode}${bodySnippet ? `：${bodySnippet}` : ''}`)
+          err.status = res.statusCode
+          reject(err)
+        })
+      })
+      req.on('error', (err) => {
+        try { warn('http', `✗ SSE ${fullPath} ${err && (err.code || err.message) || err}`) } catch { /* ignore */ }
+        reject(err)
+      })
+      req.end()
+    })
+  }
+}
+
+/**
  * 判定是否为"外部服务未部署/不可达"的正常错误，这类错误不打主进程堆栈
  * (SRC server-proxy.js isExpectedOfflineError, L455-464 — verbatim; the
  * montage voice/final channels inject this to mirror the offline-returns-null
  * contract of voice:fonts / fancy:serverTemplates / lut:list).
- */
-export function isExpectedOfflineError(err) {
+ */export function isExpectedOfflineError(err) {
   const code = err && (err.code || err.message)
   if (!code) return false
   const offlineCodes = ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH']

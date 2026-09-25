@@ -55,14 +55,29 @@ async function fixture(prepareError, waitForPrepare) {
     expect(button, label).toBeDefined();
     await act(async () => button.click());
   }
-  async function upload(file) {
+  /** mode='terminal'（默认）：等上传管线 UI 终态（成功=弹窗预览图 / 失败=[role=alert]）；
+   *  mode='prepare'：只等 template/prepare 被记录——供"prepare 挂起时切会话"类用例，
+   *  其被测行为本身就不到达 UI 终态。原先两种场景共用固定 sleep 20ms，全量并行
+   *  负载下会先于异步链完成，断言竞态偶败（2026-09-25 Release Builder 门禁实测）。 */
+  async function upload(file, mode = 'terminal') {
     const input = container.querySelector('input[type=file]');
     Object.defineProperty(input, 'files', { configurable: true, value: [file] });
     await act(async () => {
       input.dispatchEvent(new Event('change', { bubbles: true }));
-      // FileReader dispatches on a later DOM task.
-      await new Promise(resolve => setTimeout(resolve, 20));
+      // 留出 FileReader→prepare 异步链的记录窗口（act 退出时统一冲刷渲染）。
+      await new Promise(resolve => setTimeout(resolve, 50));
     });
+    if (mode === 'prepare') {
+      await vi.waitFor(() => expect(calls.some(call => call.endpoint === 'template/prepare')).toBe(true), { timeout: 10_000 });
+      return;
+    }
+    // act 退出已冲刷渲染；等 UI 终态出现
+    await vi.waitFor(
+      () => expect(
+        container.querySelector('dialog[open] img') || container.querySelector('[role=alert]'),
+      ).toBeTruthy(),
+      { timeout: 10_000 },
+    );
   }
   return { calls, click, upload, choose, hold(endpoint) { let release; waits.set(endpoint, new Promise(resolve => release = resolve)); return async () => { await act(async () => { waits.delete(endpoint); release(); }); }; }, failNext(endpoint, message) { failures.set(endpoint, message); }, async switchSession() { sessionId = 'session-b'; await act(async () => render()); } };
 }
@@ -168,7 +183,7 @@ it('cancels an upload completed after switching sessions and keeps the new sessi
   let complete;
   const pending = new Promise(resolve => complete = resolve);
   const f = await fixture(undefined, pending);
-  await f.upload(new File(['source'], 'Company.pptx'));
+  await f.upload(new File(['source'], 'Company.pptx'), 'prepare');
   expect(f.calls.some(call => call.endpoint === 'template/prepare')).toBe(true);
   await f.switchSession();
   await act(async () => { complete(); await pending; });

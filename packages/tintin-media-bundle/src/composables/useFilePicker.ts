@@ -41,6 +41,10 @@ export function useFilePicker(opts: UseFilePickerOptions) {
   function setFile(path: string): void {
     filePath.value = path
     fileName.value = path.split(/[\\/]/).pop() || path
+    // 用户显式选择的文件可能在工作区/缓存白名单之外（桌面等），预览走
+    // /tintin/media 前先经宿主 media:unlock 单文件登记（fire-and-forget，
+    // 2026-09-25 图像抠图卡引入；宿主侧存在性校验 + FIFO 上限）。
+    void window.tintin?.media?.unlock?.(path)
     opts.onPicked?.(path)
   }
 

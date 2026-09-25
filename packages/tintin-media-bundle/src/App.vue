@@ -2,7 +2,8 @@
 // 媒体工具视图根组件（WP-3）：分组卡片网格 + 内嵌工具展开（全页视图，非弹窗）。
 // 2026-09-24 用户裁决：分组对齐原客户端 views/MediaTools.vue（文案脚本模板/图形/
 // 音频/视频 四组；智能混剪按 A1 裁决永久不移植故不列卡）；未移植卡以「建设中」
-// 角标占位（不可点，恢复一张加一张卡）。已可用：文案混剪、剪映模板、声音克隆。
+// 角标占位（不可点，恢复一张加一张卡）。已可用：文案混剪、剪映模板、声音克隆、
+// 图像抠图、音频生成、参考视频下载（2026-09-25 用户裁决随产品资料批次移植）。
 import { computed, onMounted, ref } from 'vue'
 import CopywritingMontage from './components/media-tools/copywriting-montage/CopywritingMontage.vue'
 // 剪映模板卡启用（2026-09-24 用户裁决：去掉「建设中」，可用）：组/子类目两级浏览 +
@@ -10,6 +11,18 @@ import CopywritingMontage from './components/media-tools/copywriting-montage/Cop
 import JianYingTemplates from './components/media-tools/JianYingTemplates.vue'
 // 声音克隆（2026-09-24 用户裁决移植）：样本库/Qwen3 音色/克隆合成/批量克隆
 import VoiceClone from './components/media-tools/VoiceClone.vue'
+// 图像抠图（2026-09-25 用户裁决移植）：POST /matting 同步抠图，PNG 落盘原图旁
+import ImageMatting from './components/media-tools/ImageMatting.vue'
+// 音频生成（2026-09-25 用户裁决移植）：音频库列表（语义搜索/分类/试听/下载/删除）
+// + BGM/音效生成（生成即归档本地 + 一键入库）
+import AudioGen from './components/media-tools/AudioGen.vue'
+// 参考视频下载（2026-09-25 用户裁决移植）：YouTube/Bilibili 链接解析 → 档位下载
+// （yt-dlp 门 + 浏览器登录态 cookies）
+import VideoDownload from './components/media-tools/VideoDownload.vue'
+// 封面制作（2026-09-25 用户裁决移植）：图层编辑 → /workflow/run + SSE 进度 →
+// 结果画廊；AI 文案（/llm/chat/completions）可用，「开始生成」待服务端补
+// cover 工作流端点（组件头注登记实测缺口）
+import CoverMaker from './components/media-tools/CoverMaker.vue'
 
 interface ToolCard {
   id: string
@@ -33,14 +46,14 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
   {
     group: '图形',
     tools: [
-      { id: 'cover-design', title: '封面制作', desc: '商品封面图快速制作', emoji: '🎨', accent: 'linear-gradient(135deg,#EC4899 0%,#F43F5E 100%)', disabled: true },
-      { id: 'image-matting', title: '图像抠图', desc: '智能抠图 / 去除背景', emoji: '✂️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#06B6D4 100%)', disabled: true },
+      { id: 'cover-design', title: '封面制作', desc: '商品封面图快速制作', emoji: '🎨', accent: 'linear-gradient(135deg,#EC4899 0%,#F43F5E 100%)' },
+      { id: 'image-matting', title: '图像抠图', desc: '智能抠图 / 去除背景', emoji: '✂️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#06B6D4 100%)' },
     ],
   },
   {
     group: '音频',
     tools: [
-      { id: 'audio-gen', title: '音频生成', desc: 'AI 生成 BGM / 音效，一键入库', emoji: '🔊', accent: 'linear-gradient(135deg,#14B8A6 0%,#0EA5E9 100%)', disabled: true },
+      { id: 'audio-gen', title: '音频生成', desc: 'AI 生成 BGM / 音效，一键入库', emoji: '🔊', accent: 'linear-gradient(135deg,#14B8A6 0%,#0EA5E9 100%)' },
       { id: 'voice-clone', title: '声音克隆', desc: '克隆音色生成配音', emoji: '🎵', accent: 'linear-gradient(135deg,#8B5CF6 0%,#EC4899 100%)' },
     ],
   },
@@ -52,7 +65,7 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
       { id: 'live-slice', title: '直播切片', desc: '视频分析热点发现→切片与封面生成', emoji: '📡', accent: 'linear-gradient(135deg,#EF4444 0%,#DC2626 100%)', disabled: true },
       { id: 'video-repair', title: '视频修复', desc: '画质修复 / 工作流处理', emoji: '🛠️', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)', disabled: true },
       { id: 'subtitle-removal', title: '视频去水印字幕', desc: '去除字幕 / 台标水印', emoji: '🔤', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)', disabled: true },
-      { id: 'video-download', title: '参考视频下载', desc: '粘贴 YouTube/B 站 链接选档位下载', emoji: '⬇️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#6366F1 100%)', disabled: true },
+      { id: 'video-download', title: '参考视频下载', desc: '粘贴 YouTube/B 站 链接选档位下载', emoji: '⬇️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#6366F1 100%)' },
     ],
   },
 ]
@@ -78,65 +91,71 @@ onMounted(() => {
 <template>
   <!-- tintin-media-scope：搬运的 tokens/global css 的作用域根（见 src/styles/） -->
   <div class="tintin-media-scope root" :class="{ dark: isDark }">
-    <Transition name="tm-fade" mode="out-in">
-      <!-- ═══ 卡片网格 ═══ -->
-      <div v-if="!active" key="grid" class="page">
-        <div class="head">
-          <div class="title">媒体工具</div>
-          <div class="sub">选择需要执行的 AI 生产能力</div>
-        </div>
-        <div v-for="g in GROUPS" :key="g.group" class="group-block">
-          <div class="group-label">{{ g.group }}</div>
-          <div class="grid">
-            <button
-              v-for="t in g.tools"
-              :key="t.id"
-              type="button"
-              class="card"
-              :class="{ 'is-disabled': t.disabled }"
-              :style="{ '--card-accent': t.accent }"
-              :disabled="t.disabled"
-              @click="openTool(t)"
-            >
-            <span v-if="t.disabled" class="badge">即将上线</span>
-            <div class="card-top">
-              <div class="icon" :style="{ background: t.accent }"><span>{{ t.emoji }}</span></div>
-            </div>
-            <div class="card-title">{{ t.title }}</div>
-            <div class="card-desc">{{ t.desc }}</div>
-            <div class="card-foot">
-              <span class="arrow" aria-hidden="true">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M5 12h14" />
-                  <path d="M12 5l7 7-7 7" />
-                </svg>
-              </span>
-            </div>
-          </button>
+    <!-- ═══ 卡片网格 ═══ -->
+    <!-- 2026-09-25 用户报障「卡片返回后界面空白」：原 <Transition mode="out-in">
+         依赖过渡结束检测（transitionend + 双 rAF 换类），高合成器负载（卡片光晕
+         无限旋转）或帧饥饿时偶发停在 leave 阶段=整页空白。改为无 Transition 的
+         同步 v-if 交换 + 纯 CSS 入场动画（page-in）：结构上无离开阶段，不可能卡死。 -->
+    <div v-if="!active" class="page">
+      <div class="head">
+        <div class="title">媒体工具</div>
+        <div class="sub">选择需要执行的 AI 生产能力</div>
+      </div>
+      <div v-for="g in GROUPS" :key="g.group" class="group-block">
+        <div class="group-label">{{ g.group }}</div>
+        <div class="grid">
+          <button
+            v-for="t in g.tools"
+            :key="t.id"
+            type="button"
+            class="card"
+            :class="{ 'is-disabled': t.disabled }"
+            :style="{ '--card-accent': t.accent }"
+            :disabled="t.disabled"
+            @click="openTool(t)"
+          >
+          <span v-if="t.disabled" class="badge">即将上线</span>
+          <div class="card-top">
+            <div class="icon" :style="{ background: t.accent }"><span>{{ t.emoji }}</span></div>
           </div>
+          <div class="card-title">{{ t.title }}</div>
+          <div class="card-desc">{{ t.desc }}</div>
+          <div class="card-foot">
+            <span class="arrow" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14" />
+                <path d="M12 5l7 7-7 7" />
+              </svg>
+            </span>
+          </div>
+        </button>
         </div>
       </div>
+    </div>
 
-      <!-- ═══ 工具详情（同面板内嵌展开，非弹窗） ═══ -->
-      <div v-else key="detail" class="page">
-        <div class="bar">
-          <button type="button" class="back" @click="active = null">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M19 12H5" />
-              <path d="M12 19l-7-7 7-7" />
-            </svg>
-            返回媒体工具
-          </button>
-          <div class="bar-title">
-            <span class="bar-emoji">{{ activeTool?.emoji }}</span>
-            {{ activeTool?.title }}
-          </div>
+    <!-- ═══ 工具详情（同面板内嵌展开，非弹窗） ═══ -->
+    <div v-else class="page">
+      <div class="bar">
+        <button type="button" class="back" @click="active = null">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 12H5" />
+            <path d="M12 19l-7-7 7-7" />
+          </svg>
+          返回媒体工具
+        </button>
+        <div class="bar-title">
+          <span class="bar-emoji">{{ activeTool?.emoji }}</span>
+          {{ activeTool?.title }}
         </div>
-        <CopywritingMontage v-if="active === 'copywriting-montage'" />
-        <JianYingTemplates v-else-if="active === 'jianying-templates'" />
-        <VoiceClone v-else-if="active === 'voice-clone'" />
       </div>
-    </Transition>
+      <CopywritingMontage v-if="active === 'copywriting-montage'" />
+      <JianYingTemplates v-else-if="active === 'jianying-templates'" />
+      <VoiceClone v-else-if="active === 'voice-clone'" />
+      <CoverMaker v-else-if="active === 'cover-design'" />
+      <ImageMatting v-else-if="active === 'image-matting'" />
+      <AudioGen v-else-if="active === 'audio-gen'" />
+      <VideoDownload v-else-if="active === 'video-download'" />
+    </div>
   </div>
 </template>
 
@@ -150,7 +169,16 @@ onMounted(() => {
   padding: var(--space-6);
 }
 
-.page { display: flex; flex-direction: column; }
+/* 页面入场（2026-09-25 空白修复）：无 Transition 的同步 v-if 交换 + 纯 CSS
+   入场动画——离开零依赖，结构上不存在卡死点（原 out-in Transition 见上方注记） */
+.page {
+  display: flex;
+  flex-direction: column;
+  animation: page-in 0.2s var(--easing-out, cubic-bezier(0, 0, 0.2, 1));
+}
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(12px); }
+}
 
 .head { margin-bottom: var(--space-5); }
 .title { margin: 0 0 var(--space-1); font-size: 24px; font-weight: 700; line-height: 1.2; color: var(--foreground); }
@@ -168,6 +196,9 @@ onMounted(() => {
 .grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
 
 /* 卡片视觉对照源 MediaTools.vue（accent 光晕 + hover 毛玻璃），压缩到面板尺寸 */
+/* 入场 stagger + 光晕旋转（2026-09-25 用户报障「缺原客户端动画」补齐，
+   SRC OtToolCard/MediaTools 口径：stagger-in .35s + 35ms 步进、aurora-spin 8s；
+   backwards 填充：延迟期显示 from 态，播完交还 transform 给 hover 抬升） */
 .card {
   position: relative;
   display: flex;
@@ -180,10 +211,23 @@ onMounted(() => {
   border: none;
   border-radius: var(--radius-xl);
   cursor: pointer;
+  animation: card-in 0.35s var(--easing-out, cubic-bezier(0, 0, 0.2, 1)) backwards;
   transition:
     transform var(--duration-normal) var(--easing-default),
     box-shadow var(--duration-normal) var(--easing-default),
     background var(--duration-fast);
+}
+.grid .card:nth-child(1) { animation-delay: 0ms; }
+.grid .card:nth-child(2) { animation-delay: 35ms; }
+.grid .card:nth-child(3) { animation-delay: 70ms; }
+.grid .card:nth-child(4) { animation-delay: 105ms; }
+.grid .card:nth-child(5) { animation-delay: 140ms; }
+.grid .card:nth-child(6) { animation-delay: 175ms; }
+.grid .card:nth-child(7) { animation-delay: 210ms; }
+.grid .card:nth-child(8) { animation-delay: 245ms; }
+.grid .card:nth-child(n + 9) { animation-delay: 280ms; }
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(12px); }
 }
 .card::before {
   content: '';
@@ -195,6 +239,10 @@ onMounted(() => {
   filter: blur(40px);
   pointer-events: none;
   transition: opacity 0.4s;
+  animation: aurora-spin 8s linear infinite;
+}
+@keyframes aurora-spin {
+  to { transform: rotate(360deg); }
 }
 .card:hover::before { opacity: 0.16; }
 .card > * { position: relative; z-index: 1; }
@@ -279,12 +327,6 @@ onMounted(() => {
 .bar-emoji { font-size: 22px; line-height: 1; }
 
 /* 网格 ↔ 详情 切换（对照源 slide-up，缩短位移适配面板） */
-.tm-fade-enter-active,
-.tm-fade-leave-active {
-  transition: opacity 0.2s var(--easing-out), transform 0.2s var(--easing-out);
-}
-.tm-fade-enter-from { opacity: 0; transform: translateY(12px); }
-.tm-fade-leave-to { opacity: 0; transform: translateY(-6px); }
 </style>
 
 <style>

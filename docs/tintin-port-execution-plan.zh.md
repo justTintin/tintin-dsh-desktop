@@ -230,6 +230,11 @@ WP-5a 待做清单（已排期，非遗漏）：tintin 设置卡（服务器地�
 | harness UI 中文词典 | **后置项（A4 优先级裁决 2026-09-23：功能移植优先，词典不与功能移植抢资源、不进 P1 验收，启动时机由产品定；启动前置 = V14 结论）**。全界面翻译；中文术语表先行（session=会话/approval=审批/skill=技能/deliverable=交付物/preset=预设/workspace=工作区/profile=配置档…一次定表，词典/agent 输出/文档三处共用）；实现载体依 V14 结论（bundle 注册或 fork 层）；每次 dsh 升级补跟上游新增字符串 | 首版 5~8d + 升级跟版 |
 | 浏览器域 spike | webview 标签 vs 壳层 overlay 二选一验证（架构文档 §浏览器域三层形态） | 3~5d |
 | 浏览器域搬运 | 引擎近 1:1 进 `src/main/tintin/browser/` + 地基 loopback 门面 + 面板 UI | 10~15d |
+
+**浏览器域首片已落地（2026-09-25 用户裁决提前，驱动项=参考视频下载的 yt-dlp 登录态）**：
+顶部新增「浏览器」tab（chrome 原生面板：每平台登录态卡（cookie 条数）+ 打开独立浏览器窗口 + 导出登录态）；壳层引擎 `src/main/tintin/browser/`（platform-meta 一比一 + netscape-cookies 纯序列化 + browser-service 独立窗口引擎：单例 WebContentsView、close=hide 保登录态、cookies 导出 `<userData>/harness/tintin/browser/cookies/cookies_<platform>.txt`（导航后 2s 防抖/窗口隐藏/手动））+ preload `dshDesktopBrowser` 桥（platforms/open/loginStatus/exportCookies）。**spike 已裁决（2026-09-25 用户确认）：独立窗口胜出**——webview（需主窗口 webviewTag，安全面扩大）与主窗口 overlay（原生 view 盖页内弹窗、跨 tab 生命周期复杂）两实验形态已删除，主窗口 webviewTag 保持 false。
+**参考视频下载同日落地**：宿主 `lib/ytdlp-logic.js`（SRC 纯逻辑 1:1：白名单/参数/档位/错误分类）+ `lib/ytdlp.js` 宿主门（status/probe/download/saveAs；cookies 从壳层交接目录读、有文件才前置 `--cookies`；下载阻塞到终态、进度事件不落桥）+ polyfill `ytdlp` 命名空间 + `VideoDownload.vue`/`useVideoDownload` 1:1 + 卡启用（视频组）。**yt-dlp 随包分发**（2026-09-25 用户确认）：仓 `resources/bin/yt-dlp.exe`（2026.08.19）经既有 extraResources 整目录随包；builder 前置检查/自动补齐脚本已含 yt-dlp，产物校验已补 ffprobe/yt-dlp 两项（2026-09-25）。
+纯函数单测 `test/tintin-browser-platform.test.ts` + `test/tintin-ytdlp.test.ts`。**浏览器域后续**：extractors/ext-manager/download-manager/自动上架/热点采集、loopback 门面（agent 工具）。
 | 按需项 | 定时任务（schtasks 逻辑搬 host）、Office 预览导出、飞书、`/ollama` 低成本路由接入 | 各 1~3d |
 | 本地 AI 双模式 | 默认**缓议**：服务端在线为前提；确需离线再立项（架构文档 §4 缺失清单） | 另评估 |
 
@@ -239,6 +244,7 @@ WP-5a 待做清单（已排期，非遗漏）：tintin 设置卡（服务器地�
 - 工作台聊天 UI 不移植（harness 会话 UI 替代）；映射表见架构文档 §4。
 - **默认工作区（2026-09-23 用户裁决）**：运行时默认工作区 = 当前用户文档目录下 `C:\Users\Administrator\Documents\tintin-workspace`（按用户实际 Documents 路径派生，非硬编码绝对路径）。P0 经 RPC `workspace/create` 注册实现；WP-1/WP-5 落地为首启自动建目录 + 注册（含不存在时创建）。
 - **官方渠道切断（2026-09-23 实施，用户发现更新弹窗官方 v0.9.0 触发）**：① `desktop-service/index.ts checkDesktopUpdate` 直返 `{updateAvailable:false}`——上游策略服务器硬编码校验 feedUrl 为官方归档 URL（service.ts:134），本产品永远不可能合法经它更新，切断到策略层为止；② crash 遥测发往 dshdesktop.com 的同意弹窗改为静默丢弃（fork 数据不外流官方）；③ `build.publish` URL 换占位 `https://updates.tintin.example.com/desktop/`（inert，策略层切断后永不被请求）。**品牌清扫（同日）**：工作台侧栏名与会话首页徽标换上槽位（dsh-desktop-client-ui 不再引用上游 BrandWordmark/FishLogo，侧栏文字排版 "TinTin"、会话首页保留壳自有 window-mark）；壳内用户可见 "DSH Desktop" 字样清零（托盘/关于/恢复向导/错误框）；CI 产物与烟雾测试命名同步（release.yml，ModelScope 镜像仓 alexyaojin/dsh-desktop 为第三方托管仓保留）。配套测试更新：desktop-client-ui（槽位断言换品牌）、release（契约 fixture 换名）。**TinTin 真实更新端点接入属于 A3 发版前残留项**（届时换 strategy/feed/TERM 占位）。
+- **分发机游戏集成静默关闭（2026-09-25 用户裁决授权）**：安装器 customInstall 写三条用户级注册表（GameBar UseNexusForGameBarEnabled=0、GameConfigStore GameDVR_Enabled=0、GameDVR AppCaptureEnabled=0，HKCU 可逆免管理员），根治分发机精简 Xbox Game Bar 后启动应用弹 ms-gamingoverlay 商店搜索（系统游戏检测误判 Chromium/Electron 形态 + 手柄检测触发协议激活）。卸载不回写（恢复会复发弹窗）。见 build/installer.nsh。
 - 成本三通道与四条护栏见架构文档 §4.5；工具输出摘要化是 P2 工具的硬性验收项。
 - dsh 升级：跟 `latest`/`next` 通道、跳过 alpha（现状：已锁 next 的 `0.1.5-rc.3`）；流程 = 架构文档 §5 + 本仓库 `docs/harness-*-upgrade.md` runbook；每次升级加跑 V1~V3/V9 冒烟子集。**0.1.6 前瞻**（alpha.2 实测，升 0.1.6-rc 时复核）：`dsh-client-modules` 发现协议内部重构（526 行差异）是最大敞口，V3 冒烟第一项抓牢；`dsh-tools` 为 schema 演进式改动；webServer 路由/settings 面未动。
 
@@ -348,7 +354,7 @@ WP-5a 待做清单（已排期，非遗漏）：tintin 设置卡（服务器地�
 | --- | --- | --- | --- |
 | **智能混剪** | `VideoMontage.vue` + `MontageStep1-4Panel` + `composables/montage/*` | **废用（2026-09-23 裁决：永久不移植，产品入口标记过期废用；功能本就计划过期，以降低移植复杂度——用户说明）** | 剪映导出/花字/合成等共享纯逻辑模块随 WP-1 保留，供文案混剪等卡复用 |
 | 文案混剪 | `copywriting-montage/`（CopywritingMontage + CopywritingStep1-4Panel + CopywritingStoryboard + CopywritingBgmPickDialog，组件+composables 约 24 文件；2026-09-23 源仓库三连提交落定最终前缀） | **P1（2026-09-23 追加裁决：与剪映模板同为媒体首批两卡）** | "本地合成+剪映导出"重链路燃烧在 P1 完成；服务端合成按源项目 09-22 裁决暂停、本地 ffmpeg 直出为主 |
-| 音频生成 | `AudioGen.vue` | P2（2026-09-23 裁决移出 P1） | /tts、/audio |
+| 音频生成 | `AudioGen.vue` | **已移植（2026-09-25 用户裁决随产品资料批次）**：列表语义搜索/服务端分类过滤/试听/行内下载/删除 + BGM/音效生成（生成即归档 + 一键入库） | /tts、/audio；随卡出清 PENDING 三通道（downloadTemp/archiveGen/bgmUpload）；行内下载经新增桌面壳 save-file-picker 原生保存桥 |
 | 声音克隆 | `VoiceClone.vue` + `useVoiceCloneStudio` | P2（2026-09-23 裁决移出 P1） | 铁律起源案例，L4 回归重点 |
 | 视频转文字 | `VideoTranscribe.vue` | P2（2026-09-23 裁决移出 P1） | /asr + 转写队列 |
 | 分镜脚本创作 | `ops-tools/OtStoryboard.vue` | P2 | 搬运时归位 media 目录 |
@@ -356,8 +362,8 @@ WP-5a 待做清单（已排期，非遗漏）：tintin 设置卡（服务器地�
 | 仿爆款 | `ViralClone.vue` | P2 | /viral/clone 全家 |
 | 直播切片 | `LiveClip.vue` + `main/liveclip-ipc.js` | P2 | 本地重流水线 |
 | 视频去水印字幕 | `SubtitleRemoval.vue`（+VsrFrameScrubber） | P2 | /vsr |
-| 参考视频下载 | `VideoDownload.vue` + `main/ytdlp-*` | P2 | 本地重 |
-| 图像抠图 | `ImageMatting.vue` | P2 | /matting |
+| 参考视频下载 | `VideoDownload.vue` + `main/ytdlp-*` | **已移植（2026-09-25 用户裁决，随独立浏览器窗口）**：解析→档位下载→归一化→保存到本机 | 本地重；yt-dlp 登录态=浏览器 tab 分区导出 cookies |
+| 图像抠图 | `ImageMatting.vue` | **已移植（2026-09-25 用户裁决提前，随产品资料一并）**：/matting 同步契约，宿主 rembg:submit 落盘原图旁 | /matting；预览经 media:unlock 单文件登记 |
 | 封面制作（wip） | `CoverMaker.vue` | 缓议 | 产品定优先级 |
 | 视频修复（wip） | `VideoRepair.vue` | 缓议 | /vsr |
 | 花字（混剪内嵌能力） | `main/fancy-templates.js` + `resources/fancy/` | 随共享逻辑保留 | 呈现形态随文案混剪定 |
@@ -366,7 +372,7 @@ WP-5a 待做清单（已排期，非遗漏）：tintin 设置卡（服务器地�
 
 | 功能点 | 源 | 处置 | 备注 |
 | --- | --- | --- | --- |
-| 产品资料 + 文案面板 | `OtProductLibrary.vue` + `OtCopywritingPanel.vue` | P3 | /product-library 族 |
+| 产品资料 + 文案面板 | `OtProductLibrary.vue` + `OtCopywritingPanel.vue` | **已移植（2026-09-25 用户裁决提前于 P3，挂媒体包 'ops' 视图提供方）**：仓库同步/树/增删改/智能挖掘/全量挖掘/文案生成 | /product-library 族；Excel 导入导出仍待 SheetJS 批次；文案「前往分镜」写入 pendingStoryboard 信号（分镜卡 P2 消费） |
 | 图片反推提示词 | `media-tools/ReversePromptImage.vue` | P3 | /prompt/image，归位 ops 目录 |
 | 视频反推提示词 | `media-tools/ReversePromptVideo.vue` | P3 | /prompt/video，归位 ops 目录 |
 | 视频评价预测 | `OtVideoScore.vue` + `main/video-prediction-store.js` | P3 | 本地记录库搬 host 存储 |
@@ -420,7 +426,7 @@ WP-5a 待做清单（已排期，非遗漏）：tintin 设置卡（服务器地�
 
 | # | 事项 | 落点 | 状态 |
 | --- | --- | --- | --- |
-| B1 | `/tintin/ipc` 文件操作路由的路径白名单/沙箱（防穿越/任意读写） | WP-1 安全设计，L3 测试 | **必须补** |
+| B1 | `/tintin/ipc` 文件操作路由的路径白名单/沙箱（防穿越/任意读写） | WP-1 安全设计，L3 测试 | **必须补**（2026-09-25 注记：server:*/upload 已限 API 面；/tintin/media 白名单根 + `media:unlock` 用户显式单文件登记（FIFO 512）覆盖用户自选目录预览，登记只能由受信渲染层发起） |
 | B2 | 内网 HTTPS/自签证书下 provider 的 CA 信任 | P0-V11 前验证 | 未验 |
 | B3 | harness CSP 对插件注入样式/字体（iconfont）兼容 | 并入 WP-3 首周验证项 2 | 未验 |
 | B4 | 磁盘管理：合成产物/媒体缓存目录规划与清理策略 | WP-1 设计 | 未设计 |

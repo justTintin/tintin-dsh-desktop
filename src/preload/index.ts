@@ -155,6 +155,107 @@ contextBridge.exposeInMainWorld('dshDesktopDirectoryPicker', {
     ipcRenderer.invoke('directory-picker:open', typeof title === 'string' && title.trim() ? title.trim() : undefined)
 })
 
+// 2026-09-25 (TinTin port): native save dialog (audio-gen card row download;
+// SRC dialog:saveFile contract: title/defaultPath/filters → picked absolute
+// path, null on cancel). Guarded main-window-only in the main process.
+contextBridge.exposeInMainWorld('dshDesktopSaveFilePicker', {
+  pick: (options?: {
+    title?: string
+    defaultPath?: string
+    filters?: Array<{ name: string; extensions: string[] }>
+  }): Promise<string | null> => ipcRenderer.invoke('save-file-picker:open', options)
+})
+
+// 2026-09-25 (TinTin port): browser-domain engine seam (2026-09-25 用户裁决:
+// 独立窗口形态)。open = 打开/聚焦独立浏览器窗口并导航到平台 seed URL；
+// loginStatus = 各平台分区 cookie 条数（只读）；exportCookies = 分区 cookies
+// 写 Netscape 文件到 <userData>/harness/tintin/browser/cookies/（参考视频下载
+// yt-dlp 的登录态交接目录）。
+contextBridge.exposeInMainWorld('dshDesktopBrowser', {
+  platforms: (): Promise<Array<{ id: string; name: string; seedUrl: string }>> =>
+    ipcRenderer.invoke('browser:platforms'),
+  open: (platform: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('browser:open', platform),
+  loginStatus: (): Promise<{ counts: Record<string, number>; cookiesDir: string }> =>
+    ipcRenderer.invoke('browser:loginStatus'),
+  exportCookies: (): Promise<Record<string, number>> =>
+    ipcRenderer.invoke('browser:exportCookies'),
+  /** 运行平台抽取脚本（SRC browser:extractDOM 契约：成功 {ok,data}、失败 {ok:false,error:{type,message,hint}}） */
+  extractDOM: (platform: string): Promise<{ ok: boolean; data?: unknown; error?: { type: string; message: string; hint?: string } }> =>
+    ipcRenderer.invoke('browser:extractDOM', platform),
+  // ── 扩展管理（SRC browser:extension* 三通道 + 变更广播）──
+  extensionList: (): Promise<{ success: boolean; data?: { installed: boolean; extensions: Array<{ id: string; name: string; version: string; builtin?: boolean; description?: string }> } }> =>
+    ipcRenderer.invoke('browser:extensionList'),
+  extensionInstall: (filePath: string): Promise<{ success: boolean; data?: unknown; message: string }> =>
+    ipcRenderer.invoke('browser:extensionInstall', filePath),
+  extensionUninstall: (id: string): Promise<{ success: boolean; message: string }> =>
+    ipcRenderer.invoke('browser:extensionUninstall', id),
+  onExtensionsChanged: (cb: (payload: { extensions: Array<{ id: string; name: string; version: string }> }) => void): (() => void) => {
+    const listener = (_e: unknown, payload: { extensions: Array<{ id: string; name: string; version: string }> }): void => cb(payload)
+    ipcRenderer.on('browser:extensions-changed', listener)
+    return () => { ipcRenderer.removeListener('browser:extensions-changed', listener) }
+  },
+
+  // ── 下载管理（SRC downloads:* 四通道 + 进度广播订阅）──
+  downloadsStart: (params: { url: string; savePath?: string; referer?: string; headers?: Record<string, string> }): Promise<string> =>
+    ipcRenderer.invoke('downloads:start', params),
+  downloadsPause: (taskId: string): Promise<void> => ipcRenderer.invoke('downloads:pause', taskId),
+  downloadsResume: (taskId: string): Promise<void> => ipcRenderer.invoke('downloads:resume', taskId),
+  downloadsCancel: (taskId: string): Promise<void> => ipcRenderer.invoke('downloads:cancel', taskId),
+  onDownloadEvent: (handlers: {
+    progress?: (p: { taskId: string; state: string; percent: number; speed?: number; downloaded?: number; total?: number }) => void
+    done?: (p: { taskId: string; finalPath: string; size: number }) => void
+    error?: (p: { taskId: string; error: string }) => void
+  }): (() => void) => {
+    const onProgress = (_e: unknown, d: Parameters<NonNullable<typeof handlers.progress>>[0]): void => handlers.progress?.(d)
+    const onDone = (_e: unknown, d: Parameters<NonNullable<typeof handlers.done>>[0]): void => handlers.done?.(d)
+    const onError = (_e: unknown, d: Parameters<NonNullable<typeof handlers.error>>[0]): void => handlers.error?.(d)
+    if (handlers.progress) ipcRenderer.on('downloads:progress', onProgress)
+    if (handlers.done) ipcRenderer.on('downloads:done', onDone)
+    if (handlers.error) ipcRenderer.on('downloads:error', onError)
+    return () => {
+      if (handlers.progress) ipcRenderer.removeListener('downloads:progress', onProgress)
+      if (handlers.done) ipcRenderer.removeListener('downloads:done', onDone)
+      if (handlers.error) ipcRenderer.removeListener('downloads:error', onError)
+    }
+  },
+
+  // ── 媒体记录存储（SRC media:storage* 九通道）──
+  mediaStorageGetSniffed: (): Promise<{ success: boolean; data?: unknown[] }> => ipcRenderer.invoke('media:storageGetSniffed'),
+  mediaStorageSaveSniffed: (list: unknown[]): Promise<{ success: boolean; count?: number }> => ipcRenderer.invoke('media:storageSaveSniffed', list),
+  mediaStorageGetDownloads: (): Promise<{ success: boolean; data?: unknown[] }> => ipcRenderer.invoke('media:storageGetDownloads'),
+  mediaStorageSaveDownloads: (list: unknown[]): Promise<{ success: boolean; count?: number }> => ipcRenderer.invoke('media:storageSaveDownloads', list),
+  mediaStorageExport: (opts: { format?: string; path?: string }): Promise<{ success: boolean; path?: string; count?: number }> => ipcRenderer.invoke('media:storageExport', opts),
+  mediaStorageImport: (opts: { path: string }): Promise<{ success: boolean; sniffedImported?: number; downloadsImported?: number }> => ipcRenderer.invoke('media:storageImport', opts),
+  mediaStorageClearHistory: (opts: { type: string }): Promise<{ success: boolean; cleared?: string }> => ipcRenderer.invoke('media:storageClearHistory', opts),
+  mediaStorageGetFavorites: (): Promise<{ success: boolean; data?: unknown[] }> => ipcRenderer.invoke('media:storageGetFavorites'),
+  mediaStorageAddFavorite: (item: unknown): Promise<{ success: boolean; count?: number }> => ipcRenderer.invoke('media:storageAddFavorite', item),
+  mediaStorageRemoveFavorite: (url: string): Promise<{ success: boolean; count?: number }> => ipcRenderer.invoke('media:storageRemoveFavorite', url),
+  // ── 热点采集（SRC scheduled:captureHotspots 手动面 + 进度广播）──
+  captureHotspots: (): Promise<[boolean, number | string]> => ipcRenderer.invoke('browser:captureHotspots'),
+  onHotspotProgress: (cb: (p: { platform: string; index: number; total: number }) => void): (() => void) => {
+    const listener = (_e: unknown, d: Parameters<typeof cb>[0]): void => cb(d)
+    ipcRenderer.on('browser:hotspot-progress', listener)
+    return () => { ipcRenderer.removeListener('browser:hotspot-progress', listener) }
+  },
+  // ── 自动上架（SRC autoListing:* 七通道 + 进度订阅）──
+  autoListingValidate: (payload: { inputPath: string; shopKey?: string; runId?: string }): Promise<{ success: boolean; data?: unknown; error?: string }> =>
+    ipcRenderer.invoke('autoListing:validate', payload),
+  autoListingStart: (payload: { inputPath?: string; shopKey?: string; publishAfterSave?: boolean; runId?: string }): Promise<{ success: boolean; data?: unknown; error?: string }> =>
+    ipcRenderer.invoke('autoListing:start', payload),
+  autoListingStop: (): Promise<{ success: boolean; data?: unknown }> => ipcRenderer.invoke('autoListing:stop'),
+  autoListingResume: (payload: { runId: string; publishAfterSave?: boolean }): Promise<{ success: boolean; data?: unknown; error?: string }> =>
+    ipcRenderer.invoke('autoListing:resume', payload),
+  autoListingStatus: (): Promise<{ success: boolean; data?: { running: boolean; runId?: string } }> => ipcRenderer.invoke('autoListing:status'),
+  autoListingListRuns: (): Promise<{ success: boolean; data?: { runs: unknown[] } }> => ipcRenderer.invoke('autoListing:listRuns'),
+  autoListingOpenResultDir: (runId: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('autoListing:openResultDir', runId),
+  onAutoListingProgress: (cb: (p: { runId: string; stage: string; message: string; ts: number }) => void): (() => void) => {
+    const listener = (_e: unknown, d: Parameters<typeof cb>[0]): void => cb(d)
+    ipcRenderer.on('auto-listing:progress', listener)
+    return () => { ipcRenderer.removeListener('auto-listing:progress', listener) }
+  },
+})
+
 // 2026-09-24 (TinTin port): Electron 43 removed File.path — dragged/injected
 // File objects carry no path and plugins cannot resolve one without webUtils.
 // Expose the canonical resolver so plugin pages can recover absolute paths

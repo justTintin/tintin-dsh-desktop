@@ -89,36 +89,39 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Transition name="t-dialog">
-    <div v-if="visible" class="t-dialog__mask" @click="handleMaskClick">
-      <div class="t-dialog" :style="widthStyle()" @click="handleStop">
-        <!-- 头部 -->
-        <div class="t-dialog__header">
-          <span class="t-dialog__title">{{ title }}</span>
-          <button class="t-dialog__close" title="关闭" @click="handleCancel">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 6L6 18M6 6l12 12" />
-            </svg>
+  <!-- 2026-09-25 用户报障「弹窗类按钮点击无反应」加固：蒙层不再包 <Transition>。
+       原收起过渡依赖 transitionend/双 rAF——窗口被遮挡/后台时 rAF 停摆，收起
+       卡死会让蒙层滞留 DOM（fixed 全屏 z-modal），挡掉页面全部点击（与
+       App.vue 同日移除的 out-in 卡死同家族）。改为 v-if 即时移除（出场零过渡，
+       结构上无滞留点）；入场用 CSS animation（无结束依赖，不拦交互）。 -->
+  <div v-if="visible" class="t-dialog__mask" @click="handleMaskClick">
+    <div class="t-dialog" :style="widthStyle()" @click="handleStop">
+      <!-- 头部 -->
+      <div class="t-dialog__header">
+        <span class="t-dialog__title">{{ title }}</span>
+        <button class="t-dialog__close" title="关闭" @click="handleCancel">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <!-- 内容区（默认插槽） -->
+      <div class="t-dialog__body">
+        <slot />
+      </div>
+      <!-- 底部 -->
+      <div v-if="showFooter || $slots.footer" class="t-dialog__footer">
+        <slot name="footer">
+          <button class="t-dialog__btn t-dialog__btn--secondary" @click="handleCancel">
+            {{ cancelText }}
           </button>
-        </div>
-        <!-- 内容区（默认插槽） -->
-        <div class="t-dialog__body">
-          <slot />
-        </div>
-        <!-- 底部 -->
-        <div v-if="showFooter || $slots.footer" class="t-dialog__footer">
-          <slot name="footer">
-            <button class="t-dialog__btn t-dialog__btn--secondary" @click="handleCancel">
-              {{ cancelText }}
-            </button>
-            <button class="t-dialog__btn t-dialog__btn--primary" @click="handleConfirm">
-              {{ confirmText }}
-            </button>
-          </slot>
-        </div>
+          <button class="t-dialog__btn t-dialog__btn--primary" @click="handleConfirm">
+            {{ confirmText }}
+          </button>
+        </slot>
       </div>
     </div>
-  </Transition>
+  </div>
 </template>
 
 <style scoped>
@@ -218,25 +221,16 @@ onBeforeUnmount(() => {
 }
 
 /* 过渡动画 */
-.t-dialog-enter-active,
-.t-dialog-leave-active {
-  transition: opacity var(--duration-normal) var(--easing-default);
+/* 入场动画只做内部对话框的 pop（卡在首帧也只是看得见，不拦交互）。
+   蒙层本身禁止透明度入场：opacity from 0 + pointer-events auto 在动画被
+   遮挡/后台冻结时会变成看不见但拦截全部点击的蒙层（2026-09-25 用户
+   报障「弹窗类按钮点击无反应」根因，旧 Transition enter-from 同陷阱）。
+   出场即时移除（见模板注记）。 */
+.t-dialog {
+  animation: t-dialog-pop var(--duration-normal, 0.2s) var(--easing-default, ease);
 }
 
-.t-dialog-enter-active .t-dialog,
-.t-dialog-leave-active .t-dialog {
-  transition: transform var(--duration-normal) var(--easing-default),
-    opacity var(--duration-normal) var(--easing-default);
-}
-
-.t-dialog-enter-from,
-.t-dialog-leave-to {
-  opacity: 0;
-}
-
-.t-dialog-enter-from .t-dialog,
-.t-dialog-leave-to .t-dialog {
-  transform: scale(0.96) translateY(-8px);
-  opacity: 0;
+@keyframes t-dialog-pop {
+  from { transform: scale(0.96) translateY(-8px); opacity: 0; }
 }
 </style>

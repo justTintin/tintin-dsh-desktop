@@ -26,19 +26,15 @@ function listSourceFiles(dir: string, ext = /\.(ts|vue|tsx)$/): string[] {
 
 const GENERIC_METHODS = new Set(['get', 'post', 'put', 'delete', 'upload'])
 
-// Named methods still unmapped ON PURPOSE: the local-montage family (ffmpeg
-// edge trim / concat-clips / final validation) and the remaining audio
-// download family are scheduled with the WP-3 Step2-4 on-machine integration
-// work package (docs/tintin-port-execution-plan.zh.md) — before those steps
-// ship, each entry here must gain a real mapping and leave this set.
-// Everything else must map immediately; this audit exists because an unmapped
-// name 404s silently (2026-09-24 incident: ttsVoicesSamples → Step2 no
-// samples). downloadResult/audioLibraryUpload left the list when the
-// voice-clone port landed (they are mapped via host channels now).
-const PENDING_METHODS = new Set([
-  'trimEdgeClips', 'clearMontageCache', 'montageConcatClips', 'montageValidateFinal', 'montageDeleteBadFinal',
-  'audioArchiveGen', 'audioBgmUpload', 'audioDownloadTemp',
-])
+// No named methods remain unmapped ON PURPOSE. The local-montage family
+// (trimEdgeClips/clearMontageCache/montageConcatClips/montageValidateFinal/
+// montageDeleteBadFinal) left this set when the Step2-4 on-machine synthesis
+// channels were wired (2026-09-25); audioDownloadTemp/audioArchiveGen/
+// audioBgmUpload left with the audio-gen card; downloadResult/
+// audioLibraryUpload earlier with voice clone. Every named server.<method>
+// used by the media bundle must stay mapped — an unmapped name 404s silently
+// (2026-09-24 incident: ttsVoicesSamples → Step2 no samples).
+const PENDING_METHODS = new Set<string>([])
 
 /** Named methods referenced as .server.<name>(...) across media sources. */
 function collectUsedMethods(): Map<string, string[]> {

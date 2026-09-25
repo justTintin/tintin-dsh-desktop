@@ -65,7 +65,9 @@ async function fixture(sources: string[]) {
 
 function run(entry: string) {
   const result = spawnSync(process.execPath, [resolve('build/harness-node-entry.mjs'), entry], {
-    encoding: 'utf8', timeout: 15_000
+    // 预算 30s：Release Builder 门禁在全量并行+装机负载下，bundled Node 冷启动
+    // 可能超过 15s（2026-09-25 打包实测）；断言不含时长，放宽预算不减弱校验。
+    encoding: 'utf8', timeout: 30_000
   })
   expect(result.error).toBeUndefined()
   expect(result.status, result.stderr).toBe(1)
@@ -129,12 +131,12 @@ describe('structured startup failures through the real bundled loader', () => {
     const result = spawnSync(process.execPath, [
       resolve('build/harness-node-entry.mjs'), resolve('node_modules/@deepseek-ai/dsh/lib/bin.js'),
       '--profile', 'web'
-    ], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, DSH_HOME: home } })
+    ], { encoding: 'utf8', timeout: 30_000, env: { ...process.env, DSH_HOME: home } })
     expect(result.status, result.stderr).toBe(1)
     const line = result.stderr.split('\n').find((line) => line.startsWith(PLUGIN_FAILURE_PREFIX))
     expect(line, result.stderr).toBeDefined()
     expect(parsePluginStartupFailures(line!)?.[0]?.owner?.packageName).toBe(names[0])
-  }, 20_000)
+  }, 60_000)
 
   it('captures bundle preparation failures before a loader entry exists', async () => {
     const { home, entry, names } = await fixture(['export default () => {};'])

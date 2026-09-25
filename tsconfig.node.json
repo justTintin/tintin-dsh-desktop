@@ -9,6 +9,7 @@
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
+    "packages/tintin-media-bundle/src/types/**/*.ts",
     "test/**/*.ts"
   ]
 }

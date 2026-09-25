@@ -137,10 +137,7 @@ const EMPTY_HINT: Record<string, string> = {
       <span class="sb-info">分镜脚本{{ copyShots.length ? `：共 ${copyShots.length} 镜 ｜ 总时长 ${shotsTotalSec} 秒` : '' }}<template v-if="activeMeta && copyShots.length"> ｜ 选题：{{ activeMeta.topic || '—' }}</template><template v-if="activeMeta?.scriptId"> ｜ 脚本 {{ activeMeta.scriptId }}</template>
         <span v-if="copyShotsStale" class="sb-stale">⚠ 分镜基于旧版文案（文案已修改），克隆将使用当前旁白全文；请重新生成分镜</span>
       </span>
-      <div v-if="mode === 'edit'" class="row">
-        <TButton label="保存脚本" variant="secondary" size="small" :loading="scriptSaving" :disabled="!copyShots.length" @click="saveStoryboard" />
-      </div>
-      <span v-else class="sb-info">{{ MODE_STATUS[mode] }}</span>
+      <span v-if="mode !== 'edit'" class="sb-info">{{ MODE_STATUS[mode] }}</span>
     </div>
 
     <template v-if="copyShots.length">
@@ -209,23 +206,28 @@ const EMPTY_HINT: Record<string, string> = {
         </div>
 
         <!-- 绑定素材（material 态；2026-09-22 用户裁决：一镜多片·按时长装填——
-             逐片列表 + 覆盖时长/镜标对比；「选择素材」追加式，单片可移除，「解绑」清空整组） -->
+             逐片列表 + 覆盖时长/镜标对比；「选择素材」追加式，单片可移除，「解绑」清空整组）
+             2026-09-25 用户裁决：片数汇总/达标徽标移到「绑定素材」标签后；追加/解绑并排一行 -->
         <template v-if="mode === 'material'">
-          <div class="seg-field"><span class="lbl">绑定素材</span>
+          <div class="seg-field">
+            <div class="row"><span class="lbl">绑定素材</span>
+              <template v-if="boundClips(i).length">
+                <span class="muted">共 {{ boundClips(i).length }} 片 · Σ {{ coveredSec(i).toFixed(1) }}s / 标 {{ shot.duration }}s</span>
+                <span v-if="fillBadge(i)" class="fill-badge" :class="fillBadge(i)!.cls"
+                  title="Σ片段全长 vs 镜标：差值<15% 达标；欠装时预合成按现有片段合成（末端裁剪照常）">{{ fillBadge(i)!.text }}</span>
+              </template>
+            </div>
             <div v-if="boundClips(i).length" class="sb-line">
               <span v-for="(s, j) in boundClips(i)" :key="s.idx" class="bound-clip">
                 {{ j + 1 }}. {{ s.name }}（{{ s.duration > 0 ? s.duration.toFixed(1) + 's' : '—' }}）
                 <button class="unbind-btn" title="移除该片段" @click="removeShotClipAt(i, j)">×</button>
               </span>
-              <span class="fill-line">
-                <span class="muted">共 {{ boundClips(i).length }} 片 · Σ {{ coveredSec(i).toFixed(1) }}s / 标 {{ shot.duration }}s</span>
-                <span v-if="fillBadge(i)" class="fill-badge" :class="fillBadge(i)!.cls"
-                  title="Σ片段全长 vs 镜标：差值<15% 达标；欠装时预合成按现有片段合成（末端裁剪照常）">{{ fillBadge(i)!.text }}</span>
-              </span>
             </div>
             <div v-else class="muted">未绑定素材</div>
-            <TButton label="选择素材（追加）" variant="secondary" size="small" @click="matPickIdx = i" />
-            <TButton v-if="boundClips(i).length" label="解绑全部" variant="secondary" size="small" @click="unbindShotMaterial(i)" />
+            <div class="row">
+              <TButton label="选择素材（追加）" variant="secondary" size="small" @click="matPickIdx = i" />
+              <TButton v-if="boundClips(i).length" label="解绑全部" variant="secondary" size="small" @click="unbindShotMaterial(i)" />
+            </div>
           </div>
         </template>
           </div><!-- /seg-main -->
@@ -235,11 +237,13 @@ const EMPTY_HINT: Record<string, string> = {
           </div>
       </div>
 
-      <div v-if="editable" class="row">
+      <!-- 2026-09-25 用户裁决：「保存脚本」从脚本信息行移到添加镜头行右对齐 -->
+      <div v-if="editable" class="row between">
         <TButton label="＋ 添加镜头" variant="secondary" size="small" @click="copyShots.splice(copyShots.length, 0, {
           index: copyShots.length + 1, shot_type: '', visual: '', audio: '', sfx: '', duration: 3,
           material_path: '', material_type: '', material_hash: '', material_id: 0,
         })" />
+        <TButton label="保存脚本" variant="secondary" size="small" :loading="scriptSaving" :disabled="!copyShots.length" @click="saveStoryboard" />
       </div>
     </template>
     <div v-else class="muted">{{ EMPTY_HINT[mode] }}</div>
@@ -445,7 +449,6 @@ const EMPTY_HINT: Record<string, string> = {
 .sfx-row .sfx-del { margin-left: auto; }
 .sfx-row .sfx-regen { margin-left: 0; }
 /* 装填达标徽标（2026-09-22 用户裁决 B2，方案文档 §六：差值<15% 绿、欠装黄/红） */
-.fill-line { display: inline-flex; align-items: center; gap: 6px; }
 .fill-badge { padding: 1px 6px; border-radius: var(--radius-sm); font-size: 11px; font-weight: 600; }
 .fill-badge.fill-ok { color: #2ecc71; background: rgba(46, 204, 113, 0.12); }
 .fill-badge.fill-warn { color: #f39c12; background: rgba(243, 156, 18, 0.12); }

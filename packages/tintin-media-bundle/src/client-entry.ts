@@ -14,6 +14,13 @@
 // Built artifact; source of truth is src/. Rebuild: npm run tintin:media.
 import { createApp, type App as VueApp } from 'vue'
 import App from './App.vue'
+// 运营工具视图（2026-09-25 用户裁决：产品资料卡随图像抠图一并移植，提前于
+// P3 tintin-ops-bundle；chrome 占位网格在本 provider 注册后被接管，P3 落地
+// 时把注册权迁往 ops-bundle 即可——注册表同名 'ops' 覆盖语义不变）
+import OpsApp from './OpsApp.vue'
+// 会话上下文条（WP-5b，2026-09-25）：conversation.input.accessory slot 内的
+// Vue 应用——产品/素材/脚本选择写入工作区 task.json（不改 dsh 底层的注入面）
+import ContextBar from './components/workbench/ContextBar.vue'
 import './styles/tintin-tokens.css'
 import './styles/tintin-global.css'
 
@@ -42,10 +49,22 @@ declare global {
   }
 }
 
+interface SlotHost {
+  slots?: {
+    inject?: (name: string, factory: () => unknown) => void
+    register?: (def: Record<string, unknown>, component: unknown) => void
+  }
+}
+
 window.__ModuleLoader__!.load({
   id: 'tintin-media-bundle',
-  factory: () => {
+  // factory 第一参 require：dsh 模块系统注入的运行时 require 垫片（ppt-runtime
+  // 同款，packages/ppt-runtime/adapter/lib/client.js:2 `factory: (require)`），
+  // 借它取宿主 React 单例——media bundle 是 Vue+vite IIFE，绝不能自带 react
+  // 副本（双 React 实例会炸 hooks；宿主 installer 把 react 列为 HOST_SINGLETON）。
+  factory: (require?: (id: string) => unknown) => {
     let app: VueApp | null = null
+    let opsApp: VueApp | null = null
 
     // 视图生命周期挂接（2026-09-24 Tab 状态机裁决）：chrome 为每个视图持有
     // 常驻子元素，mount 每视图仅调一次、切走只隐藏不销毁（KeepAlive 语义）——
@@ -62,16 +81,62 @@ window.__ModuleLoader__!.load({
       },
     })
 
+    window.__tintinViews?.register('ops', {
+      mount(el: HTMLElement) {
+        if (opsApp) return
+        opsApp = createApp(OpsApp)
+        opsApp.mount(el)
+      },
+      unmount() {
+        opsApp?.unmount()
+        opsApp = null
+      },
+    })
+
     const module = { exports: {} as Record<string, unknown> }
     const exports = module.exports
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
-    // 无 slots/locale 注入：视图注册已在实例化时完成，宿主模块系统仅需要
-    // 模块具备 activate 兼容形状（apply 空实现）。
-    exports.inject = []
-    exports.apply = () => { /* 视图注册即本模块全部副作用 */ }
+    // slots 注入（WP-5b，2026-09-25 用户裁决：不改 dsh 底层——上下文条经上游
+    // conversation.input.accessory slot 挂载，该 slot 由本仓既有
+    // dsh-client-ui-conversation patch 提供，零新增补丁）。视图注册仍在
+    // 实例化时完成；apply 只负责 slot 注册（服务缺失时静默降级：无上下文条，
+    // 不影响会话与视图）。
+    exports.inject = ['slots']
+    exports.apply = (ctx: unknown) => {
+      registerContextBarSlot(ctx as SlotHost, require)
+    }
     return module.exports as {
       inject: string[]
       apply: (ctx: unknown) => void
     }
   },
 })
+
+/** React 薄壳：accessory 容器 div + Vue ContextBar 挂载（Vue-in-slot，WP-3 先行验证形态） */
+function registerContextBarSlot(host: SlotHost, require?: (id: string) => unknown): void {
+  const slots = host?.slots
+  if (typeof slots?.inject !== 'function' || typeof slots.register !== 'function') return
+  const React = require?.('react') as typeof import('react') | undefined
+  if (!React || typeof React.createElement !== 'function' || typeof React.useEffect !== 'function') return
+  const { createElement, useEffect, useRef } = React
+
+  const TintinContextAccessory = () => {
+    const hostRef = useRef<HTMLDivElement | null>(null)
+    useEffect(() => {
+      const el = hostRef.current
+      if (!el) return
+      const app = createApp(ContextBar)
+      app.mount(el)
+      return () => app.unmount()
+    }, [])
+    return createElement('div', { ref: hostRef, className: 'tintin-context-accessory' })
+  }
+  // 展示函数名便于 React DevTools / slot 调试定位
+  Object.defineProperty(TintinContextAccessory, 'name', { value: 'TintinContextAccessory' })
+
+  slots.inject('conversation.input.accessory', () =>
+    slots.register(
+      { name: 'conversation.input.accessory', id: 'tintin-context-bar', order: 30 },
+      TintinContextAccessory,
+    ))
+}
