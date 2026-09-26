@@ -840,7 +840,18 @@ const tintinClient = (() => {
         viralCloneMontage: (payload) => call('server:post', { path: '/viral/clone/montage', body: payload }),
         viralCloneReview: (payload) => call('server:post', { path: '/viral/clone/review', body: payload }),
         listServerWorkflows: (scope) => call('server:get', { path: '/workflows', params: { scope } }),
-        runServerWorkflow: (payload) => call('server:post', { path: '/workflows/run', body: payload }),
+        // SRC preload L299-302：multipart POST /workflows/{id}/run（fields+__values JSON），返回 {task_id}
+        runServerWorkflow: (workflowId, fields, onProgress) => {
+          const fd = new FormData()
+          fd.append('__values', JSON.stringify(fields && fields.__values ? fields.__values : {}))
+          for (const [k, v] of Object.entries(fields || {})) {
+            if (k === '__values') continue
+            if (typeof File !== 'undefined' && v instanceof File) fd.append(k, v, k)
+            else if (typeof Blob !== 'undefined' && v instanceof Blob) fd.append(k, v, k)
+            else fd.append(k, String(v))
+          }
+          return serverUpload('/workflows/' + encodeURIComponent(workflowId) + '/run', fd, onProgress)
+        },
         serverWorkflowStatus: (taskId) => call('server:get', { path: `/workflows/task/${encodeURIComponent(taskId)}` }),
         // multipart 上传族：payload 字段 → FormData（File/Blob 原样，标量转字符串）
         ...(() => {
