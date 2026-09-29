@@ -32,3 +32,9 @@ This repository owns the desktop product around an unmodified DeepSeek Harness c
 - Keep graphical application launch explicit. Builds, typechecks, unit tests, and Loader smokes must remain headless-safe.
 - Commit before major changes of direction and keep the submodule pin update separate from desktop behavior changes.
 - Keep the repository topology and package-manager split consistent with the [owning Agent Note](.agents/notes/implemented/process/2026-08-15-pinned-upstream-and-isolated-yarn-workspace.md).
+
+## TinTin porting
+
+- The TinTin business port from the dataelement-lineage fork is planned in [docs/tintin-migration-plan.md](docs/tintin-migration-plan.md) and governed by the mandatory rules in [docs/tintin-iron-rules.md](docs/tintin-iron-rules.md); implementations violating the iron rules are rejected in review. The source repository and its documents are read-only references.
+- TinTin business code lives only in dedicated `dsh-tintin-*` workspace packages composed through profile patches. It never enters `dsh-plugin-desktop/` or `dsh-plugin-desktop-beta/` `src/`, and never edits `deepseek-harness/`, vendored runtime artifacts, or third-party packages in place.
+- Every porting operation needs one of the four evidence classes defined in the iron rules (user ruling, 1:1 source parity, third-party contract or authority, measured evidence); upstream patch hunks are dispositioned in `docs/tintin-patch-audit.md` before conversion, and runtime API differences are accepted only from spike measurements.
