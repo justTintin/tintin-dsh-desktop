@@ -95,12 +95,32 @@ dsh-desktop(Yarn 4 monorepo,运行时 0.2.0-rc.2 vendored)
 - 迁 #10、#11、#14:浏览器域 Electron 模块、抽取器、扩展、自动上架;extraResources(含 300MB bin)接入 electron-builder;`afterPack` 校验扩展。
 - 验收:浏览器域窗口 + B 站/抖音抽取器在**打包目录安装版**可用(非 dev 目录)。
 
-### Phase 4 — TinTin 产品通道(1–2 周)
+### Phase 4 — TinTin 产品通道(1–2 周) — **引导完成(2026-09-30)**:`dsh-plugin-desktop-tintin` 三方镜像通道落地(Beta 字节级镜像 + TinTin 身份 com.tintin.desktop/.dsh-tintin/0.2.0-dev.0),`verify-desktop-variants` 扩为三方校验(镜像 + 未来通道增量允许清单),checkpoints/update 通道联合类型三版扩含 'tintin',通道包端到端构建通过(tsdown+vite+声明)。**余量(附录 E 决策依赖)**:浏览器域窗口接线(host↔main 通信面)、extraResources(300MB bin/抽取器/扩展)、dist:tintin 链 + 更新端点裁决、Windows 签名链移植。
 
 - 建 `dsh-plugin-desktop-tintin`:`src/` 与 Beta 镜像 + `product-identity.ts`(appId `com.tintin.desktop`、独立 DSH_HOME);`verify-desktop-variants` 扩为三方校验(tintin = 镜像 + 允许清单增量);AGENTS.md 同步改规则;Windows 签名链移植;更新器指向 TinTin 自己的版本服务;根 `dist:tintin` 链接入 `market:prepare`/`aa:prepare-release` 同样的新鲜度门禁。
 - 决策点(到此再定,列入附录待裁决清单):手机桥用 AA 还是保留 LAN 桥;`.dshpreset` 传输是否保留;mac 二进制来源。
 
-### Phase 5 — 收敛与门禁(1 周)
+### Phase 5 — 收敛与门禁(1 周) — **门禁收敛完成(2026-09-30)**:`check:tintin`(15 锚点 + 9 行数基线 + workspace 注册 + 单测 5/5)已接入根 `check` 链;三方镜像门禁与布局门禁全绿;四个 tintin workspace 测试全部接入根 `test` 链(bundle 118 + media 58 + browser 60 = 236 用例)。**余量**:dist:tintin 打包门禁待 Phase 4 打包链落地后接入;补丁 hunk 计数核对随补丁集群转译落地。
+
+## 八、移植执行总账(2026-09-30)
+
+| 阶段 | 状态 | 提交 |
+|---|---|---|
+| Phase 0 基线+审计+三 spike | ✅ 完成 | `5ac6a08505` |
+| Phase 1 宿主能力层(16.2k 行) | ✅ 完成 | `a2132658f8` |
+| Phase 2 前端能力层核心(99 文件 Vue + 真实 chrome) | ✅ 核心完成 | `3946b200ad` |
+| Phase 3 浏览器域逻辑(39 文件 + 抽取器) | ✅ 逻辑完成 | `50124521d8` |
+| Phase 4 产品通道引导 | ✅ 引导完成 | `b15eb77b0c` |
+| Phase 5 门禁收敛 | ✅ 完成 | 本提交 |
+
+**已验证的关键结论**:0.1.7→0.2.0 的宿主路由 API、客户端模块缝、dsh.client 声明完全同构;真实生产产物(1.9MB Vue dist、1426 行 chrome、1415 行宿主桥)零重写迁移;verify:profile 无头组合冒烟通过;浏览器实测全链路(向导→入口→视图→卡片→后端调用)工作。
+
+**遗留工作包**(按优先级):
+1. 三补丁集群转译(13 个补丁 re-base 到 0.2.0,resolutions patch: 接线)——SessionDelete、FORBIDDEN、附件打开。
+2. 浏览器域窗口接线(通道包 main + host↔main RPC)+ extraResources。
+3. dist:tintin 打包链 + 更新端点/签名链(附录 E 决策)。
+4. 预设运行时行为 GUI 验证、tintin:presets 生成管线 0.2.0 基底化。
+5. undici 补丁验证(审计 #26,未执行)。
 
 - `verify:customizations` grep 锚点改造成 `check:tintin` 并入根 `check` 与 `dist:tintin`;补丁 hunk 计数等价物纳入;`corepack yarn check` + 三平台打包验证 + Windows 安装包冒烟。
 
