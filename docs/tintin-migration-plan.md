@@ -80,7 +80,7 @@ dsh-desktop(Yarn 4 monorepo,运行时 0.2.0-rc.2 vendored)
 
 验收门禁:**三个 spike 全通才进入 Phase 1;任何一个不通,回本方案修订后再继续。**
 
-### Phase 1 — 宿主能力层(1.5–2 周)
+### Phase 1 — 宿主能力层(1.5–2 周) — **已完成(2026-09-30)**:lib/ 与 presets/ 逐字节原样迁入,index.js 仅改插件名;17 个测试文件 118 用例全绿;Beta 组合接线(dep + cordis.patch.yml insert)后 `verify:profile` 无头冒烟通过(Creator/plugin manager/两次 HMR generation)。注意:宿主单例(@deepseek-ai/*)不进插件私有依赖,运行时走宿主回退,测试经 vitest alias 指向 Beta 安装;首次 verify:profile 需补下 Electron 二进制(约 50 分钟,enableScripts:false 所致)。预设运行时行为留待 Phase 2 GUI 验证。
 
 - 建 `dsh-tintin-bundle` workspace:迁资产 #2–#7;预设按 0.2.0 基底重新生成;`contract:gen` 接通;对应测试迁入全绿。
 - 验收:Beta 内可 ping,可走通一条完整链路(whisper 转写经 FastAPI 代理返回)。

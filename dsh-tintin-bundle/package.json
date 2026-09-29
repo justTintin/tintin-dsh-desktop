@@ -20,6 +20,14 @@
     }
   },
   "dependencies": {
-    "@deepseek-ai/cordis": "4.0.4"
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "vitest": "4.1.8"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check": "yarn run test"
   }
 }

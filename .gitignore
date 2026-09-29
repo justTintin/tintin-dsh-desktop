@@ -17,3 +17,6 @@ dsh-community-market/lib/
 dsh-desktop-next/lib/
 dsh-desktop-next/dist/
 dsh-desktop-next/.desktop-next/
+
+# TinTin port spike scaffolding (temporary DSH_HOME + overlay)
+/.tintin-spike/

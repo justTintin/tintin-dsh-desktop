@@ -18,6 +18,11 @@
       name: dsh-plugin-desktop-beta/profiles
     - id: desktop-updates
       name: dsh-plugin-desktop-beta/updates
+    # TinTin port: host bridge and media sub-application (docs/tintin-migration-plan.md).
+    - id: tintin-host
+      name: dsh-tintin-bundle
+    - id: tintin-media
+      name: dsh-tintin-media-bundle
 
 # A desktop launch has no terminal operator waiting for the Web readiness line.
 - id: web-runtime

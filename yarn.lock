@@ -10908,6 +10908,8 @@ __metadata:
     class-variance-authority: "npm:^0.7.1"
     clsx: "npm:^2.1.1"
     dsh-community-market: "npm:0.1.0-dev.0"
+    dsh-tintin-bundle: "npm:0.1.0-dev.0"
+    dsh-tintin-media-bundle: "npm:0.1.0-dev.0"
     dshmarket: "npm:1.66.5"
     electron: "npm:44.0.0"
     electron-builder: "npm:26.15.7"
@@ -11158,15 +11160,17 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"dsh-tintin-bundle@workspace:dsh-tintin-bundle":
+"dsh-tintin-bundle@npm:0.1.0-dev.0, dsh-tintin-bundle@workspace:dsh-tintin-bundle":
   version: 0.0.0-use.local
   resolution: "dsh-tintin-bundle@workspace:dsh-tintin-bundle"
   dependencies:
-    "@deepseek-ai/cordis": "npm:4.0.4"
+    "@deepseek-ai/schemastery": "npm:^3.18.4"
+    js-yaml: "npm:^4.1.0"
+    vitest: "npm:4.1.8"
   languageName: unknown
   linkType: soft
 
-"dsh-tintin-media-bundle@workspace:dsh-tintin-media-bundle":
+"dsh-tintin-media-bundle@npm:0.1.0-dev.0, dsh-tintin-media-bundle@workspace:dsh-tintin-media-bundle":
   version: 0.0.0-use.local
   resolution: "dsh-tintin-media-bundle@workspace:dsh-tintin-media-bundle"
   languageName: unknown

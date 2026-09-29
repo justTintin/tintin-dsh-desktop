@@ -58,5 +58,23 @@
     "path": "docs/tintin-spike-report.md",
     "pattern": "✅",
     "minCount": 3
+  },
+  {
+    "comment": "the host bridge keeps its plugin identity",
+    "path": "dsh-tintin-bundle/index.js",
+    "pattern": "export const name = 'dsh-tintin-bundle'",
+    "minCount": 1
+  },
+  {
+    "comment": "the host bridge keeps the IPC route registry and preset registration",
+    "path": "dsh-tintin-bundle/index.js",
+    "pattern": "agentPresets",
+    "minCount": 1
+  },
+  {
+    "comment": "five TinTin role presets ship with the bundle",
+    "path": "dsh-tintin-bundle/lib/preset-definitions.js",
+    "pattern": "agentPresets.register()",
+    "minCount": 1
   }
 ]
