@@ -1,6 +1,11 @@
 {
   "dsh-tintin-bundle/index.js": 1415,
+  "dsh-tintin-bundle/client.js": 1426,
   "dsh-tintin-bundle/lib/jianying/jianying-exporter.js": 2186,
   "dsh-tintin-bundle/lib/montage/final-ipc.js": 1953,
-  "dsh-tintin-bundle/lib/montage/voice-tts-logic.js": 1458
+  "dsh-tintin-bundle/lib/montage/voice-tts-logic.js": 1458,
+  "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStep2Panel.vue": 1292,
+  "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStep4Panel.vue": 1175,
+  "dsh-tintin-media-bundle/src/composables/copywritingMontage/useCopywritingMontageStep3Voice.ts": 1654,
+  "dsh-tintin-media-bundle/src/composables/copywritingMontage/useCopywritingMontageStep4Final.ts": 1193
 }

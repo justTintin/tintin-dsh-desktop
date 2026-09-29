@@ -85,7 +85,7 @@ dsh-desktop(Yarn 4 monorepo,运行时 0.2.0-rc.2 vendored)
 - 建 `dsh-tintin-bundle` workspace:迁资产 #2–#7;预设按 0.2.0 基底重新生成;`contract:gen` 接通;对应测试迁入全绿。
 - 验收:Beta 内可 ping,可走通一条完整链路(whisper 转写经 FastAPI 代理返回)。
 
-### Phase 2 — 前端能力层(1.5–2 周)
+### Phase 2 — 前端能力层(1.5–2 周) — **核心完成(2026-09-30)**:Vue 源码 99 文件整体迁入,vite 管线一次构建成功(180 模块→1.6MB dist,模块 id 改 dsh-tintin-media-bundle);真实 chrome(1426 行)移植,侧栏入口注入适配官方锚点 `[class*="sidebarCol"]`/`[data-pane="sidebar"]`;浏览器实测:首启向导、三入口注入(运营/媒体/浏览器)、视图切换 KeepAlive、媒体目录、素材库卡片(含真实后端调用与显式失败路径)、输入框上下文条全部工作;media src 测试 8 文件 58 用例全绿。**余量**:三补丁集群(SessionDelete 5包/FORBIDDEN 3包/附件打开 5包)转译为独立后续工作包(逐包 re-base 到 0.2.0 + resolutions patch: 接线);`conversation.input.left` 上下文条在 0.2.0 原生存在已实证。
 
 - 建 `dsh-tintin-media-bundle`:Vue 源码整体迁入(组件不动),重写挂载缝与入口注入;dev-probe 探针页机制保留用于离线调组件。
 - 验收:分镜卡、素材库、声音克隆三张代表性卡在 Beta 内正常渲染并调通后端。

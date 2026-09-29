@@ -76,5 +76,17 @@
     "path": "dsh-tintin-bundle/lib/preset-definitions.js",
     "pattern": "agentPresets.register()",
     "minCount": 1
+  },
+  {
+    "comment": "the real web chrome keeps the official sidebar anchor adaptation",
+    "path": "dsh-tintin-bundle/client.js",
+    "pattern": "sidebarCol",
+    "minCount": 2
+  },
+  {
+    "comment": "the media bundle keeps the client entry module id",
+    "path": "dsh-tintin-media-bundle/src/client-entry.ts",
+    "pattern": "id: 'dsh-tintin-media-bundle'",
+    "minCount": 1
   }
 ]

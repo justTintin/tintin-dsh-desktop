@@ -3,7 +3,7 @@
   "version": "0.1.0-dev.0",
   "private": true,
   "type": "module",
-  "description": "TinTin media tools Vue sub-application (Spike B: real tintin-media-bundle dist mounted through the 0.2.0 client seam)",
+  "description": "TinTin media tools: Vue sub-application (media cards, storyboard montage, material library) mounted through the dsh client module seam",
   "exports": {
     ".": "./index.js",
     "./client": "./dist/client.js",
@@ -17,5 +17,17 @@
       ],
       "platform": "web"
     }
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "check": "yarn run build && yarn run test"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.9",
+    "plyr": "^3.8.4",
+    "vite": "^7.0.0",
+    "vitest": "4.1.8",
+    "vue": "^3.5.43"
   }
 }
