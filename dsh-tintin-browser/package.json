@@ -1,0 +1,25 @@
+{
+  "name": "dsh-tintin-browser",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "type": "module",
+  "description": "TinTin browser domain: independent browser windows, platform extractors, downloads, and auto-listing (pure logic + Electron-main modules consumed by the TinTin desktop channel)",
+  "exports": {
+    ".": "./src/browser/browser-service.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check": "yarn run test",
+    "fetch:bin": "node scripts/fetch-tintin-binaries.mjs",
+    "fetch:ext": "node scripts/fetch-tintin-ext-assets.mjs"
+  },
+  "devDependencies": {
+    "adm-zip": "^0.6.0",
+    "dsh-tintin-bundle": "0.1.0-dev.0",
+    "vitest": "4.1.8"
+  },
+  "dependencies": {
+    "exceljs": "4.4.0"
+  }
+}

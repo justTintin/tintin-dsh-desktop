@@ -19,6 +19,7 @@ import { basename, join, relative, resolve, sep } from 'node:path'
 const TINTIN_WORKSPACE_GLOBS = [
   'dsh-tintin-bundle',
   'dsh-tintin-media-bundle',
+  'dsh-tintin-browser',
   'dsh-plugin-desktop-tintin',
 ]
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.vue'])

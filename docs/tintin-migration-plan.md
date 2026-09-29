@@ -90,7 +90,7 @@ dsh-desktop(Yarn 4 monorepo,运行时 0.2.0-rc.2 vendored)
 - 建 `dsh-tintin-media-bundle`:Vue 源码整体迁入(组件不动),重写挂载缝与入口注入;dev-probe 探针页机制保留用于离线调组件。
 - 验收:分镜卡、素材库、声音克隆三张代表性卡在 Beta 内正常渲染并调通后端。
 
-### Phase 3 — 浏览器域 + 打包资源(2–3 周)
+### Phase 3 — 浏览器域 + 打包资源(2–3 周) — **逻辑迁移完成(2026-09-30)**:新建 `dsh-tintin-browser` workspace,浏览器域整树迁入(browser-service/cookies/嗅探/下载/扩展/自动上架 39 文件)+ 平台抽取器 6 脚本 + 二进制/扩展获取脚本;测试 9 文件 60 用例全绿(Electron 经 vitest stub 注解,纯逻辑无 Electron 依赖的设计得到保持)。**Phase 4 承接**:extraResources 接线(300MB bin + 抽取器 + 扩展)随 tintin 通道包,窗口接线与 host↔main 通信面。
 
 - 迁 #10、#11、#14:浏览器域 Electron 模块、抽取器、扩展、自动上架;extraResources(含 300MB bin)接入 electron-builder;`afterPack` 校验扩展。
 - 验收:浏览器域窗口 + B 站/抖音抽取器在**打包目录安装版**可用(非 dev 目录)。

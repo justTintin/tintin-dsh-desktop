@@ -21,6 +21,7 @@ const fabric = readJson('dsh-community-fabric/package.json')
 const market = readJson('dsh-community-market/package.json')
 const tintinBundle = readJson('dsh-tintin-bundle/package.json')
 const tintinMediaBundle = readJson('dsh-tintin-media-bundle/package.json')
+const tintinBrowser = readJson('dsh-tintin-browser/package.json')
 const upstreamPackage = readJson('deepseek-harness/package.json')
 
 if (stablePlugin.name !== 'dsh-plugin-desktop') fail('the stable Desktop workspace must retain dsh-plugin-desktop')
@@ -40,6 +41,7 @@ if (JSON.stringify(workspace.workspaces) !== JSON.stringify([
   'dsh-community-market',
   'dsh-tintin-bundle',
   'dsh-tintin-media-bundle',
+  'dsh-tintin-browser',
 ])) {
   fail('the root Yarn workspace must contain the desktop, community-fabric, community-market, and tintin packages')
 }
@@ -51,6 +53,7 @@ for (const [name, manifest] of [
   ['dsh-community-market', market],
   ['dsh-tintin-bundle', tintinBundle],
   ['dsh-tintin-media-bundle', tintinMediaBundle],
+  ['dsh-tintin-browser', tintinBrowser],
 ]) {
   if (manifest.packageManager !== undefined) fail(`${name} must inherit the root Yarn release`)
 }
@@ -101,6 +104,7 @@ for (const [owner, manifest] of [
   ['market', market],
   ['tintin bundle', tintinBundle],
   ['tintin media bundle', tintinMediaBundle],
+  ['tintin browser', tintinBrowser],
 ]) {
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'resolutions']) {
     for (const [name, range] of Object.entries(manifest[field] ?? {})) {
