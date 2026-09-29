@@ -1,0 +1,62 @@
+[
+  {
+    "comment": "the porting plan keeps its phase gates",
+    "path": "docs/tintin-migration-plan.md",
+    "pattern": "三个 spike 全通才进入 Phase 1",
+    "minCount": 1
+  },
+  {
+    "comment": "the plan keeps the numbered Phase 0 deliverables",
+    "path": "docs/tintin-migration-plan.md",
+    "pattern": "D0-",
+    "minCount": 5
+  },
+  {
+    "comment": "the iron rules keep the relocation-first rule",
+    "path": "docs/tintin-iron-rules.md",
+    "pattern": "只搬不写",
+    "minCount": 1
+  },
+  {
+    "comment": "the iron rules keep all 15 numbered rules",
+    "path": "docs/tintin-iron-rules.md",
+    "pattern": "### 铁律 ",
+    "minCount": 15
+  },
+  {
+    "comment": "the iron rules keep the four evidence classes",
+    "path": "docs/tintin-iron-rules.md",
+    "pattern": "①用户裁决;②tintin 原实现一比一",
+    "minCount": 1
+  },
+  {
+    "comment": "AGENTS.md keeps the TinTin porting governance section",
+    "path": "AGENTS.md",
+    "pattern": "## TinTin porting",
+    "minCount": 1
+  },
+  {
+    "comment": "the patch audit keeps all disposition rows",
+    "path": "docs/tintin-patch-audit.md",
+    "pattern": "TRANSLATE",
+    "minCount": 13
+  },
+  {
+    "comment": "the patch audit records the three cluster rulings",
+    "path": "docs/tintin-patch-audit.md",
+    "pattern": "SessionDelete 集群",
+    "minCount": 1
+  },
+  {
+    "comment": "the API diff keeps the measured seams table",
+    "path": "docs/tintin-api-diff.md",
+    "pattern": "webServer.register",
+    "minCount": 1
+  },
+  {
+    "comment": "the spike report records all three spike verdicts",
+    "path": "docs/tintin-spike-report.md",
+    "pattern": "✅",
+    "minCount": 3
+  }
+]

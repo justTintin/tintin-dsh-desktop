@@ -11158,6 +11158,20 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"dsh-tintin-bundle@workspace:dsh-tintin-bundle":
+  version: 0.0.0-use.local
+  resolution: "dsh-tintin-bundle@workspace:dsh-tintin-bundle"
+  dependencies:
+    "@deepseek-ai/cordis": "npm:4.0.4"
+  languageName: unknown
+  linkType: soft
+
+"dsh-tintin-media-bundle@workspace:dsh-tintin-media-bundle":
+  version: 0.0.0-use.local
+  resolution: "dsh-tintin-media-bundle@workspace:dsh-tintin-media-bundle"
+  languageName: unknown
+  linkType: soft
+
 "dshmarket@npm:1.66.5":
   version: 1.66.5
   resolution: "dshmarket@npm:1.66.5"

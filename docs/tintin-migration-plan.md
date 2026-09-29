@@ -63,7 +63,7 @@ dsh-desktop(Yarn 4 monorepo,运行时 0.2.0-rc.2 vendored)
 
 ## 五、阶段计划与交付物
 
-### Phase 0 — 基线 + spike + 补丁审计(1.5–2 周)★ 决定成败
+### Phase 0 — 基线 + spike + 补丁审计(1.5–2 周)★ 决定成败 — **已完成(2026-09-30),三 spike 全过,结果见 [spike 报告](tintin-spike-report.md)、[补丁审计](tintin-patch-audit.md)、[API 差异清单](tintin-api-diff.md)**
 
 内容:
 - 基线三连:`git submodule update --init --recursive` → `corepack yarn install` → `corepack yarn check` 全绿 → `yarn workspace dsh-plugin-desktop-beta dev` 应用可启动。

@@ -1,0 +1,25 @@
+{
+  "name": "dsh-tintin-bundle",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "type": "module",
+  "description": "TinTin host bridge plugin: local capability routes and the TinTin web chrome",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ],
+      "platform": "web"
+    }
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.4"
+  }
+}

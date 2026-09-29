@@ -1,0 +1,21 @@
+{
+  "name": "dsh-tintin-media-bundle",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "type": "module",
+  "description": "TinTin media tools Vue sub-application (Spike B: real tintin-media-bundle dist mounted through the 0.2.0 client seam)",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    }
+  }
+}
