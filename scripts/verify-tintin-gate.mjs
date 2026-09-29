@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, join, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /**
  * TinTin porting gate (iron rules 4, 13, 15 in docs/tintin-iron-rules.md).
@@ -23,7 +24,13 @@ const TINTIN_WORKSPACE_GLOBS = [
   'dsh-plugin-desktop-tintin',
 ]
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.vue'])
-const SOURCE_EXCLUDED_PARTS = new Set(['node_modules', 'dist', 'coverage'])
+const SOURCE_EXCLUDED_PARTS = new Set(['node_modules', 'dist', 'coverage', 'test', 'tests'])
+// The channel package builds its handwritten src/ into lib/ (tsdown + vite
+// bundles, tens of thousands of lines); the capability bundles instead keep
+// their handwritten host logic under lib/. Only the channel's lib/ is output.
+const BUILD_OUTPUT_PARTS_BY_PACKAGE = new Map([
+  ['dsh-plugin-desktop-tintin', new Set(['lib'])],
+])
 const MAX_SOURCE_LINES = 1000
 const MAX_BASELINE_LINES = 3528
 
@@ -39,6 +46,13 @@ export function readJsonSafe(path) {
 
 function listSourceFiles(root, directory) {
   const files = []
+  const excluded = new Set([...SOURCE_EXCLUDED_PARTS, ...(BUILD_OUTPUT_PARTS_BY_PACKAGE.get(directory) ?? [])])
+  // The channel package mirrors the Beta desktop source; mirrored files are
+  // governed by the framework repository's own rules. The 1000-line iron rule
+  // therefore applies only to channel-only additions (browser wiring etc.).
+  const mirrorRoot = directory === 'dsh-plugin-desktop-tintin'
+    ? resolve(root, 'dsh-plugin-desktop-beta')
+    : undefined
   const walk = current => {
     let entries
     try {
@@ -47,7 +61,7 @@ function listSourceFiles(root, directory) {
       return
     }
     for (const entry of entries) {
-      if (SOURCE_EXCLUDED_PARTS.has(entry.name)) continue
+      if (excluded.has(entry.name)) continue
       const full = join(current, entry.name)
       if (entry.isDirectory()) {
         walk(full)
@@ -58,6 +72,7 @@ function listSourceFiles(root, directory) {
       const extension = dotted.slice(dotted.lastIndexOf('.'))
       if (!SOURCE_EXTENSIONS.has(extension)) continue
       if (dotted.endsWith('.d.ts') || dotted.includes('.generated.')) continue
+      if (mirrorRoot !== undefined && existsSync(join(mirrorRoot, relative(resolve(root, directory), full)))) continue
       files.push(full)
     }
   }
@@ -178,6 +193,10 @@ const run = (args) => execFileSync('git', args, {
   stdio: ['ignore', 'pipe', 'pipe'],
 }).trim()
 
+// Import-safe production entry: unit tests import this module for its check
+// functions, so the gate itself only runs when executed as the main module.
+const isMain = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (isMain) {
 const anchors = readJsonSafe(resolve(root, 'scripts/tintin-anchors.json'))
 const lineBaseline = readJsonSafe(resolve(root, 'scripts/tintin-line-baseline.json'))
 if (anchors === undefined) throw new Error('verify-tintin-gate: scripts/tintin-anchors.json is missing or invalid')
@@ -201,3 +220,4 @@ const anchoredFiles = new Set(anchors.map(anchor => anchor.path))
 process.stdout.write(
   `verify-tintin-gate: ${String(anchors.length)} anchors over ${String(anchoredFiles.size)} documents and ${String(Object.keys(lineBaseline).length)} baseline entries are consistent\n`,
 )
+}

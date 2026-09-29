@@ -15,7 +15,8 @@
     "dsh-community-market",
     "dsh-tintin-bundle",
     "dsh-tintin-media-bundle",
-    "dsh-tintin-browser"
+    "dsh-tintin-browser",
+    "dsh-plugin-desktop-tintin"
   ],
   "resolutions": {
     "@agents-anywhere/dsh-bridge-next": "patch:@agents-anywhere/dsh-bridge-next@file%3Avendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.0.2-desktop.cad572c00c3e5.r156e8f86.tgz#./patches/agents-anywhere-connector-httpx.patch",

@@ -16,7 +16,7 @@ export const DESKTOP_CURRENT_VERSION_HEADER = 'X-DSH-Desktop-Version'
 export const DESKTOP_RELEASE_CHANNEL_HEADER = 'X-DSH-Desktop-Channel'
 
 /** Release streams supported by the Desktop service. */
-export type DesktopReleaseChannel = 'stable' | 'beta' | 'next'
+export type DesktopReleaseChannel = 'stable' | 'beta' | 'next' | 'tintin'
 
 /** Maximum response body bytes accepted from the version service. */
 export const MAX_VERSION_RESPONSE_BYTES = 4 * 1024

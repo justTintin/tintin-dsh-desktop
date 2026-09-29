@@ -113,7 +113,7 @@ interface ProfileCheckpointManifestMetadata {
   readonly appVersion: string
 }
 
-export type DesktopProfileCheckpointReleaseChannel = 'stable' | 'beta'
+export type DesktopProfileCheckpointReleaseChannel = 'stable' | 'beta' | 'tintin'
 
 export interface ProfileCheckpointManifestV2 extends ProfileCheckpointManifestMetadata {
   readonly version: 2
@@ -251,7 +251,7 @@ function assertAppVersion(value: string): string {
 }
 
 function assertReleaseChannel(value: string): DesktopProfileCheckpointReleaseChannel {
-  if (value !== 'stable' && value !== 'beta') fail('invalid Desktop release channel')
+  if (value !== 'stable' && value !== 'beta' && value !== 'tintin') fail('invalid Desktop release channel')
   return value
 }
 

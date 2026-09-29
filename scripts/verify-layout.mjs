@@ -22,10 +22,12 @@ const market = readJson('dsh-community-market/package.json')
 const tintinBundle = readJson('dsh-tintin-bundle/package.json')
 const tintinMediaBundle = readJson('dsh-tintin-media-bundle/package.json')
 const tintinBrowser = readJson('dsh-tintin-browser/package.json')
+const tintinDesktop = readJson('dsh-plugin-desktop-tintin/package.json')
 const upstreamPackage = readJson('deepseek-harness/package.json')
 
 if (stablePlugin.name !== 'dsh-plugin-desktop') fail('the stable Desktop workspace must retain dsh-plugin-desktop')
 if (betaPlugin.name !== 'dsh-plugin-desktop-beta') fail('the Beta Desktop workspace must publish as dsh-plugin-desktop-beta')
+if (tintinDesktop.name !== 'dsh-plugin-desktop-tintin') fail('the TinTin Desktop workspace must publish as dsh-plugin-desktop-tintin')
 if (!['stable', 'beta'].includes(upstream.activeChannel)) fail('the pinned upstream checkout must follow a declared release channel')
 const activeUpstream = upstream.channels?.[upstream.activeChannel]
 if (activeUpstream === undefined) fail('the active upstream channel is missing')
@@ -42,12 +44,14 @@ if (JSON.stringify(workspace.workspaces) !== JSON.stringify([
   'dsh-tintin-bundle',
   'dsh-tintin-media-bundle',
   'dsh-tintin-browser',
+  'dsh-plugin-desktop-tintin',
 ])) {
   fail('the root Yarn workspace must contain the desktop, community-fabric, community-market, and tintin packages')
 }
 for (const [name, manifest] of [
   ['dsh-plugin-desktop', stablePlugin],
   ['dsh-plugin-desktop-beta', betaPlugin],
+  ['dsh-plugin-desktop-tintin', tintinDesktop],
   ['dsh-desktop-next', nextDesktop],
   ['dsh-community-fabric', fabric],
   ['dsh-community-market', market],
@@ -105,6 +109,7 @@ for (const [owner, manifest] of [
   ['tintin bundle', tintinBundle],
   ['tintin media bundle', tintinMediaBundle],
   ['tintin browser', tintinBrowser],
+  ['tintin desktop', tintinDesktop],
 ]) {
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'resolutions']) {
     for (const [name, range] of Object.entries(manifest[field] ?? {})) {

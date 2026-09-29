@@ -1,0 +1,33 @@
+# Desktop Host operations compose around the existing Web bundle. Compatibility
+# mode keeps upstream ownership of the browser carrier and rendered UI.
+- insert:
+    - id: desktop-shell
+      name: dsh-plugin-desktop-tintin
+      config:
+        mode: compatibility
+    - id: desktop-terminal
+      name: dsh-plugin-desktop-tintin/terminal
+      disabled: !!js process.platform === 'linux'
+    - id: desktop-diagnostics
+      name: dsh-plugin-desktop-tintin/diagnostics
+    - id: desktop-notifications
+      name: dsh-plugin-desktop-tintin/notifications
+    - id: desktop-pnpm
+      name: dsh-plugin-desktop-tintin/pnpm
+    - id: desktop-profiles
+      name: dsh-plugin-desktop-tintin/profiles
+    - id: desktop-updates
+      name: dsh-plugin-desktop-tintin/updates
+    # TinTin port: host bridge and media sub-application (docs/tintin-migration-plan.md).
+    - id: tintin-host
+      name: dsh-tintin-bundle
+    - id: tintin-media
+      name: dsh-tintin-media-bundle
+
+# A desktop launch has no terminal operator waiting for the Web readiness line.
+- id: web-runtime
+  config:
+    openBrowser: false
+    printUrl: false
+    surfaceContext: true
+    trustedHosts: []
