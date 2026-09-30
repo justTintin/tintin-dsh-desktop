@@ -24,3 +24,9 @@ dsh-desktop-next/.desktop-next/
 # TinTin channel build outputs
 dsh-plugin-desktop-tintin/dist/
 dsh-plugin-desktop-tintin/lib/
+
+# TinTin media binaries (fetched, ~320MB — never commit)
+dsh-plugin-desktop-tintin/tintin-resources/bin/*
+dsh-plugin-desktop-tintin/tintin-resources/ext-assets/*
+!dsh-plugin-desktop-tintin/tintin-resources/bin/.gitkeep
+!dsh-plugin-desktop-tintin/tintin-resources/ext-assets/.gitkeep
