@@ -9,12 +9,12 @@
 //
 // Source: TINTIN_SRC env override, else the sibling source checkout.
 import { cpSync, existsSync, mkdirSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repo = fileURLToPath(new URL('..', import.meta.url))
 const srcRoot = process.env.TINTIN_SRC ?? 'D:\\Project\\TinTin_Client_Electron'
-const destRoot = resolve('D:/Project/dsh-desktop/dsh-plugin-desktop-tintin/tintin-resources/ext-assets')
+const destRoot = join(repo, 'dsh-plugin-desktop-tintin', 'tintin-resources', 'ext-assets')
 
 const NAMES = ['bilibili-helper', 'chrom-douyin']
 mkdirSync(destRoot, { recursive: true })

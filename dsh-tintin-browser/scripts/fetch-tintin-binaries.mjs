@@ -12,18 +12,21 @@
 // materialized all three binaries on this machine (ffprobe never shipped in
 // the client checkout).
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 
 const NAMES = ['ffmpeg.exe', 'ffprobe.exe', 'yt-dlp.exe']
 const srcCandidates = [
   process.env.TINTIN_SRC,
   'D:\\Project\\TinTin_Client_Electron',
-  'D:\\Project\\tintin-dsh-desktop',
+  'D:\\Project\\dsh-desktop',
 ].filter(Boolean)
 const srcBinOf = (root) => join(root, 'resources', 'bin')
 const srcRoot = srcCandidates.find((root) => NAMES.every((name) => existsSync(join(srcBinOf(root), name)))) ?? srcCandidates[0]
 const srcBin = srcBinOf(srcRoot)
-const destBin = resolve('D:/Project/dsh-desktop/dsh-plugin-desktop-tintin/tintin-resources/bin')
+const destBin = join(repoRoot, 'dsh-plugin-desktop-tintin', 'tintin-resources', 'bin')
 
 mkdirSync(destBin, { recursive: true })
 
