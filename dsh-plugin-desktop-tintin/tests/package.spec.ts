@@ -86,19 +86,19 @@ const dshResolution = (name: string): unknown =>
   workspaceManifest.resolutions?.[`${name}@npm:${runtimeVersion}`]
 
 describe('published package surface', () => {
-  it('keeps the private workspace version-neutral and versions the Beta package', () => {
+  it('keeps the private workspace version-neutral and versions the TinTin channel package', () => {
     expect(workspaceManifest.version).toBeUndefined()
-    expect(manifest.version).toBe('2.0.17-beta.1')
+    expect(manifest.version).toBe('0.2.0-dev.0')
   })
 
   it('runs all desktop editions and community market typechecks from the root command', () => {
     expect(workspaceManifest.scripts?.typecheck)
-      .toBe('yarn workspace dsh-plugin-desktop typecheck && yarn workspace dsh-plugin-desktop-tintin typecheck && yarn workspace dsh-community-market typecheck && yarn workspace dsh-desktop-next typecheck')
+      .toBe('yarn workspace dsh-plugin-desktop typecheck && yarn workspace dsh-plugin-desktop-beta typecheck && yarn workspace dsh-community-market typecheck && yarn workspace dsh-desktop-next typecheck')
   })
 
   it('runs all desktop editions and community market tests from the root command', () => {
     expect(workspaceManifest.scripts?.test)
-      .toBe('yarn workspace dsh-plugin-desktop test && yarn workspace dsh-plugin-desktop-tintin test && yarn workspace dsh-community-market test && yarn workspace dsh-desktop-next test')
+      .toBe('yarn workspace dsh-tintin-bundle test && yarn workspace dsh-tintin-browser test && yarn workspace dsh-tintin-media-bundle test && yarn workspace dsh-plugin-desktop test && yarn workspace dsh-plugin-desktop-beta test && yarn workspace dsh-community-market test && yarn workspace dsh-desktop-next test')
   })
 
   it('registers both npm launcher names', () => {
@@ -111,13 +111,13 @@ describe('published package surface', () => {
     expect(manifest.bin).not.toHaveProperty('dsh-plugin-desktop')
   })
 
-  it('sets a distinct Beta process identity before taking the single-instance lock', () => {
+  it('sets a distinct TinTin process identity before taking the single-instance lock', () => {
     expect(productIdentity).toContain("packageName: 'dsh-plugin-desktop-tintin'")
     expect(productIdentity).toContain("packageName: 'dsh-plugin-desktop'")
     expect(productIdentity).toContain("productName: 'TinTin'")
     expect(productIdentity).toContain("appId: 'com.tintin.desktop'")
-    expect(productIdentity).toContain('DESKTOP_PRODUCT_IDENTITY = DESKTOP_RELEASE_IDENTITIES.beta')
-    expect(productIdentity).toContain('OTHER_DESKTOP_PRODUCT_IDENTITY = DESKTOP_RELEASE_IDENTITIES.stable')
+    expect(productIdentity).toContain('DESKTOP_PRODUCT_IDENTITY = DESKTOP_RELEASE_IDENTITIES.tintin')
+    expect(productIdentity).toContain('OTHER_DESKTOP_PRODUCT_IDENTITY = DESKTOP_RELEASE_IDENTITIES.beta')
     expect(main).toContain('app.setAppUserModelId(DESKTOP_APP_ID)')
     const setName = main.indexOf('app.setName(PRODUCT_NAME)')
     const start = main.indexOf('await start()', setName)
@@ -855,7 +855,7 @@ describe('published package surface', () => {
 
   it('fixes the installed application identity', () => {
     expect(workspaceManifest.version).toBeUndefined()
-    expect(manifest.version).toBe('2.0.17-beta.1')
+    expect(manifest.version).toBe('0.2.0-dev.0')
     expect(manifest.name).toBe('dsh-plugin-desktop-tintin')
     expect(manifest.bin).toEqual({
       'dsh-desktop-tintin': 'lib/bin.js',
@@ -900,7 +900,7 @@ describe('published package surface', () => {
     ])
     expect(manifest.build?.mac?.icon).toBe('build/app-icon.icon')
     expect(manifest.build?.dmg?.icon).toBe('build/app-icon.icns')
-    expect(manifest.build?.mac?.artifactName).toBe('DSH-Desktop-Beta-${version}-${arch}.${ext}')
+    expect(manifest.build?.mac?.artifactName).toBe('TinTin-${version}-${arch}.${ext}')
     expect(manifest.build?.mac?.mergeASARs).toBe(false)
     expect(manifest.build?.mac?.signIgnore).toEqual(['\\.(?:pak|dat|wasm)$'])
     expect(manifest.build?.win?.compression).toBe('normal')
@@ -909,7 +909,7 @@ describe('published package surface', () => {
       target: 'nsis',
       arch: ['x64'],
     }])
-    expect(manifest.build?.win?.artifactName).toBe('DSH-Desktop-Beta-${version}-${arch}-Portable.${ext}')
+    expect(manifest.build?.win?.artifactName).toBe('TinTin-${version}-${arch}-Portable.${ext}')
     expect(manifest.build?.nsis).toEqual({
       include: 'installer.nsh',
       installerIcon: 'build/app-icon.ico',
@@ -924,7 +924,7 @@ describe('published package surface', () => {
       differentialPackage: false,
       shortcutName: 'TinTin',
       useZip: false,
-      artifactName: 'DSH-Desktop-Beta-${version}-${arch}-Setup.${ext}',
+      artifactName: 'TinTin-${version}-${arch}-Setup.${ext}',
     })
     expect(manifest.build?.linux?.icon).toBe('build/icons')
     expect(manifest.build?.linux?.synopsis).toBe('Agentic coding desktop for the DeepSeek Harness (Beta)')
@@ -987,13 +987,13 @@ describe('published package surface', () => {
     expect(manifest.scripts?.['verify:cli']).toBe('node scripts/verify-cli-runtime.mjs')
     expect(manifest.scripts?.check).toContain('yarn run verify:cli')
     expect(workspaceManifest.scripts?.['dist:mac:beta'])
-      .toBe('yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop-tintin dist:mac')
+      .toBe('yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop-beta dist:mac')
     expect(workspaceManifest.scripts?.['dist:mac-smoke:beta'])
-      .toBe('yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop-tintin dist:mac-smoke')
+      .toBe('yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop-beta dist:mac-smoke')
     expect(workspaceManifest.scripts?.['dist:win:beta'])
-      .toBe('yarn market:prepare && yarn aa:prepare-release && yarn aa:prepare-release --verify-release && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop-tintin dist:win')
+      .toBe('yarn market:prepare && yarn aa:prepare-release && yarn aa:prepare-release --verify-release && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop-beta dist:win')
     expect(workspaceManifest.scripts?.['dist:win-portable:beta'])
-      .toBe('yarn market:prepare && yarn aa:prepare-release && yarn aa:prepare-release --verify-release && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop-tintin dist:win-portable')
+      .toBe('yarn market:prepare && yarn aa:prepare-release && yarn aa:prepare-release --verify-release && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop-beta dist:win-portable')
     expect(manifest.build?.afterPack).toBe('./scripts/verify-packaged-runtime.ts')
     expect(manifest.build?.afterAllArtifactBuild).toBe('./scripts/verify-electron-fuses.ts')
     expect(manifest.build?.mac).toEqual(expect.objectContaining({
@@ -1034,7 +1034,7 @@ describe('published package surface', () => {
     )
 
     expect(windowsJob).not.toContain('- run: yarn check')
-    expect(windowsJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-tintin]')
+    expect(windowsJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]')
     expect(windowsJob).toContain('- run: yarn workspace ${{ matrix.workspace }} check:win-package:platform')
     expect(windowsJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:win')
     expect(windowsJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:win-portable')
@@ -1042,7 +1042,7 @@ describe('published package surface', () => {
     // Smoke artifacts are never published, so CI skips their compression.
     expect(windowsJob.match(/DSH_WINDOWS_PACKAGE_COMPRESSION: store/g)).toHaveLength(2)
     expect(macosJob).not.toContain('- run: yarn check')
-    expect(macosJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-tintin]')
+    expect(macosJob).toContain('workspace: [dsh-plugin-desktop, dsh-plugin-desktop-beta]')
     expect(macosJob).toContain('- run: yarn workspace ${{ matrix.workspace }} check:mac-package:platform')
     expect(macosJob).toContain('run: yarn workspace ${{ matrix.workspace }} dist:mac-smoke')
     expect(macosJob).toContain('DSH_PACKAGE_CHECK_ALREADY_RAN: \'1\'')

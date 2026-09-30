@@ -12053,7 +12053,7 @@ __metadata:
     dsh-tintin-browser: "npm:0.1.0-dev.0"
     dsh-tintin-bundle: "npm:0.1.0-dev.0"
     dsh-tintin-media-bundle: "npm:0.1.0-dev.0"
-    dshmarket: "npm:1.66.5"
+    dshmarket: "npm:1.66.6"
     electron: "npm:44.0.0"
     electron-builder: "npm:26.15.7"
     fs-ext: "npm:2.1.1"
@@ -12335,25 +12335,6 @@ __metadata:
     vue: "npm:^3.5.43"
   languageName: unknown
   linkType: soft
-
-"dshmarket@npm:1.66.5":
-  version: 1.66.5
-  resolution: "dshmarket@npm:1.66.5"
-  dependencies:
-    js-yaml: "npm:^4.1.0"
-    undici: "npm:^7.29.0"
-  peerDependencies:
-    "@deepseek-ai/cordis": ^4.0.1
-    "@deepseek-ai/dsh-settings": ^0.1.0-rc.7 || ^0.1.1-rc.2 || ^0.1.2-alpha.2 || ^0.2.0-rc.1
-    "@deepseek-ai/schemastery": ^3.18.1
-  peerDependenciesMeta:
-    "@deepseek-ai/dsh-settings":
-      optional: true
-    "@deepseek-ai/schemastery":
-      optional: true
-  checksum: 10c0/7cdd73b01a3278689ed7b0d83626e932f3524427cb94261236d6ab070755d36e13c59c3f4958b6c4ec56f644cb2d4495504f390ca1ff279210cf94e1256ffc78
-  languageName: node
-  linkType: hard
 
 "dshmarket@npm:1.66.6":
   version: 1.66.6
