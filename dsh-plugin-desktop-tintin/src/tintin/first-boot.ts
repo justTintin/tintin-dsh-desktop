@@ -1,12 +1,17 @@
-// TinTin first-boot provisioning (channel-only addition), ported from the
-// source repository's src/main/tintin-first-boot.ts seed half. Runs before
-// the mirrored bootstrap starts the Host, so it never races a live runtime:
-// every write only happens when the target file is absent.
+// TinTin first-boot provisioning seed (channel-only addition).
 //
-// 0.2.0 adaptations (measured against this framework):
-// - the bridge plugin namespace is dsh-tintin-bundle (not tintin-bundle);
-// - the ui-onboarding section is not seeded: 0.2.0 owns its own onboarding
-//   surface and an unknown namespace could make the settings import strict.
+// The full provisioning semantics live in the bridge's client chrome
+// (installTinTinProvisioning in dsh-tintin-bundle/client.js, user ruling
+// 2026-09-30: exactly one place configures the inference server). That flow
+// exits early until the bridge's own store carries a server URL, so this
+// seed — ported from the source repository's first-boot — writes the one
+// precondition file before the Host boots:
+//
+//   <home>/tintin/config.json = { server: { url: <seed> } }
+//
+// The seed URL is the legacy client's server.json when an old install
+// exists, else the loopback default. Only writes when the file is absent,
+// so a URL the user configured later always wins.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -14,9 +19,6 @@ import { resolveDesktopChannelHome } from '../desktop-channel-home.ts'
 import { DESKTOP_PRODUCT_IDENTITY } from '../product-identity.ts'
 
 const DEFAULT_SERVER_URL = 'http://127.0.0.1:8766'
-const WORKSPACE_DIR_NAME = 'tintin-workspace'
-export const TINTIN_SERVER_API_KEY_REF = 'TINTIN_SERVER_API_KEY'
-export const TINTIN_PLACEHOLDER_API_KEY = 'sk-tintin-local'
 
 // The old client's userData used the package name; earlier packaged builds
 // used the productName. Read both (newest mtime wins when both exist).
@@ -38,49 +40,10 @@ function resolveSeedServerUrl(appDataDir: string | undefined): string {
   return DEFAULT_SERVER_URL
 }
 
-function seedSettings(dshHome: string, serverUrl: string): void {
-  const settingsPath = join(dshHome, 'settings.yaml')
-  if (existsSync(settingsPath)) return
-  writeFileSync(settingsPath, [
-    '# Seeded by TinTin first-boot provisioning; user settings live above this.',
-    'dsh-tintin-bundle:',
-    '  server:',
-    `    url: ${serverUrl}`,
-    '    provisioned: false',
-    'llm-pi-ai:',
-    '  providers:',
-    '    tintin-server:',
-    '      displayName: TinTin',
-    '      apiKeyEnv: TINTIN_SERVER_API_KEY',
-    '      api: openai-completions',
-    `      baseURL: ${serverUrl}/llm`,
-    '      models:',
-    '        - id: deepseek-v4-flash',
-    '          name: DeepSeek V4 Flash',
-    'agent-default-model:',
-    '  provider: tintin-server',
-    '  model: deepseek-v4-flash',
-    '',
-  ].join(''), 'utf8')
-}
-
-function seedCredentials(dshHome: string): void {
-  const credPath = join(dshHome, '.credentials.yaml')
-  if (existsSync(credPath)) return
-  writeFileSync(credPath, [
-    'version: 1',
-    'records: {}',
-    'refs:',
-    `  ${TINTIN_SERVER_API_KEY_REF}: ${TINTIN_PLACEHOLDER_API_KEY}`,
-    '',
-  ].join(''), 'utf8')
-}
-
 /**
- * Resolve the channel's DSH home the same way the mirrored bootstrap will
- * (identity + environment), then seed the first-boot defaults. Provisioning
- * must never block startup: a failed seed leaves a blank home that still
- * boots, and the user configures through the first-boot wizard instead.
+ * Seed the bridge's own config store when absent, resolving the channel home
+ * the same way the mirrored bootstrap will. Provisioning must never block
+ * startup; without the seed the first-boot wizard still configures the URL.
  */
 export function seedTinTinDefaults(appDataDir: string | undefined): void {
   try {
@@ -90,27 +53,13 @@ export function seedTinTinDefaults(appDataDir: string | undefined): void {
       homeDirectory: homedir(),
     })
     const dshHome = resolution.homeDir
-    mkdirSync(dshHome, { recursive: true })
-    const serverUrl = resolveSeedServerUrl(appDataDir)
-    seedSettings(dshHome, serverUrl)
-    seedCredentials(dshHome)
-    // The settings document may be imported/rewritten by the Loader; the
-    // bridge's own store is the authoritative second copy the resolver chain
-    // reads from the very first boot.
     const storePath = join(dshHome, 'tintin', 'config.json')
-    if (!existsSync(storePath)) {
-      mkdirSync(join(dshHome, 'tintin'), { recursive: true })
-      writeFileSync(storePath, `${JSON.stringify({ server: { url: serverUrl } }, null, 2)}\n`, 'utf8')
-    }
-    console.info(`[tintin-first-boot] seeded defaults for ${dshHome} (server ${serverUrl})`)
+    if (existsSync(storePath)) return
+    const serverUrl = resolveSeedServerUrl(appDataDir)
+    mkdirSync(join(dshHome, 'tintin'), { recursive: true })
+    writeFileSync(storePath, `${JSON.stringify({ server: { url: serverUrl } }, null, 2)}\n`, 'utf8')
+    console.info(`[tintin-first-boot] seeded server url ${serverUrl} for ${dshHome}`)
   } catch (error) {
     console.warn('[tintin-first-boot] seed failed:', error instanceof Error ? error.message : String(error))
   }
-}
-
-/** Documents/tintin-workspace — the default workspace the ready-hook registers. */
-export function tintinWorkspaceDir(): string {
-  const documentsDir = process.env.TINTIN_WORKSPACE_DIR
-    ?? join(homedir(), 'Documents')
-  return join(documentsDir, WORKSPACE_DIR_NAME)
 }
