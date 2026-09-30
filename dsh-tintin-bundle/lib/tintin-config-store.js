@@ -37,17 +37,21 @@ export function mergeConfigDocs(target, patch) {
   return target
 }
 
-/** Schemastery compiles uncommitted volatile fields into empty-object
- * placeholders — semantically "no value". Letting them through a merge
- * clobbers real values (0.1.7 live bug: placeholder overwrote the store's
- * URL and the wizard prefill showed "[object Object]"). Recursively drops
- * keys whose value is an empty plain object, bottom-up. */
+/** Schemastery compiles uncommitted volatile fields into placeholder objects —
+ * semantically "no value". 0.1.7 shipped empty plain objects (the live bug:
+ * placeholder overwrote the store's URL and the wizard prefill showed
+ * "[object Object]"); 0.2.0 compiles them as `{ get: () => current }` lazy
+ * getters, which JSON-serialize as `{}` yet survive an "is empty" key count.
+ * Either shape must be dropped before a merge, or it clobbers real store
+ * values. Recursively drops leaves that are empty objects or hold only
+ * function properties, bottom-up. */
 export function stripEmptyObjectLeaves(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
   const out = {}
   for (const [key, v] of Object.entries(value)) {
     const cleaned = v && typeof v === 'object' && !Array.isArray(v) ? stripEmptyObjectLeaves(v) : v
-    const isJunk = cleaned !== undefined && typeof cleaned === 'object' && !Array.isArray(cleaned) && Object.keys(cleaned).length === 0
+    const isJunk = cleaned !== undefined && typeof cleaned === 'object' && !Array.isArray(cleaned)
+      && (Object.keys(cleaned).length === 0 || Object.values(cleaned).every((entry) => typeof entry === 'function'))
     if (cleaned !== undefined && !isJunk) out[key] = cleaned
   }
   return Object.keys(out).length > 0 ? out : undefined

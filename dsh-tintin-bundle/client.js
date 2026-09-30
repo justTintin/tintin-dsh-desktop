@@ -1134,14 +1134,103 @@ const tintinClient = (() => {
       return j?.result?.value
     })
 
+    // ── 服务端自动注册(2026-09-30 用户裁决:服务菜单方向)─────────────────
+    // 旧版在 Electron main(src/main/tintin-first-boot.ts 的 ensureTinTinProvider/
+    // ensureDefaultWorkspace)经 token→cookie 换取会话后走公开 RPC;新框架宿主
+    // 插件拿不到 web token,而本 chrome 每次加载都带会话 cookie 且 settingsRpc
+    // 在位——自愈移到这里,每次页面加载幂等执行:
+    //   server.url 已配置时:缺失则注册 tintin-server provider(模型列表经宿主
+    //   probe 拉全量)、凭据占位补齐、默认工作区登记;默认模型仅在用户尚未
+    //   改动系统默认(deepseek-official)时接管。
+    function installTintinProvisioning() {
+      const rpc = (method, args) => fetch(`/api/${method}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'client-request', rpcId: `tintin-provision-${Date.now()}`, method, payload: { args } }),
+      }).then(async (r) => {
+        const j = await r.json().catch(() => ({}))
+        if (j?.result?.ok === false) throw new Error(j.result.error?.message ?? method)
+        return j?.result?.value
+      })
+      const ensure = async () => {
+        let serverUrl = ''
+        try {
+          const cfg = await window.tintin?.config?.get?.()
+          const raw = cfg?.value?.server?.url
+          if (typeof raw === 'string' && raw.length > 0) serverUrl = raw.replace(/\/+$/u, '')
+        } catch { /* store read failure → treat as unconfigured */ }
+        if (serverUrl.length === 0) return // 未配置——等首启向导或设置卡
+        const describe = await settingsRpc('settings/describe', {})
+        const nsValue = (name) => describe?.namespaces?.find?.((n) => n?.ns === name)?.value
+        const log = (what) => console.info(`[tintin] provisioning: ${what}`)
+
+        // Provider half (缺失才注册;probe 失败降级占位模型,下次加载重试)
+        if (nsValue('llm-pi-ai')?.providers?.['tintin-server'] === undefined) {
+          let models = [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }]
+          let preferred = models[0]
+          try {
+            const r = await fetch('/tintin/setup/probe', {
+              method: 'POST', headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ url: serverUrl }),
+            })
+            const j = await r.json().catch(() => ({}))
+            if (r.ok && Array.isArray(j?.result?.models) && j.result.models.length > 0) {
+              models = j.result.models
+              preferred = j.result.preferred ?? models.find((m) => m.default) ?? models[0]
+            }
+          } catch { /* server offline — placeholder provider, self-heals next load */ }
+          await settingsRpc('settings/mutate', {
+            ns: 'llm-pi-ai',
+            ops: [{
+              op: 'set', path: ['providers', 'tintin-server'], value: {
+                displayName: 'TinTin', apiKeyEnv: 'TINTIN_SERVER_API_KEY', api: 'openai-completions',
+                baseURL: `${serverUrl}/llm`, models: models.map((m) => ({ id: m.id, name: m.name })),
+              },
+            }],
+          })
+          log(`tintin-server provider registered from ${serverUrl} (${String(models.length)} models)`)
+          // 默认模型:仅当仍是系统默认时接管(用户自选的不动)
+          const adm = nsValue('agent-default-model')
+          if ((adm?.provider ?? 'deepseek-official') === 'deepseek-official' && preferred?.id) {
+            await settingsRpc('settings/mutate', {
+              ns: 'agent-default-model',
+              ops: [{ op: 'set', path: [], value: { provider: 'tintin-server', model: preferred.id } }],
+            })
+            log(`default model -> tintin-server/${String(preferred.id)}`)
+          }
+        }
+
+        // Credential half(占位 key;服务端无鉴权,用户后配的真实值优先)
+        try {
+          const cred = await rpc('credentials/describe', { refs: ['TINTIN_SERVER_API_KEY'] })
+          if (cred?.TINTIN_SERVER_API_KEY?.configured !== true) {
+            await rpc('credentials/set', { ref: 'TINTIN_SERVER_API_KEY', value: 'sk-tintin-local' })
+            log('tintin-server credential restored (placeholder)')
+          }
+        } catch { /* credentials RPC unavailable — provider apiKeyRef 缺失时模型页会提示 */ }
+
+        // Workspace half(宿主先 mkdir,再走公开幂等 RPC)
+        try {
+          const r = await fetch('/tintin/workspace/ensure', { method: 'POST' })
+          const j = await r.json().catch(() => ({}))
+          if (r.ok && j?.result?.dir) {
+            await rpc('workspace/create', { request: { path: j.result.dir } })
+            log(`default workspace ensured: ${String(j.result.dir)}`)
+          }
+        } catch { /* UI 里仍可手动选择工作区 */ }
+      }
+      ensure().catch((e) => console.warn('[tintin] provisioning skipped:', e?.message ?? e))
+    }
+
     // Install now (see header comment): the media bundle's factory registers
     // its view provider against __tintinViews, which must already exist.
     installTintinChrome()
     installTintinBridge()
     installCapabilityTests()
+    installTintinProvisioning()
 
     return { settingsRpc }
-})()
+  })()
 
 // ── 插件定义（factory 期执行；React 只在此处可用）────────────────────────
 // 设置卡走 settings.plugin.item slot（ConfigurablePluginsTab 契约：列表只

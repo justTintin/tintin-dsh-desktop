@@ -67,4 +67,18 @@ describe('tintin-config-store', () => {
     expect(stripEmptyObjectLeaves({ server: { url: 'http://a:1', provisioned: {} }, local: { cacheDir: '' } }))
       .toEqual({ server: { url: 'http://a:1' }, local: { cacheDir: '' } })
   })
+
+  it('stripEmptyObjectLeaves drops the 0.2.0 lazy-getter volatile placeholder shape', () => {
+    // 2026-09-30 实机事故(0.2.0-rc.2)：volatile 占位编译成 { get: () => current }
+    // lazy getter——JSON 序列化为 {} 但键计数非空，旧的"空对象"判定放行，
+    // 合并视图盖掉 store 真值(自动注册读不到 server.url 的根因)。
+    const getterConfig = { server: { url: { get: () => 'http://x:1' }, provisioned: { get: () => true } } }
+    expect(stripEmptyObjectLeaves(getterConfig)).toBeUndefined()
+    const merged = mergeConfigDocs(
+      { server: { url: 'http://192.168.111.31:8000', provisioned: true } },
+      stripEmptyObjectLeaves(getterConfig) ?? {},
+    ) as { server: { url?: string, provisioned?: boolean } }
+    expect(merged.server.url).toBe('http://192.168.111.31:8000')
+    expect(merged.server.provisioned).toBe(true)
+  })
 })

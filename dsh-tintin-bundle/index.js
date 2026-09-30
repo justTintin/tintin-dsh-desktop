@@ -31,6 +31,7 @@ import { createRembgApi, createAudioArchiveApi, createVsrApi } from './lib/media
 import { loopbackCall, readLoopbackConfig, summarizeExtract } from './lib/loopback-helpers.js'
 import { createTintinAgentTools } from './lib/agent-tools.js'
 import { createContextTaskApi, defaultWorkspaceDir } from './lib/context-task.js'
+import { registerWorkspaceEnsureRoute } from './lib/workspace-ensure-route.js'
 import { createYtdlpApi } from './lib/ytdlp.js'
 import { loadPresetDefinitions } from './lib/preset-definitions.js'
 
@@ -1358,6 +1359,9 @@ export async function apply(ctx, config) {
       },
     })
 
+    // Workspace directory ensure for client-side first-boot provisioning.
+    const disposeWorkspaceEnsure = registerWorkspaceEnsureRoute({ webServer: webCtx.webServer, isTrustedRequest, sendJson, mkdirSync, defaultWorkspaceDir })
+
     // First-boot setup wizard probe: the browser cannot reach an arbitrary LAN
     // address directly (cross-origin), so the host probes the candidate server
     // (health + model list) on its behalf and returns what the provider config
@@ -1408,6 +1412,7 @@ export async function apply(ctx, config) {
       disposeUpload()
       disposeMedia()
       disposeSse()
+      disposeWorkspaceEnsure()
       disposeSetupProbe()
     }
   }, 'tintin-bundle: probe routes'))

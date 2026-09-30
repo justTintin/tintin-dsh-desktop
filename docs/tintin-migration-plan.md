@@ -120,6 +120,7 @@ dsh-desktop(Yarn 4 monorepo,运行时 0.2.0-rc.2 vendored)
 
 **遗留工作包**(按优先级):
 1. ~~三补丁集群转译~~ **已完成(2026-09-30,提交 `cc983086fe` + `e59f6491ad`)**:SessionDelete 7 包、FORBIDDEN 3 包、附件打开 4 包(UI 层含与仓库现有 conversation 补丁的合并);全部经 yarn patch: 协议注册、重装存活验证、浏览器 DOM 实测生效。剩余 11 个独立审计项(非集群)见[补丁审计](tintin-patch-audit.md)转译进度节。
+1b. ~~first-boot 重放(服务菜单+自动注册)~~ **已完成(2026-09-30)**:旧 `tintin-first-boot.ts` 的三大件迁移——provider/凭据/默认模型自愈移入 `client.js` 的 `installTintinProvisioning()`(每次页面加载幂等,经已验证同名的 settings/credentials 公开 RPC),默认工作区经宿主 `/tintin/workspace/ensure` 路由(lib/workspace-ensure-route.js)+ `workspace/create` RPC。**实测全链**:server.url 一处配置 → tintin-server provider 自动注册(2 模型,baseURL=<server>/llm)→ 默认模型自动接管 → 凭据占位 → 工作区登记,composer 模型选择器显示服务端模型。顺带修复 0.2.0 适配 bug:schemastery volatile 占位新形态 `{get:()=>current}`(lazy getter,JSON 序列化为 {} 但键计数非空)穿透 stripEmptyObjectLeaves 盖掉 store 真值——strip 增加全函数叶子判定 + 回归测试。
 2. 浏览器域窗口接线(通道包 main + host↔main RPC)+ extraResources。
 3. dist:tintin 打包链 + 更新端点/签名链(附录 E 决策)。
 4. 预设运行时行为 GUI 验证、tintin:presets 生成管线 0.2.0 基底化。
