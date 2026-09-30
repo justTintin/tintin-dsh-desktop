@@ -19,7 +19,7 @@
     "dsh-plugin-desktop-tintin"
   ],
   "resolutions": {
-    "@agents-anywhere/dsh-bridge-next": "patch:@agents-anywhere/dsh-bridge-next@file%3Avendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.0.2-desktop.c5ce6412d497c.r156e8f86.tgz#./patches/agents-anywhere-connector-httpx.patch",
+    "@agents-anywhere/dsh-bridge-next": "patch:@agents-anywhere/dsh-bridge-next@file%3Avendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.0.2-desktop.ce0d3ccf68b11.r156e8f86.tgz#./patches/agents-anywhere-connector-httpx.patch",
     "app-builder-lib@npm:26.15.7": "patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch",
     "open@npm:11.0.1": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
     "open@npm:^11.0.0": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
@@ -170,8 +170,8 @@
     "@deepseek-ai/dsh-deepseek-account-platform@npm:^0.2.0-rc.2": "file:vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-deepseek-account-platform-0.2.0-rc.2.tgz",
     "@deepseek-ai/dsh-deepseek-llm-api-extensions@npm:0.2.0-rc.2": "file:vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-deepseek-llm-api-extensions-0.2.0-rc.2.tgz",
     "@deepseek-ai/dsh-deepseek-llm-api-extensions@npm:^0.2.0-rc.2": "file:vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-deepseek-llm-api-extensions-0.2.0-rc.2.tgz",
-    "@deepseek-ai/dsh-fs-local@npm:0.2.0-rc.2": "file:vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-fs-local-0.2.0-rc.2.tgz",
-    "@deepseek-ai/dsh-fs-local@npm:^0.2.0-rc.2": "file:vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-fs-local-0.2.0-rc.2.tgz",
+    "@deepseek-ai/dsh-fs-local@npm:0.2.0-rc.2": "patch:@deepseek-ai/dsh-fs-local@file%3Avendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-fs-local-0.2.0-rc.2.tgz#./patches/dsh-fs-local@0.2.0-rc.2.patch",
+    "@deepseek-ai/dsh-fs-local@npm:^0.2.0-rc.2": "patch:@deepseek-ai/dsh-fs-local@file%3Avendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-fs-local-0.2.0-rc.2.tgz#./patches/dsh-fs-local@0.2.0-rc.2.patch",
     "@deepseek-ai/dsh-fs-observation-policy@npm:0.2.0-rc.2": "file:vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-fs-observation-policy-0.2.0-rc.2.tgz",
     "@deepseek-ai/dsh-fs-observation-policy@npm:^0.2.0-rc.2": "file:vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-fs-observation-policy-0.2.0-rc.2.tgz",
     "@deepseek-ai/dsh-fs-sandbox@npm:0.2.0-rc.2": "file:vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-fs-sandbox-0.2.0-rc.2.tgz",
