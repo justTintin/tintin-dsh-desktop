@@ -45,6 +45,22 @@
 | TRANSLATE | 13 |
 | 未执行验证 | 1(undici) |
 
+## 转译进度(2026-09-30 更新)
+
+**SessionDelete 集群 + 附件打开后端已全部转译落地**(yarn `patch:` 协议,7 个补丁文件注册 resolutions 双条目,重装验证存活):
+
+| 补丁文件 | 转译方式 | 验证 |
+|---|---|---|
+| `dsh-session-persistence@0.2.0-rc.2.patch` | 手工落位(基文件两版相同,hunk 与源逐字一致) | 6/6 符号 PASS |
+| `dsh-session-persistence-jsonl@0.2.0-rc.2.patch` | 源补丁零 re-base 直接转译 | delete 实现存在 |
+| `dsh-workspace@0.2.0-rc.2.patch` | 源补丁零 re-base | forgetSession 存在 |
+| `dsh-api-remotes@0.2.0-rc.2.patch` | offset 422/512 落位 | session/delete RPC 注册 |
+| `dsh-api-session-controller@0.2.0-rc.2.patch` | offset 30+(60 hunks,含附件打开 fileHostPath 端点) | typert host 注册 |
+| `dsh-client-file-upload@0.2.0-rc.2.patch` | 零 re-base | findStagedFile 存在 |
+| `dsh-client-ui-workspace@0.2.0-rc.2.patch` | offset 2-3 + 2 处 fuzz 1;navigation.d.ts 一处 hunk 被拒后按 0.2.0 现状手工补齐(fresh 参数/deleteSession/registerSessionStarter 声明) | deleteSession + 类型 PASS |
+
+**运行时冒烟**:补丁后运行时无告警启动,`POST /api/session/delete` 返回 unauthorized(路由存在)而非 404。**待验**:UI 右键菜单的删除入口需真实会话(依赖 LLM)后实测;附件打开的 UI 层(#10 #11 #12)未迁,后端端点已就位。
+
 **功能集群**(必须整批决策,不存在部分生效):
 
 1. **SessionDelete 集群**(#3 #4 #23 #24 #25 + #19 deleteSession):实测 vendored 0.2.0-rc.2 无 `session/delete`、无 `delete()`、无 `forgetSession`。tintin 产品有"永久删除会话"用户功能 → 裁决:**整集群 TRANSLATE**(依据②原实现一比一),五包 + workspace 的 delete hunk 以 yarn patch 分代移植,时间排 Phase 2(UI 相关)。
