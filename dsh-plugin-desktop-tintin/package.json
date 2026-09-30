@@ -394,7 +394,7 @@
       "!node_modules/fs-ext/build/**"
     ],
     "mac": {
-      "artifactName": "DSH-Desktop-Beta-${version}-${arch}.${ext}",
+      "artifactName": "TinTin-${version}-${arch}.${ext}",
       "target": [
         "dir"
       ],
@@ -430,7 +430,7 @@
           ]
         }
       ],
-      "artifactName": "DSH-Desktop-Beta-${version}-${arch}-Portable.${ext}",
+      "artifactName": "TinTin-${version}-${arch}-Portable.${ext}",
       "icon": "build/app-icon.ico",
       "asar": false
     },
@@ -446,7 +446,7 @@
       "differentialPackage": false,
       "shortcutName": "TinTin",
       "useZip": false,
-      "artifactName": "DSH-Desktop-Beta-${version}-${arch}-Setup.${ext}",
+      "artifactName": "TinTin-${version}-${arch}-Setup.${ext}",
       "installerIcon": "build/app-icon.ico",
       "uninstallerIcon": "build/app-icon.ico"
     },
@@ -466,7 +466,7 @@
         }
       ],
       "icon": "build/icons",
-      "artifactName": "DSH-Desktop-Beta-${version}-${arch}.${ext}",
+      "artifactName": "TinTin-${version}-${arch}.${ext}",
       "category": "Development",
       "synopsis": "Agentic coding desktop for the DeepSeek Harness (Beta)",
       "maintainer": "DeepSeek <dsh-desktop@deepseek.com>",
