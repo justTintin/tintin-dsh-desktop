@@ -20,3 +20,7 @@ dsh-desktop-next/.desktop-next/
 
 # TinTin port spike scaffolding (temporary DSH_HOME + overlay)
 /.tintin-spike/
+
+# TinTin channel build outputs
+dsh-plugin-desktop-tintin/dist/
+dsh-plugin-desktop-tintin/lib/

@@ -481,6 +481,24 @@
     },
     "dmg": {
       "icon": "build/app-icon.icns"
-    }
+    },
+    "extraResources": [
+      {
+        "from": "build/extractors",
+        "to": "extractors"
+      },
+      {
+        "from": "build/tintin-browser.html",
+        "to": "tintin-browser.html"
+      },
+      {
+        "from": "tintin-resources/bin",
+        "to": "bin"
+      },
+      {
+        "from": "tintin-resources/ext-assets",
+        "to": "ext-assets"
+      }
+    ]
   }
 }
