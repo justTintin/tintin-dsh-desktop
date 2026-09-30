@@ -1170,8 +1170,9 @@ function scoreClass(score: number | undefined): string {
 /* ⚠ 宽度覆盖必须 .modal.srcdlg-modal 双类（优先级压过后方 .modal 的 440px/90vw）——
    此前单类 .srcdlg-modal 写在前被 .modal 反压，弹窗一直按 440px 渲染（最大化同被压）。
    2026-09-23 用户裁决：宽度=原来的 2.5 倍（440→1100px），94vw 封顶；
-   2026-09-30 用户反馈：再宽一些（1100→1320px），右侧池条目两行信息需要横向空间，96vw 封顶 */
-.modal.srcdlg-modal { width: min(1320px, 96vw); max-height: 86vh; }
+   2026-09-30 用户反馈：再宽一些（1100→1320px），右侧池条目两行信息需要横向空间，96vw 封顶；
+   2026-10-01 用户反馈：再宽一些（1320→1600px），96vw 封顶不变，小屏不受影响 */
+.modal.srcdlg-modal { width: min(1600px, 96vw); max-height: 86vh; }
 /* 2026-09-23 用户裁决：最大化态铺满父窗口（100vw×100vh），去圆角与限高 */
 .modal.srcdlg-modal--max { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; }
 /* 标题行窗口化控制（最大化/还原/关闭，双击标题行同切换） */
