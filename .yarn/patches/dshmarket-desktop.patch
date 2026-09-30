@@ -1,8 +1,7 @@
 diff --git a/client/client.js b/client/client.js
-index 2911b31..e96b3cd 100644
 --- a/client/client.js
 +++ b/client/client.js
-@@ -8766,7 +8766,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
+@@ -10122,7 +10122,7 @@
  					return next;
  				});
  			}, []);
@@ -11,20 +10,19 @@ index 2911b31..e96b3cd 100644
  			const updatableNames = Object.keys(installed).filter((name) => name !== selfName && !effectiveDisabledSet.has(name) && isPluginUpdatable(name, String(installed[name]), updates[name], updatedNames));
  			const batchUpdatableNames = updatableNames.filter((name) => updates[name]?.restoreRequired !== true);
  			const ignoredUpdateSet = (0, react.useMemo)(() => new Set(ignoredUpdateNames), [ignoredUpdateNames]);
-@@ -9635,7 +9635,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
+@@ -11296,7 +11296,7 @@
  										children: ["v", version]
  									}),
  									(() => {
 -										const self = installed["dshmarket"] !== void 0 ? "dshmarket" : "dsh-market";
 +										const self = installed["dshmarket"] !== void 0 || updates["dshmarket"] !== void 0 ? "dshmarket" : "dsh-market";
  										const status = updates[self];
- 										return status && status.updateAvailable && !updatedNames.includes(self) && !ignoredUpdateSet.has(self) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
+ 										return status && status.updateAvailable && !updatedNames.includes(self) && !quietUpdateSet.has(self) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
  											variant: "primary",
 diff --git a/lib/routes.js b/lib/routes.js
-index 6209913..bb756d8 100644
 --- a/lib/routes.js
 +++ b/lib/routes.js
-@@ -1212,7 +1212,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -1365,7 +1365,7 @@
          // unreleased work.
          const channel = activeChannel();
          const installed = readInstalled(config.profile, activeProfileDir);
@@ -33,7 +31,7 @@ index 6209913..bb756d8 100644
              .filter(name => SELF_NAMES.has(name))
              .map(name => [name, channel]));
          const onlineSourceFor = new Map();
-@@ -1337,7 +1337,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -1500,7 +1500,7 @@
                  }
                  try {
                      const { channelFor, onlineSourceFor } = await updateCheckInputs();
@@ -42,7 +40,7 @@ index 6209913..bb756d8 100644
                      // `packages` carries the same objects the single-package endpoint
                      // returns, so one parser serves both. Only updatable ones: a badge
                      // wants the count, a panel wants the rows, and neither wants to
-@@ -1384,7 +1384,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -1547,7 +1547,7 @@
                          // or a catalog-matched local package answers here with the
                          // release it can be compared against rather than with nothing.
                          const { channelFor, onlineSourceFor } = await updateCheckInputs();
@@ -51,7 +49,7 @@ index 6209913..bb756d8 100644
                          if (update === undefined) {
                              sendJson(response, 404, { schema: UPDATE_API_V1_SCHEMA, error: 'plugin is not installed' });
                              return;
-@@ -2695,7 +2695,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -3195,7 +3195,7 @@
                      catch (error) {
                          logEvent('warn', 'updates', `package source lookup failed — ${error instanceof Error ? error.message : String(error)}`);
                      }
@@ -60,7 +58,7 @@ index 6209913..bb756d8 100644
                      for (const [name, migration] of sourceMigrationFor) {
                          const status = updates[name];
                          if (status !== undefined)
-@@ -2958,7 +2958,8 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -3482,7 +3482,8 @@
                              });
                              return;
                          }
@@ -70,7 +68,7 @@ index 6209913..bb756d8 100644
                          if (spec === undefined || INBOX_BUNDLES.has(name)) {
                              sendJson(response, 400, { error: 'plugin is not installed' });
                              return;
-@@ -3272,7 +3273,8 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -3622,7 +3623,8 @@
                          // Desktop boundary; it is what turns a silent skip into a
                          // failure with a name.
                          if (usesNpmUpdateTarget) {
@@ -80,7 +78,7 @@ index 6209913..bb756d8 100644
                              // The requested release replaces the resolved one, and with it
                              // every check below that exists to judge `latest`: re-running
                              // them would refuse the version the dialog just found, in a loop
-@@ -3223,7 +3225,8 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -3771,7 +3773,8 @@
                          // one needs a refresh, not a restart.
                          const wasLive = verifyActivation(config.profile, name, liveNames(), activeProfileDir, disabled.has(name)).state === 'live'
                              && hasHostHalf(config.profile, name, activeProfileDir);
@@ -90,7 +88,7 @@ index 6209913..bb756d8 100644
                          const beforePackageName = readInstalledPackageName(config.profile, name, activeProfileDir);
                          // A durable manifest pin is independently authoritative. When its
                          // captured lock is missing or stale, the exact OLD re-add repairs
-@@ -3267,6 +3270,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -3822,6 +3825,7 @@
                          // well as after.
                          const bundlesBefore = brokenClientBundles(config.profile, activeProfileDir);
                          const manifestBefore = manifestCapture.snapshot;
@@ -98,7 +96,7 @@ index 6209913..bb756d8 100644
                          const lockfileCapture = captureProfileLockfile();
                          const previousVersionZh = beforeVersion === null ? '更新前版本未知' : `更新前版本为 v${beforeVersion}`;
                          const previousVersionEn = beforeVersion === null ? 'the previous version is unknown' : `the previous version was v${beforeVersion}`;
-@@ -3560,14 +3564,16 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup) {
+@@ -4196,14 +4200,16 @@
                          if (ok) {
                              const stack = readBundleStack(activeProfileDir);
                              const trial = trialValidate(activeProfileDir, stack.community);
@@ -118,10 +116,9 @@ index 6209913..bb756d8 100644
                                      ? 'the composition would not boot'
                                      : `${firstIssue.layer}: ${firstIssue.message}`;
 diff --git a/lib/updates.js b/lib/updates.js
-index 26764a0..fae652d 100644
 --- a/lib/updates.js
 +++ b/lib/updates.js
-@@ -259,21 +259,27 @@ channelFor = new Map(),
+@@ -271,21 +271,27 @@
   * the generations the desktop host links in (#497). Any other `link:` is
   * a development workspace and is never opted into online updates.
   */
