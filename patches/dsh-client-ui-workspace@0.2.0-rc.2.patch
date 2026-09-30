@@ -408,6 +408,17 @@ diff --git a/lib/types/client/navigation.d.ts b/lib/types/client/navigation.d.ts
      /**
       * @param ctx - Client root Context.
       * @param directoryPicker - the directory-picking Remote namespace.
+@@ -122,6 +134,10 @@
+      */
+     constructor(ctx: Context, directoryPicker: ClientRemote['directoryPicker'], workspaces: IWorkspaces, sessions: ISessions, view: Pick<WorkspaceViewStoreActions, 'pinSessionOrder'>, notify: (toast: RowToast) => void);
+     connectWorkspace(workspaceId: WorkspaceId): Promise<SessionId>;
++    registerSessionOpener(handler: (sessionId: SessionId, source?: SessionNavigationSource) => boolean): () => void;
++    registerSessionReuseFilter(handler: (sessionId: SessionId) => boolean): () => void;
++    registerSessionStarter(handler: (workspaceId?: WorkspaceId) => boolean): () => void;
++    deleteSession(sessionId: SessionId): Promise<void>;
+     private reuseOrCreateBlank;
+     private reuseBlank;
+     openSession(target: SessionTarget): void;
 diff --git a/lib/types/client/stores.d.ts b/lib/types/client/stores.d.ts
 --- a/lib/types/client/stores.d.ts
 +++ b/lib/types/client/stores.d.ts

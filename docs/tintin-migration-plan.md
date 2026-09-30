@@ -95,7 +95,10 @@ dsh-desktop(Yarn 4 monorepo,运行时 0.2.0-rc.2 vendored)
 - 迁 #10、#11、#14:浏览器域 Electron 模块、抽取器、扩展、自动上架;extraResources(含 300MB bin)接入 electron-builder;`afterPack` 校验扩展。
 - 验收:浏览器域窗口 + B 站/抖音抽取器在**打包目录安装版**可用(非 dev 目录)。
 
-### Phase 4 — TinTin 产品通道(1–2 周) — **引导完成(2026-09-30)**:`dsh-plugin-desktop-tintin` 三方镜像通道落地(Beta 字节级镜像 + TinTin 身份 com.tintin.desktop/.dsh-tintin/0.2.0-dev.0),`verify-desktop-variants` 扩为三方校验(镜像 + 未来通道增量允许清单),checkpoints/update 通道联合类型三版扩含 'tintin',通道包端到端构建通过(tsdown+vite+声明)。**余量(附录 E 决策依赖)**:浏览器域窗口接线(host↔main 通信面)、extraResources(300MB bin/抽取器/扩展)、dist:tintin 链 + 更新端点裁决、Windows 签名链移植。
+### Phase 4 — TinTin 产品通道(1–2 周) — **引导 + 窗口接线 + 打包链完成(2026-09-30)**:
+- 三方镜像通道落地(Beta 字节级镜像 + TinTin 身份),`verify-desktop-variants` 三方校验 + 通道增量允许清单(`tintin/main-hook.ts`、`tintin-main.ts`)。
+- **组合入口架构**:`package.json main → lib/tintin-main.js`(通道专属入口,加载即装 TinTin 能力后引镜像 main)——镜像文件零改动。浏览器域经 `app.on('browser-window-created')` 挂到主窗口(dsh-tintin-browser 以 noExternal 打包进通道入口,无运行时 TS 导入);TINTIN_BIN_DIR 指向 `<resources>/bin`。
+- **打包链**:通道 `package:dir` 与根 `package:tintin:dir`(market:prepare + aa:prepare-release 新鲜度门禁)打通;win-unpacked 产物含 tintin 包与组合入口(777MB 清单核验)。⚠️ afterPack 打包冒烟在本机失败为**仓库级 Windows 存量问题**(打包内 Node 24 BigInt 对 default_app.asar 统计,Beta 同样逐字失败;CI 的 ubuntu 绿)。**余量**:extraResources 接线(300MB bin/抽取器/扩展,fetch 脚本已就位待产物)、NSIS 安装器/签名链、更新端点裁决(附录 E)。
 
 - 建 `dsh-plugin-desktop-tintin`:`src/` 与 Beta 镜像 + `product-identity.ts`(appId `com.tintin.desktop`、独立 DSH_HOME);`verify-desktop-variants` 扩为三方校验(tintin = 镜像 + 允许清单增量);AGENTS.md 同步改规则;Windows 签名链移植;更新器指向 TinTin 自己的版本服务;根 `dist:tintin` 链接入 `market:prepare`/`aa:prepare-release` 同样的新鲜度门禁。
 - 决策点(到此再定,列入附录待裁决清单):手机桥用 AA 还是保留 LAN 桥;`.dshpreset` 传输是否保留;mac 二进制来源。

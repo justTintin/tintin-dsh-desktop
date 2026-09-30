@@ -6,8 +6,8 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import AdmZip from 'adm-zip'
-import { PLATFORM_DEFS, PLATFORM_IDS } from './platform-meta'
-import { findBilibiliHelperDir } from './bilibili-ext'
+import { PLATFORM_DEFS, PLATFORM_IDS } from './platform-meta.ts'
+import { findBilibiliHelperDir } from './bilibili-ext.ts'
 import type { Session } from 'electron'
 
 export interface ExtensionEntry {

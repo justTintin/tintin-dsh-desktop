@@ -10,7 +10,10 @@ const allowedDifferences = new Set(['product-identity.ts'])
 // TinTin channel-only source additions (browser-domain window wiring lands
 // here in later work packages). Every other file must mirror Beta exactly
 // after the identity renaming below, so shared fixes stay three-way synced.
-const allowedTintinAdditions = new Set([])
+const allowedTintinAdditions = new Set([
+  'tintin/main-hook.ts',
+  'tintin-main.ts',
+])
 const normalizeIdentity = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop').replaceAll('DSH Desktop Beta', 'DSH Desktop')
 const normalizeTintin = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop-tintin').replaceAll('DSH Desktop Beta', 'TinTin')
 

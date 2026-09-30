@@ -13,7 +13,7 @@
     "directory": "dsh-plugin-desktop-tintin"
   },
   "type": "module",
-  "main": "lib/main.js",
+  "main": "lib/tintin-main.js",
   "types": "lib/types/index.d.ts",
   "bin": {
     "dsh-desktop-tintin": "lib/bin.js",
@@ -343,6 +343,7 @@
     "builder-util": "26.15.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dsh-tintin-browser": "0.1.0-dev.0",
     "electron": "44.0.0",
     "electron-builder": "26.15.7",
     "jsdom": "29.1.1",

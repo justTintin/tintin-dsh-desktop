@@ -2465,10 +2465,10 @@ __metadata:
 
 "@deepseek-ai/dsh-client-ui-workspace@patch:@deepseek-ai/dsh-client-ui-workspace@file%3Avendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-client-ui-workspace-0.2.0-rc.2.tgz#./patches/dsh-client-ui-workspace@0.2.0-rc.2.patch::locator=deepseek-harness-desktop%40workspace%3A.":
   version: 0.2.0-rc.2
-  resolution: "@deepseek-ai/dsh-client-ui-workspace@patch:@deepseek-ai/dsh-client-ui-workspace@file%3Avendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-client-ui-workspace-0.2.0-rc.2.tgz%23vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-client-ui-workspace-0.2.0-rc.2.tgz%3A%3Ahash=175e03&locator=deepseek-harness-desktop%2540workspace%253A.#./patches/dsh-client-ui-workspace@0.2.0-rc.2.patch::version=0.2.0-rc.2&hash=095144&locator=deepseek-harness-desktop%40workspace%3A."
+  resolution: "@deepseek-ai/dsh-client-ui-workspace@patch:@deepseek-ai/dsh-client-ui-workspace@file%3Avendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-client-ui-workspace-0.2.0-rc.2.tgz%23vendor/dsh-runtime/0.2.0-rc.2/deepseek-ai-dsh-client-ui-workspace-0.2.0-rc.2.tgz%3A%3Ahash=175e03&locator=deepseek-harness-desktop%2540workspace%253A.#./patches/dsh-client-ui-workspace@0.2.0-rc.2.patch::version=0.2.0-rc.2&hash=e2d7d2&locator=deepseek-harness-desktop%40workspace%3A."
   peerDependencies:
     "@deepseek-ai/cordis": ~4.0.4
-  checksum: 10c0/e569a0d267d8e92bba60ea4006ad9a567e9060224e000de7ca361ec252946dfd26b281c3c393b8140c14c756b6862cf131c85a96d9151d6fdb92e74c6dd6d799
+  checksum: 10c0/0802dc0dc91c4b6b6eb5547085560ccf153503fa37993cbfa8d72f982930901ce316f54b92caada962eeab371a6e53a720a2a2f65fb8185408dac0c9df18b5f8
   languageName: node
   linkType: hard
 
@@ -12036,6 +12036,7 @@ __metadata:
     class-variance-authority: "npm:^0.7.1"
     clsx: "npm:^2.1.1"
     dsh-community-market: "npm:0.1.0-dev.0"
+    dsh-tintin-browser: "npm:0.1.0-dev.0"
     dsh-tintin-bundle: "npm:0.1.0-dev.0"
     dsh-tintin-media-bundle: "npm:0.1.0-dev.0"
     dshmarket: "npm:1.66.5"
@@ -12288,7 +12289,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"dsh-tintin-browser@workspace:dsh-tintin-browser":
+"dsh-tintin-browser@npm:0.1.0-dev.0, dsh-tintin-browser@workspace:dsh-tintin-browser":
   version: 0.0.0-use.local
   resolution: "dsh-tintin-browser@workspace:dsh-tintin-browser"
   dependencies:

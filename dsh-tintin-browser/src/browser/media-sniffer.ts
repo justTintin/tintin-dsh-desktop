@@ -3,7 +3,7 @@
 // 渲染层注入面），改为 session.webRequest 监听资源请求，URL 规则 1:1 照搬 SRC。
 // 纯判定逻辑在 media-sniffer-logic.ts（单测下沉）；本文件只做会话挂接与去重广播。
 import type { Session } from 'electron'
-import { isMediaUrl, mediaTypeFromUrl } from './media-sniffer-logic'
+import { isMediaUrl, mediaTypeFromUrl } from './media-sniffer-logic.ts'
 
 export interface SniffedMedia {
   url: string

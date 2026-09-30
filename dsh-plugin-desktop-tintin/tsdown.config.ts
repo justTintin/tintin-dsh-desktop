@@ -32,6 +32,7 @@ export default defineConfig([
       'windows-pwsh-sandbox': 'src/windows-pwsh-sandbox.ts',
       'windows-acl-runner': 'src/windows-acl-runner.ts',
       main: 'src/main.ts',
+      'tintin-main': 'src/tintin-main.ts',
       'host-process-entry': 'src/host-process-entry.ts',
     },
     outDir: 'lib',
@@ -42,6 +43,9 @@ export default defineConfig([
     dts: false,
     clean: false,
     sourcemap: true,
+    // The browser domain ships as TypeScript source; bundle it into the
+    // channel entry instead of leaving it as a runtime package import.
+    noExternal: ['dsh-tintin-browser'],
   },
   {
     name: `${PACKAGE_NAME}/bin`,

@@ -22,17 +22,17 @@ import {
   PLATFORM_DEFS,
   PLATFORM_IDS,
   type PlatformDef,
-} from './platform-meta'
-import { formatNetscapeCookies } from './netscape-cookies'
-import { createExtensionManager, platformSessions, findDouyinHelperDir, type ExtensionManager } from './ext-manager'
-import { bilibiliHelperInstalled, findBilibiliHelperDir, injectBilibiliHelper } from './bilibili-ext'
-import { createDownloadManager, type DownloadManager } from './download-manager'
-import { createMediaStorage, type MediaStorage } from './media-storage'
-import { captureHotspots } from './hotspot-capture'
-import { startLoopbackService, type LoopbackService } from './loopback-service'
-import { scanDailyAssets, resolveDailyAssetDirs } from './daily-assets-logic'
-import { createMediaSniffer, type MediaSniffer } from './media-sniffer'
-import { createCreatorsStoreIpc } from './creators-store'
+} from './platform-meta.ts'
+import { formatNetscapeCookies } from './netscape-cookies.ts'
+import { createExtensionManager, platformSessions, findDouyinHelperDir, type ExtensionManager } from './ext-manager.ts'
+import { bilibiliHelperInstalled, findBilibiliHelperDir, injectBilibiliHelper } from './bilibili-ext.ts'
+import { createDownloadManager, type DownloadManager } from './download-manager.ts'
+import { createMediaStorage, type MediaStorage } from './media-storage.ts'
+import { captureHotspots } from './hotspot-capture.ts'
+import { startLoopbackService, type LoopbackService } from './loopback-service.ts'
+import { scanDailyAssets, resolveDailyAssetDirs } from './daily-assets-logic.ts'
+import { createMediaSniffer, type MediaSniffer } from './media-sniffer.ts'
+import { createCreatorsStoreIpc } from './creators-store.ts'
 // 自动上架编排（SRC auto-listing/* 纯 JS 移植件；类型声明见 auto-listing/ipc.d.ts）
 // @ts-expect-error 纯 JS ESM 移植件（附 ipc.d.ts 通配声明）
 import { createAutoListingIpc } from './auto-listing/ipc.js'
@@ -157,7 +157,7 @@ async function migrateDefaultSessionCookies(platform: string): Promise<number> {
             domain: c.domain,
             path: c.path,
             secure: c.secure,
-            expirationDate: c.expirationDate,
+            ...(c.expirationDate === undefined ? {} : { expirationDate: c.expirationDate }),
           })
           migrated++
         } catch { /* 单条失败不阻断（如域/路径非法） */ }
@@ -184,6 +184,10 @@ let extManager: ExtensionManager | null = null
 let downloadManager: DownloadManager | null = null
 let mediaStorage: MediaStorage | null = null
 let loopback: LoopbackService | null = null
+// Retained handles anchor the side-effect services for the process lifetime
+// (exactOptional/noUnused contract of this repository).
+void mediaStorage
+void loopback
 // 浏览器窗口页面（build/tintin-browser.html，2026-09-28 用户裁决：整体按原客户端
 // 实现——页面承载工具条/左栏/右栏/下载栏，原生视图按页面宿主矩形覆盖）
 let pageHostRect: { x: number; y: number; width: number; height: number } | null = null

@@ -12,7 +12,7 @@ import {
   safeJsonParse,
   today,
   type HotspotItem,
-} from './hotspot-logic'
+} from './hotspot-logic.ts'
 
 const _sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 

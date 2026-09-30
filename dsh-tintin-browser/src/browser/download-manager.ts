@@ -173,7 +173,7 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
           try { unlinkSync(savePath) } catch { /* 文件可能未创建 */ }
           if (isRedirect) {
             const redirectUrl = new URL(res.headers.location as string, url).href
-            startUrlDownload(redirectUrl, savePath, { referer, headers }).then(resolve).catch(reject)
+            startUrlDownload(redirectUrl, savePath, { ...(referer === undefined ? {} : { referer }), ...(headers === undefined ? {} : { headers }) }).then(resolve).catch(reject)
             return
           }
           reject(new Error(`HTTP ${res.statusCode}`))
@@ -195,7 +195,7 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
     ipcMain.handle('downloads:start', async (_e, params: { url: string; savePath?: string; referer?: string; headers?: Record<string, string> }) => {
       const { url, savePath, referer, headers } = params || {}
       const dest = savePath || join(workspacePath(), 'materials', decodeURIComponent(new URL(url).pathname.split('/').pop() || 'download'))
-      return await startUrlDownload(url, dest, { referer, headers })
+      return await startUrlDownload(url, dest, { ...(referer === undefined ? {} : { referer }), ...(headers === undefined ? {} : { headers }) })
     })
     ipcMain.handle('downloads:pause', (_e, taskId: string) => {
       const task = downloadTasks.get(taskId)

@@ -1,0 +1,51 @@
+// TinTin channel main-process capabilities (channel-only addition; see
+// docs/tintin-migration-plan.md Phase 4). The mirrored desktop bootstrap files
+// stay byte-identical to Beta, so every TinTin-specific main-process behavior
+// installs itself from here, before the mirrored bootstrap runs.
+
+import { app } from 'electron'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { registerBrowserService } from 'dsh-tintin-browser'
+
+let installed = false
+let browserAttached = false
+
+/**
+ * Install TinTin main-process capabilities. Safe to call more than once.
+ *
+ * - Media binaries: point the host bridge at `<resources>/bin`
+ *   (ffmpeg/ffprobe/yt-dlp delivered by the fetch scripts) when packaged.
+ * - Browser domain: attach to the first top-level window the desktop
+ *   bootstrap creates — the harness main window. Later windows (native-ui
+ *   modals, dialogs, recovery chrome) are ignored, matching the source
+ *   wiring where registerBrowserService received the main window only.
+ */
+export function installTinTinMainHook(): void {
+  if (installed) return
+  installed = true
+
+  if (process.env.TINTIN_BIN_DIR === undefined && app.isPackaged) {
+    const binDir = join(process.resourcesPath, 'bin')
+    if (existsSync(binDir)) process.env.TINTIN_BIN_DIR = binDir
+  }
+
+  app.on('browser-window-created', (_event, window) => {
+    if (browserAttached) return
+    if (window.getParentWindow() !== null) return
+    browserAttached = true
+    try {
+      registerBrowserService(window)
+    } catch (error) {
+      console.error(
+        `dsh-plugin-desktop-tintin: browser domain registration failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
+      browserAttached = false
+    }
+  })
+}
+
+// Install on module load so the composition entry only needs to import this
+// module before the mirrored bootstrap; ESM evaluation order then guarantees
+// the listeners exist before any window is created.
+installTinTinMainHook()
