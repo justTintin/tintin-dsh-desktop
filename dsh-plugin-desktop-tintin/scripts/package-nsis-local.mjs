@@ -37,10 +37,6 @@ const args = [
 
 const result = spawnSync(process.execPath, args, { cwd: packageRoot, env, stdio: 'inherit' })
 if (result.error !== undefined) throw result.error
-// The afterPack runtime smoke fails on this machine for a repository-wide
-// Windows/Node-24 reason (identical on Beta); the artifact is still produced,
-// so surface the code without failing the local build.
 if (result.status !== 0) {
-  process.stdout.write(`package-nsis: electron-builder exited with ${String(result.status)} (artifact may still be complete; verify it)\n`)
+  throw new Error(`electron-builder --win nsis exited with ${String(result.status)}`)
 }
-process.exitCode = 0
