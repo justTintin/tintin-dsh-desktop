@@ -136,7 +136,7 @@ const tabVoices = computed(() => {
           <!-- 2026-09-21 用户裁决：口播文案与分镜脚本绑定——显示激活分镜的旁白
                （= 批量克隆的声音来源），不再是全局草稿 manualCopy（曾致框文与声音不一致） -->
           <span class="sb-info">口播文案（旁白，与激活分镜脚本绑定，共 {{ activeNarrative.length }} 字；在「文案编写」页编辑）：</span>
-          <textarea readonly rows="3" class="input carry-textarea">{{ activeNarrative }}</textarea>
+          <textarea readonly rows="6" class="input carry-textarea">{{ activeNarrative }}</textarea>
 
           <!-- 2026-09-22 用户裁决：播放条自空态分支上提为常显——此前预合成后 voiceRows
                非空顶掉本框，声音播放条随之消失（用户报障②） -->
@@ -460,9 +460,10 @@ const tabVoices = computed(() => {
   flex: none; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 12px; font-weight: 600; color: var(--foreground);
 }
-/* 源序在 .input 之后（覆盖其 height:32px / padding:0 10px） */
+/* 源序在 .input 之后（覆盖其 height:32px / padding:0 10px）。
+   2026-09-30 用户裁决：内容区高度翻倍（96px → 192px，rows 3→6 同步） */
 .carry-textarea {
-  height: auto; min-height: 96px; padding: 8px 10px;
+  height: auto; min-height: 192px; padding: 8px 10px;
   line-height: 1.6; font-family: inherit; resize: vertical;
 }
 </style>
