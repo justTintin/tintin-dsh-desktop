@@ -12,6 +12,7 @@ const allowedDifferences = new Set(['product-identity.ts'])
 // after the identity renaming below, so shared fixes stay three-way synced.
 const allowedTintinAdditions = new Set([
   'tintin/main-hook.ts',
+  'tintin/first-boot.ts',
   'tintin-main.ts',
 ])
 const normalizeIdentity = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop').replaceAll('DSH Desktop Beta', 'DSH Desktop')

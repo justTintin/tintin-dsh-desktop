@@ -7,6 +7,7 @@ import { app } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { registerBrowserService } from 'dsh-tintin-browser'
+import { seedTinTinDefaults } from './first-boot.ts'
 
 let installed = false
 let browserAttached = false
@@ -14,6 +15,10 @@ let browserAttached = false
 /**
  * Install TinTin main-process capabilities. Safe to call more than once.
  *
+ * - First-boot provisioning: seed the tintin-server model provider, default
+ *   model, placeholder credential and the bridge's own config store into the
+ *   channel home before the Host boots (ported from the source first-boot;
+ *   without it a fresh install defaults to the official DeepSeek provider).
  * - Media binaries: point the host bridge at `<resources>/bin`
  *   (ffmpeg/ffprobe/yt-dlp delivered by the fetch scripts) when packaged.
  * - Browser domain: attach to the first top-level window the desktop
@@ -24,6 +29,8 @@ let browserAttached = false
 export function installTinTinMainHook(): void {
   if (installed) return
   installed = true
+
+  seedTinTinDefaults(app.getPath('appData'))
 
   if (process.env.TINTIN_BIN_DIR === undefined && app.isPackaged) {
     const binDir = join(process.resourcesPath, 'bin')
