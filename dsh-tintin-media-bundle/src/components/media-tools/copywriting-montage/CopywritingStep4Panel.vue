@@ -19,6 +19,9 @@ import { errText, notify, joinPath } from '@/composables/copywritingMontage/cont
 import { clientError } from '@/utils/clientLog'
 import { readCacheDir } from '@/composables/useSettingsConfig'
 import type { StoryboardShot } from '@/composables/opsStoryboardLogic'
+// 剪映设置引导图（2026-09-29：导出草稿需开启「导入 PR或FCP 工程」；vite
+// assetsInlineLimit=64KB 内联为 data URI，运行时无需独立资产文件）
+import jyImportSettingImg from '@/assets/jianying-import-setting.png'
 
 const shell = inject(copywritingMontageShellKey)!
 const { step, go, steps } = shell
@@ -111,6 +114,13 @@ const {
   storyboards,
 } = shell.s
 
+/** BGM 增益滚轮微调（2026-09-30 用户反馈：滑条太短无法精细调节——滚轮 ±1%，
+ *  复用 onBgmVolumeInput 实时应用试听音量） */
+function onBgmGainWheel(e: WheelEvent): void {
+  bgmVolume.value = Math.min(200, Math.max(0, bgmVolume.value + (e.deltaY < 0 ? 1 : -1)))
+  onBgmVolumeInput()
+}
+
 // ── 智能音效匹配（2026-09-23 实测修正：/audio/library 的 keyword 只匹配文件名、
 //  query 参数根本不被识别（此前传 query 等于无过滤随机取第 1 条！）；真正的语义
 //  数据在专用音效库 GET /sfx/library（306 条，全部带中文名 + analyze 语义标签/情绪）——
@@ -118,6 +128,9 @@ const {
 //  取最优，GET /sfx/{id}/file 下载落盘绑定）──
 const sfxMatchBusy = ref(false)
 const sfxMatchStage = ref('')
+/** 剪映设置引导图放大查看（2026-09-29：点击小图开全屏遮罩，点遮罩关闭） */
+const jyImgZoom = ref(false)
+function openJyImportImg(): void { jyImgZoom.value = true }
 const sfxMatchDone = ref(false)
 
 /** 音效库条目（GET /sfx/library 返回；analysis=服务端 /sfx/analyze 语义结果） */
@@ -652,14 +665,16 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
         </div>
 
         <!-- BGM 试听一行（2026-09-10 用户裁决：播放控制在 前、设置在后）：
-             播放/暂停 ⏹ + 进度条 + 时间 + BGM 增益（0-200%，100%=原音量，拖动实时改变试听音量） -->
+             播放/暂停 ⏹ + 进度条 + 时间 + BGM 增益（0-200%，100%=原音量，拖动实时改变试听音量）。
+             2026-09-30 用户反馈：进度条与增益滑条太短无法精细调节——两组各 flex:1 平分整行，
+             增益加滚轮微调（±1%）与更大拖动热区。 -->
         <div class="row vd4-player">
           <button class="icon-btn vd4-pbtn" :title="bgmPlaying ? '暂停' : '播放/暂停'" @click="toggleBgmPlay">{{ bgmPlaying ? '⏸' : '▶' }}</button>
-          <button class="icon-btn vd4-pbtn" title="停止播放" :disabled="!bgmPlaying" @click="stopBgmPlay">⏹</button>
-          <input class="vd4-seek grow" type="range" min="0" :max="bgmDurMs" step="1" :value="bgmPosMs" @input="seekBgm" />
+          <button class="icon-btn vd4-pbtn" title="停止播放" @click="stopBgmPlay">⏹</button>
+          <input class="vd4-seek" type="range" min="0" :max="bgmDurMs" step="1" :value="bgmPosMs" @input="seekBgm" />
           <span class="vd4-time">{{ fmtBgmTime(bgmPosMs) }} / {{ fmtBgmTime(bgmDurMs) }}</span>
-          <label class="label" title="BGM 增益 0-200%，100%=原音量；拖动实时改变试听音量">BGM 增益:</label>
-          <input v-model.number="bgmVolume" type="range" min="0" max="200" step="1" class="vd4-gain" @input="onBgmVolumeInput" />
+          <label class="label" title="BGM 增益 0-200%，100%=原音量；拖动或滚轮微调（±1%）实时改变试听音量">BGM 增益:</label>
+          <input v-model.number="bgmVolume" type="range" min="0" max="200" step="1" class="vd4-gain" @input="onBgmVolumeInput" @wheel.prevent="onBgmGainWheel" />
           <span class="vd4-gain-label">{{ bgmVolume }} %</span>
         </div>
 
@@ -751,6 +766,14 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
               title="该功能暂时停用"
               @click="exportJianyingPackageDraft" />
           </div>
+          <!-- 2026-09-29 用户裁决：导出草稿前需在剪映开启「导入 PR或FCP 工程」——
+               引导图 + 文字提示常驻导出按钮下方（图=剪映 全局设置→通用 截图，
+               src/assets 内联 data URI；点击新窗口放大） -->
+          <div class="jy-import-hint">
+            <img :src="jyImportSettingImg" class="jy-import-img" alt="剪映全局设置：通用 → 打开「导入 PR或FCP 工程」"
+              title="点击放大查看" @click="openJyImportImg" />
+            <span class="jy-import-text">导入的草稿需在剪映里开启「导入工程」才会加载：<b>剪映 → 全局设置 → 通用 → 打开「导入 PR或FCP…」开关</b>（可在启动时导入其他剪辑软件工程），然后重启剪映即可在首页看到导出的草稿。左图为该开关位置。</span>
+          </div>
           <!-- 2026-09-18 用户裁决：导出剪映时间轴进度条+完成提示独立于服务端合成，
                紧跟方案一按钮（不放到服务端合成下面）；2026-09-20 用户反馈：进度条与按钮拉开间距 -->
           <div v-if="exportBusy" class="pbar" style="margin-top:8px"><div class="pbar-inner" :style="{ width: exportProgress + '%' }"></div></div>
@@ -803,6 +826,11 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
 
     <!-- 分镜声音批量克隆选择弹窗（BGM 选择组件复用为音频选择） -->
     <CopywritingBgmPickDialog ref="bgmDlgRef" />
+
+    <!-- 剪映设置引导图放大遮罩（点小图开、点遮罩关） -->
+    <div v-if="jyImgZoom" class="jy-img-zoom" @click="jyImgZoom = false">
+      <img :src="jyImportSettingImg" alt="剪映全局设置：通用 → 打开「导入 PR或FCP 工程」" />
+    </div>
 </template>
 
 <style scoped>
@@ -1080,6 +1108,12 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
   margin: 0 6px; padding: 4px 10px; background: #2a2a2a; border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
+/* 2026-09-30 用户反馈：模板名此前无任何样式（small 裸渲染在深色卡上几乎不可见）——
+   卡底为硬编码深色 #2a2a2a，文字用固定浅色保证任何主题下可读；限宽省略防长名撑卡 */
+.textfx-word-tpl {
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; line-height: 1.4; color: #e6e6e6;
+}
 .textfx-sample-text {
   font-weight: 700; line-height: 1.2; max-width: 160px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1095,7 +1129,10 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
 .textfx-sample-video { width: 108px; height: 160px; object-fit: cover; display: block; border-radius: 4px; background: #101010; }
 .w80 { width: 80px; flex: none; }
 /* Step4 特效包装（对照 step4_final_view.py L80-196 同布局；颜色走 V3 design tokens） */
-.vd4-gain { width: 140px; flex: none; accent-color: var(--primary); }
+/* 2026-09-30 用户反馈：进度条与增益滑条等宽各占半行（flex:1 平分），18px 高热区 +
+   12px 拇指改善拖动与点选精度（原 140px 定宽滑条无法精细调节） */
+.vd4-seek { flex: 1 1 0; min-width: 120px; }
+.vd4-gain { flex: 1 1 0; min-width: 120px; height: 18px; accent-color: var(--primary); cursor: pointer; }
 .vd4-gain-label { width: 50px; flex: none; font-size: 13px; color: var(--foreground); }
 /* 播放/暂停、停止按钮（原版 ▶ 56x28，L80-88） */
 .vd4-pbtn { width: 56px; height: 28px; font-size: 13px; }
@@ -1142,6 +1179,30 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
 .vd-split:hover { background: var(--primary); opacity: 0.35; }
 /* 还原 LUT：库内选择列表（2026-09-14） */
 .lut-list { display: flex; flex-direction: column; gap: 4px; max-height: 132px; overflow-y: auto; }
+/* 剪映「导入工程」引导块（2026-09-29 用户裁决：图+文字常驻导出按钮下方；
+   小图点击放大=全屏遮罩，点遮罩关闭） */
+.jy-import-hint {
+  display: flex; gap: var(--space-3); align-items: flex-start;
+  padding: var(--space-2) var(--space-3); margin-top: var(--space-2);
+  background: var(--surface-container); border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.jy-import-img {
+  width: 168px; flex: none; cursor: zoom-in;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.jy-import-text { font-size: 12px; line-height: 1.7; color: var(--muted-foreground); }
+.jy-import-text b { color: var(--foreground); }
+.jy-img-zoom {
+  position: fixed; inset: 0; z-index: 1002;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+.jy-img-zoom img {
+  max-width: min(90vw, 560px); max-height: 88vh;
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-3);
+}
 /* 导出完成提示条（2026-09-22 用户裁决：样式对齐智能混剪 MontageStep4Panel 同名类） */
 .export-done-bar {
   display: flex; align-items: center; gap: var(--space-2);

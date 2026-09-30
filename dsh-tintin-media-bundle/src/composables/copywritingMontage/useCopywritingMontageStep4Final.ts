@@ -36,6 +36,8 @@ export interface MontageStep4Context {
   assemblePlans: Ref<PrecomposePlan[]>
   concatTransition: Ref<string>
   sharedProductInfo: Ref<{ brand: string; product: string; model: string; extra: string }>
+  /** 激活分镜的产品快照（2026-09-30 用户裁决：草稿名产品回退源——全局产品为空时用） */
+  activeProductBrief: () => string
   splitResolution: Ref<string>
   voiceRows: Ref<VoiceRow[]>
   voiceDirInput: Ref<string>
@@ -81,7 +83,7 @@ export interface MontageStep4Context {
 export function useCopywritingMontageStep4Final(ctx: MontageStep4Context) {
   const {
     statusText, ensureServerUrl, toAbsolute, assemblePlans, concatTransition,
-    sharedProductInfo, splitResolution, voiceRows, voiceDirInput, getTabById,
+    sharedProductInfo, activeProductBrief, splitResolution, voiceRows, voiceDirInput, getTabById,
     runDubBatch, nextVoiceChannel, loadTextTemplates, refreshTextFxTracks,
     currentMatchTemplateIds, resolveKeywordHits,
     scanVoiceDir, activeTextPool,
@@ -113,12 +115,12 @@ export function useCopywritingMontageStep4Final(ctx: MontageStep4Context) {
   // localStorage 跨会话记忆 bgmPath/bgmVolume，文件被删时导出侧 fs.existsSync 兜底跳过）
   const bgmPath = ref(localStorage.getItem('copywriting-montage.bgmPath') || '')
   const bgmName = ref('')
-  // BGM 增益默认 35%（2026-09-15 用户裁决，原 100；localStorage 记忆用户调整，0=静音为合法值不回退）
+  // BGM 增益默认 30%（2026-09-30 用户裁决，原 09-15 定 35；localStorage 记忆用户调整，0=静音为合法值不回退）
   // 2026-09-20 修复（用户报障：全新安装增益为 0）——Number(null)=0 且 isFinite(0)=true，
-  // 未存过键时被当成「用户设置过 0%」；改显式判 null/空串为未设置 → 回退默认 35
+  // 未存过键时被当成「用户设置过 0%」；改显式判 null/空串为未设置 → 回退默认 30
   const storedBgmVolumeRaw = localStorage.getItem('copywriting-montage.bgmVolume')
   const storedBgmVolume = storedBgmVolumeRaw === null || storedBgmVolumeRaw === '' ? NaN : Number(storedBgmVolumeRaw)
-  const bgmVolume = ref(Number.isFinite(storedBgmVolume) ? storedBgmVolume : 35)
+  const bgmVolume = ref(Number.isFinite(storedBgmVolume) ? storedBgmVolume : 30)
   watch([bgmPath, bgmVolume], () => {
     try {
       localStorage.setItem('copywriting-montage.bgmPath', bgmPath.value)
@@ -274,10 +276,19 @@ export function useCopywritingMontageStep4Final(ctx: MontageStep4Context) {
     try {
       const cands = await collectCandidates()
       step4Candidates.value = cands // 联动预览候选（不依赖 textFx 开关，进入即刷）
-      const n = cands.length
-      statusText.value = n > 0
-        ? `准备就绪：待混音合成 ${n} 个视频，点击「服务端合成」或「本地合成」`
-        : '暂无待合成视频，请先完成「口播配音」'
+      // 2026-09-30 用户反馈：原状态行按候选数提示「暂无待合成视频，请先完成口播配音」
+      // （原素材混剪 step4_final_view L388-395 逐字）——2026-09-22 虚拟时间轴架构下
+      // 预合成 mp4 不再产出，该候选链结构性为空，提示无条件恒显且误导（服务端合成
+      // 按钮同日裁决已禁用，真实出口=导出剪映草稿）。状态行改基于虚拟剪辑方案：
+      // 方案齐备=可导出（附声音克隆进度）；缺方案=指引去上一页生成方案。
+      const plans = assemblePlans.value.filter(
+        (p): p is typeof p & { groups: NonNullable<typeof p.groups>; tabId: string } =>
+          !!(p.confirmed && p.virtual && p.groups?.length && p.tabId),
+      )
+      const voiced = plans.filter((p) => getTabById(p.tabId)?.voiceWav).length
+      statusText.value = plans.length
+        ? `准备就绪：${plans.length} 个分镜方案（${voiced}/${plans.length} 已克隆声音），可点「导出到剪映时间轴」生成草稿`
+        : '暂无剪辑方案：请先在「视频素材」页完成智能匹配并点「生成剪辑方案」'
     } catch (_) { /* 原版 except pass */ }
     // 历史成片恢复（2026-09-10 用户报障：刷新/重启后 finalDone=false 三按钮全禁用，
     // 「一键导出到剪映」点击无反应——按候选视频推导 final 目录回扫已合成产物）
@@ -716,17 +727,24 @@ async function exportAllToJianyingDraft(): Promise<void> {
     try { return JSON.parse(JSON.stringify(o)) as T } catch (_) { return o }
   }
 
-  /** 草稿命名：品牌+产品型号+日期时间+分辨率+音频索引+轨道时间轴（2026-09-16 用户裁决） */
+  /** 草稿命名：日期(分钟)+品牌产品型号+分辨率+音频索引
+   *  （2026-09-30 用户裁决：日期在前精确到分钟、去「轨道时间轴」后缀；原 09-16 为
+   *  品牌在前+秒级+固定后缀。产品回退链=全局产品 → 激活分镜 productBrief → 「混剪」） */
   function timelineDraftName(): string {
     const brand = String(sharedProductInfo.value.brand || '').trim()
     const product = String(sharedProductInfo.value.product || '').trim()
     const model = String(sharedProductInfo.value.model || '').trim()
-    // 品牌+产品型号（无则兜底「混剪」）
-    const bp = (brand + product + model) || '混剪'
-    // 日期时间：YYYYMMDD_HHmmss
+    let bp = brand + product + model
+    if (!bp) {
+      // 全局产品为空（重启后未重选等）→ 激活分镜的产品快照（随 storyboards 持久化）；
+      // productBrief 形如「品牌 / 产品 / 型号」，文件名剥分隔符与空白
+      bp = activeProductBrief().replace(/[/\s]+/g, '')
+    }
+    if (!bp) bp = '混剪'
+    // 日期时间：YYYYMMDD_HHmm（分钟精度，2026-09-30 用户裁决：不需要秒）
     const d = new Date()
     const ymd = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0')
-    const hms = String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + String(d.getSeconds()).padStart(2, '0')
+    const hm = String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0')
     // 分辨率（splitResolution 格式 "1080x1920"，无则兜底「未知分辨率」）
     const resolution = splitResolution.value || '未知分辨率'
     // 音频索引
@@ -744,7 +762,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
         ? '音频' + idxs[0] + '-' + idxs[idxs.length - 1]
         : '音频' + idxs.join(',')
     }
-    return bp + '_' + ymd + '_' + hms + '_' + resolution + (audioPart ? '_' + audioPart : '') + '_轨道时间轴'
+    return ymd + '_' + hm + '_' + bp + '_' + resolution + (audioPart ? '_' + audioPart : '')
   }
 
   /** 口播行会话态恢复（2026-09-17 用户报障②③④）：voiceRows 仅在进 Step3/合成确认时

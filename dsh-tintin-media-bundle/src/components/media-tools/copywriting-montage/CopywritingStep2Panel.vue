@@ -14,7 +14,7 @@ import VdStepBar from '../VdStepBar.vue'
 import { markdownListLines, stripProductCodeFromModel, parseProductKeywords } from '@/composables/opsProductLibraryLogic'
 import { parseScriptDetail } from '@/composables/opsStoryboardLogic'
 import { copyPreviewText, SHOT_TYPE_COLORS, SHOT_TYPE_LABELS, buildAssignPool } from '@/composables/copywritingMontageLogic'
-import { buildAssignCandidateSet, buildAssignMatchPrompt, parseAssignMatchResponse, mergeTabAssignment, planShotGroup, topUpClipGroups } from '@/composables/copywritingMontageAssignLogic'
+import { buildAssignCandidateSet, buildAssignMatchPrompt, parseAssignMatchResponse, mergeTabAssignment, planShotGroup, prefilterShotCandidates, topUpClipGroups } from '@/composables/copywritingMontageAssignLogic'
 import { fetchMaterialGrid, fetchMaterialDistinct, type PickerItem } from '@/composables/useWorkbenchPickers'
 import { buildMediaServeUrl, buildMediaThumbUrl } from '@/composables/workbenchChatContext'
 import { errText, notify } from '@/composables/copywritingMontage/context'
@@ -323,6 +323,14 @@ function addLibToPool(): void {
       checked: true,
       mediaType: String(it.media_type || '') === 'image' ? 'image' : 'video',
       shotType: String(it.shot_type || '') || undefined,
+      // 使用次数（2026-09-30 用户裁决：池条目展示热度）——口径同工作台选素材弹窗
+      // usageOf：原素材读 usage_count_total（源聚合），回落 usage_count（自身）
+      usageCount: (() => {
+        const total = Number(it.usage_count_total)
+        if (Number.isFinite(total) && total > 0) return total
+        const own = Number(it.usage_count)
+        return Number.isFinite(own) && own > 0 ? own : undefined
+      })(),
       resolution: it.width && it.height ? `${Number(it.width)}x${Number(it.height)}` : undefined,
     })
     existing.add(sp)
@@ -497,9 +505,20 @@ async function applyAssignment(matchIds?: string[]): Promise<void> {
         const sum = tab.shots.reduce((a, sh) => a + (Number(sh.duration) || 0), 0)
         return vd > 0 && sum > 0 ? Math.max(0.2, Math.min(4, vd / sum)) : 1
       })()
+      // 2026-09-30 用户裁决（防重复）：本脚本内跨镜使用计数——LLM 主片已被先前镜
+      // 使用时，从预筛排名取未用片段替换（池内无未用才保留原选）；补片排序同样
+      // 优先未用（planShotGroup usage 参数），消除「每镜补的都是同一段」
+      const runUsage = new Map<number, number>()
       tab.shots.forEach((shot, si) => {
         const shim = voiceScale !== 1 ? { ...shot, duration: Math.max(0.1, (Number(shot.duration) || 0) * voiceScale) } : shot
-        const fill = planShotGroup(shim, idxs[si] ?? -1, pool)
+        let primaryIdx = idxs[si] ?? -1
+        if (primaryIdx >= 0 && (runUsage.get(primaryIdx) ?? 0) > 0) {
+          const alt = prefilterShotCandidates(shot, pool)
+            .find((c) => c.scene.idx !== primaryIdx && (runUsage.get(c.scene.idx) ?? 0) === 0)
+          if (alt) primaryIdx = alt.scene.idx
+        }
+        const fill = planShotGroup(shim, primaryIdx, pool, { usage: runUsage })
+        fill.idxs.forEach((i2) => runUsage.set(i2, (runUsage.get(i2) ?? 0) + 1))
         groups.push(fill.idxs)
         coveredAll += fill.coveredSec
         targetAll += Math.max(0, (Number(shot.duration) || 0) * voiceScale)
@@ -809,14 +828,23 @@ function scoreClass(score: number | undefined): string {
               <video v-if="r.mediaType !== 'image'" class="pool-thumb" :src="vdToAbsolute(r.clipUrl) + '#t=0.1'"
                 preload="metadata" muted tabindex="-1"></video>
               <img v-else class="pool-thumb" :src="vdToAbsolute(r.clipUrl)" alt="" />
-              <span class="pool-name" :title="r.name">{{ r.name }}</span>
-              <span class="pool-dur">{{ r.duration > 0 ? r.duration.toFixed(1) + 's' : '—' }}</span>
-              <span v-if="r.shotType" class="pool-shot"
-                :style="{ color: SHOT_TYPE_COLORS[r.shotType] || '#888', borderColor: SHOT_TYPE_COLORS[r.shotType] || '#888' }">
-                {{ SHOT_TYPE_LABELS[r.shotType] || r.shotType }}
+              <!-- 2026-09-30 用户裁决：文字两行展示更多信息——行1=名称+景别+评分+使用次数+重复标，
+                   行2=画面描述（scene_desc，无则不占位） -->
+              <span class="pool-main">
+                <span class="pool-line1">
+                  <span class="pool-name" :title="r.name">{{ r.name }}</span>
+                  <span v-if="r.shotType" class="pool-shot"
+                    :style="{ color: SHOT_TYPE_COLORS[r.shotType] || '#888', borderColor: SHOT_TYPE_COLORS[r.shotType] || '#888' }">
+                    {{ SHOT_TYPE_LABELS[r.shotType] || r.shotType }}
+                  </span>
+                  <span v-if="r.score" class="pool-score">{{ r.score.toFixed(1) }}分</span>
+                  <span v-if="r.usageCount" class="pool-usage" title="服务端使用次数（原素材=自身+分割片段聚合）">用{{ r.usageCount }}次</span>
+                  <span v-if="poolIsDup(r)" class="pool-dup" title="与池内其他片段文件内容相同（MD5 一致）；素材库条目未下载前不参与比对">重复</span>
+                </span>
+                <span v-if="r.description || r.analysis" class="pool-desc" :title="r.description || r.analysis">{{
+                  r.description || r.analysis }}</span>
               </span>
-              <span v-if="r.score" class="pool-score">{{ r.score.toFixed(1) }}分</span>
-              <span v-if="poolIsDup(r)" class="pool-dup" title="与池内其他片段文件内容相同（MD5 一致）；素材库条目未下载前不参与比对">重复</span>
+              <span class="pool-dur">{{ r.duration > 0 ? r.duration.toFixed(1) + 's' : '—' }}</span>
               <button class="pool-del" type="button" title="从选择池删除"
                 @click.stop="removePoolScene(r.idx)">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -1141,8 +1169,9 @@ function scoreClass(score: number | undefined): string {
 .srcdlg-mask { z-index: 120; }
 /* ⚠ 宽度覆盖必须 .modal.srcdlg-modal 双类（优先级压过后方 .modal 的 440px/90vw）——
    此前单类 .srcdlg-modal 写在前被 .modal 反压，弹窗一直按 440px 渲染（最大化同被压）。
-   2026-09-23 用户裁决：宽度=原来的 2.5 倍（440→1100px），94vw 封顶 */
-.modal.srcdlg-modal { width: min(1100px, 94vw); max-height: 86vh; }
+   2026-09-23 用户裁决：宽度=原来的 2.5 倍（440→1100px），94vw 封顶；
+   2026-09-30 用户反馈：再宽一些（1100→1320px），右侧池条目两行信息需要横向空间，96vw 封顶 */
+.modal.srcdlg-modal { width: min(1320px, 96vw); max-height: 86vh; }
 /* 2026-09-23 用户裁决：最大化态铺满父窗口（100vw×100vh），去圆角与限高 */
 .modal.srcdlg-modal--max { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; }
 /* 标题行窗口化控制（最大化/还原/关闭，双击标题行同切换） */
@@ -1185,7 +1214,18 @@ function scoreClass(score: number | undefined): string {
   flex: none; width: 84px; height: 48px; object-fit: cover;
   background: #000; border-radius: var(--radius-md); pointer-events: none;
 }
-.pool-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--foreground); }
+.pool-name { min-width: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--foreground); }
+/* 2026-09-30 用户裁决：文字两行展示——行1=名称+徽标，行2=画面描述（无则不占位） */
+.pool-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pool-line1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pool-desc {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; line-height: 1.5; color: var(--muted-foreground);
+}
+.pool-usage {
+  flex: none; font-size: 10px; padding: 0 5px; border-radius: 999px;
+  color: var(--muted-foreground); border: 1px solid var(--border);
+}
 .pool-dur { flex: none; font-size: 12px; font-weight: 700; color: var(--success); }
 .pool-shot { flex: none; font-size: 11px; padding: 0 5px; border: 1px solid #888; border-radius: 999px; color: #888; }
 .pool-score { flex: none; font-size: 11px; color: var(--muted-foreground); }
