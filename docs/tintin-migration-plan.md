@@ -116,7 +116,7 @@ dsh-desktop(Yarn 4 monorepo,运行时 0.2.0-rc.2 vendored)
 **已验证的关键结论**:0.1.7→0.2.0 的宿主路由 API、客户端模块缝、dsh.client 声明完全同构;真实生产产物(1.9MB Vue dist、1426 行 chrome、1415 行宿主桥)零重写迁移;verify:profile 无头组合冒烟通过;浏览器实测全链路(向导→入口→视图→卡片→后端调用)工作。
 
 **遗留工作包**(按优先级):
-1. 三补丁集群转译(13 个补丁 re-base 到 0.2.0,resolutions patch: 接线)——SessionDelete、FORBIDDEN、附件打开。
+1. ~~三补丁集群转译~~ **已完成(2026-09-30,提交 `cc983086fe` + `e59f6491ad`)**:SessionDelete 7 包、FORBIDDEN 3 包、附件打开 4 包(UI 层含与仓库现有 conversation 补丁的合并);全部经 yarn patch: 协议注册、重装存活验证、浏览器 DOM 实测生效。剩余 11 个独立审计项(非集群)见[补丁审计](tintin-patch-audit.md)转译进度节。
 2. 浏览器域窗口接线(通道包 main + host↔main RPC)+ extraResources。
 3. dist:tintin 打包链 + 更新端点/签名链(附录 E 决策)。
 4. 预设运行时行为 GUI 验证、tintin:presets 生成管线 0.2.0 基底化。
