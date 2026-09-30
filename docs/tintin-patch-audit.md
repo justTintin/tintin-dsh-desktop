@@ -59,6 +59,21 @@
 | `dsh-client-file-upload@0.2.0-rc.2.patch` | 零 re-base | findStagedFile 存在 |
 | `dsh-client-ui-workspace@0.2.0-rc.2.patch` | offset 2-3 + 2 处 fuzz 1;navigation.d.ts 一处 hunk 被拒后按 0.2.0 现状手工补齐(fresh 参数/deleteSession/registerSessionStarter 声明) | deleteSession + 类型 PASS |
 
+**FORBIDDEN 集群 + 附件打开 UI 层亦已转译落地**(追加 5 个补丁):
+
+| 补丁文件 | 转译方式 | 验证 |
+|---|---|---|
+| `dsh-llm-deepseek@0.2.0-rc.2.patch` | offset 5 | FORBIDDEN 分级 |
+| `dsh-llm-pi-ai@0.2.0-rc.2.patch` | offset 4 ×3 | FORBIDDEN + content 重建 + 归因头 |
+| `dsh-client-ui-trajectory@0.2.0-rc.2.patch` | 零 re-base | failure.forbidden 文案 |
+| `dsh-client-ui-attachment@0.2.0-rc.2.patch` | 1 处 hunk 拒后按 0.2.0 CSS 模块对象手工补(`A7K3aG_preview` 成员+样式对齐前缀) | preview 类映射 |
+| `dsh-client-ui-chat@0.2.0-rc.2.patch` | 1 处 hunk 拒后同法补(`bfNlQW_fileCardButton`) | openUploadedAttachment provide |
+| `dsh-client-ui-conversation@0.2.0-rc.2.patch` | **与仓库现有补丁合并**:5 处 CSS hunk 因两版 CSS 串/hash 前缀漂移被拒,按 0.2.0 真实前缀(ank0OG_/uWtHQG_)手工重写注入 | DOM 实测:`[data-dsh-conversation-header]` 在 DOM、hero 样式已注入 |
+
+**DOM 级实测**(浏览器):补丁后四个 client UI 包不破界面;conversation 合并补丁的属性与样式真实生效。
+
+**剩余未转译**(11 项,独立功能项非集群):#1 loader 超时链、#5 app-boot advisory、#7 余量(identitySectionMap/recordCombo)、#8 shortcuts、#9 agent-preset UI、#13 deliverables、#14 model-selection 搜索、#15 settings-general、#16 settings-models(最大单项)、#17 余量(侧栏属性)、#26 undici 待验。
+
 **运行时冒烟**:补丁后运行时无告警启动,`POST /api/session/delete` 返回 unauthorized(路由存在)而非 404。**待验**:UI 右键菜单的删除入口需真实会话(依赖 LLM)后实测;附件打开的 UI 层(#10 #11 #12)未迁,后端端点已就位。
 
 **功能集群**(必须整批决策,不存在部分生效):

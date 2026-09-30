@@ -1,10 +1,57 @@
 diff --git a/lib/client.js b/lib/client.js
 --- a/lib/client.js
 +++ b/lib/client.js
-@@ -16367,12 +16367,13 @@
+@@ -15800,7 +15800,7 @@
+ 			const tag = document.createElement("style");
+ 			tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-conversation";
+ 			tag.dataset.pluginCss = tagId$4;
+-			tag.textContent = css$4;
++			tag.textContent = css$4 + ".ank0OG_heroWorkspaceRow [data-slot=conversation\\\\.hero\\\\.agentPreset]>span{width:max-content!important;min-width:0!important;max-width:240px;flex:none}.ank0OG_heroModeCluster{width:max-content;max-width:100%;flex:none;align-items:center;gap:2px;display:flex}.ank0OG_heroModeCluster button{box-sizing:border-box;height:28px;padding:0 8px!important;border:0!important;border-radius:8px!important;background:transparent!important;color:var(--dsw-alias-label-primary)!important;font:inherit;font-size:13px;font-weight:500;line-height:20px;gap:6px;cursor:pointer;transition:background-color .12s ease,color .12s ease,transform .12s ease}.ank0OG_heroModeCluster button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)!important;color:var(--dsw-alias-label-primary)!important}.ank0OG_heroModeCluster button[data-selected=true]{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 10%,transparent)!important;color:var(--dsw-alias-state-business-primary)!important}.ank0OG_heroModeCluster button:active:not(:disabled){transform:scale(.98)}.ank0OG_heroModeCluster button:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}.ank0OG_heroWorkspaceRow{padding-right:20px;box-sizing:border-box}";
+ 			document.head.appendChild(tag);
+ 		}
+ 		var ConversationRoot_module_css_default = {
+@@ -15817,6 +15817,7 @@
+ 			"embeddedBody": "ank0OG_embeddedBody",
+ 			"header": "ank0OG_header",
+ 			"headerActions": "ank0OG_headerActions",
++			"heroModeCluster": "ank0OG_heroModeCluster",
+ 			"headerBlank": "ank0OG_headerBlank",
+ 			"headerCorner": "ank0OG_headerCorner",
+ 			"headerLeading": "ank0OG_headerLeading",
+@@ -16280,12 +16281,17 @@
+ 							setPickerOpen(false);
+ 						}
+ 					}),
+-					renderSlot("conversation.hero.agentPreset", {})
++					renderSlot("conversation.hero.agentPreset", {}),
++					(0, react_jsx_runtime.jsx)("div", {
++						className: ConversationRoot_module_css_default.heroModeCluster,
++						children: renderSlot("conversation.hero.modeActions", zone ?? {})
++					})
+ 				]
+ 			});
+ 			const inert = sessionId === void 0 || hero && chipTitle === void 0;
+ 			const inputBar = renderSlot("conversation.composer.bar", {
+ 				variant: hero ? "hero" : "composer",
++				extensionZone: zone,
+ 				...inert ? {
+ 					disabled: true,
+ 					placeholder: t("placeholder.workspace"),
+@@ -16307,7 +16313,8 @@
+ 					}),
+ 					hero && heroWorkspaceRow,
+ 					zone !== void 0 && renderSlot("conversation.input.dock", zone),
+-					inputBar
++					inputBar,
++					sessionId === void 0 ? renderSlot("conversation.hero.dock", zone ?? {}) : null
+ 				]
+ 			});
+ 			const composer = renderSlotChain("conversation.composer", {
+@@ -16367,12 +16374,14 @@
  			const blank = session === void 0 || conversation === void 0 || session.blank && conversationPhase(session, conversation) === "blank";
  			return (0, react_jsx_runtime.jsxs)("header", {
  				className: clsx(ConversationRoot_module_css_default.header, blank && ConversationRoot_module_css_default.headerBlank, sessionId === void 0 && ConversationRoot_module_css_default.headerSessionless),
++				"data-dsh-conversation-header": "",
 +				"data-conversation-header": "",
  				"data-window-drag": true,
  				children: [(0, react_jsx_runtime.jsx)("div", {
@@ -16,7 +63,7 @@ diff --git a/lib/client.js b/lib/client.js
  			});
  		}
  		/**
-@@ -16460,6 +16461,7 @@
+@@ -16460,6 +16469,7 @@
  			const showTabs = !hideChrome && tabs.length > 1;
  			return (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("div", {
  				className: ConversationRoot_module_css_default.titleRow,
@@ -24,3 +71,218 @@ diff --git a/lib/client.js b/lib/client.js
  				children: [!hideChrome && (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [(0, react_jsx_runtime.jsxs)("div", {
  					className: ConversationRoot_module_css_default.titleCluster,
  					children: [(0, react_jsx_runtime.jsxs)("nav", {
+@@ -17175,7 +17185,7 @@
+ 			const tag = document.createElement("style");
+ 			tag.dataset.plugin = "@deepseek-ai/dsh-client-ui-conversation";
+ 			tag.dataset.pluginCss = tagId$1;
+-			tag.textContent = css$1;
++			tag.textContent = css$1 + ".uWtHQG_promptRow{width:100%;min-width:0;align-items:flex-start;display:flex}.uWtHQG_promptRow>.uWtHQG_accessory{flex:none;padding:4px 0 0 12px}.uWtHQG_promptRow>.uWtHQG_accessory:empty{display:none}.uWtHQG_promptRow>.uWtHQG_scroll{flex:1;min-width:0}";
+ 			document.head.appendChild(tag);
+ 		}
+ 		var InputBar_module_css_default = {
+@@ -17197,6 +17207,7 @@
+ 			"pending": "uWtHQG_pending",
+ 			"placeholder": "uWtHQG_placeholder",
+ 			"primary": "uWtHQG_primary",
++			"promptRow": "uWtHQG_promptRow",
+ 			"retry": "uWtHQG_retry",
+ 			"root": "uWtHQG_root",
+ 			"row": "uWtHQG_row",
+@@ -17223,7 +17234,7 @@
+ 		* The no-session state renders the SAME div inert as the Workspace-picker
+ 		* trigger instead of a parallel tree.
+ 		*/
+-		const InputBar = (0, react.memo)(function InputBar({ useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments, retryFileUpload, toggleCommandMenu, stop, t, renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut, useProjection, sessionId, variant, disabled: inert = false, blocked, workspacePickerOpen = false, onRequestWorkspace, placeholder, accessory }) {
++		const InputBar = (0, react.memo)(function InputBar({ useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments, retryFileUpload, toggleCommandMenu, stop, t, renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut, useProjection, sessionId, variant, disabled: inert = false, blocked, workspacePickerOpen = false, onRequestWorkspace, placeholder, accessory, extensionZone, openUploadedFile }) {
+ 			const input = useInput((s) => s);
+ 			const notice = useNotices((s) => s);
+ 			const busyEnter = useBusyEnter((s) => s);
+@@ -17451,10 +17462,6 @@
+ 								className: InputBar_module_css_default.overlayAnchor,
+ 								children: renderSlot("conversation.input.overlay", {})
+ 							}),
+-							accessory !== void 0 && (0, react_jsx_runtime.jsx)("div", {
+-								className: InputBar_module_css_default.accessory,
+-								children: accessory
+-							}),
+ 							renderSlot("conversation.input.attachments", {
+ 								attachments,
+ 								canAcceptDrop,
+@@ -17466,25 +17473,35 @@
+ 								onRetryFile: (id) => {
+ 									retryFileUpload?.(id);
+ 								},
++								onOpenUploadedFile: openUploadedFile,
+ 								dropLimits: imageLimits === void 0 ? void 0 : {
+ 									count: imageLimits.maxImagesPerMessage,
+ 									size: imageSizeText(imageLimits.maxImageBytes)
+ 								}
+ 							}),
+-							(0, react_jsx_runtime.jsx)(DraftEditor, {
+-								classNames: InputBar_module_css_default,
+-								editor,
+-								scrollRef,
+-								editable,
+-								editorDisabled,
+-								phase: input?.phase ?? "inert",
+-								placeholderText,
+-								ariaLabel: workspaceTrigger ? t("hero.chooseWorkspace") : placeholderText,
+-								workspaceTrigger,
+-								workspacePickerOpen,
+-								onWorkspaceKeyDown,
+-								hint,
+-								showPlaceholder: draft === "" && attachments.length === 0 && !claimActive
++							(0, react_jsx_runtime.jsxs)("div", {
++								className: InputBar_module_css_default.promptRow,
++								children: [
++									(0, react_jsx_runtime.jsx)("div", {
++										className: InputBar_module_css_default.accessory,
++										children: accessory ?? (sessionId === void 0 ? null : renderSlot("conversation.input.accessory", extensionZone))
++									}),
++									(0, react_jsx_runtime.jsx)(DraftEditor, {
++										classNames: InputBar_module_css_default,
++										editor,
++										scrollRef,
++										editable,
++										editorDisabled,
++										phase: input?.phase ?? "inert",
++										placeholderText,
++										ariaLabel: workspaceTrigger ? t("hero.chooseWorkspace") : placeholderText,
++										workspaceTrigger,
++										workspacePickerOpen,
++										onWorkspaceKeyDown,
++										hint,
++										showPlaceholder: draft === "" && attachments.length === 0 && !claimActive
++									})
++								]
+ 							}),
+ 							(0, react_jsx_runtime.jsxs)("div", {
+ 								ref: rowRef,
+@@ -17612,7 +17629,7 @@
+ 					}),
+ 					(0, react_jsx_runtime.jsxs)("div", {
+ 						className: InputBar_module_css_default.dock,
+-						children: [variant === "composer" && input !== void 0 && sessionId !== void 0 ? renderSlot("conversation.composer.dock", {}) : null, activity ? null : (0, react_jsx_runtime.jsx)(ContextMeter, {
++						children: [input !== void 0 && sessionId !== void 0 ? renderSlot("conversation.composer.dock", extensionZone ?? {}) : null, activity ? null : (0, react_jsx_runtime.jsx)(ContextMeter, {
+ 							useProjection,
+ 							t
+ 						})]
+@@ -18179,6 +18196,14 @@
+ 					"conversation.hero.agentPreset": {
+ 						kind: "single",
+ 						scope: "session-maybe"
++					},
++					"conversation.hero.modeActions": {
++						kind: "list",
++						scope: "session-maybe"
++					},
++					"conversation.hero.dock": {
++						kind: "list",
++						scope: "session-maybe"
+ 					}
+ 				},
+ 				slots: {
+@@ -18302,6 +18327,10 @@
+ 						kind: "list",
+ 						scope: "session"
+ 					},
++					"conversation.input.accessory": {
++						kind: "list",
++						scope: "session"
++					},
+ 					"conversation.input.permission": {
+ 						kind: "single",
+ 						scope: "session"
+@@ -18338,6 +18367,7 @@
+ 						removeAttachment: void 0,
+ 						resolveDraftAttachments: void 0,
+ 						retryFileUpload: void 0,
++						openUploadedFile: void 0,
+ 						toggleCommandMenu: void 0,
+ 						stop: void 0,
+ 						hooks: {
+@@ -18404,6 +18434,11 @@
+ 						retryFileUpload: (id) => {
+ 							if (sessions.binding(sessionId) !== void 0) conversation.retryFileUpload(sessionId, id);
+ 						},
++						openUploadedFile: async (attachmentId) => {
++							const opener = ctx.get("openUploadedAttachment");
++							if (opener === void 0) throw new Error("ui-conversation: openUploadedAttachment is unavailable");
++							await opener.open(sessionId, attachmentId);
++						},
+ 						toggleCommandMenu: inputTriggers === void 0 ? void 0 : (selection) => {
+ 							shell.dismissPopup();
+ 							const snapshot = shell.snapshot;
+@@ -18436,10 +18471,7 @@
+ 				yield slots.register({
+ 					name: "main",
+ 					key: "conversation",
+-					children: { "main.conversation": {
+-						kind: "single",
+-						scope: "session-maybe"
+-					} }
++					children: { "main.conversation": { kind: "single", scope: "session-maybe" } }
+ 				}, ConversationPanel);
+ 				yield registerConversationRoot();
+ 				yield registerConversationContent();
+diff --git a/lib/types/client/contract/slots.d.ts b/lib/types/client/contract/slots.d.ts
+--- a/lib/types/client/contract/slots.d.ts
++++ b/lib/types/client/contract/slots.d.ts
+@@ -210,6 +210,18 @@
+             scope: 'session-maybe';
+             owner: HeroAgentPresetOwnerProps;
+         };
++        /** Product-mode controls beside the blank-session agent preset. */
++        'conversation.hero.modeActions': {
++            kind: 'list';
++            scope: 'session-maybe';
++            owner: InputZone;
++        };
++        /** Entries below the new-conversation input before a session exists. */
++        'conversation.hero.dock': {
++            kind: 'list';
++            scope: 'session-maybe';
++            owner: InputZone;
++        };
+         /** Full-width entries above the composer card. */
+         'conversation.input.dock': {
+             kind: 'list';
+@@ -221,10 +233,17 @@
+             kind: 'list';
+             scope: 'session';
+         };
++        /** Compact template and reference material rendered before the editable prompt. */
++        'conversation.input.accessory': {
++            kind: 'list';
++            scope: 'session';
++            owner: InputZone;
++        };
+         /** Ambient entries below the composer card. */
+         'conversation.composer.dock': {
+             kind: 'list';
+             scope: 'session';
++            owner: InputZone;
+         };
+         /** Compact controls at the left of the composer tool row. */
+         'conversation.input.left': {
+@@ -440,8 +459,10 @@
+     /** Open the Workspace picker from the inert composer surface. */
+     onRequestWorkspace?: () => void;
+     placeholder?: string;
+-    /** Optional content rendered above the composer surface. */
++    /** Optional compact content rendered before the editable prompt. */
+     accessory?: ReactNode;
++    /** Point-in-time Session and input state supplied to Composer extension slots. */
++    extensionZone?: InputZone;
+ }
+ /** Package-private operations injected into the resident composer bar. */
+ export interface ComposerBarInjected {
+@@ -486,7 +507,7 @@
+     onActiveChange: (active: boolean) => void;
+ }
+ /** Full props of the resident composer bar. */
+-export type ComposerBarProps = PropsRuntime<'conversation.composer.bar'> & PropsRenderSlots<'conversation.input.attachments' | 'conversation.input.overlay' | 'conversation.input.permission' | 'conversation.input.left' | 'conversation.input.plan' | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity' | 'conversation.composer.dock'> & InjectFace<ComposerBarInjected> & PropsLocale<'conversation'>;
++export type ComposerBarProps = PropsRuntime<'conversation.composer.bar'> & PropsRenderSlots<'conversation.input.attachments' | 'conversation.input.overlay' | 'conversation.input.accessory' | 'conversation.input.permission' | 'conversation.input.left' | 'conversation.input.plan' | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity' | 'conversation.composer.dock'> & InjectFace<ComposerBarInjected> & PropsLocale<'conversation'>;
+ /** Owner values used to elect a composer takeover. */
+ export interface ComposerChainProps {
+     /** Current Session identity used by temporary business-owned entries. */
