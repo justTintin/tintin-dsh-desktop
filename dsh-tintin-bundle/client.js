@@ -972,13 +972,13 @@ const tintinClient = (() => {
         document.body.appendChild(input)
         input.click()
       })
-      // 2026-09-24 修复：Electron 43 移除 File.path（拖拽/文件选择拿不到路径，
-      // 全部静默失效）——桌面 preload 已暴露 dshDesktopFilePath.forFile
-      // （webUtils.getPathForFile 封装），这里经桥解析绝对路径。
+      // Electron 43 移除 File.path，经 preload 桥解析绝对路径：fork 名
+      // dshDesktopFilePath.forFile 之外再试通道契约名 __DSH_DESKTOP_FILE_PATH__.getPathForFile
+      // （迁移只带来了消费方，暴露层用的是上游契约名——单试 fork 名会静默失效）。
       const pickedPath = (f) => {
         if (!f) return ''
         try {
-          const viaBridge = window.dshDesktopFilePath?.forFile?.(f)
+          const viaBridge = window.dshDesktopFilePath?.forFile?.(f) || window.__DSH_DESKTOP_FILE_PATH__?.getPathForFile?.(f)
           if (typeof viaBridge === 'string' && viaBridge) return viaBridge
         } catch { /* 桥缺失走降级 */ }
         return f.path || ''
