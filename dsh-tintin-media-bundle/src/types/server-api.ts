@@ -81,6 +81,7 @@ export type UnifiedTaskType =
   | 'rembg_matting'  // V3 S1
   | 'vsr_enhance'    // V3 S2
   | 'storyboard_export'
+  | 'storyboard_generate' // 仿视频 V3.5 素材准备（scheduled 成片队列，PRD-M-5 §5.1）
   | 'script_generate'
   | 'tts_generate'
   | 'asr_transcribe'
@@ -224,6 +225,11 @@ export const API_PATHS = {
     scriptsList: '/api/storyboard/scripts',
     scriptsItem: (id: string) => `/api/storyboard/scripts/${id}`,
     save:        '/api/storyboard/scripts',
+    // 仿视频 V3.5（PRD-M-5，2026-10-02 v1.0+评审复核 §9 新增最小集）：
+    // 服务端文档写 POST /storyboard/imitate，客户端按本表 /api 前缀惯例登记
+    imitate:     '/api/storyboard/imitate',
+    // HumanGate② 数据面：PUT /storyboard/{id}/shots/{name}/frames（multipart 换帧或 confirmed）
+    shotFrames:  (id: string, name: string) => `/api/storyboard/scripts/${id}/shots/${encodeURIComponent(name)}/frames`,
   },
   agent: {
     registry:              '/agent/registry',
