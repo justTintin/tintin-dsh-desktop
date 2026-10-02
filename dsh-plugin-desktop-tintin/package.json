@@ -138,6 +138,7 @@
     "start:isolated": "DSH_DESKTOP_ISOLATED_HOST=1 node lib/bin.js",
     "dev": "yarn run build && yarn run prepare:electron-native && node lib/bin.js",
     "package:dir": "yarn run build && yarn run prepare:electron-native && node scripts/package-dir.mjs",
+    "package:dir:hot": "yarn run prepare:electron-native && node scripts/package-dir.mjs",
     "dist:mac": "node scripts/release-mac.ts",
     "dist:mac-smoke": "node scripts/package-mac.ts",
     "dist:win": "node scripts/package-win.ts",
