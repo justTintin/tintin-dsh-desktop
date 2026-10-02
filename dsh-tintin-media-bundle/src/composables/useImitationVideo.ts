@@ -349,8 +349,6 @@ export function useImitationVideo() {
     // Part 1
     part1TaskId, part1Phase, part1Error, part1Note, part1MaterialId, part1Result, scriptId, scriptVersion, shotCount,
     submitImitate,
-    // 反推提示词
-    rpTaskId, rpPhase, rpError, rpResult, submitReversePrompt,
     // 脚本（HumanGate①）
     loadScript, saveScript,
     // HumanGate②
