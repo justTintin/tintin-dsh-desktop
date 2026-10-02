@@ -22,6 +22,7 @@ import { useImitationVideo } from '@/composables/useImitationVideo'
 import type { PickerItem } from '@/composables/useWorkbenchPickers'
 import { clientError } from '@/utils/clientLog'
 import { acceptFileDragOver } from '@/utils/fileUrl'
+import { API_PATHS } from '@/types/server-api'
 import {
   SCENE_ELEMENT_KEYS,
   canConfirmFrames,
@@ -31,13 +32,14 @@ import {
   genBadgeText,
   isStageDReady,
   sceneElementOptions,
+  shotsTotalDuration,
   switchShotSource,
   type GenerateStage,
   type ImitationShot,
   type SceneElementKey,
 } from '@/composables/imitationVideoLogic'
 
-const STEPS = ['1. 生成脚本', '2. 素材准备', '3. 分镜图确认', '4. 视频生成', '5. 触发草稿链', '6. 交付']
+const STEPS = ['1. 视频拆解', '2. 生成脚本', '3. 分镜头确认', '4. 视频生成', '5. 包装特效', '6. 交付']
 
 /** 场景要素键 → 中文标签（展示层专用；数据面键名/枚举值仍按契约英文） */
 const SCENE_ELEMENT_LABELS: Record<string, string> = {
@@ -180,6 +182,87 @@ function clearScriptProduct(): void {
   if (record.value) record.value.products = []
 }
 
+// ── 口播文案（脚本主稿）：Part 1 拆解稿在 meta.imitate.voiceover；「重新生成文案」
+//    走 /copywriting/voiceover（product_desc 必填=选中产品，duration_s=镜头轨总长）；
+//    随脚本保存（ScriptIn.meta 透传）──
+const voiceoverText = computed({
+  get: () => String(((record.value?.meta as Record<string, unknown> | undefined)?.imitate as Record<string, unknown> | undefined)?.voiceover ?? ''),
+  set: (v: string) => {
+    if (!record.value) return
+    const meta = { ...((record.value.meta as Record<string, unknown>) ?? {}) }
+    meta.imitate = { ...((meta.imitate as Record<string, unknown>) ?? {}), voiceover: v }
+    record.value.meta = meta
+  },
+})
+
+const regenBusy = ref(false)
+const regenError = ref('')
+async function regenerateVoiceover(): Promise<void> {
+  const p = (record.value?.products as Array<Record<string, unknown>> | undefined)?.[0]
+  if (!p) {
+    regenError.value = '请先「选择产品」——文案按产品信息重写（product_desc 必填）'
+    return
+  }
+  regenBusy.value = true
+  regenError.value = ''
+  try {
+    const productDesc = [p.brand, p.model || p.name, p.category].filter(Boolean).map(String).join(' / ')
+    const resp = (await window.tintin.server.post(API_PATHS.copywriting.voiceover, {
+      product_desc: productDesc,
+      duration_s: shotsTotalDuration(shots.value),
+      hint: '电商口播，节奏贴近原片，句子完整不拆行',
+    })) as Record<string, unknown> | null
+    const text = resp?.voiceover ?? resp?.text ?? resp?.content
+    if (!text) {
+      const keys = resp ? Object.keys(resp).join(',') : 'null'
+      regenError.value = `文案生成响应缺文案字段（实得字段：${keys}）`
+      clientError('imitation-video', regenError.value, { resp })
+      return
+    }
+    voiceoverText.value = String(text)
+  } catch (e) {
+    regenError.value = `文案生成失败：${(e as Error).message}`
+    clientError('imitation-video', regenError.value, e)
+  } finally {
+    regenBusy.value = false
+  }
+}
+
+// ── 口播配音（TTS 整段直发——拆句禁令；engine=voxcpm=客户端默认裁决）：
+//    生成后就地试听；挂接脚本口播轨（voice_audio_id）随包装特效链，属文案线复用链路 ──
+const ttsBusy = ref(false)
+const ttsError = ref('')
+const ttsAudioUrl = ref('')
+async function generateVoiceAudio(): Promise<void> {
+  const text = voiceoverText.value.trim()
+  if (!text) {
+    ttsError.value = '口播文案为空：先拆解或「重新生成文案」'
+    return
+  }
+  ttsBusy.value = true
+  ttsError.value = ''
+  try {
+    const resp = (await window.tintin.server.post(API_PATHS.tts, {
+      text,
+      engine: 'voxcpm',
+      target_duration: shotsTotalDuration(shots.value),
+    })) as Record<string, unknown> | null
+    const url = resp?.audio_url ?? resp?.url ?? resp?.audio ?? resp?.path
+    if (!url) {
+      const keys = resp ? Object.keys(resp).join(',') : 'null'
+      ttsError.value = `配音响应缺音频地址字段（实得字段：${keys}）`
+      clientError('imitation-video', ttsError.value, { resp })
+      return
+    }
+    ttsAudioUrl.value = toAbsolute(String(url))
+  } catch (e) {
+    ttsError.value = `配音生成失败：${(e as Error).message}`
+    clientError('imitation-video', ttsError.value, e)
+  } finally {
+    ttsBusy.value = false
+  }
+}
+
 function goBack(): void {
   step.value = Math.max(1, step.value - 1)
 }
@@ -246,7 +329,7 @@ async function enterPrep(): Promise<void> {
   // 阶段 B（A-roll）依赖口播音频先行（阶段 A 属文案线现状）；此处先跑阶段 C 分镜帧
   const ok = await iv.submitGenerate({ scriptId: scriptId.value, stage: 'frames' }, shots.value)
   enteringPrep.value = false
-  if (ok) step.value = 2
+  if (ok) step.value = 3
 }
 
 // ── 生成任务通用：完成/失败后刷新脚本（帧引用/状态徽标落库后回读）；
@@ -301,9 +384,8 @@ async function regenerateFrame(i: number): Promise<void> {
   const name = shots.value[i]?.gen?.name
   if (!name) return
   regenFrame.value = String(name)
-  if (await iv.submitGenerate({ scriptId: scriptId.value, stage: 'frames', onlyShots: [String(name)] }, shots.value)) {
-    step.value = 2
-  }
+  // 单帧重生成：提交后留在本页（分镜头确认），生成状态行可见
+  await iv.submitGenerate({ scriptId: scriptId.value, stage: 'frames', onlyShots: [String(name)] }, shots.value)
   regenFrame.value = ''
 }
 
@@ -401,7 +483,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 
       <div class="seg-field">
         <span class="lbl">A-roll 口播人像（可选，第 3 步配置）</span>
-        <span class="muted">数字人 / 实拍上传在「2. 素材准备」中配置（数字人人物图上传通道待服务端契约，当前可先走实拍）</span>
+        <span class="muted">数字人 / 实拍上传在「3. 分镜头确认」中配置（数字人人物图上传通道待服务端契约，当前可先走实拍）</span>
       </div>
 
       <div class="row">
@@ -416,15 +498,33 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       <div v-if="iv.part1Phase.value === 'running'" class="muted">分析进行中（分钟级）：拆镜头 → 运镜测量 → 转写文案 → 生成仿拍脚本…</div>
       <div v-if="iv.part1Error.value" class="iv-err">{{ iv.part1Error.value }}</div>
       <div v-if="iv.enumsError.value" class="iv-err">枚举加载失败：{{ iv.enumsError.value }}（刷新重试：{{ ' ' }}<a class="iv-link" @click="iv.loadEnums">重试</a>）</div>
+      <div v-if="iv.part1Phase.value === 'done' && shots.length" class="row">
+        <TButton label="下一步：生成脚本" @click="step = 2" />
+        <span class="muted">拆解完成：共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒</span>
+      </div>
+    </div>
 
-      <!-- 审核脚本区（HumanGate①）——Part 1 完成后同页展开 -->
-      <template v-if="record && shots.length">
-      <div class="iv-divider"></div>
+    <!-- ═══ 第 2 步：生成脚本（重新生成文案 + 口播配音 + 逐镜审核，HumanGate①；单脚本全步共用）═══ -->
+    <div v-else-if="step === 2 && record && shots.length" class="iv-panel">
       <div class="row between">
-        <span class="sb-info">仿拍脚本：共 {{ shots.length }} 镜 ｜ 总时长 {{ shots.reduce((s, x) => s + (Number(x.duration) || 0), 0) }} 秒 ｜ 脚本 {{ scriptId }}</span>
-        <span class="muted">逐镜审核后提交生成——混合比例（AI/实拍）在此定稿</span>
+        <span class="sb-info">仿拍脚本：共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒 ｜ 脚本 {{ scriptId }}</span>
+        <span class="muted">文案与口播配音在此生成；混合比例（AI/实拍）逐镜定稿</span>
       </div>
       <div v-if="timelineWarn" class="iv-warn">{{ timelineWarn }}</div>
+
+      <!-- 口播文案（脚本主稿）：Part 1 拆解稿 → 可按所选产品重新生成（/copywriting/voiceover） -->
+      <div class="seg-field">
+        <span class="lbl">口播文案（脚本主稿，随脚本保存）</span>
+        <textarea v-model="voiceoverText" rows="4" class="input carry-textarea" placeholder="原片口播转写稿；点「重新生成文案」按所选产品重写，也可直接编辑"></textarea>
+      </div>
+      <div class="row">
+        <TButton label="重新生成文案" variant="secondary" :loading="regenBusy" @click="regenerateVoiceover" />
+        <TButton label="生成口播配音（试听）" variant="secondary" :loading="ttsBusy" :disabled="!voiceoverText.trim()" @click="generateVoiceAudio" />
+        <audio v-if="ttsAudioUrl" controls preload="none" :src="ttsAudioUrl" class="iv-audio" />
+        <span v-if="regenError" class="iv-err">{{ regenError }}</span>
+        <span v-if="ttsError" class="iv-err">{{ ttsError }}</span>
+        <span class="muted">配音为整段直发（voxcpm）；脚本口播轨经包装特效链接入</span>
+      </div>
 
       <div v-for="(shot, i) in shots" :key="i" class="seg-card">
         <div class="seg-head">
@@ -470,14 +570,13 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <button v-if="productLabel()" class="product-clear" title="清除已选产品" @click="clearScriptProduct">×</button>
         <span v-if="iv.genError.value" class="iv-err">{{ iv.genError.value }}</span>
         <span class="spacer"></span>
-        <TButton label="下一步：素材准备" :loading="enteringPrep" @click="enterPrep" />
+        <TButton label="下一步：分镜头确认" :loading="enteringPrep" @click="enterPrep" />
       </div>
       <WbPickProductDialog :visible="productPickVisible" @close="productPickVisible = false" @pick="onProductPick" />
-      </template>
     </div>
 
-    <!-- ═══ 第 2 步：素材准备（A-roll 状态 + 分镜帧生成）═══ -->
-    <div v-else-if="step === 2" class="iv-panel">
+    <!-- ═══ 第 3 步：分镜头确认（HumanGate②：A-roll 状态 + 分镜帧生成/等待 + 九宫格确认同页）═══ -->
+    <div v-else-if="step === 3" class="iv-panel">
       <div class="seg-field">
         <span class="lbl">A-roll 口播人像</span>
         <span class="muted">
@@ -489,16 +588,12 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <span class="lbl">分镜帧（首尾帧）生成</span>
         <span v-if="iv.genPhase.value === 'running'" class="muted">生成中（GPU 远端，单镜约 3~7 分钟）… 已完成 {{ genResultSummary.done }} 镜、失败 {{ genResultSummary.failed }} 镜</span>
         <span v-else-if="iv.genPhase.value === 'failed'" class="iv-err">生成失败：{{ iv.genError.value }}</span>
-        <span v-else-if="iv.genPhase.value === 'done'" class="muted">分镜帧已生成（成功 {{ genResultSummary.done }} 镜<template v-if="genResultSummary.failed">、失败 {{ genResultSummary.failed }} 镜</template>）——进入下一步逐帧确认</span>
+        <span v-else-if="iv.genPhase.value === 'done'" class="muted">分镜帧已生成（成功 {{ genResultSummary.done }} 镜<template v-if="genResultSummary.failed">、失败 {{ genResultSummary.failed }} 镜</template>）——逐帧确认</span>
       </div>
       <div class="row">
-        <TButton v-if="iv.genPhase.value === 'done'" label="进入分镜图确认" @click="step = 3" />
         <TButton label="刷新脚本状态" variant="secondary" @click="reloadScript" />
       </div>
-    </div>
-
-    <!-- ═══ 第 3 步：分镜图确认（HumanGate②·九宫格）═══ -->
-    <div v-else-if="step === 3" class="iv-panel">
+      <div class="iv-divider"></div>
       <div class="row between">
         <span class="sb-info">已确认 {{ framesReadyCount }} / {{ generateShotsCount }} 镜——全帧确认后解锁视频生成</span>
         <span class="muted">每帧可手动替换 / 单帧重生成（按当前脚本参数）；细化批注通道待服务端映射层端点</span>
@@ -531,7 +626,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         </div>
       </div>
       <div class="row">
-        <TButton label="开始逐镜视频生成" :disabled="!isStageDReady(shots) || !!startVideos" @click="startVideoGeneration" />
+        <TButton label="下一步：视频生成" :disabled="!isStageDReady(shots) || !!startVideos" @click="startVideoGeneration" />
         <span v-if="iv.genError.value" class="iv-err">{{ iv.genError.value }}</span>
       </div>
       <input ref="frameInput" type="file" accept="image/png" class="iv-hide" @change="onReplaceFrame" />
@@ -566,7 +661,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       </div>
     </div>
 
-    <!-- ═══ 第 5 步：触发草稿链（HumanGate③·两段式）═══ -->
+    <!-- ═══ 第 5 步：包装特效（HumanGate③·两段式，复用文案线特效包装→草稿链）═══ -->
     <div v-else-if="step === 5" class="iv-panel">
       <div class="seg-field">
         <span class="lbl">素材就绪情况</span>
