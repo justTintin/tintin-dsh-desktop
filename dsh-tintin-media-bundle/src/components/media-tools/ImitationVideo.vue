@@ -16,7 +16,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import TButton from '@/components/common/TButton.vue'
 import VdStepBar from '@/components/media-tools/VdStepBar.vue'
 import { createMontageSharedRuntime } from '@/composables/copywritingMontage/context'
+import { useFilePicker } from '@/composables/useFilePicker'
 import { useImitationVideo } from '@/composables/useImitationVideo'
+import { clientError } from '@/utils/clientLog'
+import { acceptFileDragOver } from '@/utils/fileUrl'
 import {
   SCENE_ELEMENT_KEYS,
   canConfirmFrames,
@@ -56,17 +59,76 @@ onMounted(() => {
 // ── 第 1 步：选原视频（本地上传 File / 素材库 material://{id} / http url）──
 type SourceMode = 'file' | 'material' | 'url'
 const sourceMode = ref<SourceMode>('file')
-const sourceFile = ref<File | null>(null)
 const sourceMaterial = ref('')
 const sourceUrl = ref('')
 const ratio = ref('9:16')
 const fidelity = ref('balanced')
-const fileInput = ref<HTMLInputElement | null>(null)
+/** 本地文件上传进度（0..1；<0 未在上传） */
+const uploadRatio = ref(-1)
 
-function onSourceFile(e: Event): void {
-  const f = (e.target as HTMLInputElement).files?.[0] || null
-  sourceFile.value = f
+// 本地视频走工程统一拖入控件（useFilePicker：点击选择/拖拽 + 120px 统一 dropzone，
+// 2026-09-07 全程序统一裁决）。上传通道需要真 File：拖入从 dataTransfer 直取；
+// 对话框只给路径 → 经宿主 /tintin/media 代理（unlock 已由选择器触发）取回内容成 File。
+const VIDEO_PICK_EXTS = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'flv', 'm4v']
+const sourceFile = ref<File | null>(null)
+const fileResolving = ref(false)
+const pickError = ref('')
+const videoPicker = useFilePicker({
+  dialogTitle: '选择原视频',
+  filters: [{ name: '视频', extensions: VIDEO_PICK_EXTS }],
+})
+
+function isVideoName(name: string): boolean {
+  const ext = name.split('.').pop()?.toLowerCase() || ''
+  return VIDEO_PICK_EXTS.includes(ext)
 }
+
+/** 拖入：先取真 File（上传用），再交共享选择器落路径/展示名 */
+function onVideoDrop(e: DragEvent): void {
+  const f = e.dataTransfer?.files?.[0] || null
+  if (f && !isVideoName(f.name)) {
+    pickError.value = `不支持的视频格式：${f.name}（支持 ${VIDEO_PICK_EXTS.join(' / ')}）`
+    return
+  }
+  if (f) sourceFile.value = f
+  pickError.value = ''
+  videoPicker.onDrop(e)
+}
+
+/** 对话框路径 → File（宿主 /tintin/media 同源代理流式取回；失败显式报错不静默） */
+async function resolveFileFromPath(path: string): Promise<void> {
+  if (!isVideoName(path)) {
+    sourceFile.value = null
+    pickError.value = `不支持的视频格式：${path}`
+    return
+  }
+  fileResolving.value = true
+  try {
+    const res = await fetch(`/tintin/media?path=${encodeURIComponent(path)}`)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    const name = path.split(/[\\/]/).pop() || 'source.mp4'
+    sourceFile.value = new File([blob], name, { type: blob.type || 'video/mp4' })
+    pickError.value = ''
+  } catch (err) {
+    sourceFile.value = null
+    pickError.value = `读取所选文件失败：${(err as Error).message}`
+    clientError('imitation-video', pickError.value, err)
+  } finally {
+    fileResolving.value = false
+  }
+}
+
+// 路径变化：拖入已直取同名 File 则跳过；对话框新路径则代理解析
+watch(videoPicker.filePath, (p) => {
+  if (!p) {
+    sourceFile.value = null
+    return
+  }
+  const base = p.split(/[\\/]/).pop()
+  if (sourceFile.value && sourceFile.value.name === base) return
+  void resolveFileFromPath(p)
+})
 
 const part1VideoInput = computed<unknown>(() => {
   if (sourceMode.value === 'file') return sourceFile.value
@@ -75,7 +137,7 @@ const part1VideoInput = computed<unknown>(() => {
 })
 
 const canSubmitPart1 = computed(() => {
-  if (sourceMode.value === 'file') return !!sourceFile.value
+  if (sourceMode.value === 'file') return !!sourceFile.value && !fileResolving.value
   if (sourceMode.value === 'material') return /^\d+$/.test(sourceMaterial.value.trim())
   return /^https?:\/\//i.test(sourceUrl.value.trim())
 })
@@ -240,10 +302,27 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <label class="iv-mode" :class="{ on: sourceMode === 'url' }"><input v-model="sourceMode" type="radio" value="url" />链接</label>
       </div>
 
-      <div v-if="sourceMode === 'file'" class="seg-field">
-        <span class="lbl">原视频（本地文件，自动上传入素材库后分析）</span>
-        <input type="file" accept="video/*" class="iv-file" @change="onSourceFile" />
-        <span v-if="sourceFile" class="muted">已选择：{{ sourceFile.name }}（{{ (sourceFile.size / 1024 / 1024).toFixed(1) }} MB）</span>
+      <div v-if="sourceMode === 'file'" class="iv-filepick">
+        <div class="dropzone" :class="{ 'is-active': videoPicker.isDragging.value, 'has-file': !!videoPicker.filePath.value }"
+          @click="videoPicker.pickFile"
+          @drop.prevent="onVideoDrop"
+          @dragover.prevent="acceptFileDragOver($event); videoPicker.onDragOver()"
+          @dragleave.prevent="videoPicker.onDragLeave">
+          <svg v-if="!videoPicker.filePath.value" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+          </svg>
+          <div class="dropzone__text">
+            <template v-if="!videoPicker.filePath.value">
+              <span class="dropzone__main">点击选择原视频或拖拽到此处</span>
+              <span class="dropzone__hint">支持 MP4 / MOV / MKV / AVI / WEBM / FLV / M4V；自动上传入素材库后进入拆解</span>
+            </template>
+            <template v-else>
+              <span class="dropzone__main">{{ videoPicker.fileName.value }}</span>
+              <span class="dropzone__hint">{{ fileResolving ? '正在读取文件…' : sourceFile ? `${(sourceFile.size / 1024 / 1024).toFixed(1)} MB · 点击重新选择` : '正在读取文件…' }}</span>
+            </template>
+          </div>
+        </div>
+        <div v-if="pickError" class="iv-err">{{ pickError }}</div>
       </div>
       <div v-else-if="sourceMode === 'material'" class="seg-field">
         <span class="lbl">素材库 ID（视频需已在服务端素材库）</span>
@@ -278,9 +357,11 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <TButton label="提交拆解（Part 1）" :loading="iv.part1Phase.value === 'running'" :disabled="!canSubmitPart1" @click="iv.submitImitate({
           video: part1VideoInput,
           options: { ratio, fidelity },
+          onUploadProgress: (r) => { uploadRatio.value = r },
         })" />
         <span v-if="iv.part1Note.value" class="muted">{{ iv.part1Note.value }}</span>
       </div>
+      <div v-if="uploadRatio.value >= 0 && uploadRatio.value < 1 && iv.part1Phase.value !== 'running'" class="muted">本地上传中 {{ Math.round(uploadRatio.value * 100) }}%</div>
       <div v-if="iv.part1Phase.value === 'running'" class="muted">分析进行中（分钟级）：拆镜头 → 运镜测量 → 转写文案 → 生成仿拍脚本…</div>
       <div v-if="iv.part1Error.value" class="iv-err">{{ iv.part1Error.value }}</div>
       <div v-if="iv.enumsError.value" class="iv-err">枚举加载失败：{{ iv.enumsError.value }}（刷新重试：{{ ' ' }}<a class="iv-link" @click="iv.loadEnums">重试</a>）</div>
@@ -459,8 +540,6 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <TButton label="重新走一遍（新视频）" variant="secondary" @click="step = 1" />
       </div>
     </div>
-
-    <input ref="fileInput" type="file" accept="video/*" class="iv-hide" @change="onSourceFile" />
   </div>
 </template>
 
@@ -477,7 +556,36 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 .iv-warn { color: var(--warning, #f1c40f); font-size: 12px; font-weight: 600; }
 .iv-link { color: var(--primary); cursor: pointer; text-decoration: underline; }
 .iv-hide { display: none; }
-.iv-file { font-size: 12px; }
+.iv-filepick { display: flex; flex-direction: column; gap: 6px; }
+
+/* ── 工程统一拖入控件（2026-09-07 用户裁决：全程序拖拽上传区高度统一 min-height 120px；
+     样式与 ImageMatting 等工具卡同构）── */
+.dropzone {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 120px;
+  padding: var(--space-6);
+  background: color-mix(in srgb, var(--primary) 6%, var(--surface-container));
+  border: 1.5px dashed color-mix(in srgb, var(--primary) 40%, var(--border));
+  border-radius: var(--radius-lg);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--easing-default),
+    background var(--duration-fast) var(--easing-default);
+}
+.dropzone:hover,
+.dropzone.is-active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface-container));
+}
+.dropzone.has-file {
+  border-style: solid;
+  color: var(--foreground);
+}
+.dropzone__text { display: flex; flex-direction: column; gap: 2px; }
+.dropzone__main { font-size: var(--font-size-body); font-weight: var(--font-weight-medium); color: var(--foreground); }
+.dropzone__hint { font-size: 12px; color: var(--muted-foreground); }
 .w70 { width: 90px; } .w60 { width: 64px; } .w90 { width: 110px; } .w110 { width: 130px; }
 
 .iv-mode {
