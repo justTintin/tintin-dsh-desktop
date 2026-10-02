@@ -101,14 +101,34 @@ describe('整镜来源切换（§5.3-2）', () => {
     expect(shot.visual).toBe('v')
   })
 
-  it('generate→material：移除 gen 块，保留编辑字段与既有绑片', () => {
+  it('generate→material：保留 gen 块（A2 裁决：切回不重建）与既有绑片', () => {
     const g = genShot('shot_01', { material_id: 77 })
     const shot = switchShotSource(g, 'material')
     expect(shot.source).toBe('material')
-    expect(shot.gen).toBeUndefined()
+    expect(shot.gen).toEqual(g.gen) // gen 原样保留，不删
     expect(shot.duration).toBe(5)
     expect(shot.audio).toBe('口播文案')
     expect(shot.material_id).toBe(77)
+  })
+
+  it('AI→实拍→AI 往返：保留的 gen 原样恢复（编辑过的提示词/帧状态不丢），绑片按 A1 清零', () => {
+    const edited = genShot('shot_02', {
+      gen: {
+        ...genShot('x').gen!,
+        name: 'shot_02',
+        camera: 'crane_up',
+        scene_en: 'marble desk with cool rim light',
+        frames_status: 'confirmed',
+        first_frame: { path: 'script_x/shot_02_first.png', source: 'generated' },
+      },
+    })
+    const roundTrip = switchShotSource(switchShotSource(edited, 'material'), 'generate')
+    expect(roundTrip.source).toBe('generate')
+    expect(roundTrip.gen).toEqual(edited.gen) // 原样恢复，非重建默认值
+    expect(roundTrip.gen?.camera).toBe('crane_up')
+    expect(roundTrip.gen?.frames_status).toBe('confirmed')
+    expect(roundTrip.material_id).toBe(0)
+    expect(roundTrip.material_path).toBe('')
   })
 })
 

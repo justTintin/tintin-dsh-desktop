@@ -201,17 +201,22 @@ export function framesBadgeText(shot: ImitationShot): string {
 // ── 来源切换（§5.3-2：整镜切换 AI↔实拍，混合比例人工定稿）────────
 
 /**
- * 整镜切换来源。generate→material：按 §3「增量字段（source=generate 时）」移除 gen 块
- * （数据面干净，PUT 整体替换语义下不保留僵尸块）；material_id 保留由用户重绑。
- * material→generate：重置绑片字段为服务端零值（实测 2026-10-02 Shot schema：
- * material_id 为 integer default 0 非 nullable，传 null 会被 Pydantic 422 拒；
- * 防旧实拍绑片在生成完成前混入混剪，§8 _auto_bind_materials 对 generate 镜不告警）
- * 并初始化 gen（backend=comfygen、唯一名、双状态机归 pending）。
+ * 整镜切换来源（2026-10-02 用户裁决 A1/A2）：
+ * · 切实拍（→material）：**保留 gen 块**——gen 是小体积配置数据且携带已确认帧引用
+ *   （first/last_frame、frames_status），删除后切回需重跑映射层并重烧 GPU 重生成帧；
+ *   "僵尸块"顾虑因体积小不成立。实拍镜上的 gen 为惰性保留（阶段 C/D 只筛
+ *   source=generate）；material_id 保留由用户重绑。
+ * · 切 AI（→generate）：绑定字段清零（A1：material_id=0/material_path=''，实测
+ *   integer default 0 非 nullable，null 会被 422；防旧实拍绑片在生成完成前混入混剪）；
+ *   若镜头已有保留的 gen 块则**原样恢复不重建**（保住编辑过的提示词/运镜/帧状态），
+ *   无 gen 才初始化全新块（backend=comfygen、唯一名、双状态机归 pending）。
  */
 export function switchShotSource(shot: ImitationShot, to: ShotSource, allShots: ImitationShot[] = []): ImitationShot {
   if (to === 'material') {
-    const { gen: _drop, ...rest } = shot
-    return { ...rest, source: 'material' }
+    return { ...shot, source: 'material' }
+  }
+  if (shot.gen) {
+    return { ...shot, source: 'generate', material_id: 0, material_path: '' }
   }
   return {
     ...shot,
