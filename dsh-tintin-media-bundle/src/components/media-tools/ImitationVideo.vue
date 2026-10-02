@@ -22,6 +22,7 @@ import { useImitationVideo } from '@/composables/useImitationVideo'
 import type { PickerItem } from '@/composables/useWorkbenchPickers'
 import { clientError } from '@/utils/clientLog'
 import { acceptFileDragOver } from '@/utils/fileUrl'
+import { MAX_SOURCE_VIDEO_SEC, probeDurationSec } from '@/utils/videoDuration'
 import { API_PATHS } from '@/types/server-api'
 import {
   SCENE_ELEMENT_KEYS,
@@ -130,14 +131,33 @@ function isVideoName(name: string): boolean {
   return VIDEO_PICK_EXTS.includes(ext)
 }
 
-/** 拖入：先取真 File（上传用），再交共享选择器落路径/展示名 */
-function onVideoDrop(e: DragEvent): void {
+/** 原片时长上限（2026-10-02 用户裁决：上传视频 ≤60 秒，超限明确提示拦截） */
+const MAX_SOURCE_SEC = MAX_SOURCE_VIDEO_SEC
+
+/** 时长校验：超限清空选择并给明确提示；返回是否通过 */
+async function enforceDurationLimit(file: File): Promise<boolean> {
+  const sec = await probeDurationSec(file)
+  if (sec !== null && sec > MAX_SOURCE_SEC) {
+    sourceFile.value = null
+    videoPicker.clearFile()
+    pickError.value = `视频时长 ${Math.round(sec)} 秒，超过 ${MAX_SOURCE_SEC} 秒上限——请选择 ${MAX_SOURCE_SEC} 秒以内的原片（拆解链面向短视频）`
+    clientError('imitation-video', pickError.value, { name: file.name, sec })
+    return false
+  }
+  return true
+}
+
+/** 拖入：先取真 File（上传用），再交共享选择器落路径/展示名；格式与时长双重校验 */
+async function onVideoDrop(e: DragEvent): Promise<void> {
   const f = e.dataTransfer?.files?.[0] || null
   if (f && !isVideoName(f.name)) {
     pickError.value = `不支持的视频格式：${f.name}（支持 ${VIDEO_PICK_EXTS.join(' / ')}）`
     return
   }
-  if (f) sourceFile.value = f
+  if (f) {
+    if (!(await enforceDurationLimit(f))) return
+    sourceFile.value = f
+  }
   pickError.value = ''
   videoPicker.onDrop(e)
 }
@@ -155,7 +175,9 @@ async function resolveFileFromPath(path: string): Promise<void> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const blob = await res.blob()
     const name = path.split(/[\\/]/).pop() || 'source.mp4'
-    sourceFile.value = new File([blob], name, { type: blob.type || 'video/mp4' })
+    const file = new File([blob], name, { type: blob.type || 'video/mp4' })
+    if (!(await enforceDurationLimit(file))) return
+    sourceFile.value = file
     pickError.value = ''
   } catch (err) {
     sourceFile.value = null
@@ -534,7 +556,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
           <div class="dropzone__text">
             <template v-if="!videoPicker.filePath.value">
               <span class="dropzone__main">点击选择原视频或拖拽到此处</span>
-              <span class="dropzone__hint">支持 MP4 / MOV / MKV / AVI / WEBM / FLV / M4V；自动上传入素材库后进入拆解</span>
+              <span class="dropzone__hint">支持 MP4 / MOV / MKV / AVI / WEBM / FLV / M4V，时长 ≤ {{ MAX_SOURCE_SEC }} 秒；自动上传入素材库后进入拆解</span>
             </template>
             <template v-else>
               <span class="dropzone__main">{{ videoPicker.fileName.value }}</span>

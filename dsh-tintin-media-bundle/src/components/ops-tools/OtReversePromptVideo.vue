@@ -10,6 +10,7 @@ import TButton from '@/components/common/TButton.vue'
 import { useFilePicker } from '@/composables/useFilePicker'
 import { useImitationVideo } from '@/composables/useImitationVideo'
 import { acceptFileDragOver } from '@/utils/fileUrl'
+import { MAX_SOURCE_VIDEO_SEC, probeDurationSec } from '@/utils/videoDuration'
 
 const iv = useImitationVideo()
 
@@ -28,13 +29,23 @@ function isVideo(name: string): boolean {
   const ext = name.split('.').pop()?.toLowerCase() || ''
   return VIDEO_EXTS.includes(ext)
 }
-function onDrop(e: DragEvent): void {
+async function onDrop(e: DragEvent): Promise<void> {
   const f = e.dataTransfer?.files?.[0] || null
   if (f && !isVideo(f.name)) {
     pickError.value = `不支持的视频格式：${f.name}（支持 ${VIDEO_EXTS.join(' / ')}）`
     return
   }
-  if (f) sourceFile.value = f
+  if (f) {
+    // 时长上限校验（2026-10-02 用户裁决：≤60 秒，超限明确提示）
+    const sec = await probeDurationSec(f)
+    if (sec !== null && sec > MAX_SOURCE_VIDEO_SEC) {
+      sourceFile.value = null
+      picker.clearFile()
+      pickError.value = `视频时长 ${Math.round(sec)} 秒，超过 ${MAX_SOURCE_VIDEO_SEC} 秒上限——请选择 ${MAX_SOURCE_VIDEO_SEC} 秒以内的视频`
+      return
+    }
+    sourceFile.value = f
+  }
   pickError.value = ''
   picker.onDrop(e)
 }
@@ -83,7 +94,7 @@ onMounted(() => { /* 枚举等非本卡依赖，不拉 */ })
         <div class="dropzone__text">
           <template v-if="!picker.filePath.value">
             <span class="dropzone__main">点击选择视频或拖拽到此处</span>
-            <span class="dropzone__hint">自动上传后拆解，返回脚本与提示词</span>
+            <span class="dropzone__hint">时长 ≤ {{ MAX_SOURCE_VIDEO_SEC }} 秒；自动上传后拆解，返回脚本与提示词</span>
           </template>
           <template v-else>
             <span class="dropzone__main">{{ picker.fileName.value }}</span>

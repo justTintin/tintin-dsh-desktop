@@ -77,7 +77,7 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
     group: '视频',
     tools: [
       { id: 'copywriting-montage', title: '文案混剪', desc: '按文案自动匹配素材，快速生成混剪成片', emoji: '📝', accent: 'linear-gradient(135deg,#10B981 0%,#0EA5E9 100%)' },
-      { id: 'imitation-video', title: '仿视频', desc: '原视频拆解 → 仿拍脚本 → AI 分镜生成 → 剪映草稿', emoji: '🎯', accent: 'linear-gradient(135deg,#F43F5E 0%,#F59E0B 100%)' },
+      { id: 'imitation-video', title: '仿爆款视频', desc: '原视频拆解 → 仿拍脚本 → AI 分镜生成 → 剪映草稿', emoji: '🎯', accent: 'linear-gradient(135deg,#F43F5E 0%,#F59E0B 100%)' },
       // 仿爆款旧卡已退役（2026-10-02 用户裁决：旧款未投产，V3.5 仿视频向导链取代；
       // 服务端 /viral/clone/* 契约面与类型保留，客户端 UI/composable/logic 移除）
       { id: 'live-slice', title: '直播切片', desc: '视频分析热点发现→切片与封面生成', emoji: '📡', accent: 'linear-gradient(135deg,#EF4444 0%,#DC2626 100%)' },
