@@ -64,6 +64,7 @@ async function reloadScript(): Promise<void> {
   if (data) {
     record.value = data
     seedOrigAudio()
+    seedOrigVoiceover()
   }
 }
 
@@ -75,6 +76,24 @@ async function reloadScript(): Promise<void> {
 function seedOrigAudio(): void {
   for (const s of shots.value) {
     if (s.orig_audio === undefined || s.orig_audio === '') s.orig_audio = String(s.audio ?? '')
+  }
+}
+
+/** 拆解文案固化（orig_voiceover，meta 透传保存）：首次载入把原片口播转写从
+ *  voiceover 拷贝固化——此后 voiceover 即"脚本文案"（重新生成后绑定脚本），
+ *  拆解原文永不被动覆盖（2026-10-02 用户裁决：两套文案分离） */
+const origVoiceoverText = computed(() => {
+  const imitate = (record.value?.meta as Record<string, unknown> | undefined)?.imitate as Record<string, unknown> | undefined
+  return String(imitate?.orig_voiceover ?? '')
+})
+function seedOrigVoiceover(): void {
+  if (!record.value) return
+  const meta = { ...((record.value.meta as Record<string, unknown>) ?? {}) }
+  const imitate = { ...((meta.imitate as Record<string, unknown>) ?? {}) }
+  if ((imitate.orig_voiceover === undefined || imitate.orig_voiceover === '') && imitate.voiceover) {
+    imitate.orig_voiceover = String(imitate.voiceover)
+    meta.imitate = imitate
+    record.value.meta = meta
   }
 }
 
@@ -278,6 +297,7 @@ async function loadVoiceSamples(): Promise<void> {
 const ttsBusy = ref(false)
 const ttsError = ref('')
 const ttsAudioUrl = ref('')
+const ttsBindNote = ref('')
 async function generateVoiceAudio(): Promise<void> {
   const text = voiceoverText.value.trim()
   if (!text) {
@@ -301,6 +321,23 @@ async function generateVoiceAudio(): Promise<void> {
       return
     }
     ttsAudioUrl.value = toAbsolute(String(url))
+    // 声音克隆完成后自动填充绑定到脚本（2026-10-02 用户裁决：不需要单独按钮）——
+    // 响应含音频库 id（audio_id/voice_audio_id）即写脚本 voice_audio_id 并自动保存；
+    // 无 id 则显式说明待入库契约（打点响应键，不静默）
+    const audioId = resp?.audio_id ?? resp?.voice_audio_id
+    if (audioId !== undefined && audioId !== null && audioId !== '') {
+      if (record.value) {
+        record.value.voice_audio_id = Number(audioId) || String(audioId)
+        const dur = Number(resp?.duration ?? resp?.voice_dur_sec)
+        if (Number.isFinite(dur) && dur > 0) record.value.voice_dur_sec = dur
+      }
+      await saveScript()
+      ttsBindNote.value = `配音已自动绑定脚本口播轨（voice_audio_id=${String(audioId)}）并保存`
+    } else {
+      const keys = Object.keys(resp ?? {}).join(',')
+      ttsBindNote.value = '配音已生成（可试听）；响应未含音频库 id，自动绑定待音频入库契约（已记录响应字段）'
+      clientError('imitation-video', `配音响应缺 audio_id（实得字段：${keys}）`, { resp })
+    }
   } catch (e) {
     ttsError.value = `配音生成失败：${(e as Error).message}`
     clientError('imitation-video', ttsError.value, e)
@@ -556,10 +593,15 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       </div>
       <div v-if="timelineWarn" class="iv-warn">{{ timelineWarn }}</div>
 
-      <!-- 新口播文案（主稿）：按所选产品重写原片口播（/copywriting/voiceover） -->
+      <!-- 两套文案（2026-10-02 用户裁决）：上=拆解文案（原片口播转写，只读、不绑定脚本）；
+           下=脚本文案（重新生成后绑定脚本，配音/逐镜以此为准） -->
       <div class="seg-field">
-        <span class="lbl">新口播文案（主稿，随脚本保存；配音与逐镜替换以此为准）</span>
-        <textarea v-model="voiceoverText" rows="4" class="input carry-textarea" placeholder="初值=原片口播转写；选择产品后点「重新生成文案」按新产品重写，也可直接编辑"></textarea>
+        <span class="lbl">拆解文案（原片口播转写——只读参考，不绑定脚本）</span>
+        <textarea :value="origVoiceoverText" readonly rows="3" class="input carry-textarea iv-orig" placeholder="（原片无口播或拆解未含转写）"></textarea>
+      </div>
+      <div class="seg-field">
+        <span class="lbl">脚本文案（重新生成后绑定脚本，可编辑——配音与逐镜替换以此为准）</span>
+        <textarea v-model="voiceoverText" rows="4" class="input carry-textarea" placeholder="选择产品 →「重新生成文案」按新产品重写（生成后才与脚本绑定），也可直接编辑"></textarea>
       </div>
       <div class="row">
         <TButton label="选择产品" @click="productPickVisible = true" />
@@ -586,7 +628,8 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <audio v-if="ttsAudioUrl" :src="ttsAudioUrl" controls preload="auto" class="iv-audio" title="配音结果" />
         <span v-if="regenError" class="iv-err">{{ regenError }}</span>
         <span v-if="ttsError" class="iv-err">{{ ttsError }}</span>
-        <span class="muted">整段直发不拆句；新文案按镜自动拆分待服务端口播切分修复（§11-26），当前逐镜旁白可手动粘贴替换</span>
+        <span v-if="ttsBindNote" class="muted">{{ ttsBindNote }}</span>
+        <span class="muted">整段直发不拆句；新文案按镜自动拆分待服务端口播切分修复（§11-26）</span>
       </div>
 
       <div v-for="(shot, i) in shots" :key="i" class="seg-card">
