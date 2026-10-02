@@ -27,6 +27,9 @@ import OtStoryboard from './components/media-tools/OtStoryboard.vue'
 import VideoTranscribe from './components/media-tools/VideoTranscribe.vue'
 // 去水印字幕（2026-09-25 P2 恢复）：预览帧四点框选 + /vsr/remove
 import SubtitleRemoval from './components/media-tools/SubtitleRemoval.vue'
+// 仿视频（V3.5 · PRD-M-5，2026-10-02）：原视频→仿拍脚本→AI 素材→剪映草稿七步向导；
+// 取代已退役的旧「仿爆款」卡（裁决 §11-15），整体方案与文案混剪对应（§5.3）
+import ImitationVideo from './components/media-tools/ImitationVideo.vue'
 // 直播切片（2026-09-25 P2 恢复）：热点发现→切片→封面/字幕（whisper+llmChat+liveclip 文件 I/O）
 import LiveClip from './components/media-tools/LiveClip.vue'
 // 封面制作（2026-09-25 用户裁决移植）：图层编辑 → /workflow/run + SSE 进度 →
@@ -74,6 +77,7 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
     group: '视频',
     tools: [
       { id: 'copywriting-montage', title: '文案混剪', desc: '按文案自动匹配素材，快速生成混剪成片', emoji: '📝', accent: 'linear-gradient(135deg,#10B981 0%,#0EA5E9 100%)' },
+      { id: 'imitation-video', title: '仿视频', desc: '原视频拆解 → 仿拍脚本 → AI 分镜生成 → 剪映草稿', emoji: '🎯', accent: 'linear-gradient(135deg,#F43F5E 0%,#F59E0B 100%)' },
       // 仿爆款旧卡已退役（2026-10-02 用户裁决：旧款未投产，V3.5 仿视频向导链取代；
       // 服务端 /viral/clone/* 契约面与类型保留，客户端 UI/composable/logic 移除）
       { id: 'live-slice', title: '直播切片', desc: '视频分析热点发现→切片与封面生成', emoji: '📡', accent: 'linear-gradient(135deg,#EF4444 0%,#DC2626 100%)' },
@@ -166,6 +170,7 @@ onMounted(() => {
         </div>
       </div>
       <CopywritingMontage v-if="active === 'copywriting-montage'" />
+      <ImitationVideo v-else-if="active === 'imitation-video'" />
       <JianYingTemplates v-else-if="active === 'jianying-templates'" />
       <VoiceClone v-else-if="active === 'voice-clone'" />
       <OtStoryboard v-else-if="active === 'storyboard'" />
