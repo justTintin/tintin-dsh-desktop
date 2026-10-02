@@ -382,7 +382,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       </div>
 
       <div class="row">
-        <TButton label="提交拆解（Part 1）" :loading="iv.part1Phase.value === 'running'" :disabled="!canSubmitPart1" @click="iv.submitImitate({
+        <TButton label="提交拆解" :loading="iv.part1Phase.value === 'running'" :disabled="!canSubmitPart1" @click="iv.submitImitate({
           video: part1VideoInput,
           options: { ratio, fidelity },
           onUploadProgress: (r) => { uploadRatio.value = r },
@@ -442,8 +442,9 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 
       <div class="row">
         <TButton label="保存脚本" variant="secondary" :loading="saving" @click="saveScript" />
-        <TButton label="进入素材准备（生成分镜帧）" :loading="enteringPrep" @click="enterPrep" />
         <span v-if="iv.genError.value" class="iv-err">{{ iv.genError.value }}</span>
+        <span class="spacer"></span>
+        <TButton label="下一步：素材准备" :loading="enteringPrep" @click="enterPrep" />
       </div>
       </template>
     </div>
