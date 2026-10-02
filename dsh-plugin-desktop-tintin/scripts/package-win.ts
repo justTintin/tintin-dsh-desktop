@@ -72,6 +72,13 @@ export interface WindowsPackageOptions {
   ) => void
   /** Report non-secret packaging progress. */
   readonly log: (message: string) => void
+  /**
+   * Hot package mode (2026-10-02 user ruling): skip the preflight gate and
+   * clean rebuild, repack the existing build outputs for fast iteration.
+   * The default remains the full clean-and-gated chain; source changes need
+   * a build before a hot pack or they will not be in the artifact.
+   */
+  readonly hot?: boolean
 }
 
 /**
@@ -104,7 +111,10 @@ function run(
 }
 
 /** Create the native packaging options for a verifier entry point. */
-export function createWindowsPackageOptions(verifier = './verify-win-installer.ts'): WindowsPackageOptions {
+export function createWindowsPackageOptions(
+  verifier = './verify-win-installer.ts',
+  hot = false,
+): WindowsPackageOptions {
   const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
   const workspaceRoot = resolve(desktopRoot, '..')
   const require = createRequire(import.meta.url)
@@ -127,6 +137,7 @@ export function createWindowsPackageOptions(verifier = './verify-win-installer.t
     nodeExecutable: process.execPath,
     run,
     log: message => console.log(message),
+    hot,
   }
 }
 
@@ -162,7 +173,7 @@ export function packageWindowsArtifact(
   if (compression !== undefined) {
     options.log(`Packaging the ${artifact} with ${compression} compression.`)
   }
-  if (options.env.DSH_PACKAGE_CHECK_ALREADY_RAN !== '1') {
+  if (!options.hot && options.env.DSH_PACKAGE_CHECK_ALREADY_RAN !== '1') {
     options.run(
       options.commandShell,
       [
@@ -174,6 +185,8 @@ export function packageWindowsArtifact(
       options.workspaceRoot,
       cleanEnvironment,
     )
+  } else if (options.hot) {
+    options.log('Hot package mode: skipping the preflight gate and reusing the existing build outputs; run dist:win for the default clean, gated build.')
   } else {
     options.log('Skipping the Windows package preflight; the package gate already passed.')
   }
@@ -216,7 +229,8 @@ export function packageWindowsInstaller(
 const invokedPath = process.argv[1]
 if (invokedPath !== undefined && resolve(invokedPath) === fileURLToPath(import.meta.url)) {
   try {
-    packageWindowsInstaller()
+    const hot = process.argv.includes('--hot')
+    packageWindowsInstaller(hot ? createWindowsPackageOptions(undefined, true) : undefined)
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
     process.exitCode = 1
