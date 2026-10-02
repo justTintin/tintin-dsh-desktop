@@ -233,6 +233,10 @@ export const API_PATHS = {
     // 仿视频 V3.5（PRD-M-5，2026-10-02 v1.0+评审复核 §9 新增最小集）：
     // 实测（2026-10-02 openapi 探针）：imitate 挂在 scripts 集合下
     imitate:     '/api/storyboard/scripts/imitate',
+    // 本地视频预上传（2026-10-02 服务端开通）：multipart file → 入素材库
+    // （source=imitate_upload、file_hash 去重）→ 返 {material_id, material}，
+    // 客户端以 material://{id} 作 imitate.video 提交
+    imitateUpload: '/api/storyboard/scripts/imitate/upload',
     // HumanGate② 数据面（实测 multipart：first/last 文件 + confirmed 布尔）
     shotFrames:  (id: string, name: string) => `/api/storyboard/scripts/${id}/shots/${encodeURIComponent(name)}/frames`,
   },

@@ -5,12 +5,10 @@
 // 依据：《仿视频流程规范》v1.0（2026-10-02 合并版）§4/§5.1/§5.3/§11-19；
 // 端点与响应形态以 2026-10-02 服务端实测为准（/api/storyboard/scripts/imitate、
 // /tasks/unified/{id} result={script_id,version,shot_count}、frames multipart）。
-// 已知契约缺口（显式报错，不发明端点）：
-//   · imitate 本地视频预上传通道——服务端 openapi 无通用视频 upload 路由
-//     （仅 audio/comfyui-image/fonts/runninghub/sfx 专用），待服务端定契约后接入；
-//     过渡期用素材库引用（material://{id}）或服务端路径。
-//   · multipart 文件字段需真 File/Blob（桥面 server.upload 原样 XHR.send），
-//     由 UI 文件选择器供给；本层不读盘。
+// 本地视频预上传已闭（2026-10-02 服务端开通 `POST /api/storyboard/scripts/
+// imitate/upload`）：multipart file → 入素材库（source=imitate_upload、file_hash
+// 去重）→ 返 {material_id, material} → 以 material://{id} 提交 imitate。
+// File/Blob 属 DOM 概念留在本层（UI 文件选择器供给）；纯逻辑层只处理字符串形态。
 // ═══════════════════════════════════════════════════════════════
 
 import { onBeforeUnmount, ref } from 'vue'
@@ -40,9 +38,12 @@ function serverBridge() {
 }
 
 export interface ImitateSubmitInput {
+  /** material://{id} | http url | 服务端路径 | File（本地视频，经 imitate/upload 预上传） */
   video: unknown
   products?: Array<unknown>
   options?: { ratio?: string; fidelity?: string; max_shots?: number }
+  /** 本地 File 预上传进度（0..1） */
+  onUploadProgress?: (ratio: number) => void
 }
 
 export interface GenerateSubmitInput {
@@ -93,12 +94,39 @@ export function useImitationVideo() {
   onBeforeUnmount(stopPart1Polling)
 
   async function submitImitate(input: ImitateSubmitInput): Promise<boolean> {
-    const built = buildImitateBody(input)
-    part1Note.value = built.note
+    let video: unknown = input.video
+    part1Note.value = ''
+    // File/Blob → 先经 imitate/upload 入素材库，拿 material_id 转成 material:// URI
+    if (typeof File !== 'undefined' && (input.video instanceof File || input.video instanceof Blob)) {
+      try {
+        const form = new FormData()
+        form.append('file', input.video, input.video instanceof File ? input.video.name : 'source.mp4')
+        const resp = (await serverBridge().upload(
+          API_PATHS.storyboard.imitateUpload,
+          form,
+          input.onUploadProgress,
+        )) as Record<string, unknown> | null
+        const mid = resp?.material_id ?? (resp?.material as Record<string, unknown> | undefined)?.id
+        if (mid === undefined || mid === null || mid === '') {
+          const keys = resp ? Object.keys(resp).join(',') : 'null'
+          part1Error.value = `预上传响应缺 material_id（实得字段：${keys}）`
+          clientError(TAG, part1Error.value, { resp })
+          return false
+        }
+        video = `material://${mid}`
+        part1Note.value = `本地视频已入素材库 id=${mid}`
+        clientInfo(TAG, `预上传完成 material_id=${mid}`)
+      } catch (e) {
+        part1Error.value = `本地视频预上传失败：${(e as Error).message}`
+        clientError(TAG, part1Error.value, e)
+        return false
+      }
+    }
+    const built = buildImitateBody({ video, products: input.products, options: input.options })
+    part1Note.value = part1Note.value || built.note
     if (!built.ok) {
-      // 本地文件：预上传通道无服务端契约（文件头注登记）——显式报错引导素材库/路径
       const msg = built.needsUpload
-        ? '本地视频暂不支持直传：服务端预上传通道未定契约，请改用素材库引用或服务端路径（评审登记）'
+        ? '本地路径字符串无法直传（渲染层不读盘）：请传入文件选择器的 File 对象，或素材库 material://{id} / 服务端路径'
         : built.note
       part1Error.value = msg
       clientError(TAG, `imitate 提交被拒：${msg}`)
