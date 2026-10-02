@@ -147,19 +147,23 @@ async function enforceDurationLimit(file: File): Promise<boolean> {
   return true
 }
 
-/** 拖入：先取真 File（上传用），再交共享选择器落路径/展示名；格式与时长双重校验 */
-async function onVideoDrop(e: DragEvent): Promise<void> {
+/**
+ * 拖入：同步段内完成格式校验 + File 直取 + 选择器回显（Drop 事件的 dataTransfer
+ * 在处理器让出控制权后被清空——任何 await 之后再读就是空，2026-10-02 实机回归：
+ * async 化时长校验后回显消失，即此因）；时长探测异步后置，超限撤下并明确提示。
+ */
+function onVideoDrop(e: DragEvent): void {
   const f = e.dataTransfer?.files?.[0] || null
   if (f && !isVideoName(f.name)) {
     pickError.value = `不支持的视频格式：${f.name}（支持 ${VIDEO_PICK_EXTS.join(' / ')}）`
     return
   }
-  if (f) {
-    if (!(await enforceDurationLimit(f))) return
-    sourceFile.value = f
-  }
+  if (f) sourceFile.value = f
   pickError.value = ''
   videoPicker.onDrop(e)
+  if (f) {
+    void enforceDurationLimit(f)
+  }
 }
 
 /** 对话框路径 → File（宿主 /tintin/media 同源代理流式取回；失败显式报错不静默） */
