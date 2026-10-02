@@ -237,12 +237,18 @@ describe('A-roll 对轨（§3：±15% 仅提示；成片总长=两轨较长者�
 })
 
 describe('Part 1 输入归一化与请求体（§4）', () => {
-  it('三形态 + 本地文件需预上传', () => {
+  it('三形态 + 本地文件需预上传 + material://URI 往返', () => {
     expect(normalizeImitateVideo(123).kind).toBe('material')
     expect(normalizeImitateVideo('https://v.douyin.com/xyz').kind).toBe('url')
     expect(normalizeImitateVideo('D:/work/output/src.mp4').kind).toBe('video_path')
     expect(normalizeImitateVideo('C:/Users/me/Desktop/demo.mp4').kind).toBe('local_file')
     expect(normalizeImitateVideo('').kind).toBe('invalid')
+    // 预上传成功后的往返：编排层把 material://{id} 回填再提交，必须原样通过
+    // （2026-10-02 实机事故回归锚：缺 URI 分支时被误判 local_file 致上传白做）
+    const rt = buildImitateBody({ video: 'material://812729' })
+    expect(rt.ok).toBe(true)
+    expect(rt.body.video).toBe('material://812729')
+    expect(normalizeImitateVideo('material://812729').kind).toBe('material')
   })
   it('body.video 按 kind 取值（材质=material:// URI，实测 2026-10-02）；products/options 透传；本地文件返回 needsUpload', () => {
     expect(buildImitateBody({ video: 123 })).toEqual({ ok: true, body: { video: 'material://123' }, note: expect.any(String) })

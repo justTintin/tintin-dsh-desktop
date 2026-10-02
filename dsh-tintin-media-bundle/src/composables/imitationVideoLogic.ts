@@ -442,6 +442,12 @@ export function normalizeImitateVideo(videoRef: unknown): ImitateVideoInput | { 
     return { kind: 'material', materialId: Number.isInteger(n) ? n : String(videoRef).trim(), note: `素材库 id=${videoRef}` }
   }
   const s = String(videoRef).trim()
+  // material://{id} URI（服务端实测入参形态；预上传成功后的回填往返也走这里——
+  // 2026-10-02 实机事故：缺此分支时 URI 被误判为本地路径，上传成功却拒绝提交）
+  const materialUri = /^material:\/\/(.+)$/.exec(s)
+  if (materialUri) {
+    return { kind: 'material', materialId: materialUri[1], note: `素材库 URI id=${materialUri[1]}` }
+  }
   if (/^https?:\/\//i.test(s)) return { kind: 'url', url: s, note: 'http(s) 链接（服务端下载）' }
   if (/[/\\]output[/\\]/i.test(s) || /(^|[/\\])output[/\\]?$/i.test(s)) {
     return { kind: 'video_path', videoPath: s, note: '服务端已上传路径' }
