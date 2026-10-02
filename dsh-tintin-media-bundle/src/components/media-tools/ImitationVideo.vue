@@ -216,6 +216,20 @@ function clearScriptProduct(): void {
   if (record.value) record.value.products = []
 }
 
+/** 反推提示词展示文本：整体提示词字段优先（prompt/text/overall_prompt/prompt_text），
+ *  未命中但结果非空则整段 JSON 只读展示（保输出可见，不猜空） */
+const reversePromptText = computed(() => {
+  const r = iv.rpResult.value || {}
+  for (const k of ['prompt', 'text', 'overall_prompt', 'prompt_text']) {
+    const v = r[k]
+    if (typeof v === 'string' && v.trim()) return v
+  }
+  if (Object.keys(r).length) {
+    try { return JSON.stringify(r, null, 2) } catch { return '' }
+  }
+  return ''
+})
+
 // ── 口播文案（脚本主稿）：Part 1 拆解稿在 meta.imitate.voiceover；「重新生成文案」
 //    走 /copywriting/voiceover（product_desc 必填=选中产品，duration_s=镜头轨总长）；
 //    随脚本保存（ScriptIn.meta 透传）──
@@ -578,11 +592,38 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       <div v-if="iv.part1Phase.value === 'running'" class="muted">分析进行中（分钟级）：拆镜头 → 运镜测量 → 转写文案 → 生成仿拍脚本…</div>
       <div v-if="iv.part1Error.value" class="iv-err">{{ iv.part1Error.value }}</div>
       <div v-if="iv.enumsError.value" class="iv-err">枚举加载失败：{{ iv.enumsError.value }}（刷新重试：{{ ' ' }}<a class="iv-link" @click="iv.loadEnums">重试</a>）</div>
-      <div v-if="iv.part1Phase.value === 'done' && shots.length" class="row">
-        <span class="muted">拆解完成：原片脚本（模板）共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒——下一步替换文案文字并配新口播</span>
+      <template v-if="iv.part1Phase.value === 'done' && shots.length">
+      <div class="iv-divider"></div>
+      <div class="row between">
+        <span class="lbl">拆解脚本（原片脚本·只读）——编辑与文案替换在第 2 步「生成脚本」</span>
+        <span class="sb-info">共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒</span>
+      </div>
+      <div v-for="(shot, i) in shots" :key="i" class="seg-card">
+        <div class="seg-head">
+          <span class="seg-no">#{{ i + 1 }}</span>
+          <span class="sb-info">{{ shot.shot_type || '未定镜别' }} ｜ {{ shot.duration }}s ｜ {{ enumLabel(iv.enums.value?.cameras || [], shot.gen?.camera) }}</span>
+        </div>
+        <div v-if="shot.visual" class="sb-line">画面：{{ shot.visual }}</div>
+        <div v-if="shot.orig_audio || shot.audio" class="sb-line iv-orig">原旁白：{{ shot.orig_audio || shot.audio }}</div>
+      </div>
+
+      <!-- 反推提示词（/prompt/video：原视频→生视频提示词；2026-10-02 用户裁决新增输出） -->
+      <div class="seg-field">
+        <span class="lbl">反推提示词（原视频 → 生视频提示词：风格/运镜/光线/转场）</span>
+        <div class="row">
+          <TButton label="反推提示词" variant="secondary" :loading="iv.rpPhase.value === 'running'" @click="iv.submitReversePrompt" />
+          <span v-if="iv.rpPhase.value === 'running'" class="muted">反推进行中（分割+逐镜头反推，分钟级）…</span>
+          <span v-if="iv.rpError.value" class="iv-err">{{ iv.rpError.value }}</span>
+        </div>
+        <textarea v-if="reversePromptText" :value="reversePromptText" readonly rows="4" class="input carry-textarea"></textarea>
+      </div>
+
+      <div class="row">
+        <span class="muted">拆解完成——下一步替换文案文字并配新口播</span>
         <span class="spacer"></span>
         <TButton label="下一步：生成脚本" @click="step = 2" />
       </div>
+      </template>
     </div>
 
     <!-- ═══ 第 2 步：生成脚本（原片脚本为模板：替换文字=新产品文案 + 新文案口播配音；HumanGate①；单脚本全步共用）═══ -->
