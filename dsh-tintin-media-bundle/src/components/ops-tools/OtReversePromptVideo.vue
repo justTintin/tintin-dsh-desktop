@@ -53,18 +53,9 @@ const resultShots = computed<Array<Record<string, unknown>>>(() => {
   const r = iv.part1Result.value || {}
   return Array.isArray(r.shots) ? (r.shots as Array<Record<string, unknown>>) : []
 })
-/** 反推提示词：整体提示词字段优先；未命中非空结果整段 JSON 展示保可见 */
-const promptText = computed(() => {
-  const r = iv.part1Result.value || {}
-  for (const k of ['prompt', 'text', 'overall_prompt', 'prompt_text']) {
-    const v = r[k]
-    if (typeof v === 'string' && v.trim()) return v
-  }
-  if (Object.keys(r).length) {
-    try { return JSON.stringify(r, null, 2) } catch { return '' }
-  }
-  return ''
-})
+/** 反推提示词（逐镜，随拆解 shots[] 返回——2026-10-02 服务端规范定稿：
+ *  visual 中文 + scene_en/end_scene_en 英文提示词 + 运镜/时长；无独立顶层字段） */
+const promptShots = computed<Array<Record<string, unknown>>>(() => resultShots.value)
 
 watch(() => iv.part1Phase.value, ph => {
   if (ph === 'done') void 0
@@ -121,9 +112,15 @@ onMounted(() => { /* 枚举等非本卡依赖，不拉 */ })
         <b>#{{ i + 1 }}</b> {{ s.duration }}s ｜ {{ s.camera || '—' }}
         <span class="muted">{{ s.visual }}</span>
       </div>
-      <div class="lbl" style="margin-top: 10px">反推提示词</div>
-      <textarea v-if="promptText" :value="promptText" readonly rows="6" class="rpv-text"></textarea>
-      <div v-else class="muted">本次拆解结果暂未含提示词字段——待服务端在 imitate 结果中加入（已裁决：拆解接口返回脚本+提示词）</div>
+      <div class="lbl" style="margin-top: 10px">反推提示词（逐镜）</div>
+      <template v-if="promptShots.length">
+        <div v-for="(s, i) in promptShots" :key="i" class="rpv-shot">
+          <div><b>#{{ i + 1 }}</b> {{ s.duration }}s ｜ {{ s.camera || '—' }}<span class="muted">{{ s.visual }}</span></div>
+          <div v-if="s.scene_en" class="rpv-en">scene_en: {{ s.scene_en }}</div>
+          <div v-if="s.end_scene_en" class="rpv-en">end_scene_en: {{ s.end_scene_en }}</div>
+        </div>
+      </template>
+      <div v-else class="muted">拆解结果未含 shots 明细（旧版服务端）</div>
     </template>
   </div>
 </template>
@@ -146,6 +143,7 @@ onMounted(() => { /* 枚举等非本卡依赖，不拉 */ })
   border-radius: var(--radius-md); font-size: 12px; color: var(--foreground); }
 .rpv-shot b { color: var(--primary); margin-right: 4px; }
 .rpv-shot .muted { margin-left: 8px; }
+.rpv-en { margin-top: 2px; font-size: 11px; color: var(--muted-foreground); font-family: monospace; }
 .rpv-text { min-height: 120px; padding: 8px 10px; background: var(--card); border: 1px solid var(--border);
   border-radius: var(--radius-md); color: var(--foreground); font-size: 12px; line-height: 1.6;
   font-family: inherit; resize: vertical; }

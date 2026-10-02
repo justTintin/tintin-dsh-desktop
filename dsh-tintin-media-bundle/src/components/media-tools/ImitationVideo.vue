@@ -216,19 +216,11 @@ function clearScriptProduct(): void {
   if (record.value) record.value.products = []
 }
 
-/** 反推提示词展示文本：拆解接口结果即唯一来源（2026-10-02 用户裁决——不再单独调
- *  /prompt/video）；整体提示词字段优先（prompt/text/overall_prompt/prompt_text），
- *  未命中但结果非空则整段 JSON 只读展示（保输出可见，不猜空） */
-const reversePromptText = computed(() => {
+/** 反推提示词（随拆解返回，2026-10-02 服务端规范定稿）：result.shots[]=逐镜反推提示词
+ *  （visual 中文 + scene_en/end_scene_en 英文提示词 + 运镜/时长）——无独立顶层字段 */
+const rpShots = computed<Array<Record<string, unknown>>>(() => {
   const r = iv.part1Result.value || {}
-  for (const k of ['prompt', 'text', 'overall_prompt', 'prompt_text']) {
-    const v = r[k]
-    if (typeof v === 'string' && v.trim()) return v
-  }
-  if (Object.keys(r).length) {
-    try { return JSON.stringify(r, null, 2) } catch { return '' }
-  }
-  return ''
+  return Array.isArray(r.shots) ? (r.shots as Array<Record<string, unknown>>) : []
 })
 
 // ── 口播文案（脚本主稿）：Part 1 拆解稿在 meta.imitate.voiceover；「重新生成文案」
@@ -608,12 +600,22 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <div v-if="shot.orig_audio || shot.audio" class="sb-line iv-orig">原旁白：{{ shot.orig_audio || shot.audio }}</div>
       </div>
 
-      <!-- 反推提示词（随拆解结果返回——2026-10-02 用户裁决：拆解接口即脚本+提示词
-           唯一来源，不单独调 /prompt/video；字段就位前显示待服务端说明） -->
+      <!-- 反推提示词（逐镜，随拆解 shots[] 返回——2026-10-02 服务端规范定稿：
+           result.shots[]=name/visual/scene 四要素/scene_en/end_scene_en/camera/duration） -->
       <div class="seg-field">
-        <span class="lbl">反推提示词（随拆解返回：风格/运镜/光线/转场）</span>
-        <textarea v-if="reversePromptText" :value="reversePromptText" readonly rows="4" class="input carry-textarea"></textarea>
-        <span v-else class="muted">本次拆解结果暂未含提示词字段——待服务端在 imitate 结果中加入（已裁决：拆解接口返回脚本+提示词）</span>
+        <span class="lbl">反推提示词（逐镜，随拆解返回）</span>
+        <template v-if="rpShots.length">
+          <div v-for="(s, i) in rpShots" :key="i" class="seg-card">
+            <div class="seg-head">
+              <span class="seg-no">#{{ i + 1 }}</span>
+              <span class="sb-info">{{ s.duration }}s ｜ {{ enumLabel(iv.enums.value?.cameras || [], s.camera) }}</span>
+            </div>
+            <div class="sb-line">{{ s.visual }}</div>
+            <div v-if="s.scene_en" class="sb-line iv-orig">scene_en: {{ s.scene_en }}</div>
+            <div v-if="s.end_scene_en" class="sb-line iv-orig">end_scene_en: {{ s.end_scene_en }}</div>
+          </div>
+        </template>
+        <span v-else class="muted">拆解结果未含 shots 明细（旧版服务端）——升级后自动展示逐镜提示词</span>
       </div>
 
       <div class="row">
