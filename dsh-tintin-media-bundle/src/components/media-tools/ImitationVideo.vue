@@ -35,7 +35,16 @@ import {
   type SceneElementKey,
 } from '@/composables/imitationVideoLogic'
 
-const STEPS = ['1. 选原视频', '2. 审核脚本', '3. 素材准备', '4. 分镜图确认', '5. 视频生成', '6. 触发草稿链', '7. 交付']
+const STEPS = ['1. 生成脚本', '2. 素材准备', '3. 分镜图确认', '4. 视频生成', '5. 触发草稿链', '6. 交付']
+
+/** 场景要素键 → 中文标签（展示层专用；数据面键名/枚举值仍按契约英文） */
+const SCENE_ELEMENT_LABELS: Record<string, string> = {
+  surface: '台面',
+  environment: '环境',
+  lighting: '光照',
+  style: '风格',
+  composition: '构图',
+}
 
 const iv = useImitationVideo()
 const { ensureServerUrl, toAbsolute } = createMontageSharedRuntime()
@@ -142,13 +151,29 @@ const canSubmitPart1 = computed(() => {
   return /^https?:\/\//i.test(sourceUrl.value.trim())
 })
 
-// Part 1 完成 → 拉脚本进第 2 步（HumanGate①）
+// Part 1 完成 → 拉脚本，审核区就地展开（第 1/2 步已合并为「生成脚本」单页）
 watch(() => iv.part1Phase.value, async (ph) => {
-  if (ph === 'done') {
-    await reloadScript()
-    if (shots.value.length) step.value = 2
-  }
+  if (ph === 'done') await reloadScript()
 })
+
+function goBack(): void {
+  step.value = Math.max(1, step.value - 1)
+}
+
+/** 重新走一遍：清选择与脚本态，停留在第 1 步 */
+function resetFlow(): void {
+  record.value = null
+  iv.part1Phase.value = ''
+  iv.part1Note.value = ''
+  iv.part1Error.value = ''
+  iv.genPhase.value = ''
+  iv.genError.value = ''
+  iv.genResult.value = {}
+  sourceFile.value = null
+  videoPicker.clearFile()
+  uploadRatio.value = -1
+  step.value = 1
+}
 
 // ── 第 2 步：审核脚本（HumanGate①：逐镜编辑 + AI 生成区块 + 来源切换）──
 function toggleSource(i: number): void {
@@ -197,15 +222,15 @@ async function enterPrep(): Promise<void> {
   // 阶段 B（A-roll）依赖口播音频先行（阶段 A 属文案线现状）；此处先跑阶段 C 分镜帧
   const ok = await iv.submitGenerate({ scriptId: scriptId.value, stage: 'frames' }, shots.value)
   enteringPrep.value = false
-  if (ok) step.value = 3
+  if (ok) step.value = 2
 }
 
 // ── 生成任务通用：完成/失败后刷新脚本（帧引用/状态徽标落库后回读）──
 watch(() => iv.genPhase.value, async (ph, old) => {
   if (old === 'running' && (ph === 'done' || ph === 'failed')) {
     await reloadScript()
-    if (ph === 'done' && step.value === 3) step.value = 4
-    if (ph === 'done' && step.value === 5) step.value = 6
+    if (ph === 'done' && step.value === 2) step.value = 3
+    if (ph === 'done' && step.value === 4) step.value = 5
   }
 })
 
@@ -254,7 +279,7 @@ async function regenerateFrame(i: number): Promise<void> {
   if (!name) return
   regenFrame.value = String(name)
   if (await iv.submitGenerate({ scriptId: scriptId.value, stage: 'frames', onlyShots: [String(name)] }, shots.value)) {
-    step.value = 3
+    step.value = 2
   }
   regenFrame.value = ''
 }
@@ -265,7 +290,7 @@ const generateShotsCount = computed(() => shots.value.filter((s) => s.source ===
 const startVideos = ref('')
 async function startVideoGeneration(): Promise<void> {
   startVideos.value = '1'
-  if (await iv.submitGenerate({ scriptId: scriptId.value, stage: 'videos' }, shots.value)) step.value = 5
+  if (await iv.submitGenerate({ scriptId: scriptId.value, stage: 'videos' }, shots.value)) step.value = 4
   startVideos.value = ''
 }
 
@@ -279,7 +304,7 @@ async function retryShot(i: number): Promise<void> {
   if (await iv.submitGenerate(
     { scriptId: scriptId.value, stage: 'videos', onlyShots: [String(name)], fidelityOverride: retryFidelity.value },
     shots.value,
-  )) step.value = 5
+  )) step.value = 4
   retrying.value = ''
 }
 
@@ -293,8 +318,11 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 <template>
   <div class="iv-page">
     <VdStepBar :step="step" :steps="STEPS" />
+    <div v-if="step > 1" class="row">
+      <TButton label="← 上一步" variant="secondary" size="small" @click="goBack" />
+    </div>
 
-    <!-- ═══ 第 1 步：选原视频 ═══ -->
+    <!-- ═══ 第 1 步：生成脚本（选原视频 + 审核脚本合并页，2026-10-02 用户裁决）═══ -->
     <div v-if="step === 1" class="iv-panel">
       <div class="row">
         <label class="iv-mode" :class="{ on: sourceMode === 'file' }"><input v-model="sourceMode" type="radio" value="file" />本地上传</label>
@@ -350,7 +378,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 
       <div class="seg-field">
         <span class="lbl">A-roll 口播人像（可选，第 3 步配置）</span>
-        <span class="muted">数字人 / 实拍上传在「3. 素材准备」中配置（数字人人物图上传通道待服务端契约，当前可先走实拍）</span>
+        <span class="muted">数字人 / 实拍上传在「2. 素材准备」中配置（数字人人物图上传通道待服务端契约，当前可先走实拍）</span>
       </div>
 
       <div class="row">
@@ -365,10 +393,10 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       <div v-if="iv.part1Phase.value === 'running'" class="muted">分析进行中（分钟级）：拆镜头 → 运镜测量 → 转写文案 → 生成仿拍脚本…</div>
       <div v-if="iv.part1Error.value" class="iv-err">{{ iv.part1Error.value }}</div>
       <div v-if="iv.enumsError.value" class="iv-err">枚举加载失败：{{ iv.enumsError.value }}（刷新重试：{{ ' ' }}<a class="iv-link" @click="iv.loadEnums">重试</a>）</div>
-    </div>
 
-    <!-- ═══ 第 2 步：审核脚本（HumanGate①）═══ -->
-    <div v-else-if="step === 2" class="iv-panel">
+      <!-- 审核脚本区（HumanGate①）——Part 1 完成后同页展开 -->
+      <template v-if="record && shots.length">
+      <div class="iv-divider"></div>
       <div class="row between">
         <span class="sb-info">仿拍脚本：共 {{ shots.length }} 镜 ｜ 总时长 {{ shots.reduce((s, x) => s + (Number(x.duration) || 0), 0) }} 秒 ｜ 脚本 {{ scriptId }}</span>
         <span class="muted">逐镜审核后提交生成——混合比例（AI/实拍）在此定稿</span>
@@ -402,14 +430,13 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
                 <option v-for="f in iv.enums.value?.fidelity || []" :key="f.value" :value="f.value">{{ f.label }}</option>
               </select>
             </label>
-            <label v-for="k in SCENE_ELEMENT_KEYS" :key="k" class="seg-field head-field"><span class="lbl">{{ k }}</span>
+            <label v-for="k in SCENE_ELEMENT_KEYS" :key="k" class="seg-field head-field"><span class="lbl">{{ SCENE_ELEMENT_LABELS[k] || k }}</span>
               <select :value="(shot.gen.scene || {})[k] ?? ''" class="input w110" @change="(shot.gen.scene = { ...(shot.gen.scene || {}), [k]: ($event.target as HTMLSelectElement).value })">
                 <option value="">（未设）</option>
                 <option v-for="o in sceneElementOptions(iv.enums.value!, k as SceneElementKey)" :key="o.value" :value="o.value">{{ o.label }}</option>
               </select>
             </label>
           </div>
-          <div v-if="shot.gen.end_scene_en" class="sb-line">尾帧策略：{{ shot.gen.end_scene_en }}</div>
         </div>
       </div>
 
@@ -418,10 +445,11 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <TButton label="进入素材准备（生成分镜帧）" :loading="enteringPrep" @click="enterPrep" />
         <span v-if="iv.genError.value" class="iv-err">{{ iv.genError.value }}</span>
       </div>
+      </template>
     </div>
 
-    <!-- ═══ 第 3 步：素材准备（A-roll 状态 + 分镜帧生成）═══ -->
-    <div v-else-if="step === 3" class="iv-panel">
+    <!-- ═══ 第 2 步：素材准备（A-roll 状态 + 分镜帧生成）═══ -->
+    <div v-else-if="step === 2" class="iv-panel">
       <div class="seg-field">
         <span class="lbl">A-roll 口播人像</span>
         <span class="muted">
@@ -436,13 +464,13 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <span v-else-if="iv.genPhase.value === 'done'" class="muted">分镜帧已生成（成功 {{ genResultSummary.done }} 镜<template v-if="genResultSummary.failed">、失败 {{ genResultSummary.failed }} 镜</template>）——进入下一步逐帧确认</span>
       </div>
       <div class="row">
-        <TButton v-if="iv.genPhase.value === 'done'" label="进入分镜图确认" @click="step = 4" />
+        <TButton v-if="iv.genPhase.value === 'done'" label="进入分镜图确认" @click="step = 3" />
         <TButton label="刷新脚本状态" variant="secondary" @click="reloadScript" />
       </div>
     </div>
 
-    <!-- ═══ 第 4 步：分镜图确认（HumanGate②·九宫格）═══ -->
-    <div v-else-if="step === 4" class="iv-panel">
+    <!-- ═══ 第 3 步：分镜图确认（HumanGate②·九宫格）═══ -->
+    <div v-else-if="step === 3" class="iv-panel">
       <div class="row between">
         <span class="sb-info">已确认 {{ framesReadyCount }} / {{ generateShotsCount }} 镜——全帧确认后解锁视频生成</span>
         <span class="muted">每帧可手动替换 / 单帧重生成（按当前脚本参数）；细化批注通道待服务端映射层端点</span>
@@ -481,8 +509,8 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       <input ref="frameInput" type="file" accept="image/png" class="iv-hide" @change="onReplaceFrame" />
     </div>
 
-    <!-- ═══ 第 5 步：逐镜视频生成 ═══ -->
-    <div v-else-if="step === 5" class="iv-panel">
+    <!-- ═══ 第 4 步：逐镜视频生成 ═══ -->
+    <div v-else-if="step === 4" class="iv-panel">
       <div class="row between">
         <span class="sb-info">逐镜视频生成（以确认首尾帧为硬约束）</span>
         <span v-if="iv.genPhase.value === 'running'" class="muted">生成中（小时级，取决于镜数与保真档位）…</span>
@@ -505,13 +533,13 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         </div>
       </div>
       <div class="row">
-        <TButton v-if="iv.genPhase.value === 'done' && doneCount === shots.length" label="进入草稿链" @click="step = 6" />
+        <TButton v-if="iv.genPhase.value === 'done' && doneCount === shots.length" label="进入草稿链" @click="step = 5" />
         <TButton label="刷新脚本状态" variant="secondary" @click="reloadScript" />
       </div>
     </div>
 
-    <!-- ═══ 第 6 步：触发草稿链（HumanGate③·两段式）═══ -->
-    <div v-else-if="step === 6" class="iv-panel">
+    <!-- ═══ 第 5 步：触发草稿链（HumanGate③·两段式）═══ -->
+    <div v-else-if="step === 5" class="iv-panel">
       <div class="seg-field">
         <span class="lbl">素材就绪情况</span>
         <span class="sb-info">共 {{ shots.length }} 镜：已就绪 {{ doneCount }} 镜（实拍绑定或 AI 生成完成）<template v-if="doneCount < shots.length">；仍有 {{ shots.length - doneCount }} 镜未就绪</template></span>
@@ -521,13 +549,13 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <span class="muted">与文案线产片交互一致：脚本已保存到服务端脚本库（{{ scriptId }}），在「文案混剪」工具的「选择分镜脚本」中选用该脚本，走既有 口播配音 → 特效包装 → 草稿/成片 流程；交付通道同样复用文案线（zip 草稿包 / 本地导出剪映）。</span>
       </div>
       <div class="row">
-        <TButton label="进入交付说明" @click="step = 7" />
+        <TButton label="进入交付说明" @click="step = 6" />
         <TButton label="刷新脚本状态" variant="secondary" @click="reloadScript" />
       </div>
     </div>
 
-    <!-- ═══ 第 7 步：交付 ═══ -->
-    <div v-else-if="step === 7" class="iv-panel">
+    <!-- ═══ 第 6 步：交付 ═══ -->
+    <div v-else-if="step === 6" class="iv-panel">
       <div class="seg-field">
         <span class="lbl">交付（复用文案线双通道）</span>
         <span class="muted">
@@ -537,7 +565,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         </span>
       </div>
       <div class="row">
-        <TButton label="重新走一遍（新视频）" variant="secondary" @click="step = 1" />
+        <TButton label="重新走一遍（新视频）" variant="secondary" @click="resetFlow" />
       </div>
     </div>
   </div>
@@ -557,6 +585,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 .iv-link { color: var(--primary); cursor: pointer; text-decoration: underline; }
 .iv-hide { display: none; }
 .iv-filepick { display: flex; flex-direction: column; gap: 6px; }
+.iv-divider { height: 1px; background: var(--border); margin: 8px 0; }
 
 /* ── 工程统一拖入控件（2026-09-07 用户裁决：全程序拖拽上传区高度统一 min-height 120px；
      样式与 ImageMatting 等工具卡同构）── */
