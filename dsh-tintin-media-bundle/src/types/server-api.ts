@@ -221,6 +221,11 @@ export const API_PATHS = {
     generate:   '/digital-human/generate',
     listModels: '/digital-human/models',
   },
+  comfygen: {
+    // 仿视频 V3.5 §11-19（2026-10-02）：枚举唯一源——gen_spec 快照（非代理，
+    // comfygen 离线可用），含 scene 四要素/cameras/fidelity 中文标签与 ratio→尺寸换算
+    enums: '/comfygen/enums',
+  },
   storyboard: {
     scriptsList: '/api/storyboard/scripts',
     scriptsItem: (id: string) => `/api/storyboard/scripts/${id}`,

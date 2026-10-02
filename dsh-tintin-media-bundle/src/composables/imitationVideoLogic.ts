@@ -6,13 +6,13 @@
 //   +《ComfyUI 工作流调用规范》v4.1 §3（camera/fidelity/duration 枚举与比例换算）。
 // 实施注记：
 //   · 本文件是客户端侧 gen_spec 镜像（提交前把关，铁律 6 显式报错不兜底）；
-//     枚举全集的权威来源=服务端定义下发（2026-10-02 用户裁决 A4：scene 四要素与
-//     camera/fidelity 枚举归服务端契约，代理 comfygen /api/enums 的服务端端点待立）。
-//     在服务端枚举契约落地前，下方 CAMERA_OPTIONS/FIDELITY_OPTIONS 为按规范文档
-//     （流程规范 §4 运镜映射表 + v4.1 §3）暂编的过渡本地表，服务端契约发布后替换
-//     为服务端下发值；scene 四要素只做存在性/形态校验，不做枚举全集校验（勿臆造）。
-//   · 任务级 stage 缺省值未裁决（流程规范 §11-9），buildStoryboardGenerateBody
-//     强制显式传 stage，客户端不依赖服务端缺省。
+//     **枚举全集唯一源 = 服务端 `GET /comfygen/enums`**（2026-10-02 用户裁决 A4 +
+//     流程规范 §11-19 闭账：gen_spec 快照、非代理、comfygen 离线可用；含 ratio→尺寸
+//     换算表与中文标签）。本地过渡枚举表已删除——实测服务端 cameras 含 `dolly_in`
+//     （本地表没有，会误杀合法值）、无 `follow`（待 comfygen #11），证明必须以服务端
+//     为准。调用方（composable）负责拉取后经 normalizeServerEnums 归一传入；
+//     无 enums 时 validateGenShots 跳过枚举合法性检查（服务端 gen_spec 兜底）。
+//   · 任务级 stage 服务端缺省=all（§11-9 闭账），客户端仍按裁决 A3 永远显式传。
 //   · Part 1 输入允许 http url（流程规范 §4），与旧版仿爆款（已退役 2026-10-02，
 //     用户裁决 A5：旧款未投产，V3.5 新链取代；服务端 /viral/clone/* 契约与类型保留）
 //     不同源，勿互抄。
@@ -46,28 +46,101 @@ export type GenerateStage = 'aroll' | 'frames' | 'videos' | 'all'
 /** 保真档位（v4.1 §3：fast 约3分 / balanced 约4.5分 / high 约7分） */
 export type Fidelity = 'fast' | 'balanced' | 'high'
 
-/** 运镜枚举（流程规范 §4 运镜映射表 + v4.1 §3；follow 待 comfygen #11，暂不入下拉） */
+/** 运镜枚举（全集以服务端 /comfygen/enums 下发为准；dolly_in 为服务端实测有值，
+ *  follow 待 comfygen #11——本地联合仅作编写提示，校验以 enums 传入值为准） */
 export type CameraKey =
   | 'push_in' | 'pull_out' | 'pan_left' | 'pan_right' | 'orbit'
-  | 'handheld' | 'follow' | 'crane_up' | 'crane_down' | 'static'
+  | 'handheld' | 'follow' | 'crane_up' | 'crane_down' | 'static' | 'dolly_in'
 
-export const CAMERA_OPTIONS: Array<{ value: CameraKey; label: string }> = [
-  { value: 'push_in', label: '推近' },
-  { value: 'pull_out', label: '拉远' },
-  { value: 'pan_left', label: '左摇/移' },
-  { value: 'pan_right', label: '右摇/移' },
-  { value: 'orbit', label: '环绕（小角度）' },
-  { value: 'handheld', label: '跟拍（暂代手持）' },
-  { value: 'crane_up', label: '升' },
-  { value: 'crane_down', label: '降' },
-  { value: 'static', label: '固定' },
-]
+// ── 服务端枚举（唯一源 GET /comfygen/enums，流程规范 §11-19）────
 
-export const FIDELITY_OPTIONS: Array<{ value: Fidelity; label: string }> = [
-  { value: 'fast', label: '快速（约3分）' },
-  { value: 'balanced', label: '均衡（约4.5分）' },
-  { value: 'high', label: '高保真（约7分）' },
-]
+export interface EnumOption {
+  value: string
+  label: string
+}
+
+/** 服务端 /comfygen/enums 归一结果（各枚举 {value,label} 列表 + ratio→尺寸表） */
+export interface ServerEnums {
+  source: string
+  surfaces: EnumOption[]
+  environments: EnumOption[]
+  lightings: EnumOption[]
+  styles: EnumOption[]
+  compositions: EnumOption[]
+  cameras: EnumOption[]
+  fidelity: EnumOption[]
+  ratios: Array<{ ratio: string; width: number; height: number }>
+}
+
+function toOptions(map: unknown): EnumOption[] {
+  if (!map || typeof map !== 'object') return []
+  return Object.entries(map as Record<string, unknown>)
+    .filter(([, v]) => typeof v === 'string')
+    .map(([value, label]) => ({ value, label: String(label) }))
+}
+
+/**
+ * 归一化服务端枚举响应（实测 2026-10-02：{ok,source,contract,surfaces,
+ * environments,lightings,styles,compositions,cameras,fidelity,ratios}，
+ * 各枚举为 {值:中文标签} 映射、ratios 为 {ratio:[w,h]}）。
+ * ok!==true 或 cameras/fidelity 缺失 → null（调用方显式报错，不兜底猜测）。
+ */
+export function normalizeServerEnums(raw: unknown): ServerEnums | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  if (o.ok !== true) return null
+  const ratios: ServerEnums['ratios'] = []
+  if (o.ratios && typeof o.ratios === 'object') {
+    for (const [ratio, wh] of Object.entries(o.ratios as Record<string, unknown>)) {
+      if (Array.isArray(wh) && wh.length >= 2 && Number.isFinite(Number(wh[0])) && Number.isFinite(Number(wh[1]))) {
+        ratios.push({ ratio, width: Number(wh[0]), height: Number(wh[1]) })
+      }
+    }
+  }
+  const enums: ServerEnums = {
+    source: String(o.source || ''),
+    surfaces: toOptions(o.surfaces),
+    environments: toOptions(o.environments),
+    lightings: toOptions(o.lightings),
+    styles: toOptions(o.styles),
+    compositions: toOptions(o.compositions),
+    cameras: toOptions(o.cameras),
+    fidelity: toOptions(o.fidelity),
+    ratios,
+  }
+  if (!enums.cameras.length || !enums.fidelity.length) return null
+  return enums
+}
+
+/** 场景四要素键序（§3 gen.scene） */
+export type SceneElementKey = 'surface' | 'environment' | 'lighting' | 'style' | 'composition'
+export const SCENE_ELEMENT_KEYS: SceneElementKey[] = ['surface', 'environment', 'lighting', 'style', 'composition']
+
+const SCENE_ELEMENT_ENUM_MAP: Record<SceneElementKey, 'surfaces' | 'environments' | 'lightings' | 'styles' | 'compositions'> = {
+  surface: 'surfaces',
+  environment: 'environments',
+  lighting: 'lightings',
+  style: 'styles',
+  composition: 'compositions',
+}
+
+/** 取场景某要素的下拉选项（中文下拉值=comfygen 枚举，§5.3-2） */
+export function sceneElementOptions(enums: ServerEnums, key: SceneElementKey): EnumOption[] {
+  return enums[SCENE_ELEMENT_ENUM_MAP[key]]
+}
+
+/** 枚举值 → 中文标签（未命中回退原值，用于展示而非校验） */
+export function enumLabel(options: EnumOption[], value: unknown): string {
+  const v = String(value ?? '')
+  return options.find((o) => o.value === v)?.label || v
+}
+
+/** ratio → 尺寸换算（未命中返回 null；§6 gen_spec 同源表） */
+export function ratioSize(enums: ServerEnums, ratio: unknown): { width: number; height: number } | null {
+  const r = String(ratio ?? '')
+  const hit = enums.ratios.find((x) => x.ratio === r)
+  return hit ? { width: hit.width, height: hit.height } : null
+}
 
 export const GEN_BACKENDS: GenBackend[] = ['comfygen', 'jimeng', 'runninghub', 'manual']
 export const FRAMES_STATUS_VALUES: FramesStatus[] = ['pending', 'generated', 'confirmed']
@@ -250,10 +323,11 @@ export interface GenSpecIssue {
 
 /**
  * 提交前校验（§4 契约测试口径的客户端镜像）：枚举合法 / scene_en 纯 ASCII /
- * duration 3~15 / name 唯一且 ASCII。scene 四要素枚举全集校验归服务端 gen_spec
- * （/api/enums 代理契约未立，此处只查存在形态）。
+ * duration 3~15 / name 唯一且 ASCII。传入 enums（/comfygen/enums 归一结果）时
+ * 连带校验 camera/fidelity/场景四要素全集；未传则跳过枚举全集检查（服务端
+ * gen_spec 兜底）——本地不再维护枚举表（裁决 A4/§11-19）。
  */
-export function validateGenShots(shots: ImitationShot[]): GenSpecIssue[] {
+export function validateGenShots(shots: ImitationShot[], enums?: ServerEnums | null): GenSpecIssue[] {
   const issues: GenSpecIssue[] = []
   const seenNames = new Map<string, number>()
   shots.forEach((shot, i) => {
@@ -276,11 +350,21 @@ export function validateGenShots(shots: ImitationShot[]): GenSpecIssue[] {
     if (gen.end_scene_en !== undefined && gen.end_scene_en !== '' && !isAscii(gen.end_scene_en)) {
       issues.push({ index: i, field: 'gen.end_scene_en', message: 'end_scene_en 含非 ASCII 字符' })
     }
-    if (gen.camera && !CAMERA_OPTIONS.some((c) => c.value === gen.camera) && gen.camera !== 'follow') {
-      issues.push({ index: i, field: 'gen.camera', message: `未知运镜：${gen.camera}` })
+    if (gen.camera && enums && !enums.cameras.some((c) => c.value === gen.camera)) {
+      issues.push({ index: i, field: 'gen.camera', message: `未知运镜：${gen.camera}（合法值以 /comfygen/enums 为准）` })
     }
-    if (gen.fidelity && !FIDELITY_OPTIONS.some((f) => f.value === gen.fidelity)) {
+    if (gen.fidelity && enums && !enums.fidelity.some((f) => f.value === gen.fidelity)) {
       issues.push({ index: i, field: 'gen.fidelity', message: `未知保真档位：${gen.fidelity}` })
+    }
+    if (gen.scene && enums) {
+      const scene = gen.scene as Record<string, unknown>
+      for (const key of SCENE_ELEMENT_KEYS) {
+        const v = scene[key]
+        if (v === undefined || v === null || v === '') continue
+        if (!sceneElementOptions(enums, key).some((o) => o.value === String(v))) {
+          issues.push({ index: i, field: `gen.scene.${key}`, message: `未知场景枚举 ${key}=${v}（合法值以 /comfygen/enums 为准）` })
+        }
+      }
     }
     if (gen.backend && !GEN_BACKENDS.includes(gen.backend)) {
       issues.push({ index: i, field: 'gen.backend', message: `未知生成后端：${gen.backend}` })

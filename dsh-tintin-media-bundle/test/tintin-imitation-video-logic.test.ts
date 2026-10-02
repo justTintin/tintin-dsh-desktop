@@ -12,16 +12,35 @@ import {
   canConfirmFrames,
   clampDuration,
   composedDuration,
+  enumLabel,
   framesBadgeText,
   genBadgeText,
   isStageDReady,
   nextGenName,
   normalizeImitateVideo,
+  normalizeServerEnums,
+  ratioSize,
+  sceneElementOptions,
   shotsTotalDuration,
   switchShotSource,
   validateGenShots,
   type ImitationShot,
+  type ServerEnums,
 } from '../src/composables/imitationVideoLogic'
+
+/** /comfygen/enums 实测形状的测试夹具（裁剪子集，结构 1:1） */
+const ENUMS: ServerEnums = normalizeServerEnums({
+  ok: true,
+  source: 'gen_spec',
+  surfaces: { gray_studio: '浅灰摄影棚', dark_wood_desk: '深色木纹桌面' },
+  environments: { none: '无（纯台面）', gaming_room: '夜晚电竞房' },
+  lightings: { soft_studio: '柔和顶光', purple_blue: '紫蓝氛围灯' },
+  styles: { ecommerce: '电商大片' },
+  compositions: { centered: '居中构图', closeup: '特写构图' },
+  cameras: { push_in: '镜头缓慢推近', static: '固定机位', dolly_in: '镜头平滑前移' },
+  fidelity: { fast: '快速（约3分/镜头）', balanced: '均衡（约4.5分/镜头）', high: '高保真（约7分/镜头）' },
+  ratios: { '9:16': [704, 1248], '16:9': [1280, 704] },
+})!
 
 function genShot(name: string, over: Partial<ImitationShot> = {}): ImitationShot {
   return {
@@ -133,23 +152,33 @@ describe('整镜来源切换（§5.3-2）', () => {
 })
 
 describe('gen_spec 客户端镜像（§6）', () => {
-  it('name 重复 / 非 ASCII / duration 越界 / 未知运镜逐一报错', () => {
+  it('name 重复 / 非 ASCII / duration 越界 / 未知运镜逐一报错（带 enums 全集校验）', () => {
     const dupA = genShot('shot_01')
     const dupB = genShot('shot_01')
     const chinese = genShot('shot_02', { gen: { ...genShot('x').gen!, scene_en: '深色木桌' } })
     const badDur = genShot('shot_03', { duration: 20 })
     const badCam = genShot('shot_04', { gen: { ...genShot('x').gen!, camera: 'zoom' as never } })
-    const issues = validateGenShots([dupA, dupB, chinese, badDur, badCam])
+    const issues = validateGenShots([dupA, dupB, chinese, badDur, badCam], ENUMS)
     expect(issues.some((i) => i.message.includes('name 重复'))).toBe(true)
     expect(issues.some((i) => i.field === 'gen.scene_en')).toBe(true)
     expect(issues.some((i) => i.field === 'duration')).toBe(true)
     expect(issues.some((i) => i.field === 'gen.camera')).toBe(true)
   })
 
-  it('follow 运镜暂收（待 comfygen #11）；干净脚本零问题', () => {
+  it('无 enums 跳过枚举全集检查（服务端 gen_spec 兜底）；有 enums 时以服务端表为准', () => {
     const follow = genShot('shot_01', { gen: { ...genShot('x').gen!, camera: 'follow' } })
-    expect(validateGenShots([follow])).toEqual([])
-    expect(validateGenShots([genShot('shot_01'), { duration: 4, source: 'material' }])).toEqual([])
+    const dolly = genShot('shot_02', { gen: { ...genShot('x').gen!, camera: 'dolly_in' } })
+    expect(validateGenShots([follow])).toEqual([]) // 无 enums 不查全集
+    expect(validateGenShots([dolly], ENUMS)).toEqual([]) // dolly_in 服务端有值，本地旧表没有——以服务端为准
+    expect(validateGenShots([follow], ENUMS).some((i) => i.field === 'gen.camera')).toBe(true) // follow 待 comfygen #11，服务端表无此值
+    expect(validateGenShots([genShot('shot_01'), { duration: 4, source: 'material' }], ENUMS)).toEqual([])
+  })
+
+  it('场景四要素：有 enums 时查全集，空值跳过', () => {
+    const badSurface = genShot('shot_01', { gen: { ...genShot('x').gen!, scene: { ...genShot('x').gen!.scene!, surface: 'wood' } } })
+    expect(validateGenShots([badSurface], ENUMS).some((i) => i.field === 'gen.scene.surface')).toBe(true)
+    const noScene = genShot('shot_01', { gen: { ...genShot('x').gen!, scene: {} } })
+    expect(validateGenShots([noScene], ENUMS)).toEqual([])
   })
 
   it('clampDuration 归一 3~15，非法回退 5', () => {
@@ -163,6 +192,28 @@ describe('gen_spec 客户端镜像（§6）', () => {
     expect(nextGenName(['shot_01', 'shot_02'])).toBe('shot_03')
     expect(nextGenName([])).toBe('shot_01')
     expect(nextGenName(['shot_02'])).toBe('shot_01')
+  })
+})
+
+describe('服务端枚举唯一源（§11-19：GET /comfygen/enums）', () => {
+  it('normalizeServerEnums 归一实测形状；ok 非 true 或 cameras/fidelity 缺失 → null', () => {
+    expect(ENUMS.source).toBe('gen_spec')
+    expect(ENUMS.cameras).toHaveLength(3)
+    expect(ENUMS.fidelity.map((f) => f.value)).toEqual(['fast', 'balanced', 'high'])
+    expect(ENUMS.ratios).toEqual([
+      { ratio: '9:16', width: 704, height: 1248 },
+      { ratio: '16:9', width: 1280, height: 704 },
+    ])
+    expect(normalizeServerEnums({ ok: false })).toBeNull()
+    expect(normalizeServerEnums({ ok: true, cameras: {}, fidelity: {} })).toBeNull()
+    expect(normalizeServerEnums(null)).toBeNull()
+  })
+  it('场景要素取项 / 标签回退 / ratio 换算', () => {
+    expect(sceneElementOptions(ENUMS, 'surface').map((o) => o.value)).toEqual(['gray_studio', 'dark_wood_desk'])
+    expect(enumLabel(ENUMS.cameras, 'dolly_in')).toBe('镜头平滑前移')
+    expect(enumLabel(ENUMS.cameras, 'unknown_x')).toBe('unknown_x') // 展示回退原值
+    expect(ratioSize(ENUMS, '9:16')).toEqual({ width: 704, height: 1248 })
+    expect(ratioSize(ENUMS, '21:9')).toBeNull()
   })
 })
 
