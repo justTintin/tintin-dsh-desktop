@@ -195,6 +195,8 @@ export interface ImitationShot {
   index?: number
   visual?: string
   audio?: string
+  /** 原片旁白切片（拆解稿参考，第 2 步替换文字前的原稿；extra=allow 随脚本保存） */
+  orig_audio?: string
   duration: number
   /** 混剪标准绑定字段（实拍绑定 / AI 生成回填 唯一权威，§3） */
   material_id?: number | string | null

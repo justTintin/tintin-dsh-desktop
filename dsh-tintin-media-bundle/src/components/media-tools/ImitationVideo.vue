@@ -61,7 +61,21 @@ const scriptId = computed(() => iv.scriptId.value || String(record.value?.id || 
 async function reloadScript(): Promise<void> {
   if (!scriptId.value) return
   const data = await iv.loadScript(scriptId.value)
-  if (data) record.value = data
+  if (data) {
+    record.value = data
+    seedOrigAudio()
+  }
+}
+
+/**
+ * 每镜固化原片旁白参考（orig_audio，extra=allow 随脚本透传保存）：
+ * 第 1 步拆出的=原片脚本（模板）；第 2 步「生成脚本」替换文字——shot.audio 为
+ * 新文案（可编辑），原片口播切片留在 orig_audio 供对照（2026-10-02 用户裁决语义）。
+ */
+function seedOrigAudio(): void {
+  for (const s of shots.value) {
+    if (s.orig_audio === undefined || s.orig_audio === '') s.orig_audio = String(s.audio ?? '')
+  }
 }
 
 onMounted(() => {
@@ -500,30 +514,35 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       <div v-if="iv.enumsError.value" class="iv-err">枚举加载失败：{{ iv.enumsError.value }}（刷新重试：{{ ' ' }}<a class="iv-link" @click="iv.loadEnums">重试</a>）</div>
       <div v-if="iv.part1Phase.value === 'done' && shots.length" class="row">
         <TButton label="下一步：生成脚本" @click="step = 2" />
-        <span class="muted">拆解完成：共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒</span>
+        <span class="muted">拆解完成：原片脚本（模板）共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒——下一步替换文案文字并配新口播</span>
       </div>
     </div>
 
-    <!-- ═══ 第 2 步：生成脚本（重新生成文案 + 口播配音 + 逐镜审核，HumanGate①；单脚本全步共用）═══ -->
+    <!-- ═══ 第 2 步：生成脚本（原片脚本为模板：替换文字=新产品文案 + 新文案口播配音；HumanGate①；单脚本全步共用）═══ -->
     <div v-else-if="step === 2 && record && shots.length" class="iv-panel">
       <div class="row between">
-        <span class="sb-info">仿拍脚本：共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒 ｜ 脚本 {{ scriptId }}</span>
-        <span class="muted">文案与口播配音在此生成；混合比例（AI/实拍）逐镜定稿</span>
+        <span class="sb-info">原片脚本（模板）：共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒 ｜ 脚本 {{ scriptId }}</span>
+        <span class="muted">本步生成新视频脚本：替换文案文字 + 新文案口播配音；AI/实拍逐镜定稿</span>
       </div>
       <div v-if="timelineWarn" class="iv-warn">{{ timelineWarn }}</div>
 
-      <!-- 口播文案（脚本主稿）：Part 1 拆解稿 → 可按所选产品重新生成（/copywriting/voiceover） -->
+      <!-- 新口播文案（主稿）：按所选产品重写原片口播（/copywriting/voiceover） -->
       <div class="seg-field">
-        <span class="lbl">口播文案（脚本主稿，随脚本保存）</span>
-        <textarea v-model="voiceoverText" rows="4" class="input carry-textarea" placeholder="原片口播转写稿；点「重新生成文案」按所选产品重写，也可直接编辑"></textarea>
+        <span class="lbl">新口播文案（主稿，随脚本保存；配音与逐镜替换以此为准）</span>
+        <textarea v-model="voiceoverText" rows="4" class="input carry-textarea" placeholder="初值=原片口播转写；选择产品后点「重新生成文案」按新产品重写，也可直接编辑"></textarea>
       </div>
       <div class="row">
-        <TButton label="重新生成文案" variant="secondary" :loading="regenBusy" @click="regenerateVoiceover" />
+        <TButton label="选择产品" @click="productPickVisible = true" />
+        <span v-if="productLabel()" class="product-chip" title="当前产品（文案按此重写，产品图随脚本供生成）">当前产品：{{ productLabel() }}</span>
+        <button v-if="productLabel()" class="product-clear" title="清除已选产品" @click="clearScriptProduct">×</button>
+        <TButton label="重新生成文案" :loading="regenBusy" @click="regenerateVoiceover" />
         <TButton label="生成口播配音（试听）" variant="secondary" :loading="ttsBusy" :disabled="!voiceoverText.trim()" @click="generateVoiceAudio" />
         <audio v-if="ttsAudioUrl" controls preload="none" :src="ttsAudioUrl" class="iv-audio" />
+      </div>
+      <div class="row">
         <span v-if="regenError" class="iv-err">{{ regenError }}</span>
         <span v-if="ttsError" class="iv-err">{{ ttsError }}</span>
-        <span class="muted">配音为整段直发（voxcpm）；脚本口播轨经包装特效链接入</span>
+        <span class="muted">配音整段直发（voxcpm）；新文案按镜自动拆分待服务端口播切分修复（§11-26），当前逐镜旁白可手动粘贴替换</span>
       </div>
 
       <div v-for="(shot, i) in shots" :key="i" class="seg-card">
@@ -538,7 +557,8 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
             @click="toggleSource(i)" />
         </div>
         <label class="seg-field"><span class="lbl">画面描述</span><textarea v-model="shot.visual" rows="2" class="input carry-textarea" /></label>
-        <label class="seg-field"><span class="lbl">旁白（口播文案，可编辑）</span><textarea v-model="shot.audio" rows="1" class="input carry-textarea carry-textarea--sm" /></label>
+        <div v-if="shot.orig_audio" class="sb-line iv-orig">原旁白（拆解稿）：{{ shot.orig_audio }}</div>
+        <label class="seg-field"><span class="lbl">旁白（新文案，替换原片文字——可编辑）</span><textarea v-model="shot.audio" rows="1" class="input carry-textarea carry-textarea--sm" placeholder="新视频该镜的口播文案（从上方新文案粘贴或手写替换）"></textarea></label>
 
         <!-- AI 生成区块（§5.3 差异项：来源标记 / 生成参数 / 逐镜状态） -->
         <div v-if="shot.source === 'generate' && shot.gen" class="iv-gen">
@@ -565,9 +585,6 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 
       <div class="row">
         <TButton label="保存脚本" variant="secondary" :loading="saving" @click="saveScript" />
-        <TButton label="选择产品" @click="productPickVisible = true" />
-        <span v-if="productLabel()" class="product-chip" title="当前产品（随脚本保存，素材准备阶段按此供产品图）">当前产品：{{ productLabel() }}</span>
-        <button v-if="productLabel()" class="product-clear" title="清除已选产品" @click="clearScriptProduct">×</button>
         <span v-if="iv.genError.value" class="iv-err">{{ iv.genError.value }}</span>
         <span class="spacer"></span>
         <TButton label="下一步：分镜头确认" :loading="enteringPrep" @click="enterPrep" />
@@ -709,6 +726,8 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 .iv-hide { display: none; }
 .iv-filepick { display: flex; flex-direction: column; gap: 6px; }
 .iv-divider { height: 1px; background: var(--border); margin: 8px 0; }
+.iv-orig { color: var(--muted-foreground); font-style: italic; }
+.iv-audio { height: 32px; }
 .product-chip {
   display: inline-flex; align-items: center; padding: 1px 8px; font-size: 12px;
   background: color-mix(in srgb, var(--primary) 8%, var(--surface-container));
