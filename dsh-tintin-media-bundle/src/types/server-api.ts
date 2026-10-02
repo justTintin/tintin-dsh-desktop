@@ -231,9 +231,14 @@ export const API_PATHS = {
     // 「重新生成文案」按所选产品重写口播主稿（2026-10-02 用户裁决）
     voiceover: '/copywriting/voiceover',
   },
-  // TTS 统一入口（/indextts/tts，IndexTTSRequest：text 必填，engine 可选——
-  // 客户端默认 voxcpm=2026-09-28 用户裁决，整段直发不拆句）：仿视频口播配音试听
+  // TTS 统一入口（/indextts/tts，IndexTTSRequest：text 必填，engine/sample_id 可选——
+  // 客户端默认 voxcpm=2026-09-28 用户裁决，整段直发不拆句）：仿视频口播配音
   tts: '/indextts/tts',
+  voice: {
+    // 声音样本库（GET /voice/samples，audio_url 字段——与声音克隆页/文案混剪 Step3 同源；
+    // 仿视频配音的参考声音下拉）
+    samples: '/voice/samples',
+  },
   storyboard: {
     scriptsList: '/api/storyboard/scripts',
     scriptsItem: (id: string) => `/api/storyboard/scripts/${id}`,

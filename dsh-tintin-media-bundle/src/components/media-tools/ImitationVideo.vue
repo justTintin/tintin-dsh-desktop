@@ -81,6 +81,7 @@ function seedOrigAudio(): void {
 onMounted(() => {
   void iv.loadEnums()
   void ensureServerUrl()
+  void loadVoiceSamples()
 })
 
 // ── 第 1 步：选原视频（本地上传 File / 素材库 material://{id} / http url）──
@@ -242,8 +243,38 @@ async function regenerateVoiceover(): Promise<void> {
   }
 }
 
-// ── 口播配音（TTS 整段直发——拆句禁令；engine=voxcpm=客户端默认裁决）：
-//    生成后就地试听；挂接脚本口播轨（voice_audio_id）随包装特效链，属文案线复用链路 ──
+// ── 口播配音（对齐文案混剪 Step3 形态：参考声音样本下拉=GET /voice/samples 同源 +
+//    常驻播放条预览 + 引擎下拉；TTS 整段直发——拆句禁令；挂接脚本口播轨属文案线复用链）──
+const TTS_ENGINE_OPTIONS = [
+  { label: 'VoxCPM2', value: 'voxcpm' },
+  { label: 'QwenTTS（Qwen3-TTS）', value: 'qwen3' },
+  { label: 'IndexTTS（快速/情感）', value: 'indextts' },
+]
+const ttsEngineSel = ref<'voxcpm' | 'qwen3' | 'indextts'>('voxcpm') // 客户端默认 voxcpm（2026-09-28 裁决）
+interface VoiceSample { id: number; name: string; url: string }
+const voiceSamples = ref<VoiceSample[]>([])
+const voiceSamplesError = ref('')
+const selectedSampleId = ref(0) // 0=Base 音色（未选样本）
+const samplePreviewUrl = computed(() => voiceSamples.value.find((s) => s.id === selectedSampleId.value)?.url || '')
+async function loadVoiceSamples(): Promise<void> {
+  voiceSamplesError.value = ''
+  try {
+    const res = (await window.tintin.server.get(API_PATHS.voice.samples)) as unknown
+    const arr = (Array.isArray(res) ? res : (res as Record<string, unknown> | null)?.items) as Array<Record<string, unknown>> | undefined
+    if (!Array.isArray(arr)) {
+      voiceSamplesError.value = '声音样本响应缺 items 数组'
+      clientError('imitation-video', voiceSamplesError.value, { res })
+      return
+    }
+    voiceSamples.value = arr
+      .filter((s) => s.id !== undefined)
+      .map((s) => ({ id: Number(s.id), name: String(s.name || s.desc || `样本 ${s.id}`), url: String(s.audio_url || '') }))
+  } catch (e) {
+    voiceSamplesError.value = `声音样本加载失败：${(e as Error).message}（可用 Base 音色继续）`
+    clientError('imitation-video', voiceSamplesError.value, e)
+  }
+}
+
 const ttsBusy = ref(false)
 const ttsError = ref('')
 const ttsAudioUrl = ref('')
@@ -258,7 +289,8 @@ async function generateVoiceAudio(): Promise<void> {
   try {
     const resp = (await window.tintin.server.post(API_PATHS.tts, {
       text,
-      engine: 'voxcpm',
+      engine: ttsEngineSel.value,
+      sample_id: selectedSampleId.value,
       target_duration: shotsTotalDuration(shots.value),
     })) as Record<string, unknown> | null
     const url = resp?.audio_url ?? resp?.url ?? resp?.audio ?? resp?.path
@@ -437,9 +469,6 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 <template>
   <div class="iv-page">
     <VdStepBar :step="step" :steps="STEPS" />
-    <div v-if="step > 1" class="row">
-      <TButton label="← 上一步" variant="secondary" size="small" @click="goBack" />
-    </div>
 
     <!-- ═══ 第 1 步：生成脚本（选原视频 + 审核脚本合并页，2026-10-02 用户裁决）═══ -->
     <div v-if="step === 1" class="iv-panel">
@@ -513,8 +542,9 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       <div v-if="iv.part1Error.value" class="iv-err">{{ iv.part1Error.value }}</div>
       <div v-if="iv.enumsError.value" class="iv-err">枚举加载失败：{{ iv.enumsError.value }}（刷新重试：{{ ' ' }}<a class="iv-link" @click="iv.loadEnums">重试</a>）</div>
       <div v-if="iv.part1Phase.value === 'done' && shots.length" class="row">
-        <TButton label="下一步：生成脚本" @click="step = 2" />
         <span class="muted">拆解完成：原片脚本（模板）共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒——下一步替换文案文字并配新口播</span>
+        <span class="spacer"></span>
+        <TButton label="下一步：生成脚本" @click="step = 2" />
       </div>
     </div>
 
@@ -535,14 +565,28 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <TButton label="选择产品" @click="productPickVisible = true" />
         <span v-if="productLabel()" class="product-chip" title="当前产品（文案按此重写，产品图随脚本供生成）">当前产品：{{ productLabel() }}</span>
         <button v-if="productLabel()" class="product-clear" title="清除已选产品" @click="clearScriptProduct">×</button>
+        <span class="spacer"></span>
         <TButton label="重新生成文案" :loading="regenBusy" @click="regenerateVoiceover" />
-        <TButton label="生成口播配音（试听）" variant="secondary" :loading="ttsBusy" :disabled="!voiceoverText.trim()" @click="generateVoiceAudio" />
-        <audio v-if="ttsAudioUrl" controls preload="none" :src="ttsAudioUrl" class="iv-audio" />
+      </div>
+      <!-- 参考声音（对齐文案混剪 Step3：样本下拉 + 常驻播放条预览 + 引擎下拉） -->
+      <div class="row">
+        <span class="lbl">参考声音:</span>
+        <select v-model.number="selectedSampleId" class="input w140" title="声音克隆样本（GET /voice/samples 与声音克隆页同源；0=Base 音色）">
+          <option :value="0">Base 音色（未选样本）</option>
+          <option v-for="s in voiceSamples" :key="s.id" :value="s.id">{{ s.name }}</option>
+        </select>
+        <audio v-if="samplePreviewUrl" :src="toAbsolute(samplePreviewUrl)" controls preload="auto" class="iv-audio" title="样本试听" />
+        <select v-model="ttsEngineSel" class="input w140" title="TTS 引擎（客户端默认 VoxCPM2）">
+          <option v-for="e in TTS_ENGINE_OPTIONS" :key="e.value" :value="e.value">{{ e.label }}</option>
+        </select>
+        <span v-if="voiceSamplesError" class="muted">{{ voiceSamplesError }}</span>
       </div>
       <div class="row">
+        <TButton label="生成口播配音" :loading="ttsBusy" :disabled="!voiceoverText.trim()" @click="generateVoiceAudio" />
+        <audio v-if="ttsAudioUrl" :src="ttsAudioUrl" controls preload="auto" class="iv-audio" title="配音结果" />
         <span v-if="regenError" class="iv-err">{{ regenError }}</span>
         <span v-if="ttsError" class="iv-err">{{ ttsError }}</span>
-        <span class="muted">配音整段直发（voxcpm）；新文案按镜自动拆分待服务端口播切分修复（§11-26），当前逐镜旁白可手动粘贴替换</span>
+        <span class="muted">整段直发不拆句；新文案按镜自动拆分待服务端口播切分修复（§11-26），当前逐镜旁白可手动粘贴替换</span>
       </div>
 
       <div v-for="(shot, i) in shots" :key="i" class="seg-card">
@@ -584,6 +628,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       </div>
 
       <div class="row">
+        <TButton label="← 上一步" variant="secondary" size="small" @click="goBack" />
         <TButton label="保存脚本" variant="secondary" :loading="saving" @click="saveScript" />
         <span v-if="iv.genError.value" class="iv-err">{{ iv.genError.value }}</span>
         <span class="spacer"></span>
@@ -643,8 +688,10 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         </div>
       </div>
       <div class="row">
-        <TButton label="下一步：视频生成" :disabled="!isStageDReady(shots) || !!startVideos" @click="startVideoGeneration" />
+        <TButton label="← 上一步" variant="secondary" size="small" @click="goBack" />
         <span v-if="iv.genError.value" class="iv-err">{{ iv.genError.value }}</span>
+        <span class="spacer"></span>
+        <TButton label="下一步：视频生成" :disabled="!isStageDReady(shots) || !!startVideos" @click="startVideoGeneration" />
       </div>
       <input ref="frameInput" type="file" accept="image/png" class="iv-hide" @change="onReplaceFrame" />
     </div>
@@ -673,8 +720,10 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         </div>
       </div>
       <div class="row">
-        <TButton v-if="iv.genPhase.value === 'done' && doneCount === shots.length" label="进入草稿链" @click="step = 5" />
+        <TButton label="← 上一步" variant="secondary" size="small" @click="goBack" />
         <TButton label="刷新脚本状态" variant="secondary" @click="reloadScript" />
+        <span class="spacer"></span>
+        <TButton v-if="iv.genPhase.value === 'done' && doneCount === shots.length" label="下一步：包装特效" @click="step = 5" />
       </div>
     </div>
 
@@ -689,8 +738,10 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <span class="muted">与文案线产片交互一致：脚本已保存到服务端脚本库（{{ scriptId }}），在「文案混剪」工具的「选择分镜脚本」中选用该脚本，走既有 口播配音 → 特效包装 → 草稿/成片 流程；交付通道同样复用文案线（zip 草稿包 / 本地导出剪映）。</span>
       </div>
       <div class="row">
-        <TButton label="进入交付说明" @click="step = 6" />
+        <TButton label="← 上一步" variant="secondary" size="small" @click="goBack" />
         <TButton label="刷新脚本状态" variant="secondary" @click="reloadScript" />
+        <span class="spacer"></span>
+        <TButton label="下一步：交付" @click="step = 6" />
       </div>
     </div>
 
@@ -705,6 +756,8 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         </span>
       </div>
       <div class="row">
+        <TButton label="← 上一步" variant="secondary" size="small" @click="goBack" />
+        <span class="spacer"></span>
         <TButton label="重新走一遍（新视频）" variant="secondary" @click="resetFlow" />
       </div>
     </div>
@@ -767,7 +820,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 .dropzone__text { display: flex; flex-direction: column; gap: 2px; }
 .dropzone__main { font-size: var(--font-size-body); font-weight: var(--font-weight-medium); color: var(--foreground); }
 .dropzone__hint { font-size: 12px; color: var(--muted-foreground); }
-.w70 { width: 90px; } .w60 { width: 64px; } .w90 { width: 110px; } .w110 { width: 130px; }
+.w70 { width: 90px; } .w60 { width: 64px; } .w90 { width: 110px; } .w110 { width: 130px; } .w140 { width: 160px; }
 
 .iv-mode {
   display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;
