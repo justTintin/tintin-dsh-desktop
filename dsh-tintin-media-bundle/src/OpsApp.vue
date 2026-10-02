@@ -11,6 +11,8 @@ import { computed, onMounted, ref } from 'vue'
 import OtProductLibrary from './components/ops-tools/OtProductLibrary.vue'
 // 自动上架（2026-09-29 用户裁决：UI 入口=运营工具卡；引擎=壳侧浏览器 fxg 分区）
 import OtAutoListingPanel from './components/ops-tools/OtAutoListingPanel.vue'
+// 视频反推提示词（2026-10-02 用户裁决启用）：走仿视频拆解接口一次返回脚本+提示词
+import OtReversePromptVideo from './components/ops-tools/OtReversePromptVideo.vue'
 
 interface ToolCard {
   id: string
@@ -34,7 +36,7 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
     group: '提示词',
     tools: [
       { id: 'reverse-prompt-image', title: '图片反推提示词', desc: '上传图片，AI 生成绘画提示词', emoji: '🖼️', accent: 'linear-gradient(135deg,#10B981 0%,#14B8A6 100%)', disabled: true },
-      { id: 'reverse-prompt-video', title: '视频反推提示词', desc: '上传视频，框选片段生成提示词', emoji: '🎬', accent: 'linear-gradient(135deg,#3B82F6 0%,#8B5CF6 100%)', disabled: true },
+      { id: 'reverse-prompt-video', title: '视频反推提示词', desc: '拆解视频 → 脚本 + 反推提示词（仿视频拆解接口）', emoji: '🎬', accent: 'linear-gradient(135deg,#3B82F6 0%,#8B5CF6 100%)' },
     ],
   },
   {
@@ -125,6 +127,7 @@ onMounted(() => {
         </div>
         <OtProductLibrary v-if="active === 'product-library'" />
         <OtAutoListingPanel v-else-if="active === 'auto-listing'" />
+        <OtReversePromptVideo v-else-if="active === 'reverse-prompt-video'" />
       </div>
   </div>
 </template>

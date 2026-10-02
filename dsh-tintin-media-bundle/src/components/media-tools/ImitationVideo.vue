@@ -216,10 +216,11 @@ function clearScriptProduct(): void {
   if (record.value) record.value.products = []
 }
 
-/** 反推提示词展示文本：整体提示词字段优先（prompt/text/overall_prompt/prompt_text），
+/** 反推提示词展示文本：拆解接口结果即唯一来源（2026-10-02 用户裁决——不再单独调
+ *  /prompt/video）；整体提示词字段优先（prompt/text/overall_prompt/prompt_text），
  *  未命中但结果非空则整段 JSON 只读展示（保输出可见，不猜空） */
 const reversePromptText = computed(() => {
-  const r = iv.rpResult.value || {}
+  const r = iv.part1Result.value || {}
   for (const k of ['prompt', 'text', 'overall_prompt', 'prompt_text']) {
     const v = r[k]
     if (typeof v === 'string' && v.trim()) return v
@@ -607,15 +608,12 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <div v-if="shot.orig_audio || shot.audio" class="sb-line iv-orig">原旁白：{{ shot.orig_audio || shot.audio }}</div>
       </div>
 
-      <!-- 反推提示词（/prompt/video：原视频→生视频提示词；2026-10-02 用户裁决新增输出） -->
+      <!-- 反推提示词（随拆解结果返回——2026-10-02 用户裁决：拆解接口即脚本+提示词
+           唯一来源，不单独调 /prompt/video；字段就位前显示待服务端说明） -->
       <div class="seg-field">
-        <span class="lbl">反推提示词（原视频 → 生视频提示词：风格/运镜/光线/转场）</span>
-        <div class="row">
-          <TButton label="反推提示词" variant="secondary" :loading="iv.rpPhase.value === 'running'" @click="iv.submitReversePrompt" />
-          <span v-if="iv.rpPhase.value === 'running'" class="muted">反推进行中（分割+逐镜头反推，分钟级）…</span>
-          <span v-if="iv.rpError.value" class="iv-err">{{ iv.rpError.value }}</span>
-        </div>
+        <span class="lbl">反推提示词（随拆解返回：风格/运镜/光线/转场）</span>
         <textarea v-if="reversePromptText" :value="reversePromptText" readonly rows="4" class="input carry-textarea"></textarea>
+        <span v-else class="muted">本次拆解结果暂未含提示词字段——待服务端在 imitate 结果中加入（已裁决：拆解接口返回脚本+提示词）</span>
       </div>
 
       <div class="row">

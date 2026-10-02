@@ -83,8 +83,10 @@ export function useImitationVideo() {
   const part1Phase = ref<'' | 'running' | 'done' | 'failed'>('')
   const part1Error = ref('')
   const part1Note = ref('')
-  /** Part 1 源素材 id（预上传回填 / material:// 输入解析；反推提示词的输入引用） */
+  /** Part 1 源素材 id（预上传回填 / material:// 输入解析；供后续产品图等引用） */
   const part1MaterialId = ref('')
+  /** Part 1 完整结果（shots[] + 提示词字段——拆解接口=脚本+反推提示词唯一来源） */
+  const part1Result = ref<Record<string, unknown>>({})
   const scriptId = ref('')
   const scriptVersion = ref(0)
   const shotCount = ref(0)
@@ -186,6 +188,9 @@ export function useImitationVideo() {
         scriptId.value = String(sid)
         scriptVersion.value = Number(result.version) || 0
         shotCount.value = Number(result.shot_count) || 0
+        // 完整结果保留（含 shots[] 与提示词字段——2026-10-02 用户裁决：拆解接口即
+        // 脚本+反推提示词的唯一来源，客户端不再单独调 /prompt/video）
+        part1Result.value = result
         part1Phase.value = 'done'
         clientInfo(TAG, `Part1 完成 script=${sid} shots=${shotCount.value}`)
       } catch (e) {
@@ -338,71 +343,11 @@ export function useImitationVideo() {
     return arollTimelineWarning(shots, voiceDurSec)
   }
 
-  // ── 反推提示词（/prompt/video：原视频 → 高水平生视频提示词；异步 unified 轮询，
-  //    结果=分镜结构 shots[]+整体提示词，只读展示于第 1 步；2026-10-02 用户裁决新增输出）──
-  const rpTaskId = ref('')
-  const rpPhase = ref<'' | 'running' | 'done' | 'failed'>('')
-  const rpError = ref('')
-  const rpResult = ref<Record<string, unknown>>({})
-  let rpTimer: ReturnType<typeof setInterval> | null = null
-  function stopRpPolling(): void {
-    if (rpTimer) { clearInterval(rpTimer); rpTimer = null }
-  }
-  onBeforeUnmount(stopRpPolling)
-
-  async function submitReversePrompt(): Promise<boolean> {
-    if (!part1MaterialId.value) {
-      rpError.value = '无素材 id（链接输入未入素材库）——反推提示词需要 material 引用；本地上传/素材库输入可用'
-      return false
-    }
-    try {
-      const resp = (await serverBridge().post(API_PATHS.prompt.video, {
-        material_id: part1MaterialId.value,
-      })) as Record<string, unknown> | null
-      const taskId = resp && (resp.task_id ?? resp.id)
-      if (taskId === undefined || taskId === null || taskId === '') {
-        const keys = resp ? Object.keys(resp).join(',') : 'null'
-        rpError.value = `反推任务响应缺 id/task_id（实得字段：${keys}）`
-        clientError(TAG, rpError.value, { resp })
-        return false
-      }
-      rpTaskId.value = String(taskId)
-      rpPhase.value = 'running'
-      rpError.value = ''
-      rpResult.value = {}
-      stopRpPolling()
-      rpTimer = setInterval(async () => {
-        try {
-          const t = extractTaskObj(await serverBridge().get(API_PATHS.tasks.unifiedItem(rpTaskId.value)))
-          const info = mapTaskStatus(t.status ?? t.state, t)
-          if (info.phase === 'running') return
-          stopRpPolling()
-          if (info.phase === 'failed') {
-            rpPhase.value = 'failed'
-            rpError.value = info.error
-            clientError(TAG, `反推提示词失败 task=${rpTaskId.value}`, { error: info.error })
-            return
-          }
-          rpResult.value = (t.result ?? {}) as Record<string, unknown>
-          rpPhase.value = 'done'
-          clientInfo(TAG, `反推提示词完成 task=${rpTaskId.value}`)
-        } catch (e) {
-          clientError(TAG, `反推轮询异常 task=${rpTaskId.value}`, e)
-        }
-      }, POLL_INTERVAL_MS)
-      return true
-    } catch (e) {
-      rpError.value = `反推提示词提交失败：${(e as Error).message}`
-      clientError(TAG, rpError.value, e)
-      return false
-    }
-  }
-
   return {
     // 枚举
     enums, enumsError, loadEnums,
     // Part 1
-    part1TaskId, part1Phase, part1Error, part1Note, part1MaterialId, scriptId, scriptVersion, shotCount,
+    part1TaskId, part1Phase, part1Error, part1Note, part1MaterialId, part1Result, scriptId, scriptVersion, shotCount,
     submitImitate,
     // 反推提示词
     rpTaskId, rpPhase, rpError, rpResult, submitReversePrompt,
