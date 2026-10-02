@@ -15,9 +15,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import TButton from '@/components/common/TButton.vue'
 import VdStepBar from '@/components/media-tools/VdStepBar.vue'
+import WbPickProductDialog from '@/components/workbench/WbPickProductDialog.vue'
 import { createMontageSharedRuntime } from '@/composables/copywritingMontage/context'
 import { useFilePicker } from '@/composables/useFilePicker'
 import { useImitationVideo } from '@/composables/useImitationVideo'
+import type { PickerItem } from '@/composables/useWorkbenchPickers'
 import { clientError } from '@/utils/clientLog'
 import { acceptFileDragOver } from '@/utils/fileUrl'
 import {
@@ -156,6 +158,28 @@ watch(() => iv.part1Phase.value, async (ph) => {
   if (ph === 'done') await reloadScript()
 })
 
+// ── 产品选择（与文案混剪同交互：WbPickProductDialog 公共弹窗单选；选中写进
+//    脚本 products 随 PUT 保存——ScriptIn.products=ProductRef[]，阶段 C/D 产品图
+//    解析按脚本 products 取图，§5.1-2）──
+const productPickVisible = ref(false)
+function productLabel(): string {
+  const p = (record.value?.products as Array<Record<string, unknown>> | undefined)?.[0]
+  if (!p) return ''
+  return [p.brand, p.model || p.name].filter(Boolean).join(' / ') || String(p.name || p.brand || '')
+}
+function onProductPick(item: PickerItem): void {
+  if (!record.value) return
+  record.value.products = [{
+    brand: String(item.brand || ''),
+    model: String(item.model || ''),
+    category: String(item.category || ''),
+    name: String(item.name || item.model || ''),
+  }]
+}
+function clearScriptProduct(): void {
+  if (record.value) record.value.products = []
+}
+
 function goBack(): void {
   step.value = Math.max(1, step.value - 1)
 }
@@ -225,12 +249,11 @@ async function enterPrep(): Promise<void> {
   if (ok) step.value = 2
 }
 
-// ── 生成任务通用：完成/失败后刷新脚本（帧引用/状态徽标落库后回读）──
+// ── 生成任务通用：完成/失败后刷新脚本（帧引用/状态徽标落库后回读）；
+//    不自动跳步——步进一律由用户点「下一步」（2026-10-02 用户裁决）──
 watch(() => iv.genPhase.value, async (ph, old) => {
   if (old === 'running' && (ph === 'done' || ph === 'failed')) {
     await reloadScript()
-    if (ph === 'done' && step.value === 2) step.value = 3
-    if (ph === 'done' && step.value === 4) step.value = 5
   }
 })
 
@@ -442,10 +465,14 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 
       <div class="row">
         <TButton label="保存脚本" variant="secondary" :loading="saving" @click="saveScript" />
+        <TButton label="选择产品" @click="productPickVisible = true" />
+        <span v-if="productLabel()" class="product-chip" title="当前产品（随脚本保存，素材准备阶段按此供产品图）">当前产品：{{ productLabel() }}</span>
+        <button v-if="productLabel()" class="product-clear" title="清除已选产品" @click="clearScriptProduct">×</button>
         <span v-if="iv.genError.value" class="iv-err">{{ iv.genError.value }}</span>
         <span class="spacer"></span>
         <TButton label="下一步：素材准备" :loading="enteringPrep" @click="enterPrep" />
       </div>
+      <WbPickProductDialog :visible="productPickVisible" @close="productPickVisible = false" @pick="onProductPick" />
       </template>
     </div>
 
@@ -587,6 +614,16 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
 .iv-hide { display: none; }
 .iv-filepick { display: flex; flex-direction: column; gap: 6px; }
 .iv-divider { height: 1px; background: var(--border); margin: 8px 0; }
+.product-chip {
+  display: inline-flex; align-items: center; padding: 1px 8px; font-size: 12px;
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface-container));
+  border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--foreground);
+}
+.product-clear {
+  width: 18px; height: 18px; padding: 0; line-height: 1; font-size: 12px; flex: none;
+  background: transparent; color: var(--muted-foreground); border: none; border-radius: 50%; cursor: pointer;
+}
+.product-clear:hover { color: var(--danger, #e74c3c); }
 
 /* ── 工程统一拖入控件（2026-09-07 用户裁决：全程序拖拽上传区高度统一 min-height 120px；
      样式与 ImageMatting 等工具卡同构）── */
