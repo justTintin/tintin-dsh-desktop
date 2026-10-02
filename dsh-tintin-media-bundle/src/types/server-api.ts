@@ -226,9 +226,9 @@ export const API_PATHS = {
     scriptsItem: (id: string) => `/api/storyboard/scripts/${id}`,
     save:        '/api/storyboard/scripts',
     // 仿视频 V3.5（PRD-M-5，2026-10-02 v1.0+评审复核 §9 新增最小集）：
-    // 服务端文档写 POST /storyboard/imitate，客户端按本表 /api 前缀惯例登记
-    imitate:     '/api/storyboard/imitate',
-    // HumanGate② 数据面：PUT /storyboard/{id}/shots/{name}/frames（multipart 换帧或 confirmed）
+    // 实测（2026-10-02 openapi 探针）：imitate 挂在 scripts 集合下
+    imitate:     '/api/storyboard/scripts/imitate',
+    // HumanGate② 数据面（实测 multipart：first/last 文件 + confirmed 布尔）
     shotFrames:  (id: string, name: string) => `/api/storyboard/scripts/${id}/shots/${encodeURIComponent(name)}/frames`,
   },
   agent: {

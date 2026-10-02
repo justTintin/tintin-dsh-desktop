@@ -93,7 +93,8 @@ describe('整镜来源切换（§5.3-2）', () => {
     const mat: ImitationShot = { duration: 6, source: 'material', material_id: 33, visual: 'v', audio: 'a' }
     const shot = switchShotSource(mat, 'generate', [genShot('shot_01'), genShot('shot_02')])
     expect(shot.source).toBe('generate')
-    expect(shot.material_id).toBeNull()
+    expect(shot.material_id).toBe(0) // 实测 Shot.material_id 为 integer default 0 非 nullable
+    expect(shot.material_path).toBe('')
     expect(shot.gen?.name).toBe('shot_03') // 已占 01/02 → 冲突递增
     expect(shot.gen?.frames_status).toBe('pending')
     expect(shot.gen?.status).toBe('pending')
@@ -172,10 +173,11 @@ describe('Part 1 输入归一化与请求体（§4）', () => {
     expect(normalizeImitateVideo('C:/Users/me/Desktop/demo.mp4').kind).toBe('local_file')
     expect(normalizeImitateVideo('').kind).toBe('invalid')
   })
-  it('body.video 按 kind 取值；products/options 透传；本地文件返回 needsUpload', () => {
-    expect(buildImitateBody({ video: 123 })).toEqual({ ok: true, body: { video: 123 }, note: expect.any(String) })
+  it('body.video 按 kind 取值（材质=material:// URI，实测 2026-10-02）；products/options 透传；本地文件返回 needsUpload', () => {
+    expect(buildImitateBody({ video: 123 })).toEqual({ ok: true, body: { video: 'material://123' }, note: expect.any(String) })
     expect(buildImitateBody({ video: 'https://a/b.mp4' }).body).toEqual({ video: 'https://a/b.mp4' })
     const withOpts = buildImitateBody({ video: 1, products: [{ id: 9 }], options: { ratio: '9:16', fidelity: 'balanced', max_shots: 9 } })
+    expect(withOpts.body.video).toBe('material://1')
     expect(withOpts.body.products).toEqual([{ id: 9 }])
     expect(withOpts.body.options).toEqual({ ratio: '9:16', fidelity: 'balanced', max_shots: 9 })
     const local = buildImitateBody({ video: 'C:/local.mp4' })
@@ -197,7 +199,7 @@ describe('Part 2 请求体（§5.1 / §11-9 stage 显式）', () => {
   it('非法 stage 抛错（与 comfygen stage 同名异值防线）', () => {
     expect(() => buildStoryboardGenerateBody({ scriptId: 's1', stage: 'video' as never })).toThrow()
   })
-  it('HumanGate② 帧确认/换帧 body（§9）', () => {
+  it('HumanGate② 帧确认/换帧 body（§9；实测 PUT 为 multipart：confirmed 布尔 + first/last 文件）', () => {
     expect(buildFramesConfirmBody()).toEqual({ confirmed: true })
     expect(buildFramesReplaceFiles('C:/f.png')).toEqual({ first: { path: 'C:/f.png' } })
     expect(buildFramesReplaceFiles('C:/f.png', 'C:/l.png')).toEqual({ first: { path: 'C:/f.png' }, last: { path: 'C:/l.png' } })

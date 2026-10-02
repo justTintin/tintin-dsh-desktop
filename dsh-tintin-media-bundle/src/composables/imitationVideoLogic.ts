@@ -198,21 +198,21 @@ export function framesBadgeText(shot: ImitationShot): string {
 /**
  * 整镜切换来源。generate→material：按 §3「增量字段（source=generate 时）」移除 gen 块
  * （数据面干净，PUT 整体替换语义下不保留僵尸块）；material_id 保留由用户重绑。
- * material→generate：清空 material_id（防旧实拍绑片在生成完成前混入混剪，§8
- * _auto_bind_materials 对 generate 镜不告警）并初始化 gen（backend=comfygen、
- * 唯一名、双状态机归 pending）。
+ * material→generate：重置绑片字段为服务端零值（实测 2026-10-02 Shot schema：
+ * material_id 为 integer default 0 非 nullable，传 null 会被 Pydantic 422 拒；
+ * 防旧实拍绑片在生成完成前混入混剪，§8 _auto_bind_materials 对 generate 镜不告警）
+ * 并初始化 gen（backend=comfygen、唯一名、双状态机归 pending）。
  */
 export function switchShotSource(shot: ImitationShot, to: ShotSource, allShots: ImitationShot[] = []): ImitationShot {
   if (to === 'material') {
     const { gen: _drop, ...rest } = shot
     return { ...rest, source: 'material' }
   }
-  const { material_id: _old, material_path: _oldPath, ...rest } = shot
   return {
-    ...rest,
+    ...shot,
     source: 'generate',
-    material_id: null,
-    material_path: null,
+    material_id: 0,
+    material_path: '',
     gen: {
       backend: 'comfygen',
       name: nextGenName(allShots.map((s) => s.gen?.name)),
@@ -364,7 +364,8 @@ export interface ImitateBodyInput {
   options?: { ratio?: string; fidelity?: string; max_shots?: number }
 }
 
-/** POST /storyboard/imitate body（§4/§9；服务端未实现前为客户端冻结契约面） */
+/** POST /storyboard/scripts/imitate body（§4/§9；实测 2026-10-02：video 素材形态
+ *  为 `material://{id}` URI 而非裸 id——文档 §4 的 material_id 字面按此 URI 落地） */
 export function buildImitateBody(input: ImitateBodyInput): { ok: boolean; body: Record<string, unknown>; needsUpload?: string; note: string } {
   const src = normalizeImitateVideo(input.video)
   if (src.kind === 'invalid') return { ok: false, body: {}, note: src.note }
@@ -372,7 +373,7 @@ export function buildImitateBody(input: ImitateBodyInput): { ok: boolean; body: 
     return { ok: false, body: {}, needsUpload: src.localPath, note: src.note }
   }
   const body: Record<string, unknown> = {
-    video: src.kind === 'material' ? src.materialId : src.kind === 'url' ? src.url : src.videoPath,
+    video: src.kind === 'material' ? `material://${src.materialId}` : src.kind === 'url' ? src.url : src.videoPath,
   }
   if (input.products?.length) body.products = input.products
   if (input.options) body.options = input.options
@@ -402,7 +403,11 @@ export function buildStoryboardGenerateBody(p: StoryboardGenerateParams): Record
   return { task_type: 'storyboard_generate', params }
 }
 
-/** HumanGate② 帧确认 body（PUT .../frames 标记 confirmed 形态，§9） */
+/**
+ * HumanGate② 帧确认表单值（实测 2026-10-02：PUT frames 为 multipart/form-data，
+ * 字段 first/last 文件可选 + confirmed 布尔；本函数返回确认形态的表单值，
+ * 由调用方以 multipart 编码发送，无文件）。
+ */
 export function buildFramesConfirmBody(): Record<string, unknown> {
   return { confirmed: true }
 }
