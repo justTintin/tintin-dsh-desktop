@@ -242,6 +242,13 @@ function clearScriptProduct(): void {
   if (record.value) record.value.products = []
 }
 
+/** 时长展示格式化：一位小数、去尾零（浮点噪声修复 2026-10-03） */
+function formatSec(v: unknown): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  return `${parseFloat(n.toFixed(2))}s`
+}
+
 /** 反推提示词（随拆解返回，2026-10-02 服务端规范定稿）：result.shots[]=逐镜反推提示词
  *  （visual 中文 + scene_en/end_scene_en 英文提示词 + 运镜/时长）——无独立顶层字段 */
 const rpShots = computed<Array<Record<string, unknown>>>(() => {
@@ -620,7 +627,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       <div v-for="(shot, i) in shots" :key="i" class="seg-card">
         <div class="seg-head">
           <span class="seg-no">#{{ i + 1 }}</span>
-          <span class="sb-info">{{ shot.shot_type || '未定镜别' }} ｜ {{ shot.duration }}s ｜ {{ enumLabel(iv.enums.value?.cameras || [], shot.gen?.camera) }}</span>
+          <span class="sb-info">{{ shot.shot_type || '未定镜别' }} ｜ {{ formatSec(shot.duration) }} ｜ {{ enumLabel(iv.enums.value?.cameras || [], shot.gen?.camera) }}</span>
         </div>
         <div v-if="shot.visual" class="sb-line">画面：{{ shot.visual }}</div>
         <div v-if="shot.orig_audio || shot.audio" class="sb-line iv-orig">原旁白：{{ shot.orig_audio || shot.audio }}</div>
@@ -634,7 +641,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
           <div v-for="(s, i) in rpShots" :key="i" class="seg-card">
             <div class="seg-head">
               <span class="seg-no">#{{ i + 1 }}</span>
-              <span class="sb-info">{{ s.duration }}s ｜ {{ enumLabel(iv.enums.value?.cameras || [], s.camera) }}</span>
+              <span class="sb-info">{{ formatSec(s.duration) }} ｜ {{ enumLabel(iv.enums.value?.cameras || [], s.camera) }}</span>
             </div>
             <div class="sb-line">{{ s.visual }}</div>
             <div v-if="s.scene_en" class="sb-line iv-orig">scene_en: {{ s.scene_en }}</div>

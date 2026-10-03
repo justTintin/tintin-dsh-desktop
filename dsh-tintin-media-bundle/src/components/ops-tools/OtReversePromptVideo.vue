@@ -66,6 +66,13 @@ const resultShots = computed<Array<Record<string, unknown>>>(() => {
 })
 /** 反推提示词（逐镜，随拆解 shots[] 返回——2026-10-02 服务端规范定稿：
  *  visual 中文 + scene_en/end_scene_en 英文提示词 + 运镜/时长；无独立顶层字段） */
+/** 时长展示格式化：一位小数、去尾零（浮点噪声修复 2026-10-03） */
+function formatSec(v: unknown): string {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return '—'
+  return `${parseFloat(n.toFixed(2))}s`
+}
+
 const promptShots = computed<Array<Record<string, unknown>>>(() => resultShots.value)
 
 watch(() => iv.part1Phase.value, ph => {
@@ -120,13 +127,13 @@ onMounted(() => { /* 枚举等非本卡依赖，不拉 */ })
       <div class="rpv-divider"></div>
       <div class="lbl">拆解脚本（{{ resultShots.length }} 镜）</div>
       <div v-for="(s, i) in resultShots" :key="i" class="rpv-shot">
-        <b>#{{ i + 1 }}</b> {{ s.duration }}s ｜ {{ s.camera || '—' }}
+        <b>#{{ i + 1 }}</b> {{ formatSec(s.duration) }} ｜ {{ s.camera || '—' }}
         <span class="muted">{{ s.visual }}</span>
       </div>
       <div class="lbl" style="margin-top: 10px">反推提示词（逐镜）</div>
       <template v-if="promptShots.length">
         <div v-for="(s, i) in promptShots" :key="i" class="rpv-shot">
-          <div><b>#{{ i + 1 }}</b> {{ s.duration }}s ｜ {{ s.camera || '—' }}<span class="muted">{{ s.visual }}</span></div>
+          <div><b>#{{ i + 1 }}</b> {{ formatSec(s.duration) }} ｜ {{ s.camera || '—' }}<span class="muted">{{ s.visual }}</span></div>
           <div v-if="s.scene_en" class="rpv-en">scene_en: {{ s.scene_en }}</div>
           <div v-if="s.end_scene_en" class="rpv-en">end_scene_en: {{ s.end_scene_en }}</div>
         </div>
