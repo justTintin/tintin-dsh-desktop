@@ -256,6 +256,14 @@ const rpShots = computed<Array<Record<string, unknown>>>(() => {
   return Array.isArray(r.shots) ? (r.shots as Array<Record<string, unknown>>) : []
 })
 
+/** 整体提示词（meta.prompt_en，服务端映射层自动生成：从逐镜 scene 枚举统计主导
+ *  风格组装整片创作方向；随脚本保存，只读展示为"整体方向卡"——2026-10-03 实证） */
+const overallPromptEn = computed(() => {
+  const meta = record.value?.meta as Record<string, unknown> | undefined
+  const v = meta?.prompt_en
+  return typeof v === 'string' ? v.trim() : ''
+})
+
 // ── 口播文案（脚本主稿）：Part 1 拆解稿在 meta.imitate.voiceover；「重新生成文案」
 //    走 /copywriting/voiceover（product_desc 必填=选中产品，duration_s=镜头轨总长）；
 //    随脚本保存（ScriptIn.meta 透传）──
@@ -634,9 +642,14 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
       </div>
 
       <!-- 反推提示词（逐镜，随拆解 shots[] 返回——2026-10-02 服务端规范定稿：
-           result.shots[]=name/visual/scene 四要素/scene_en/end_scene_en/camera/duration） -->
+           result.shots[]=name/visual/scene 四要素/scene_en/end_scene_en/camera/duration；
+           整体方向卡=meta.prompt_en（服务端映射层生成，随脚本保存，2026-10-03 实证） -->
       <div class="seg-field">
         <span class="lbl">反推提示词（逐镜，随拆解返回）</span>
+        <div v-if="overallPromptEn" class="seg-card iv-gen">
+          <div class="row between"><span class="lbl">整体提示词（整片创作方向，随脚本保存）</span><span class="sb-info">meta.prompt_en</span></div>
+          <div class="sb-line">{{ overallPromptEn }}</div>
+        </div>
         <template v-if="rpShots.length">
           <div v-for="(s, i) in rpShots" :key="i" class="seg-card">
             <div class="seg-head">
