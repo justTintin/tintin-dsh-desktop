@@ -472,7 +472,8 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <span class="spacer"></span>
         <TButton label="重新生成仿写文案" :loading="regenBusy" @click="regenerateVoiceover" />
       </div>
-      <!-- 参考声音（对齐文案混剪 Step3：样本下拉 + 常驻播放条预览 + 引擎下拉） -->
+      <!-- 参考声音（对齐文案混剪 Step3：样本下拉 + 常驻播放条预览 + 引擎下拉；
+           2026-10-03 用户裁决：与生成按钮合一行，按钮右对齐） -->
       <div class="row">
         <span class="lbl">参考声音:</span>
         <select v-model.number="selectedSampleId" class="input w140" title="声音克隆样本（GET /voice/samples 与声音克隆页同源；0=Base 音色）">
@@ -484,9 +485,10 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
           <option v-for="e in TTS_ENGINE_OPTIONS" :key="e.value" :value="e.value">{{ e.label }}</option>
         </select>
         <span v-if="voiceSamplesError" class="muted">{{ voiceSamplesError }}</span>
+        <span class="spacer"></span>
+        <TButton label="生成口播配音" :loading="ttsBusy" :disabled="!voiceoverText.trim()" @click="generateVoiceAudio" />
       </div>
       <div class="row">
-        <TButton label="生成口播配音" :loading="ttsBusy" :disabled="!voiceoverText.trim()" @click="generateVoiceAudio" />
         <audio v-if="ttsAudioUrl" :src="ttsAudioUrl" controls preload="auto" class="iv-audio" title="配音结果" />
         <span v-if="regenError" class="iv-err">{{ regenError }}</span>
         <span v-if="regenWarn" class="iv-warn">{{ regenWarn }}</span>
