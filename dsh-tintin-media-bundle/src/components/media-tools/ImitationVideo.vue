@@ -109,7 +109,8 @@ const productPickVisible = ref(false)
 function productLabel(): string {
   const p = (record.value?.products as Array<Record<string, unknown>> | undefined)?.[0]
   if (!p) return ''
-  return [p.brand, p.model || p.name].filter(Boolean).join(' / ') || String(p.name || p.brand || '')
+  const parts = [p.brand, p.model || p.name].filter(Boolean).map(String).filter((v, i, a) => a.indexOf(v) === i)
+  return parts.join(' / ') || String(p.name || p.brand || '')
 }
 function onProductPick(item: PickerItem): void {
   if (!record.value) return
@@ -469,7 +470,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <span v-if="productLabel()" class="product-chip" title="当前产品（文案按此重写，产品图随脚本供生成）">当前产品：{{ productLabel() }}</span>
         <button v-if="productLabel()" class="product-clear" title="清除已选产品" @click="clearScriptProduct">×</button>
         <span class="spacer"></span>
-        <TButton label="重新生成文案" :loading="regenBusy" @click="regenerateVoiceover" />
+        <TButton label="重新生成仿写文案" :loading="regenBusy" @click="regenerateVoiceover" />
       </div>
       <!-- 参考声音（对齐文案混剪 Step3：样本下拉 + 常驻播放条预览 + 引擎下拉） -->
       <div class="row">
