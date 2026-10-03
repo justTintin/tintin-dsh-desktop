@@ -16,6 +16,7 @@
 
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { clientError } from '../utils/clientLog'
+import { API_PATHS } from '../types/server-api'
 import {
   // Step3 字幕样式（2026-09-17 用户裁决：字幕样式统一来自服务端 /subtitle_styles）
   serverStylesToPresets,
@@ -185,6 +186,33 @@ export function useCopywritingMontage() {
   const scriptScene = ref('general')    // 场景（通用/口播带货/产品讲解/种草推荐）
   const suggestDuration = ref(30)       // 建议时长（秒）：随场景取默认，可手动调整
   const systemPrompt = ref(SCRIPT_SYSTEM_PROMPT_DEFAULT)
+  // 投放平台（2026-10-03 用户裁决：场景后平台下拉，默认抖音）——字典/默认值/风格
+  // 指引均来自服务端 GET /copywriting/platforms（与 /copywriting/voiceover 的
+  // platform 参数同源）；guide 织入 system 提示词（同场景指令惯例）
+  interface PlatformItem { name: string; guide: string }
+  const platformOptions = ref<PlatformItem[]>([])
+  const platformDefault = ref('抖音')
+  const scriptPlatform = ref('')        // 选中平台名（''=未拉到字典时的待定态）
+  const scriptPlatformGuide = computed(() =>
+    platformOptions.value.find((p) => p.name === scriptPlatform.value)?.guide || '')
+  async function loadPlatforms(): Promise<void> {
+    try {
+      const res = await window.tintin.server.get(API_PATHS.copywriting.platforms)
+      const data = (res && typeof res === 'object' ? res : null) as { default?: string; platforms?: Array<{ name?: string; guide?: string }> } | null
+      const list = Array.isArray(data?.platforms) ? data!.platforms! : []
+      platformOptions.value = list
+        .filter((x) => x && typeof x.name === 'string' && x.name)
+        .map((x) => ({ name: String(x.name), guide: String(x.guide || '') }))
+      if (typeof data?.default === 'string' && data.default) platformDefault.value = data.default
+      // 选中值优先保持用户已选；否则取服务端 default；字典缺失时兜底"抖音"
+      const keep = platformOptions.value.some((p) => p.name === scriptPlatform.value)
+      if (!keep) scriptPlatform.value = platformDefault.value || '抖音'
+    } catch (err) {
+      // 字典拉取失败不阻塞生成：保底"抖音"（平台块无 guide 也可织入）
+      if (!scriptPlatform.value) scriptPlatform.value = '抖音'
+      clientError('copywriting-montage', '平台字典拉取失败，使用默认抖音', err)
+    }
+  }
   const manualCopy = ref('')            // 视频文案（可选，可编辑）
   const manualCopyBusy = ref(false)     // 「生成文案和关键词」进行中（关键词为其串行第二步）
   // localStorage 恢复：显式判 null 为未设置才回退默认（Number(null)=0 的坑见 679133e）；
@@ -296,6 +324,8 @@ export function useCopywritingMontage() {
       suggestSec: suggestDuration.value,
       brand: info.brand, product: info.product, modelName: info.model, extra: info.extra,
       customRequirement: customRequirement.value,
+      platform: scriptPlatform.value,
+      platformGuide: scriptPlatformGuide.value,
     })
   }
 
@@ -466,6 +496,7 @@ export function useCopywritingMontage() {
     storyboards, activeStoryboardId, activeStoryboard, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, COPY_STORYBOARD_MAX,
     scriptProvider, scriptProviderOptions, paragraphCount, customRequirement, systemPrompt,
     scriptScene, SCRIPT_SCENE_OPTIONS,
+    scriptPlatform, platformOptions, platformDefault, loadPlatforms,
     resetSystemPrompt, promptPreviewDlg, openPromptPreview, closePromptPreview,
     genScriptAndKeywords, loadScriptProviders,
     updateSceneDesc, previewSourceVideo, previewScene, closePreview, clearSplitCache,
@@ -544,4 +575,4 @@ export function useCopywritingMontage() {
     SHOT_TYPE_LABELS, SHOT_TYPE_COLORS,
   }
 }
-
+

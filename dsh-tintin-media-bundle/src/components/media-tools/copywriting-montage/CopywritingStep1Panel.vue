@@ -22,6 +22,7 @@ const {
   manualCopy, manualCopyBusy, suggestDuration, activeNarrative,
   scriptProvider, scriptProviderOptions, paragraphCount, customRequirement, systemPrompt,
   scriptScene, SCRIPT_SCENE_OPTIONS,
+  scriptPlatform, platformOptions, loadPlatforms,
   resetSystemPrompt, promptPreviewDlg, openPromptPreview, closePromptPreview,
   genScriptAndKeywords, loadScriptProviders,
 } = shell.s
@@ -57,7 +58,7 @@ const productLabel = computed(() => {
   return extras.length ? `${base}（${extras.length} 条卖点）` : base
 })
 
-onMounted(() => { void loadScriptProviders() })
+onMounted(() => { void loadScriptProviders(); void loadPlatforms() })
 </script>
 
 <template>
@@ -82,6 +83,13 @@ onMounted(() => { void loadScriptProviders() })
           <label class="field-label">场景</label>
           <span class="info-i" title="场景指令与产品信息会并入系统提示词一并发给大模型（「预览最终提示词」可查看合并结果）">ⓘ</span>
           <TSelect v-model="scriptScene" :options="SCRIPT_SCENE_OPTIONS" class="scene-select" />
+          <!-- 投放平台（2026-10-03 用户裁决：场景后平台下拉，默认抖音=服务端 default；
+               平台口播风格指引织入系统提示词，字典=GET /copywriting/platforms） -->
+          <label class="field-label">平台</label>
+          <select v-model="scriptPlatform" class="scene-select" title="投放平台（平台口播风格指引将并入系统提示词）">
+            <option v-for="p in platformOptions" :key="p.name" :value="p.name">{{ p.name }}</option>
+            <option v-if="!platformOptions.length" value="抖音">抖音</option>
+          </select>
           <label class="field-label">
             建议时长
             <span class="info-i" title="按口播约 4 字/秒估算；切换场景时自动取该场景默认值，可手动调整">ⓘ</span>

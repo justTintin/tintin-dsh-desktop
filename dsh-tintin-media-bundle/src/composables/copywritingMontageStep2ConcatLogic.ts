@@ -508,10 +508,21 @@ export function buildScriptSystemPrompt(base: string, opts: {
   extra?: string
   customRequirement?: string
   suggestSec?: number
+  /** 投放平台名（2026-10-03 用户裁决：场景后平台下拉，默认抖音） */
+  platform?: string
+  /** 平台口播风格指引（GET /copywriting/platforms 的 guide，服务端字典下发） */
+  platformGuide?: string
 }): string {
   const parts = [String(base || '').trim()]
   const scene = SCRIPT_SCENE_OPTIONS.find((o) => o.value === opts.scene) || SCRIPT_SCENE_OPTIONS[0]
   if (scene) parts.push(`## 场景\n${scene.directive}`)
+  // 投放平台（2026-10-03：场景后平台下拉；平台口播风格指引织入提示词——
+  // 与服务端 /copywriting/voiceover 的 platform 参数同源语义，字典同 /copywriting/platforms）
+  const platformName = String(opts.platform ?? '').trim()
+  if (platformName) {
+    const guide = String(opts.platformGuide ?? '').trim()
+    parts.push(guide ? `## 投放平台\n${platformName}。${guide}` : `## 投放平台\n${platformName}`)
+  }
   // 建议时长（2026-09-21 用户裁决：时长控制并入提示词；口播约 4 字/秒）
   const suggestRaw = Math.round(Number(opts.suggestSec) || 0)
   const suggest = suggestRaw >= 5 ? suggestRaw : 0 // 未传/过短 → 不出建议时长块
