@@ -1,13 +1,13 @@
 <script setup lang="ts">
 // ═══════════════════════════════════════════════════════════════
-// ImitationVideo.vue — 仿视频向导（PRD-M-5 · V3.5 客户端 UI）
-// 步骤结构=流程规范 §5.3 用户流程七步（比文案混剪四步多，文档定义为准）：
-//   1 选原视频 → 2 审核脚本(HumanGate①) → 3 素材准备(A-roll+分镜帧)
-//   → 4 分镜图确认(HumanGate②·九宫格) → 5 逐镜视频生成
-//   → 6 触发草稿链(HumanGate③·两段式) → 7 交付(复用文案线双通道)
-// 整体方案与文案混剪对应（§5.3 原则）：同卡片/步骤条/镜头卡视觉形态与交互惯例，
-// 差异仅「AI 生成」区块（来源标记/生成参数/逐镜状态）；脚本审核页不复用
-// CopywritingStoryboard（深耦合文案线 inject shell），按同形态自持数据。
+// ImitationVideo.vue — 仿爆款视频向导（PRD-M-5 · V3.5 客户端 UI）
+// 步骤结构=六步（2026-10-02/03 用户裁决定稿）：
+//   1 视频拆解 → 2 生成脚本(HumanGate①) → 3 分镜头确认(HumanGate②)
+//   → 4 视频生成 → 5 包装特效(HumanGate③) → 6 交付
+// 第 1 步自持拆解交互，拆为 ImitationSourceStep 子组件（铁律 4 千行红线拆分，
+// 逐符号纯搬迁）；本壳保留步序/脚本数据/第 2-6 步。
+// 整体方案与文案混剪对应（§5.3 原则）：同卡片/步骤条/镜头卡视觉形态与交互惯例；
+// 审核页不复用 CopywritingStoryboard（深耦合文案线 inject shell），按同形态自持数据。
 // 编排=useImitationVideo（runner）；纯逻辑=imitationVideoLogic（可单测）。
 // 待服务端契约项（显式占位不发明）：A-roll 数字人人物图上传通道、细化批注
 // 映射层端点、草稿链直提（storyboard_montage 走文案线现有入口）。
@@ -15,14 +15,12 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import TButton from '@/components/common/TButton.vue'
 import VdStepBar from '@/components/media-tools/VdStepBar.vue'
+import ImitationSourceStep from '@/components/media-tools/ImitationSourceStep.vue'
 import WbPickProductDialog from '@/components/workbench/WbPickProductDialog.vue'
 import { createMontageSharedRuntime } from '@/composables/copywritingMontage/context'
-import { useFilePicker } from '@/composables/useFilePicker'
 import { useImitationVideo } from '@/composables/useImitationVideo'
 import type { PickerItem } from '@/composables/useWorkbenchPickers'
 import { clientError } from '@/utils/clientLog'
-import { acceptFileDragOver } from '@/utils/fileUrl'
-import { MAX_SOURCE_VIDEO_SEC, probeDurationSec } from '@/utils/videoDuration'
 import { API_PATHS } from '@/types/server-api'
 import {
   SCENE_ELEMENT_KEYS,
@@ -104,122 +102,6 @@ onMounted(() => {
   void loadVoiceSamples()
 })
 
-// ── 第 1 步：选原视频（本地上传 File / 素材库 material://{id} / http url）──
-type SourceMode = 'file' | 'material' | 'url'
-const sourceMode = ref<SourceMode>('file')
-const sourceMaterial = ref('')
-const sourceUrl = ref('')
-const ratio = ref('9:16')
-const fidelity = ref('balanced')
-/** 本地文件上传进度（0..1；<0 未在上传） */
-const uploadRatio = ref(-1)
-
-// 本地视频走工程统一拖入控件（useFilePicker：点击选择/拖拽 + 120px 统一 dropzone，
-// 2026-09-07 全程序统一裁决）。上传通道需要真 File：拖入从 dataTransfer 直取；
-// 对话框只给路径 → 经宿主 /tintin/media 代理（unlock 已由选择器触发）取回内容成 File。
-const VIDEO_PICK_EXTS = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'flv', 'm4v']
-const sourceFile = ref<File | null>(null)
-const fileResolving = ref(false)
-const pickError = ref('')
-const videoPicker = useFilePicker({
-  dialogTitle: '选择原视频',
-  filters: [{ name: '视频', extensions: VIDEO_PICK_EXTS }],
-})
-
-function isVideoName(name: string): boolean {
-  const ext = name.split('.').pop()?.toLowerCase() || ''
-  return VIDEO_PICK_EXTS.includes(ext)
-}
-
-/** 原片时长上限（2026-10-02 用户裁决：上传视频 ≤60 秒，超限明确提示拦截） */
-const MAX_SOURCE_SEC = MAX_SOURCE_VIDEO_SEC
-
-/** 时长校验：超限清空选择并给明确提示；返回是否通过 */
-async function enforceDurationLimit(file: File): Promise<boolean> {
-  const sec = await probeDurationSec(file)
-  if (sec !== null && sec > MAX_SOURCE_SEC) {
-    sourceFile.value = null
-    videoPicker.clearFile()
-    pickError.value = `视频时长 ${Math.round(sec)} 秒，超过 ${MAX_SOURCE_SEC} 秒上限——请选择 ${MAX_SOURCE_SEC} 秒以内的原片（拆解链面向短视频）`
-    clientError('imitation-video', pickError.value, { name: file.name, sec })
-    return false
-  }
-  return true
-}
-
-/**
- * 拖入：同步段内完成格式校验 + File 直取 + 选择器回显（Drop 事件的 dataTransfer
- * 在处理器让出控制权后被清空——任何 await 之后再读就是空，2026-10-02 实机回归：
- * async 化时长校验后回显消失，即此因）；时长探测异步后置，超限撤下并明确提示。
- */
-function onVideoDrop(e: DragEvent): void {
-  const f = e.dataTransfer?.files?.[0] || null
-  if (f && !isVideoName(f.name)) {
-    pickError.value = `不支持的视频格式：${f.name}（支持 ${VIDEO_PICK_EXTS.join(' / ')}）`
-    return
-  }
-  if (f) sourceFile.value = f
-  pickError.value = ''
-  videoPicker.onDrop(e)
-  if (f) {
-    void enforceDurationLimit(f)
-  }
-}
-
-/** 对话框路径 → File（宿主 /tintin/media 同源代理流式取回；失败显式报错不静默） */
-async function resolveFileFromPath(path: string): Promise<void> {
-  if (!isVideoName(path)) {
-    sourceFile.value = null
-    pickError.value = `不支持的视频格式：${path}`
-    return
-  }
-  fileResolving.value = true
-  try {
-    const res = await fetch(`/tintin/media?path=${encodeURIComponent(path)}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const blob = await res.blob()
-    const name = path.split(/[\\/]/).pop() || 'source.mp4'
-    const file = new File([blob], name, { type: blob.type || 'video/mp4' })
-    if (!(await enforceDurationLimit(file))) return
-    sourceFile.value = file
-    pickError.value = ''
-  } catch (err) {
-    sourceFile.value = null
-    pickError.value = `读取所选文件失败：${(err as Error).message}`
-    clientError('imitation-video', pickError.value, err)
-  } finally {
-    fileResolving.value = false
-  }
-}
-
-// 路径变化：拖入已直取同名 File 则跳过；对话框新路径则代理解析
-watch(videoPicker.filePath, (p) => {
-  if (!p) {
-    sourceFile.value = null
-    return
-  }
-  const base = p.split(/[\\/]/).pop()
-  if (sourceFile.value && sourceFile.value.name === base) return
-  void resolveFileFromPath(p)
-})
-
-const part1VideoInput = computed<unknown>(() => {
-  if (sourceMode.value === 'file') return sourceFile.value
-  if (sourceMode.value === 'material') return sourceMaterial.value.trim()
-  return sourceUrl.value.trim()
-})
-
-const canSubmitPart1 = computed(() => {
-  if (sourceMode.value === 'file') return !!sourceFile.value && !fileResolving.value
-  if (sourceMode.value === 'material') return /^\d+$/.test(sourceMaterial.value.trim())
-  return /^https?:\/\//i.test(sourceUrl.value.trim())
-})
-
-// Part 1 完成 → 拉脚本，审核区就地展开（第 1/2 步已合并为「生成脚本」单页）
-watch(() => iv.part1Phase.value, async (ph) => {
-  if (ph === 'done') await reloadScript()
-})
-
 // ── 产品选择（与文案混剪同交互：WbPickProductDialog 公共弹窗单选；选中写进
 //    脚本 products 随 PUT 保存——ScriptIn.products=ProductRef[]，阶段 C/D 产品图
 //    解析按脚本 products 取图，§5.1-2）──
@@ -248,13 +130,6 @@ function formatSec(v: unknown): string {
   if (!Number.isFinite(n)) return '—'
   return `${parseFloat(n.toFixed(2))}s`
 }
-
-/** 反推提示词（随拆解返回，2026-10-02 服务端规范定稿）：result.shots[]=逐镜反推提示词
- *  （visual 中文 + scene_en/end_scene_en 英文提示词 + 运镜/时长）——无独立顶层字段 */
-const rpShots = computed<Array<Record<string, unknown>>>(() => {
-  const r = iv.part1Result.value || {}
-  return Array.isArray(r.shots) ? (r.shots as Array<Record<string, unknown>>) : []
-})
 
 /** 整体提示词（meta.prompt_en，服务端映射层自动生成：从逐镜 scene 枚举统计主导
  *  风格组装整片创作方向；随脚本保存，只读展示为"整体方向卡"——2026-10-03 实证） */
@@ -423,10 +298,7 @@ function resetFlow(): void {
   iv.genPhase.value = ''
   iv.genError.value = ''
   iv.genResult.value = {}
-  sourceFile.value = null
-  videoPicker.clearFile()
-  uploadRatio.value = -1
-  step.value = 1
+  step.value = 1 // 第 1 步子组件随 v-if 重建，源选择自动清空
 }
 
 // ── 第 2 步：审核脚本（HumanGate①：逐镜编辑 + AI 生成区块 + 来源切换）──
@@ -571,122 +443,8 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
   <div class="iv-page">
     <VdStepBar :step="step" :steps="STEPS" />
 
-    <!-- ═══ 第 1 步：生成脚本（选原视频 + 审核脚本合并页，2026-10-02 用户裁决）═══ -->
-    <div v-if="step === 1" class="iv-panel">
-      <div class="row">
-        <label class="iv-mode" :class="{ on: sourceMode === 'file' }"><input v-model="sourceMode" type="radio" value="file" />本地上传</label>
-        <label class="iv-mode" :class="{ on: sourceMode === 'material' }"><input v-model="sourceMode" type="radio" value="material" />素材库</label>
-        <label class="iv-mode" :class="{ on: sourceMode === 'url' }"><input v-model="sourceMode" type="radio" value="url" />链接</label>
-      </div>
-
-      <div v-if="sourceMode === 'file'" class="iv-filepick">
-        <div class="dropzone" :class="{ 'is-active': videoPicker.isDragging.value, 'has-file': !!videoPicker.filePath.value }"
-          @click="videoPicker.pickFile"
-          @drop.prevent="onVideoDrop"
-          @dragover.prevent="acceptFileDragOver($event); videoPicker.onDragOver()"
-          @dragleave.prevent="videoPicker.onDragLeave">
-          <svg v-if="!videoPicker.filePath.value" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
-          </svg>
-          <div class="dropzone__text">
-            <template v-if="!videoPicker.filePath.value">
-              <span class="dropzone__main">点击选择原视频或拖拽到此处</span>
-              <span class="dropzone__hint">支持 MP4 / MOV / MKV / AVI / WEBM / FLV / M4V，时长 ≤ {{ MAX_SOURCE_SEC }} 秒；自动上传入素材库后进入拆解</span>
-            </template>
-            <template v-else>
-              <span class="dropzone__main">{{ videoPicker.fileName.value }}</span>
-              <span class="dropzone__hint">{{ fileResolving ? '正在读取文件…' : sourceFile ? `${(sourceFile.size / 1024 / 1024).toFixed(1)} MB · 点击重新选择` : '正在读取文件…' }}</span>
-            </template>
-          </div>
-        </div>
-        <div v-if="pickError" class="iv-err">{{ pickError }}</div>
-      </div>
-      <div v-else-if="sourceMode === 'material'" class="seg-field">
-        <span class="lbl">素材库 ID（视频需已在服务端素材库）</span>
-        <input v-model="sourceMaterial" class="input" placeholder="如 123" />
-      </div>
-      <div v-else class="seg-field">
-        <span class="lbl">视频链接（服务端下载）</span>
-        <input v-model="sourceUrl" class="input" placeholder="https://..." />
-      </div>
-
-      <div class="row">
-        <label class="seg-field head-field"><span class="lbl">画幅</span>
-          <select v-model="ratio" class="input w90">
-            <option v-for="r in iv.enums.value?.ratios || []" :key="r.ratio" :value="r.ratio">
-              {{ r.ratio }}（{{ r.width }}×{{ r.height }}）
-            </option>
-          </select>
-        </label>
-        <label class="seg-field head-field"><span class="lbl">保真档位</span>
-          <select v-model="fidelity" class="input w110">
-            <option v-for="f in iv.enums.value?.fidelity || []" :key="f.value" :value="f.value">{{ f.label }}</option>
-          </select>
-        </label>
-      </div>
-
-      <div class="seg-field">
-        <span class="lbl">A-roll 口播人像（可选，第 3 步配置）</span>
-        <span class="muted">数字人 / 实拍上传在「3. 分镜头确认」中配置（数字人人物图上传通道待服务端契约，当前可先走实拍）</span>
-      </div>
-
-      <div class="row">
-        <TButton label="提交拆解" :loading="iv.part1Phase.value === 'running'" :disabled="!canSubmitPart1" @click="iv.submitImitate({
-          video: part1VideoInput,
-          options: { ratio, fidelity },
-          onUploadProgress: (r) => { uploadRatio.value = r },
-        })" />
-        <span v-if="iv.part1Note.value" class="muted">{{ iv.part1Note.value }}</span>
-      </div>
-      <div v-if="uploadRatio.value >= 0 && uploadRatio.value < 1 && iv.part1Phase.value !== 'running'" class="muted">本地上传中 {{ Math.round(uploadRatio.value * 100) }}%</div>
-      <div v-if="iv.part1Phase.value === 'running'" class="muted">分析进行中（分钟级）：拆镜头 → 运镜测量 → 转写文案 → 生成仿拍脚本…</div>
-      <div v-if="iv.part1Error.value" class="iv-err">{{ iv.part1Error.value }}</div>
-      <div v-if="iv.enumsError.value" class="iv-err">枚举加载失败：{{ iv.enumsError.value }}（刷新重试：{{ ' ' }}<a class="iv-link" @click="iv.loadEnums">重试</a>）</div>
-      <template v-if="iv.part1Phase.value === 'done' && shots.length">
-      <div class="iv-divider"></div>
-      <div class="row between">
-        <span class="lbl">拆解脚本（原片脚本·只读）——编辑与文案替换在第 2 步「生成脚本」</span>
-        <span class="sb-info">共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒</span>
-      </div>
-      <div v-for="(shot, i) in shots" :key="i" class="seg-card">
-        <div class="seg-head">
-          <span class="seg-no">#{{ i + 1 }}</span>
-          <span class="sb-info">{{ shot.shot_type || '未定镜别' }} ｜ {{ formatSec(shot.duration) }} ｜ {{ enumLabel(iv.enums.value?.cameras || [], shot.gen?.camera) }}</span>
-        </div>
-        <div v-if="shot.visual" class="sb-line">画面：{{ shot.visual }}</div>
-        <div v-if="shot.orig_audio || shot.audio" class="sb-line iv-orig">原旁白：{{ shot.orig_audio || shot.audio }}</div>
-      </div>
-
-      <!-- 反推提示词（逐镜，随拆解 shots[] 返回——2026-10-02 服务端规范定稿：
-           result.shots[]=name/visual/scene 四要素/scene_en/end_scene_en/camera/duration；
-           整体方向卡=meta.prompt_en（服务端映射层生成，随脚本保存，2026-10-03 实证） -->
-      <div class="seg-field">
-        <span class="lbl">反推提示词（逐镜，随拆解返回）</span>
-        <div v-if="overallPromptEn" class="seg-card iv-gen">
-          <div class="row between"><span class="lbl">整体提示词（整片创作方向，随脚本保存）</span><span class="sb-info">meta.prompt_en</span></div>
-          <div class="sb-line">{{ overallPromptEn }}</div>
-        </div>
-        <template v-if="rpShots.length">
-          <div v-for="(s, i) in rpShots" :key="i" class="seg-card">
-            <div class="seg-head">
-              <span class="seg-no">#{{ i + 1 }}</span>
-              <span class="sb-info">{{ formatSec(s.duration) }} ｜ {{ enumLabel(iv.enums.value?.cameras || [], s.camera) }}</span>
-            </div>
-            <div class="sb-line">{{ s.visual }}</div>
-            <div v-if="s.scene_en" class="sb-line iv-orig">scene_en: {{ s.scene_en }}</div>
-            <div v-if="s.end_scene_en" class="sb-line iv-orig">end_scene_en: {{ s.end_scene_en }}</div>
-          </div>
-        </template>
-        <span v-else class="muted">拆解结果未含 shots 明细（旧版服务端）——升级后自动展示逐镜提示词</span>
-      </div>
-
-      <div class="row">
-        <span class="muted">拆解完成——下一步替换文案文字并配新口播</span>
-        <span class="spacer"></span>
-        <TButton label="下一步：生成脚本" @click="step = 2" />
-      </div>
-      </template>
-    </div>
+    <!-- ═══ 第 1 步：视频拆解（自持子组件，铁律 4 拆分；完成回读由父级 watch 承担）═══ -->
+    <ImitationSourceStep v-if="step === 1" :iv="iv" :shots="shots" :overall-prompt-en="overallPromptEn" @next="step = 2" />
 
     <!-- ═══ 第 2 步：生成脚本（原片脚本为模板：替换文字=新产品文案 + 新文案口播配音；HumanGate①；单脚本全步共用）═══ -->
     <div v-else-if="step === 2 && record && shots.length" class="iv-panel">
