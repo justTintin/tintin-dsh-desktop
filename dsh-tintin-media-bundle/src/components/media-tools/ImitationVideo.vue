@@ -279,6 +279,12 @@ const voiceoverText = computed({
 
 const regenBusy = ref(false)
 const regenError = ref('')
+const regenWarn = ref('')
+/** 口播语速基准（字/秒，带货口播 4~7 区间取中值偏快，对照原片实测 ~6）——
+ *  用于 hint 字数目标与生成后偏差提示（2026-10-03：服务端 duration_s 字数约束
+ *  未落实，实机 24.8s 原片 155 字 vs 生成 ~100 字） */
+const VOICEOVER_CPS = 6
+
 async function regenerateVoiceover(): Promise<void> {
   const p = (record.value?.products as Array<Record<string, unknown>> | undefined)?.[0]
   if (!p) {
@@ -287,12 +293,15 @@ async function regenerateVoiceover(): Promise<void> {
   }
   regenBusy.value = true
   regenError.value = ''
+  regenWarn.value = ''
   try {
     const productDesc = [p.brand, p.model || p.name, p.category].filter(Boolean).map(String).join(' / ')
+    const dur = shotsTotalDuration(shots.value)
+    const targetChars = Math.round(dur * VOICEOVER_CPS)
     const resp = (await window.tintin.server.post(API_PATHS.copywriting.voiceover, {
       product_desc: productDesc,
-      duration_s: shotsTotalDuration(shots.value),
-      hint: '电商口播，节奏贴近原片，句子完整不拆行',
+      duration_s: dur,
+      hint: `电商口播，节奏贴近原片，句子完整不拆行；全文约 ${targetChars} 字（对应 ${Math.round(dur)} 秒口播），口语化带货风格`,
     })) as Record<string, unknown> | null
     const text = resp?.voiceover ?? resp?.text ?? resp?.content
     if (!text) {
@@ -302,6 +311,13 @@ async function regenerateVoiceover(): Promise<void> {
       return
     }
     voiceoverText.value = String(text)
+    // 字数偏差显式提示（不改数据；服务端 duration_s 字数约束修复前的人工提示）
+    const chars = String(text).replace(/\s/g, '').length
+    const dev = targetChars > 0 ? Math.abs(chars - targetChars) / targetChars : 0
+    if (dev > 0.3) {
+      regenWarn.value = `生成了 ${chars} 字，按 ${Math.round(dur)} 秒口播（${VOICEOVER_CPS} 字/秒）应约 ${targetChars} 字——偏差 ${Math.round(dev * 100)}%，建议重试或直接编辑；已同时向服务端报 duration_s 字数约束问题`
+      clientError('imitation-video', regenWarn.value, { chars, targetChars, dur })
+    }
   } catch (e) {
     regenError.value = `文案生成失败：${(e as Error).message}`
     clientError('imitation-video', regenError.value, e)
@@ -714,6 +730,7 @@ const doneCount = computed(() => shots.value.filter((s) => s.source !== 'generat
         <TButton label="生成口播配音" :loading="ttsBusy" :disabled="!voiceoverText.trim()" @click="generateVoiceAudio" />
         <audio v-if="ttsAudioUrl" :src="ttsAudioUrl" controls preload="auto" class="iv-audio" title="配音结果" />
         <span v-if="regenError" class="iv-err">{{ regenError }}</span>
+        <span v-if="regenWarn" class="iv-warn">{{ regenWarn }}</span>
         <span v-if="ttsError" class="iv-err">{{ ttsError }}</span>
         <span v-if="ttsBindNote" class="muted">{{ ttsBindNote }}</span>
         <span class="muted">整段直发不拆句；新文案按镜自动拆分待服务端口播切分修复（§11-26）</span>
