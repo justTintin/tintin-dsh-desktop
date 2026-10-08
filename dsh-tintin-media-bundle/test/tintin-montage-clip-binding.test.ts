@@ -3,6 +3,7 @@
 //  script_1cafea8187bc；本测试锁定编解码容错口径）
 import { describe, expect, it } from 'vitest'
 import {
+  clipGroupsFromMaterialIds,
   clipGroupsFromScriptShots,
   decodeClipGroups,
   encodeClipGroups,
@@ -61,5 +62,25 @@ describe('clipGroupsFromScriptShots（详情 shots → 逐镜提取，与 normal
       [],
     ])
     expect(clipGroupsFromScriptShots(null)).toEqual([])
+  })
+})
+
+describe('clipGroupsFromMaterialIds（2026-10-06 仿视频桥接：material_id 兜底）', () => {
+  it('clip_groups 有段的镜原样保留；无段镜用 material_id>0 构造 material:// 单段（duration=镜标）', () => {
+    const shots = [
+      { material_id: 41, duration: 3 },
+      { material_id: 0, duration: 3 },
+      { material_id: 42, duration: 0 },
+    ]
+    const groups = [[{ ref: '/split/a_0.mp4', duration: 2.5 }], [], []]
+    expect(clipGroupsFromMaterialIds(shots, groups)).toEqual([
+      [{ ref: '/split/a_0.mp4', duration: 2.5 }],
+      [],
+      [{ ref: 'material://42', duration: 0 }],
+    ])
+  })
+
+  it('material_id 非正整数（0/null/缺失）保持空组', () => {
+    expect(clipGroupsFromMaterialIds([{ material_id: 0 }, {}, { material_id: null as unknown as number }], [])).toEqual([[], [], []])
   })
 })

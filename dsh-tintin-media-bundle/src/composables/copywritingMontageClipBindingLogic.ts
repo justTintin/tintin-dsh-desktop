@@ -80,3 +80,20 @@ export function clipGroupsFromScriptShots(shots: unknown): ClipBindingSeg[][] {
     return decodeClipGroups([cg])[0] || []
   })
 }
+
+/** 绑定恢复兜底（2026-10-06 仿视频桥接）：仿视频生成链把逐镜视频回填在 shots 根级
+ *  material_id、不写 clip_groups——特效包装面板装载仿视频脚本时恢复链拿到全空=整页
+ *  「未绑定素材」。clip_groups 有段的镜原样保留（文案线 0929 方案优先）；无段的镜用
+ *  material_id>0 构造单段 material:// 组（duration=镜标，restoreTabClipGroups 原生
+ *  认识 material:// ref，入池/懒下载/预合成全链复用）。 */
+export function clipGroupsFromMaterialIds(
+  shots: ReadonlyArray<{ material_id?: number; duration?: number }>,
+  groups: ReadonlyArray<ClipBindingSeg[]>,
+): ClipBindingSeg[][] {
+  return shots.map((s, i) => {
+    if (groups[i]?.length) return groups[i]
+    const mid = Number(s.material_id)
+    if (!Number.isInteger(mid) || mid <= 0) return []
+    return [{ ref: `material://${mid}`, duration: Number(s.duration) || 0 }]
+  })
+}

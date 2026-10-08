@@ -22,6 +22,9 @@ import {
   buildStoryboardGenerateBody,
   isStageDReady,
   normalizeServerEnums,
+  parseSixViewEntries,
+  sixViewFileUrl,
+  type SixViewEntry,
   validateGenShots,
   type GenerateStage,
   type ImitationShot,
@@ -47,11 +50,15 @@ export interface ImitateSubmitInput {
 }
 
 export interface GenerateSubmitInput {
+  arollMaterialId?: number
+  arollImage?: string
   scriptId: string
   stage: GenerateStage
   onlyShots?: string[]
   fidelityOverride?: 'fast' | 'balanced' | 'high'
   autoMontage?: boolean
+  /** 产品图 url/路径数组（2026-10-03 用户裁决：第 2 步选产品图后随任务直传，服务端 ≥1 校验） */
+  productImages?: string[]
 }
 
 export function useImitationVideo() {
@@ -78,11 +85,51 @@ export function useImitationVideo() {
     }
   }
 
+  // ── 平台字典（2026-10-03 用户裁决：仿写文案对齐文案混剪——GET /copywriting/platforms，
+  //    platform 直传服务端，平台指引由服务端织入；拉取失败保留当前值）──
+  const ivPlatformOptions = ref<Array<{ name: string; guide: string }>>([])
+  const ivPlatform = ref('抖音')
+  async function loadIvPlatforms(): Promise<void> {
+    try {
+      const res = await serverBridge().get(API_PATHS.copywriting.platforms)
+      const data = (res && typeof res === 'object' ? res : null) as { default?: string; platforms?: Array<{ name?: string; guide?: string }> } | null
+      const list = Array.isArray(data?.platforms) ? data!.platforms! : []
+      if (list.length) {
+        ivPlatformOptions.value = list
+          .filter((x) => x && typeof x.name === 'string' && x.name)
+          .map((x) => ({ name: String(x.name), guide: String(x.guide || '') }))
+        if (typeof data?.default === 'string' && data.default) ivPlatform.value = data.default
+        clientInfo(TAG, `平台字典已加载 n=${ivPlatformOptions.value.length} default=${ivPlatform.value}`)
+      }
+    } catch (e) { /* 拉取失败保留当前值；打点可追溯（铁律 7） */
+      clientError(TAG, '平台字典拉取失败（保留默认抖音）', e)
+    }
+  }
+
+  // ── Seedance 交付包（v4.9 收口：九宫格图一张+逐镜 prompt_zh/camera_zh/seed_base；
+  //    未生成/旧脚本 → null，UI 落占位不兜底造数据）──
+  const storyboardPack = ref<Record<string, unknown> | null>(null)
+  async function loadStoryboardPack(id: string): Promise<void> {
+    if (!id) return
+    try {
+      storyboardPack.value = (await serverBridge().get(API_PATHS.storyboard.storyboardPack(id))) as Record<string, unknown> | null
+    } catch (e) {
+      storyboardPack.value = null
+      clientInfo(TAG, `storyboard-pack 未取到（未生成或旧脚本）：${(e as Error).message}`)
+    }
+  }
+
   // ── Part 1：imitate 提交 + unified 轮询（§4/§5.3）────────────
   const part1TaskId = ref('')
   const part1Phase = ref<'' | 'running' | 'done' | 'failed'>('')
   const part1Error = ref('')
   const part1Note = ref('')
+  /** 拆解进度反馈（2026-10-03 用户裁决：拆解中必须有进度条）：progress=服务端 0-100
+   *  （实测 completed=100），缺省/未知=-1 → UI 走不定态动画；已用时秒表+last_message */
+  const part1Progress = ref(-1)
+  const part1ElapsedSec = ref(0)
+  const part1Message = ref('')
+  let part1StartedAt = 0
   /** Part 1 源素材 id（预上传回填 / material:// 输入解析；供后续产品图等引用） */
   const part1MaterialId = ref('')
   /** Part 1 完整结果（shots[] + 提示词字段——拆解接口=脚本+反推提示词唯一来源） */
@@ -152,6 +199,10 @@ export function useImitationVideo() {
       part1TaskId.value = String(taskId)
       part1Phase.value = 'running'
       part1Error.value = ''
+      part1StartedAt = Date.now()
+      part1ElapsedSec.value = 0
+      part1Progress.value = -1
+      part1Message.value = ''
       clientInfo(TAG, `Part1 已提交 task=${taskId}`)
       startPart1Polling()
       return true
@@ -164,11 +215,16 @@ export function useImitationVideo() {
 
   function startPart1Polling(): void {
     stopPart1Polling()
-    part1Timer = setInterval(async () => {
+    const tick = async (): Promise<void> => {
       try {
         const resp = await serverBridge().get(API_PATHS.tasks.unifiedItem(part1TaskId.value))
         const task = extractTaskObj(resp)
         const info = mapTaskStatus(task.status ?? task.state, task)
+        // 进度/用时/阶段文案同步刷新（running 态 UI 每个轮询周期更新一次）
+        part1ElapsedSec.value = Math.round((Date.now() - part1StartedAt) / 1000)
+        const rawProg = Number((task as Record<string, unknown>).progress)
+        part1Progress.value = Number.isFinite(rawProg) && rawProg >= 0 ? Math.min(100, Math.round(rawProg)) : -1
+        part1Message.value = String((task as Record<string, unknown>).last_message ?? '')
         if (info.phase === 'running') return
         stopPart1Polling()
         if (info.phase === 'failed') {
@@ -196,7 +252,10 @@ export function useImitationVideo() {
       } catch (e) {
         clientError(TAG, `Part1 轮询异常 task=${part1TaskId.value}`, e)
       }
-    }, POLL_INTERVAL_MS)
+    }
+    // 首拍立即执行（不等首个周期）——提交后 UI 即刻进 running 并出进度条
+    void tick()
+    part1Timer = setInterval(() => { void tick() }, POLL_INTERVAL_MS)
   }
 
   // ── 脚本读写（HumanGate① 数据面，§5.3）────────────────────────
@@ -230,6 +289,22 @@ export function useImitationVideo() {
   }
 
   // ── HumanGate②：帧确认 / 手动换帧（multipart，实测口径）──────
+  /** 闸门① 九宫分镜整体确认（v4.3：PUT draft/confirm → draft_status=confirmed，解锁 frames 精稿） */
+  async function confirmDraft(id: string): Promise<boolean> {
+    try {
+      const resp = (await serverBridge().put(API_PATHS.storyboard.draftConfirm(id), {})) as Record<string, unknown> | null
+      if (resp === null || (resp as Record<string, unknown>)?.error) {
+        clientError(TAG, `九宫粗稿确认失败 id=${id}`, { resp })
+        return false
+      }
+      clientInfo(TAG, `九宫粗稿已确认（draft_status=confirmed）id=${id}`)
+      return true
+    } catch (e) {
+      clientError(TAG, `九宫粗稿确认异常 id=${id}`, e)
+      return false
+    }
+  }
+
   async function confirmShotFrames(id: string, name: string): Promise<boolean> {
     const form = new FormData()
     Object.entries(buildFramesConfirmBody()).forEach(([k, v]) => form.append(k, String(v)))
@@ -253,7 +328,8 @@ export function useImitationVideo() {
 
   async function uploadShotFrames(id: string, name: string, form: FormData, action: string): Promise<boolean> {
     try {
-      const resp = await serverBridge().upload(API_PATHS.storyboard.shotFrames(id, name), form)
+      // frames 端点=PUT multipart（POST 会被 405 拒——2026-10-06 实测修复）
+      const resp = await serverBridge().upload(API_PATHS.storyboard.shotFrames(id, name), form, undefined, 'PUT')
       if (resp === null || (resp as Record<string, unknown>)?.error) {
         clientError(TAG, `${action} 失败`, { resp, id, name })
         return false
@@ -268,9 +344,14 @@ export function useImitationVideo() {
 
   // ── Part 2：storyboard_generate 提交 + scheduled 轮询（§5.1）──
   const genTaskId = ref('')
+  /** 最近一次 videos 提交的任务 id（E-1.2「生成任务转草稿」入口用——from-task 只认成片任务；
+   *  A-roll 等后续任务不覆盖它，保证转草稿指向逐镜视频任务） */
+  const videosTaskId = ref('')
   const genPhase = ref<'' | 'running' | 'done' | 'failed'>('')
   const genError = ref('')
   const genResult = ref<Record<string, unknown>>({})
+  /** comfygen job_ids（服务端任务运行中即写 result.job_ids——/comfygen/jobs 精确关联锚点，2026-10-06） */
+  const genJobIds = ref<string[]>([])
 
   let genTimer: ReturnType<typeof setInterval> | null = null
   function stopGenPolling(): void {
@@ -305,9 +386,15 @@ export function useImitationVideo() {
         return false
       }
       genTaskId.value = String(taskId)
+      if (input.stage === 'videos') videosTaskId.value = String(taskId)
       genPhase.value = 'running'
       genError.value = ''
       genResult.value = {}
+      genStage.value = input.stage
+      genStartedAt = Date.now()
+      genElapsedSec.value = 0
+      genProgress.value = -1
+      genMessage.value = ''
       clientInfo(TAG, `storyboard_generate 已提交 task=${genTaskId.value} stage=${input.stage}`)
       startGenPolling()
       return true
@@ -318,13 +405,28 @@ export function useImitationVideo() {
     }
   }
 
+  // ── 生成进度反馈（2026-10-04 用户裁决：分镜头确认步与第 1 步同款进度条）──
+  const genProgress = ref(-1)      // 服务端 0-100；缺省/未知=-1 → UI 不定态
+  const genElapsedSec = ref(0)
+  const genMessage = ref('')
+  /** 最近提交的生成阶段（storyboard/frames/videos/aroll）——UI 按阶段归位进度显示 */
+  const genStage = ref<GenerateStage | ''>('')
+  let genStartedAt = 0
+
   function startGenPolling(): void {
     stopGenPolling()
-    genTimer = setInterval(async () => {
+    const tick = async (): Promise<void> => {
       try {
         const resp = await serverBridge().get(API_PATHS.scheduled.tasksItem(genTaskId.value))
         const task = extractTaskObj(resp)
         const info = mapTaskStatus(task.status ?? task.state, task)
+        genElapsedSec.value = Math.round((Date.now() - genStartedAt) / 1000)
+        const rawProg = Number((task as Record<string, unknown>).progress)
+        genProgress.value = Number.isFinite(rawProg) && rawProg >= 0 ? Math.min(100, Math.round(rawProg)) : -1
+        genMessage.value = String((task as Record<string, unknown>).last_message ?? '')
+        const resObj = (task.result ?? {}) as Record<string, unknown>
+        const jids = Array.isArray(resObj.job_ids) ? resObj.job_ids.map((x) => String(x)) : []
+        if (jids.length) genJobIds.value = jids
         if (info.phase === 'running') return
         stopGenPolling()
         genPhase.value = info.phase === 'done' ? 'done' : 'failed'
@@ -335,7 +437,9 @@ export function useImitationVideo() {
       } catch (e) {
         clientError(TAG, `生成轮询异常 task=${genTaskId.value}`, e)
       }
-    }, POLL_INTERVAL_MS)
+    }
+    void tick()
+    genTimer = setInterval(() => { void tick() }, POLL_INTERVAL_MS)
   }
 
   /** A-roll 对轨 warning（§3：±15% 仅提示；voice 时长由脚本记录提供） */
@@ -343,18 +447,112 @@ export function useImitationVideo() {
     return arollTimelineWarning(shots, voiceDurSec)
   }
 
+  // ── 六视图（§11-51：选品/上传产品图触发；九宫格回填前左栏展示，2026-10-08 用户裁决上下共存）──
+  const sixViewTaskId = ref('')
+  const sixViewPhase = ref<'' | 'running' | 'done' | 'failed'>('')
+  const sixViews = ref<SixViewEntry[]>([])
+  const sixViewError = ref('')
+  let sixViewTimer: ReturnType<typeof setInterval> | null = null
+  function stopSixViewPolling(): void {
+    if (sixViewTimer) { clearInterval(sixViewTimer); sixViewTimer = null }
+  }
+  onBeforeUnmount(stopSixViewPolling)
+
+  /** 提交六视图编排并轮询（productImages=第 2 步选品图，缺省服务端读脚本选品留痕；
+   *  服务端 400 文案自带指引——「请求未传 product_images 且脚本无选品留痕」） */
+  async function submitSixView(productImages: string[] = []): Promise<boolean> {
+    if (!scriptId.value) {
+      sixViewPhase.value = 'failed'
+      sixViewError.value = '尚无脚本（先完成第 1 步拆解）——六视图挂脚本提交'
+      clientError(TAG, sixViewError.value)
+      return false
+    }
+    stopSixViewPolling()
+    sixViewPhase.value = 'running'
+    sixViewError.value = ''
+    try {
+      const resp = (await serverBridge().post(API_PATHS.storyboard.sixView(scriptId.value), {
+        product_images: productImages,
+      })) as Record<string, unknown> | null
+      const syncUrls = parseSixViewEntries((resp as Record<string, unknown>)?.result ?? resp)
+        .map((e) => ({ ...e, url: e.url || sixViewFileUrl(scriptId.value, e.view) }))
+      if (syncUrls.length) {
+        sixViews.value = syncUrls
+        sixViewPhase.value = 'done'
+        clientInfo(TAG, `六视图同步返回 ${syncUrls.length} 张`)
+        return true
+      }
+      const taskId = resp && (resp.task_id ?? resp.id)
+      if (!taskId || (typeof taskId !== 'string' && typeof taskId !== 'number')) {
+        sixViewPhase.value = 'failed'
+        sixViewError.value = `六视图提交响应缺 task_id（实得字段：${resp ? Object.keys(resp).join(',') : 'null'}）`
+        clientError(TAG, sixViewError.value, { resp })
+        return false
+      }
+      sixViewTaskId.value = String(taskId)
+      clientInfo(TAG, `六视图已提交 task=${sixViewTaskId.value}`)
+      startSixViewPolling()
+      return true
+    } catch (e) {
+      sixViewPhase.value = 'failed'
+      sixViewError.value = `六视图提交失败：${(e as Error).message}`
+      clientError(TAG, sixViewError.value, e)
+      return false
+    }
+  }
+
+  function startSixViewPolling(): void {
+    stopSixViewPolling()
+    const tick = async (): Promise<void> => {
+      try {
+        const resp = (await serverBridge().get(API_PATHS.storyboard.sixViewResult(sixViewTaskId.value))) as Record<string, unknown> | null
+        const st = String(resp?.status ?? '').toLowerCase()
+        if (st === 'running' || st === 'pending' || st === '') return
+        stopSixViewPolling()
+        if (st === 'failed' || st === 'error') {
+          sixViewPhase.value = 'failed'
+          sixViewError.value = String(resp?.error || '六视图任务失败')
+          clientError(TAG, `六视图任务失败 task=${sixViewTaskId.value}`, { resp })
+          return
+        }
+        const urls = parseSixViewEntries((resp?.result ?? resp) as Record<string, unknown>)
+          .map((e) => ({ ...e, url: e.url || sixViewFileUrl(scriptId.value, e.view) }))
+        if (!urls.length) {
+          sixViewPhase.value = 'failed'
+          sixViewError.value = `六视图完成但响应无视图列表（实得字段：${resp ? Object.keys(resp).join(',') : 'null'}）`
+          clientError(TAG, sixViewError.value, { resp })
+          return
+        }
+        sixViews.value = urls
+        sixViewPhase.value = 'done'
+        clientInfo(TAG, `六视图完成 ${urls.length} 张`)
+      } catch (e) {
+        clientError(TAG, '六视图轮询异常（下个周期重试）', e)
+      }
+    }
+    void tick()
+    sixViewTimer = setInterval(() => { void tick() }, 2000)
+  }
+
   return {
     // 枚举
     enums, enumsError, loadEnums,
+    // 平台字典（仿写文案）
+    ivPlatformOptions, ivPlatform, loadIvPlatforms,
+    // Seedance 交付包（九宫格图+提示词）
+    storyboardPack, loadStoryboardPack,
     // Part 1
     part1TaskId, part1Phase, part1Error, part1Note, part1MaterialId, part1Result, scriptId, scriptVersion, shotCount,
+    part1Progress, part1ElapsedSec, part1Message,
     submitImitate,
     // 脚本（HumanGate①）
     loadScript, saveScript,
     // HumanGate②
-    confirmShotFrames, replaceShotFrames,
+    confirmShotFrames, replaceShotFrames, confirmDraft,
     // Part 2
-    genTaskId, genPhase, genError, genResult,
+    genTaskId, genPhase, genError, genResult, genProgress, genElapsedSec, genMessage, genStage, genJobIds, videosTaskId,
+    // 六视图（§11-51）
+    sixViewTaskId, sixViewPhase, sixViews, sixViewError, submitSixView,
     submitGenerate, preflightGenerate, timelineWarning,
   }
 }

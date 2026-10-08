@@ -40,6 +40,7 @@ import { useCopywritingMontageTextFx } from './useCopywritingMontageTextFx'
 import type { SplitSceneRow } from '../copywritingMontageStep1SplitLogic'
 import {
   encodeClipGroups,
+  clipGroupsFromMaterialIds,
   clipGroupsFromScriptShots,
   type ClipBindingSeg,
 } from '../copywritingMontageClipBindingLogic'
@@ -1168,28 +1169,35 @@ function clearVoiceProgressListener(): void {
     }
   }
   /** 应用选中的脚本：分镜与旁白整组回填为新分镜 tab（同脚本已开 → 直接切换） */
-  function applySelectedScript(): void {
+  /** 应用选中的脚本：分镜与旁白整组回填为新分镜 tab（同脚本已开 → 直接切换）。
+   *  重建路径返回绑定恢复的 Promise（2026-10-06 仿视频交付步需等入池完成再生成方案；
+   *  其余分支/既有火忘调用不受影响）。silent=程序化装载静默（2026-10-06 用户报障：
+   *  仿视频装载是"以服务端为准重建"，弹「已切换分镜/已应用脚本」全是噪声） */
+  function applySelectedScript(opts?: { silent?: boolean }): Promise<void> | void {
+    const quiet = !!opts?.silent
     const id = scriptPickDlg.value.selectedId
     const detail = pickDetail.value.detail
     if (!id || !detail || !detail.shots.length) {
-      notify('未选择脚本', '请先在左侧列表选择一个脚本。')
+      if (!quiet) notify('未选择脚本', '请先在左侧列表选择一个脚本。')
       return
     }
     const existing = storyboards.value.find((s) => s.scriptId === id)
     if (existing) {
       activeStoryboardId.value = existing.id
       scriptPickDlg.value.show = false
-      notify('已切换分镜', `脚本已在分镜列表中，已切换到「${existing.name}」。`)
+      if (!quiet) notify('已切换分镜', `脚本已在分镜列表中，已切换到「${existing.name}」。`)
       return
     }
     const tab = addStoryboardTab({ name: detail.topic || '', scriptId: id, topic: detail.topic || '', narrative: shotsNarrationText(detail.shots), shots: detail.shots, productBrief: productBriefOf(detail.product) })
     if (!tab) {
-      notify('分镜数量已达上限', `最多支持 ${COPY_STORYBOARD_MAX} 个分镜脚本，请先删除部分分镜。`)
+      if (!quiet) notify('分镜数量已达上限', `最多支持 ${COPY_STORYBOARD_MAX} 个分镜脚本，请先删除部分分镜。`)
       return
     }
     // 2026-09-29 跨机绑定恢复：脚本带 clip_groups → 按服务端标识入池重建 clipGroups
+    // 2026-10-06 仿视频桥接：clip_groups 缺失镜用根级 material_id 兜底（仿视频生成链
+    // 回填 material_id 不写 clip_groups——缺失时恢复链全空=特效包装整页「未绑定素材」）
     // （异步不阻塞 tab 创建；素材已不在服务端时该段预合成会点名，重新智能匹配可重建）
-    void restoreTabClipGroups(tab, detail.clipGroups)
+    const restored = restoreTabClipGroups(tab, clipGroupsFromMaterialIds(detail.shots, detail.clipGroups))
     // 2026-09-30 跨机口播恢复：脚本带 voice_audio_id → 从音频库下载回填 tab.voiceWav
     void restoreTabVoiceFromLibrary(tab, detail.voiceAudioId, detail.voiceDurSec, {
       ensureServerUrl,
@@ -1198,7 +1206,8 @@ function clearVoiceProgressListener(): void {
     })
     scriptPickDlg.value.show = false
     statusText.value = `完成： 已应用脚本「${detail.topic || id}」（${detail.shots.length} 镜）`
-    notify('已应用脚本', `分镜与旁白已回填（${detail.shots.length} 镜），可在分镜卡上继续调整。`)
+    if (!quiet) notify('已应用脚本', `分镜与旁白已回填（${detail.shots.length} 镜），可在分镜卡上继续调整。`)
+    return restored
   }
   /** 批量克隆全部分镜的旁白（2026-09-21 用户裁决：二/三步批量处理——每个分镜脚本
    *  一条整段声音；进度按 tab 聚合；单 tab 失败不阻断其余。产物落在各 tab.voiceWav） */

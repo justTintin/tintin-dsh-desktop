@@ -1,11 +1,13 @@
 {
-  "dsh-tintin-bundle/index.js": 1420,
-  "dsh-tintin-bundle/client.js": 1515,
-  "dsh-tintin-bundle/lib/jianying/jianying-exporter.js": 2193,
-  "dsh-tintin-bundle/lib/montage/final-ipc.js": 1953,
-  "dsh-tintin-bundle/lib/montage/voice-tts-logic.js": 1458,
-  "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStep2Panel.vue": 1332,
-  "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStep4Panel.vue": 1236,
-  "dsh-tintin-media-bundle/src/composables/copywritingMontage/useCopywritingMontageStep3Voice.ts": 1681,
-  "dsh-tintin-media-bundle/src/composables/copywritingMontage/useCopywritingMontageStep4Final.ts": 1211
+ "dsh-tintin-bundle/index.js": 1429,
+ "dsh-tintin-bundle/client.js": 1528,
+ "dsh-tintin-bundle/lib/jianying/jianying-exporter.js": 2193,
+ "dsh-tintin-bundle/lib/montage/final-ipc.js": 1953,
+ "dsh-tintin-bundle/lib/montage/voice-tts-logic.js": 1458,
+ "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStep2Panel.vue": 1332,
+ "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStep4Panel.vue": 1236,
+ "dsh-tintin-media-bundle/src/composables/copywritingMontage/useCopywritingMontageStep3Voice.ts": 1690,
+ "dsh-tintin-media-bundle/src/composables/copywritingMontage/useCopywritingMontageStep4Final.ts": 1213,
+ "dsh-tintin-media-bundle/src/components/media-tools/ImitationVideo.vue": 1304,
+ "dsh-tintin-media-bundle/src/components/media-tools/ImitationFxPackPanel.vue": 1228
 }

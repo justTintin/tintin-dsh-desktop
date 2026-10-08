@@ -19,6 +19,7 @@
 /* ── 上下文条目类型（源 workbenchChatContext.ts L177-204 原样） ── */
 
 export interface CtxProductItem {
+  [key: string]: unknown
   id?: string
   category?: string
   brand?: string

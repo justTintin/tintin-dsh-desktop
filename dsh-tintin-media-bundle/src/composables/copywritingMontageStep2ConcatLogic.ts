@@ -419,138 +419,106 @@ export function buildVoiceoverPayload(opts: {
   return payload
 }
 
-/** 解析 voiceover 响应（实测契约 {text,chars,budget,retried}），空文案报错 */
+/** 解析 voiceover 响应为单稿正文：优先顶层 text（旧版/锁定写法单稿形态）；
+ *  十稿全量形态（variants[]，2026-10-03 用户裁决）取第一种成功稿——Step2 逐条方案
+ *  本就是自动填充，与旧版自动语义一致；十选一交互归 Step1 文案编写页。空文案报错 */
 export function parseVoiceoverResponse(resp: unknown): string {
-  const text = String((resp as { text?: unknown } | null | undefined)?.text ?? '').trim()
-  if (!text) throw new Error('服务端未返回口播文案')
-  return text
+  const r = resp as { text?: unknown; variants?: unknown } | null | undefined
+  const direct = String(r?.text ?? '').trim()
+  if (direct) return direct
+  if (r && Array.isArray(r.variants)) {
+    for (const v of r.variants as Array<Record<string, unknown>>) {
+      const text = String(v?.text ?? '').trim()
+      if (text) return text
+    }
+  }
+  throw new Error('服务端未返回口播文案')
 }
 
-// ── 文案编写页提示词构建器（2026-09-21 用户裁决：按参考界面重排——高级脚本设置
-//    （生成方式/段落数量/自定义要求/系统提示）+ AI 生成文案与关键词）──────────
+// ── Step1 十稿全量（2026-10-03 用户裁决：服务端每次返回 10 种文案写法，客户端挑选
+//    确认；同日裁决：场景选择与时长限制自 Step1 删除——写法维度由服务端 FORMULAS
+//    承担、时长走服务端缺省预算；平台=结构化参数直传）────────────────────────
+// 契约（server/api/copywriting_api.py 实读 2026-10-03）：POST /copywriting/voiceover
+//   formula 缺省=十稿全量（每种写法一稿，单稿失败该稿带 error 不拖垮整体，全部失败 502）
+//   formula 锁定=单稿（客户端选定写法后重出）；GET /copywriting/formulas 查写法字典
+// 兼容：活服务端未部署新版时响应为旧版单稿形态（顶层 text，无 variants 键）——双形态都认。
 
-/** 系统提示默认值（2026-09-21 用户定稿：Video Script Generator 角色式提示词，逐字） */
-export const SCRIPT_SYSTEM_PROMPT_DEFAULT = [
-  '# Role: Video Script Generator',
-  '',
-  '## Goals:',
-  'Generate a script for a video, depending on the subject of the video.',
-  '',
-  '## Constrains:',
-  '1. the script is to be returned as a string with the specified number of paragraphs.',
-  '2. do not under any circumstance reference this prompt in your response.',
-  '3. get straight to the point, don\'t start with unnecessary things like, "welcome to this video".',
-  '4. you must not include any type of markdown or formatting in the script, never use a title.',
-  '5. only return the raw content of the script.',
-  '6. do not include "voiceover", "narrator" or similar indicators of what should be spoken at the beginning of each paragraph or line.',
-  '7. you must not mention the prompt, or anything about the script itself. also, never talk about the amount of paragraphs or lines. just write the script.',
-  '8. respond in the same language as the video subject.',
-].join('\n')
+/** 候选稿：一种文案写法一条 */
+export interface VoiceoverCandidate {
+  /** 文案写法名（痛点式/开箱实测式/测评对比式/反常识式/价格冲击式/成分背书式/清单盘点式/用户见证式/干货教程式/剧情植入式） */
+  formula: string
+  /** 文案正文 */
+  text: string
+  /** 实际字数（响应缺失时按正文长度兜底） */
+  chars: number
+  /** 预估口播时长（秒，服务端按 字数/6语速 估算一位小数（2026-10-07 统一口径已上线，
+   *  探针 85/14.2 实证；客户端 VOICEOVER_CPS 同为 6）；缺失不显示） */
+  durationS?: number
+}
 
-/** 旧版默认提示词（同日早版 Constraints 七条；仅供 localStorage 一次性迁移比对——
- *  存储值恰等于它时升级为新默认，用户自定义过的提示词不动） */
-export const SCRIPT_SYSTEM_PROMPT_LEGACY_DEFAULT = [
-  '## Constraints:',
-  '1. The script is to be returned as a string with the specified number of paragraphs.',
-  '2. Do not under any circumstance reference this prompt in your response.',
-  '3. Get straight to the point, don\'t start with unnecessary things like, "welcome to this video!"',
-  '4. You must not include any type of markdown or formatting in the script, never use a title.',
-  '5. Only return the core content of the script. Do not include OTF elements such as preface.',
-  '6. I will provide the script length and I would like you to stay on the script topic at that length.',
-  '7. You must not mention the prompt, or anything about the script itself. Also, never talk about the amount of paragraphs or lines, just write the script.',
-].join('\n')
+export interface VoiceoverCandidatesResult {
+  /** 可选稿：≥2 时客户端弹窗挑选确认；=1 时可直接采用免弹窗 */
+  candidates: VoiceoverCandidate[]
+  /** 出错稿写法名（十稿全量下单稿失败不拖垮整体，服务端该稿带 error） */
+  failedFormulas: string[]
+  /** 响应为单稿形态（顶层 text，旧版服务端/锁定写法）——调用方可直接采用 */
+  single: boolean
+}
+
+const posNumOrUndef = (v: unknown): number | undefined => {
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : undefined
+}
+
+/** 归一 voiceover 响应为候选稿列表：十稿全量（variants[]，error 稿滤除进 failedFormulas）
+ *  与单稿（顶层 text）双形态都认；两者皆非 → 空结果（调用方按响应实得键名报错） */
+export function voiceoverCandidatesFromResponse(resp: unknown): VoiceoverCandidatesResult {
+  const out: VoiceoverCandidatesResult = { candidates: [], failedFormulas: [], single: false }
+  const r = resp as { variants?: unknown; text?: unknown; chars?: unknown; duration_s?: unknown; formula?: unknown } | null | undefined
+  if (r && Array.isArray(r.variants)) {
+    for (const v of r.variants as Array<Record<string, unknown>>) {
+      const name = String(v?.formula ?? '').trim()
+      const text = String(v?.text ?? '').trim()
+      if (text) {
+        const chars = Number(v?.chars)
+        out.candidates.push({
+          formula: name,
+          text,
+          chars: Number.isFinite(chars) && chars > 0 ? chars : text.length,
+          durationS: posNumOrUndef(v?.duration_s),
+        })
+      } else {
+        out.failedFormulas.push(name)
+      }
+    }
+    return out
+  }
+  const text = String(r?.text ?? '').trim()
+  if (text) {
+    const chars = Number(r?.chars)
+    out.single = true
+    out.candidates.push({
+      formula: String(r?.formula ?? '').trim(),
+      text,
+      chars: Number.isFinite(chars) && chars > 0 ? chars : text.length,
+      durationS: posNumOrUndef(r?.duration_s),
+    })
+  }
+  return out
+}
+
+/** 产品描述组包（Step1 生成入参 product_desc；与 buildVoiceoverPayload 同口径：
+ *  品牌/产品/型号「，」连接，全空时回退补充卖点，再空返回 '' 由调用方校验报错） */
+export function productDescFromInfo(info: { brand?: string; product?: string; modelName?: string; extra?: string }): string {
+  const s = (v: unknown) => String(v ?? '').trim()
+  const parts = [s(info?.brand), s(info?.product), s(info?.modelName)].filter(Boolean)
+  return parts.join('，') || s(info?.extra)
+}
 
 /** 关键词提取固定系统提示（页面「系统提示」仅约束文案生成，关键词用内置口径） */
 export const KEYWORDS_SYSTEM_PROMPT =
   '你是视频关键词提取助手。从用户给出的视频文案中提取适合作为视频文字模板/花字命中依据的关键词：' +
   '只保留在文案中原文出现的词语，8-15 个，按出现顺序用中文逗号「，」分隔返回，不要序号、不要解释、不要任何其他内容。'
-
-/** 场景选项（2026-09-21 用户裁决：场景选择——通用/口播带货/产品讲解/种草推荐；
- *  场景指令随系统提示一并发给 LLM） */
-/** 场景时长节奏基准（2026-09-21 用户裁决：口播约 4 字/秒） */
-export const NARRATION_CHARS_PER_SEC = 4
-
-export interface ScriptSceneOption {
-  label: string
-  value: string
-  /** 并入 system 提示词的场景指令 */
-  directive: string
-  /** 该场景的建议时长（秒）：场景切换时作为「建议时长」默认值 */
-  defaultSec: number
-}
-
-export const SCRIPT_SCENE_OPTIONS: ScriptSceneOption[] = [
-  {
-    label: '通用', value: 'general', defaultSec: 30,
-    directive: '不限定具体场景：按产品信息自然撰写一条通用的产品视频口播文案。',
-  },
-  {
-    label: '口播带货', value: 'live_pitch', defaultSec: 30,
-    directive: '口播带货场景：真人出镜口播节奏，开场即抓注意力，强化卖点与行动号召（引导下单），语气有感染力、节奏紧凑。',
-  },
-  {
-    label: '产品讲解', value: 'explain', defaultSec: 45,
-    directive: '产品讲解场景：围绕产品功能、参数与使用体验展开讲解，信息密度高，专业可信，适合深度介绍。',
-  },
-  {
-    label: '种草推荐', value: 'seeding', defaultSec: 40,
-    directive: '种草推荐场景：第一人称真实体验口吻，突出使用感受、适用人群与使用场景，柔和种草，弱化叫卖感。',
-  },
-]
-
-/** 组最终 system 提示词：页面可编辑系统提示为基底，依次追加场景指令、产品信息块与
- *  自定义文案要求（均为可选——产品信息全空时省略该块；「预览最终提示词」展示的即此合并结果） */
-export function buildScriptSystemPrompt(base: string, opts: {
-  scene?: string
-  brand?: string
-  product?: string
-  modelName?: string
-  extra?: string
-  customRequirement?: string
-  suggestSec?: number
-  /** 投放平台名（2026-10-03 用户裁决：场景后平台下拉，默认抖音） */
-  platform?: string
-  /** 平台口播风格指引（GET /copywriting/platforms 的 guide，服务端字典下发） */
-  platformGuide?: string
-}): string {
-  const parts = [String(base || '').trim()]
-  const scene = SCRIPT_SCENE_OPTIONS.find((o) => o.value === opts.scene) || SCRIPT_SCENE_OPTIONS[0]
-  if (scene) parts.push(`## 场景\n${scene.directive}`)
-  // 投放平台（2026-10-03：场景后平台下拉；平台口播风格指引织入提示词——
-  // 与服务端 /copywriting/voiceover 的 platform 参数同源语义，字典同 /copywriting/platforms）
-  const platformName = String(opts.platform ?? '').trim()
-  if (platformName) {
-    const guide = String(opts.platformGuide ?? '').trim()
-    parts.push(guide ? `## 投放平台\n${platformName}。${guide}` : `## 投放平台\n${platformName}`)
-  }
-  // 建议时长（2026-09-21 用户裁决：时长控制并入提示词；口播约 4 字/秒）
-  const suggestRaw = Math.round(Number(opts.suggestSec) || 0)
-  const suggest = suggestRaw >= 5 ? suggestRaw : 0 // 未传/过短 → 不出建议时长块
-  if (suggest > 0) {
-    parts.push(`## 建议时长\n约 ${suggest} 秒（口播约 ${NARRATION_CHARS_PER_SEC} 字/秒，正文控制在 ${suggest * NARRATION_CHARS_PER_SEC} 字左右）。`)
-  }
-  const s = (v: unknown) => String(v ?? '').trim()
-  const info = [s(opts.brand), s(opts.product), s(opts.modelName)].filter(Boolean).join('，')
-  const extra = s(opts.extra)
-  const infoLines = [
-    info ? `产品：${info}` : '',
-    extra ? `核心卖点：${extra}` : '',
-  ].filter(Boolean)
-  if (infoLines.length) parts.push(`## 产品信息\n${infoLines.join('\n')}`)
-  if (s(opts.customRequirement)) parts.push(`## 文案要求\n${s(opts.customRequirement)}`)
-  return parts.join('\n\n')
-}
-
-/** 组文案生成 user prompt（产品/场景已并入 system，这里只给脚本长度与产出指令） */
-export function buildScriptUserPrompt(opts: { paragraphCount: number }): string {
-  const n = Math.max(1, Math.floor(Number(opts.paragraphCount) || 1))
-  return `脚本长度：${n} 个段落。\n请按以上要求写一条视频口播文案，直接返回文案正文。`
-}
-
-/** 组关键词提取 user prompt（文案全文随消息给出） */
-export function buildKeywordsUserPrompt(copyText: string): string {
-  return `请从以下视频文案中提取关键词：\n${String(copyText || '').trim()}`
-}
 
 // ── 分镜×素材自动分配池（2026-09-21 用户裁决：素材来源将来含本地上传/在线素材/
 //    在线搜索/AI 生成——分配统一走本池，并按 hash 去重）──

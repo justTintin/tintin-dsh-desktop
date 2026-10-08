@@ -1,53 +1,31 @@
 <script setup lang="ts">
 // ═════════════════════════════════════════════════════════════
 // CopywritingStep1Panel.vue — 文案混剪 Step1 文案编写面板
-// 2026-09-21 用户裁决：按参考界面重排——高级脚本设置（生成方式/段落数量/自定义要求/
-// 系统提示）+ AI 生成视频文案与关键词；原「选择素材 + 智能镜头分割」自本页删除
-// （分割/素材编排仍保留在 useCopywritingMontageStep1Split，供「镜头重组」页链路使用）。
-// 状态经 inject 解构回原名（零改动）；本页提示词组装与生成在 useCopywritingMontage。
+// 2026-10-03 用户裁决：①场景选择与时间限制删除——写法维度由服务端 FORMULAS 承担
+// （POST /copywriting/voiceover 十稿全量），时长走服务端缺省预算；本行保留平台下拉。
+// ②生成改调服务端十稿全量：每次返回约 10 种文案写法，客户端弹窗挑选确认一种写入
+// 文案框（单稿形态直接采用免弹窗）。③高级脚本设置整体删除（自定义文案要求随入口
+// 退役，hint 不传）；原「产品/高级设置」+「平台/AI 生成」两行合一行，AI 生成右对齐。
+// 状态经 inject 解构回原名（零改动）；生成编排在 useCopywritingMontage。
 // ═════════════════════════════════════════════════════════════
-import { ref, computed, onMounted, inject, nextTick } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import TButton from '@/components/common/TButton.vue'
 import CopywritingStoryboard from './CopywritingStoryboard.vue'
-import TSelect from '@/components/common/TSelect.vue'
 import VdStepBar from '../VdStepBar.vue'
 import WbPickProductDialog from '@/components/workbench/WbPickProductDialog.vue'
+import VoiceoverPickerDialog from '../VoiceoverPickerDialog.vue'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 
 const shell = inject(copywritingMontageShellKey)!
 const { step, go, steps } = shell
 const {
-  // 文案编写（2026-09-21 用户裁决：高级脚本设置 + AI 生成视频文案与关键词）
+  // 文案编写（2026-10-03 用户裁决：平台选择 + 服务端十稿全量，客户端挑选确认）
   sharedProductInfo, applyScriptProduct, clearScriptProduct,
-  manualCopy, manualCopyBusy, suggestDuration, activeNarrative,
-  scriptProvider, scriptProviderOptions, paragraphCount, customRequirement, systemPrompt,
-  scriptScene, SCRIPT_SCENE_OPTIONS,
+  manualCopy, manualCopyBusy, activeNarrative,
   scriptPlatform, platformOptions, loadPlatforms,
-  resetSystemPrompt, promptPreviewDlg, openPromptPreview, closePromptPreview,
-  genScriptAndKeywords, loadScriptProviders,
+  voiceoverCandidates, voiceoverFailedFormulas, voiceoverDlgOpen, voiceoverSelectedIdx, closeVoiceoverDlg,
+  genVoiceoverCandidates, confirmVoiceoverCandidate,
 } = shell.s
-
-/** 高级脚本设置弹窗（2026-09-21 用户裁决：高级设置改弹出窗；场景选择置于入口之后） */
-const showAdvDlg = ref(false)
-
-// 临时诊断（2026-09-28 弹窗"无法弹出"连环报障）：error 级经 env:log 落
-// harness.log。三段埋点切开链路——①点击是否到达（open requested）；
-// ②teleport 目标与旧形态残留（scope/mask 计数，count>1 = 多实例吸收）；
-// ③渲染后 mask 是否真进 DOM 且带目标父级。根因定位后整段移除。
-function openAdvDlg(): void {
-  const scopes = document.querySelectorAll('.tintin-media-scope')
-  const masks = document.querySelectorAll('.modal-mask')
-  const overlay = document.getElementById('tintin-view-overlay')
-  // eslint-disable-next-line no-console
-  console.error('[tintin][adv-dlg] open requested; scopes=', scopes.length, 'pre-masks=', masks.length, 'overlay=', !!overlay, 'overlayDisplay=', overlay ? getComputedStyle(overlay).display : 'n/a', 'activeTab=', document.querySelector('#tintin-top-tabs [data-active="true"]')?.textContent ?? document.getElementById('tintin-top-tabs')?.innerHTML.slice(0, 120))
-  showAdvDlg.value = true
-  nextTick(() => {
-    const mask = document.querySelector('.modal-mask')
-    const cs = mask ? getComputedStyle(mask) : null
-    // eslint-disable-next-line no-console
-    console.error('[tintin][adv-dlg] after tick; maskInDom=', !!mask, 'maskCount=', document.querySelectorAll('.modal-mask').length, 'z=', cs?.zIndex, 'display=', cs?.display, 'parent=', mask?.parentElement?.className?.slice?.(0, 60) ?? 'none', 'rect=', mask ? JSON.stringify(mask.getBoundingClientRect()) : 'n/a')
-  })
-}
 
 /* ── 选择产品（公共弹窗；选中后显示在按钮后面，写入 sharedProductInfo 单一来源）── */
 const pickDlgVisible = ref(false)
@@ -58,52 +36,42 @@ const productLabel = computed(() => {
   return extras.length ? `${base}（${extras.length} 条卖点）` : base
 })
 
-onMounted(() => { void loadScriptProviders(); void loadPlatforms() })
+onMounted(() => { void loadPlatforms() })
 </script>
 
 <template>
       <section class="card">
         <VdStepBar :step="step" :steps="steps" @go="go" />
 
-        <!-- 选择产品（公共弹窗；选中产品显示在其右侧，写入 sharedProductInfo 供本页生成与后续链路共用）
-             2026-09-25 用户裁决：「高级脚本设置」入口移到本行右对齐 -->
-        <div class="row product-row">
+        <!-- 产品+平台+AI 生成行（2026-10-03 用户裁决：高级脚本设置删除，原两行合一行，
+             AI 生成按钮右对齐；平台=结构化参数直传，字典 GET /copywriting/platforms） -->
+        <div class="row action-row">
           <TButton label="选择产品" icon="search" @click="pickDlgVisible = true" />
           <template v-if="productLabel">
             <span class="product-chip" :title="productLabel">当前产品：{{ productLabel }}</span>
             <button class="product-clear" title="清除已选产品" @click="clearScriptProduct">×</button>
           </template>
-          <span class="spacer"></span>
-          <TButton label="高级脚本设置" icon="settings" variant="secondary" @click="openAdvDlg" />
-        </div>
-
-        <!-- 场景选择行（2026-09-21 用户裁决：场景选择在高级设置入口之后；2026-09-25 入口移走后本行保留场景/时长/AI 生成）
-             场景指令并入发给 LLM 的系统提示词 -->
-        <div class="row adv-row">
-          <label class="field-label">场景</label>
-          <span class="info-i" title="场景指令与产品信息会并入系统提示词一并发给大模型（「预览最终提示词」可查看合并结果）">ⓘ</span>
-          <TSelect v-model="scriptScene" :options="SCRIPT_SCENE_OPTIONS" class="scene-select" />
-          <!-- 投放平台（2026-10-03 用户裁决：场景后平台下拉，默认抖音=服务端 default；
-               平台口播风格指引织入系统提示词，字典=GET /copywriting/platforms） -->
           <label class="field-label">平台</label>
-          <select v-model="scriptPlatform" class="scene-select" title="投放平台（平台口播风格指引将并入系统提示词）">
+          <select v-model="scriptPlatform" class="scene-select" title="投放平台（平台口播风格指引由服务端织入生成）">
             <option v-for="p in platformOptions" :key="p.name" :value="p.name">{{ p.name }}</option>
             <option v-if="!platformOptions.length" value="抖音">抖音</option>
           </select>
-          <label class="field-label">
-            建议时长
-            <span class="info-i" title="按口播约 4 字/秒估算；切换场景时自动取该场景默认值，可手动调整">ⓘ</span>
-          </label>
-          <input v-model.number="suggestDuration" type="number" min="5" max="600" step="5" class="input w70" />
-          <span class="field-label">秒</span>
-          <!-- 2026-09-21 用户裁决：AI 生成文案和关键词按钮放到场景后面同一行 -->
-          <TButton label="✨ 点击使用AI生成视频文案" :loading="manualCopyBusy" @click="genScriptAndKeywords" />
+          <span class="spacer"></span>
+          <!-- 未选产品禁用（2026-10-03 用户裁决：生成按选中产品出 10 稿，产品必选——
+               服务端 product_desc 必填；选中后持久化，重启保留） -->
+          <TButton
+            label="✨ 点击使用AI生成视频文案"
+            :loading="manualCopyBusy"
+            :disabled="!productLabel"
+            :title="productLabel ? '' : '请先「选择产品」——服务端按产品信息生成 10 种文案写法'"
+            @click="genVoiceoverCandidates"
+          />
         </div>
 
         <div class="field">
           <label class="field-label">
             视频文案（可选）
-            <span class="info-i" title="可直接手动编写，或点击上方按钮由 AI 生成。2026-09-21 用户裁决：口播文案与分镜脚本绑定——有分镜脚本时本框即激活分镜的旁白（克隆声音以此为准），无分镜时为全局草稿（随本地设置保存）">ⓘ</span>
+            <span class="info-i" title="可直接手动编写，或点击上方按钮由 AI 生成 10 种文案写法后挑选一种。口播文案与分镜脚本绑定——有分镜脚本时本框即激活分镜的旁白（克隆声音以此为准），无分镜时为全局草稿（随本地设置保存）">ⓘ</span>
           </label>
           <textarea
             v-model="activeNarrative"
@@ -133,74 +101,24 @@ onMounted(() => { void loadScriptProviders(); void loadPlatforms() })
         @pick="applyScriptProduct"
       />
 
-      <!-- 高级脚本设置弹窗（2026-09-21 用户裁决：改弹出窗；表单项实时绑定即时生效） -->
-      <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
-        <div v-if="showAdvDlg" class="modal-mask" @click.self="showAdvDlg = false">
-          <div class="modal modal--adv">
-            <span class="modal-title">高级脚本设置</span>
-            <div class="field">
-              <label class="field-label">
-                文案生成方式
-                <span class="info-i" title="选择生成文案所用的大模型；「当前大模型 Provider」= 服务端默认模型（设置页可改）">ⓘ</span>
-              </label>
-              <TSelect v-model="scriptProvider" :options="scriptProviderOptions" />
-            </div>
-            <div class="field">
-              <label class="field-label">文案段落数量</label>
-              <input v-model.number="paragraphCount" type="number" min="1" max="20" step="1" class="input w80" />
-            </div>
-            <div class="field">
-              <label class="field-label">自定义文案要求</label>
-              <textarea
-                v-model="customRequirement"
-                class="input ta"
-                rows="3"
-                placeholder="例：语气更轻松，适合小红书风格，面向年轻用户，并带有悬念"
-              />
-            </div>
-            <div class="field">
-              <label class="field-label">系统提示</label>
-              <textarea
-                v-model="systemPrompt"
-                class="input ta ta--sys"
-                rows="8"
-                spellcheck="false"
-              />
-            </div>
-            <div class="row">
-              <TButton label="恢复默认提示词" icon="refresh" plain @click="resetSystemPrompt" />
-              <TButton label="预览最终提示词" icon="search" plain @click="openPromptPreview" />
-            </div>
-            <div class="modal-actions"><TButton label="完成" @click="showAdvDlg = false" /></div>
-          </div>
-        </div>
-      </div></teleport>
-
-      <!-- 预览最终提示词弹窗（只读展示 system + user 两条消息） -->
-      <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
-        <div v-if="promptPreviewDlg.show" class="modal-mask" @click.self="closePromptPreview">
-          <div class="modal modal-wide">
-            <span class="modal-title">预览最终提示词</span>
-            <div class="prompt-block">
-              <label class="field-label">系统提示（system）</label>
-              <textarea readonly class="input ta prompt-ta" rows="8">{{ promptPreviewDlg.system }}</textarea>
-            </div>
-            <div class="prompt-block">
-              <label class="field-label">用户消息（user）</label>
-              <textarea readonly class="input ta prompt-ta" rows="6">{{ promptPreviewDlg.user }}</textarea>
-            </div>
-            <div class="modal-actions"><TButton label="关闭" plain @click="closePromptPreview" /></div>
-          </div>
-        </div>
-      </div></teleport>
+      <!-- 十稿挑选弹窗（共享组件；默认选中第一种，点卡片切换，确定写入文案框） -->
+      <VoiceoverPickerDialog
+        :open="voiceoverDlgOpen"
+        :candidates="voiceoverCandidates"
+        :failed-formulas="voiceoverFailedFormulas"
+        :selected-idx="voiceoverSelectedIdx"
+        @update:selected-idx="voiceoverSelectedIdx = $event"
+        @confirm="confirmVoiceoverCandidate"
+        @close="closeVoiceoverDlg"
+      />
 </template>
 
 <style scoped>
 .card { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 
-/* 高级脚本设置：入口行 + 弹窗（2026-09-21 用户裁决：折叠块改弹窗） */
-.adv-row :deep(.t-select) { flex: 1 1 auto; min-width: 220px; width: auto; }
-.modal--adv { width: 640px; }
+/* 产品+平台+AI 生成行（2026-10-03：两行合一，AI 生成右对齐） */
+.action-row .scene-select { min-width: 96px; width: 96px; }
+.modal--voice { width: 720px; }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
 
@@ -216,39 +134,13 @@ onMounted(() => { void loadScriptProviders(); void loadPlatforms() })
 
 .input:focus { border-color: var(--primary); }
 
-.w80 { width: 80px; flex: none; }
-
 /* textarea：源序在 .input 之后覆盖其 height:32px / padding:0 10px */
 .ta {
   height: auto; min-height: 72px; padding: 8px 10px;
   line-height: 1.6; font-family: inherit; resize: vertical;
 }
 
-.ta--sys { min-height: 180px; font-size: 12px; line-height: 1.55; font-family: Consolas, Menlo, monospace; }
-
 .ta--copy { min-height: 260px; }
-
-/* ✨ AI 动作行（参考界面：全宽平铺行 + 星标图标） */
-.ai-row {
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  width: 100%; height: 40px;
-  background: color-mix(in srgb, var(--primary) 8%, var(--surface-container));
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
-  border-radius: var(--radius-md); color: var(--foreground);
-  font-size: 13px; font-weight: var(--font-weight-medium, 500); cursor: pointer;
-  transition: border-color var(--duration-fast, 0.15s), background var(--duration-fast, 0.15s);
-}
-
-.ai-row:hover:not(:disabled) { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, var(--surface-container)); }
-
-.ai-row:disabled { opacity: 0.55; cursor: not-allowed; }
-
-.ai-row-icon { font-size: 14px; }
-
-.divider { height: 1px; background: var(--border); flex: none; }
-
-/* 选择产品行（高级脚本设置上方） */
-.product-row { gap: var(--space-2); }
 
 .product-chip {
   max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -265,26 +157,4 @@ onMounted(() => { void loadScriptProviders(); void loadPlatforms() })
 
 .product-clear:hover { color: var(--danger, #e74c3c); border-color: var(--danger, #e74c3c); }
 
-.muted { color: var(--muted-foreground); font-size: 12px; }
-
-/* 预览最终提示词弹窗 */
-.modal-mask {
-  position: fixed; inset: 0; z-index: 1002; display: flex; align-items: center; justify-content: center;
-  background: rgba(0,0,0,.7);
-}
-
-.modal {
-  display: flex; flex-direction: column; gap: 12px; width: 440px; max-width: 90vw; max-height: 80vh;
-  padding: 20px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg);
-}
-
-.modal-wide { width: 720px; }
-
-.modal-title { font-size: 15px; font-weight: 600; }
-
-.prompt-block { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
-
-.prompt-ta { min-height: 0; overflow-y: auto; white-space: pre; }
-
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

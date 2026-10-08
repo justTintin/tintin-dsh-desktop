@@ -18,6 +18,8 @@ import {
   isStageDReady,
   nextGenName,
   normalizeImitateVideo,
+  parseSixViewEntries,
+  sixViewFileUrl,
   normalizeServerEnums,
   ratioSize,
   sceneElementOptions,
@@ -276,10 +278,79 @@ describe('Part 2 请求体（§5.1 / §11-9 stage 显式）', () => {
   it('非法 stage 抛错（与 comfygen stage 同名异值防线）', () => {
     expect(() => buildStoryboardGenerateBody({ scriptId: 's1', stage: 'video' as never })).toThrow()
   })
+  it('quality 档透传（批3 D4：draft 缺省/final 定稿；不传不出键=服务端缺省）', () => {
+    const fin = buildStoryboardGenerateBody({ scriptId: 's1', stage: 'frames', quality: 'final' })
+    expect((fin.params as Record<string, unknown>).quality).toBe('final')
+    const draft = buildStoryboardGenerateBody({ scriptId: 's1', stage: 'frames', quality: 'draft' })
+    expect((draft.params as Record<string, unknown>).quality).toBe('draft')
+    const none = buildStoryboardGenerateBody({ scriptId: 's1', stage: 'frames' })
+    expect((none.params as Record<string, unknown>).quality).toBeUndefined()
+  })
+  it('product_images 随任务直传且截断 ≤6（2026-10-06 服务端放宽 2→6；worker 只认 url/路径）', () => {
+    const one = buildStoryboardGenerateBody({ scriptId: 's1', stage: 'frames', productImages: ['http://x/1.png'] })
+    expect((one.params as Record<string, unknown>).product_images).toEqual(['http://x/1.png'])
+    const six = buildStoryboardGenerateBody({
+      scriptId: 's1', stage: 'videos',
+      productImages: ['http://x/1.png', 'http://x/2.png', 'http://x/3.png', 'http://x/4.png', 'http://x/5.png', 'http://x/6.png', 'http://x/7.png'],
+    })
+    expect((six.params as Record<string, unknown>).product_images).toEqual([
+      'http://x/1.png', 'http://x/2.png', 'http://x/3.png', 'http://x/4.png', 'http://x/5.png', 'http://x/6.png',
+    ])
+    expect(buildStoryboardGenerateBody({ scriptId: 's1', stage: 'frames' }).params).not.toHaveProperty('product_images')
+  })
+  it('seed_base 不进提交面（规范 §5.1 定稿：服务端自回填自消费 gen.seed_base，客户端提交形=发明契约）', () => {
+    const shots = [{ gen: { name: 'shot_01', seed_base: 42 } }]
+    for (const stage of ['storyboard', 'frames', 'videos', 'all'] as const) {
+      const body = buildStoryboardGenerateBody({ scriptId: 's1', stage }, shots as never)
+      expect(body.params).not.toHaveProperty('seed_base')
+    }
+  })
   it('HumanGate② 帧确认/换帧 body（§9；实测 PUT 为 multipart：confirmed 布尔 + first/last 文件）', () => {
     expect(buildFramesConfirmBody()).toEqual({ confirmed: true })
     expect(buildFramesReplaceFiles('C:/f.png')).toEqual({ first: { path: 'C:/f.png' } })
     expect(buildFramesReplaceFiles('C:/f.png', 'C:/l.png')).toEqual({ first: { path: 'C:/f.png' }, last: { path: 'C:/l.png' } })
     expect(buildFramesReplaceFiles()).toEqual({})
+  })
+})
+
+describe('六视图提取（§11-51，2026-10-08 实测定稿两形态）', () => {
+  it('键控对象形态（实测 result/meta）：views 按视角名键控，规范序输出，view 名入条目', () => {
+    const real = {
+      status: 'generated',
+      views: { top: { path: 's/six_view/top.png' }, back: { path: 's/six_view/back.png' },
+        left: { path: 's/six_view/left.png' }, front: { path: 's/six_view/front.png' },
+        right: { path: 's/six_view/right.png' }, bottom: { path: 's/six_view/bottom.png' } },
+      job_id: '6a3e940fb434', source: 'comfygen_view_jobs',
+    }
+    expect(parseSixViewEntries(real)).toEqual([
+      { view: 'front', path: 's/six_view/front.png' },
+      { view: 'right', path: 's/six_view/right.png' },
+      { view: 'back', path: 's/six_view/back.png' },
+      { view: 'left', path: 's/six_view/left.png' },
+      { view: 'top', path: 's/six_view/top.png' },
+      { view: 'bottom', path: 's/six_view/bottom.png' },
+    ])
+    // 自包含 url 字段随条目透传（新任务回填带 url；无 url 时调用方按 sixViewFileUrl 拼）
+    const withUrl = parseSixViewEntries({ views: { front: { path: 's/six_view/front.png', url: '/api/storyboard/scripts/s1/six-view/file/front' } } })
+    expect(withUrl[0]?.url).toBe('/api/storyboard/scripts/s1/six-view/file/front')
+    expect(sixViewFileUrl('script_x', 'top')).toBe('/api/storyboard/scripts/script_x/six-view/file/top')
+    // 轮询响应形态：views 嵌在 result 下
+    expect(parseSixViewEntries({ status: 'completed', result: real }).map((e) => e.view)).toEqual([
+      'front', 'right', 'back', 'left', 'top', 'bottom',
+    ])
+  })
+  it('数组形态兼容：直数组/多键数组取路径字符串，非串过滤，序号补 view 名', () => {
+    expect(parseSixViewEntries({ paths: ['/x/y.png'] })).toEqual([{ view: '1', path: '/x/y.png' }])
+    expect(parseSixViewUrlsCompat())
+  })
+  function parseSixViewUrlsCompat(): boolean {
+    expect(parseSixViewEntries(['only-array-form'])).toEqual([{ view: '1', path: 'only-array-form' }])
+    expect(parseSixViewEntries({ views: [123, 'keep'] })).toEqual([{ view: '1', path: 'keep' }])
+    return true
+  }
+  it('无视图键/空源返回空数组（显示层走占位）', () => {
+    expect(parseSixViewEntries({ status: 'running' })).toEqual([])
+    expect(parseSixViewEntries(null)).toEqual([])
+    expect(parseSixViewEntries({ views: 'not-array' })).toEqual([])
   })
 })

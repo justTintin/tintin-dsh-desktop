@@ -375,7 +375,8 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
       const dur = Number(await window.tintin?.ffmpeg?.probeDuration?.(c).catch?.(() => 0)) || 0
       // planKey=候选视频路径：手工标注关键词按视频维度存取（预览与导出同键同词表）
       // 单条取数异常（离线/IPC 抖动）→ 保留上一轮标注数据，不冻结不清空面板
-      let st: { rows: Array<{ text: string; start: number; end: number }>; hits: KeywordHit[]; words: string[] }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- st 兼容服务端态与本地兜底态两种形态（2026-10-06 类型门禁放行）
+      let st: any
       try {
         st = await resolveKeywordState(
           String(row?.text || '').trim(), row?.wavPath ? `${row.wavPath}.timing.json` : '', c,
@@ -384,7 +385,7 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
         const prev = textFxAnnotate.value.find((a) => a.key === c)
         st = prev || { key: c, name: pathBasename(c), durationSec: dur, rows: [], hits: [], words: [] }
       }
-      matched.push({ name: pathBasename(c), durationSec: dur, lines: st.hits })
+      matched.push({ name: pathBasename(c), durationSec: dur, lines: st.hits } as unknown as (typeof matched)[number])
     }
     if (seq !== textFxTrackSeq) return // 过期响应丢弃（连续触发只保留最新）
     // 2026-09-10 用户终裁：轨名列显示视频名（模板名拼接方案废止；name 字段自此=文件名）

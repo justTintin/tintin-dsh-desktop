@@ -90,11 +90,12 @@ function closeMenu(): void { menu.value.show = false }
 // 无标注的行 → 词级命中着色（产品/LLM 词，全局）。同词不同位置互不影响。
 // 右键：行有手工标注 → 「取消本位置」；否则彩色词 → 「取消标注（拉黑该词）」；
 // 纯文本 → 「标注为关键词（本位置）」。
-function occForRow(tr: KeywordAnnotateTrack, rowStart: number): { rowStart: number; text: string } | undefined {
+function occForRow(tr: KeywordAnnotateTrack, rowStart?: number): { rowStart: number; text: string } | undefined {
+  if (rowStart === undefined) return undefined
   return (tr.occs || []).find((o) => Math.abs(o.rowStart - rowStart) < 0.02)
 }
 interface RowPart { t: string; kw: boolean; kind: '' | 'occ' | 'word' }
-function rowSegs(tr: KeywordAnnotateTrack, row: { text: string }): RowPart[] {
+function rowSegs(tr: KeywordAnnotateTrack, row: { text: string; start?: number }): RowPart[] {
   const t = String(row.text || '')
   const occ = occForRow(tr, row.start)
   if (occ) {

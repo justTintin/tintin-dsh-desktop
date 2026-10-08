@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 【仿视频复制版】2026-10-06 物理复制自 copywriting-montage/CopywritingStep4Panel.vue（原文件零改动）；状态经 props.s 注入（原为 inject(shell)）。
 // ═══════════════════════════════════════════════════════════════
 // CopywritingStep4Panel.vue — 智能混剪 Step4 特效包装/BGM/成片面板（铁律 10 Phase3 P4，2026-09-19）
 // 模板/样式自 VideoMontage.vue 逐字搬迁；状态经 inject 解构回原名（零改动）。
@@ -9,11 +10,10 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, inject } from 'vue'
 import TButton from '@/components/common/TButton.vue'
 import TSelect from '@/components/common/TSelect.vue'
-import VdStepBar from '../VdStepBar.vue'
-import CopywritingBgmPickDialog from './CopywritingBgmPickDialog.vue'
-import CopywritingStoryboard from './CopywritingStoryboard.vue'
-import KeywordAnnotateRows from '../KeywordAnnotateRows.vue'
-import { copywritingMontageShellKey } from './copywritingMontageUiContext'
+import CopywritingBgmPickDialog from './copywriting-montage/CopywritingBgmPickDialog.vue'
+import CopywritingStoryboard from './copywriting-montage/CopywritingStoryboard.vue'
+import KeywordAnnotateRows from './KeywordAnnotateRows.vue'
+import type { CopywritingMontageUi } from './copywriting-montage/copywritingMontageUiContext'
 import { FANCY_STYLE_PREVIEW, fancyDrawtextToPreview, subtitlePresetTileStyle } from '@/composables/copywritingMontageLogic'
 import { errText, notify, joinPath } from '@/composables/copywritingMontage/context'
 import { clientError } from '@/utils/clientLog'
@@ -23,8 +23,7 @@ import type { StoryboardShot } from '@/composables/opsStoryboardLogic'
 // assetsInlineLimit=64KB 内联为 data URI，运行时无需独立资产文件）
 import jyImportSettingImg from '@/assets/jianying-import-setting.png'
 
-const shell = inject(copywritingMontageShellKey)!
-const { step, go, steps } = shell
+const props = defineProps<{ s: CopywritingMontageUi; section?: 'fx' | 'export' }>()
 const {
   splitResolution,
   previewUrl,
@@ -96,12 +95,7 @@ const {
   stopBgmPlay,
   onBgmVolumeInput,
   seekBgm,
-  rowBgmName,
-  setRowBgm,
-  clearRowBgm,
-  pickRowBgm,
   downloadLibraryBgm,
-  rowBgmForCandidate,
   startFinalMix,
   openFinalDir,
   openExportDraftDir,
@@ -112,7 +106,7 @@ const {
   toAbsolute: vdToAbsolute,
   fmtBgmTime,
   storyboards,
-} = shell.s
+} = props.s
 
 /** BGM 增益滚轮微调（2026-09-30 用户反馈：滑条太短无法精细调节——滚轮 ±1%，
  *  复用 onBgmVolumeInput 实时应用试听音量） */
@@ -351,13 +345,6 @@ async function runSfxPack(): Promise<void> {
   }
 }
 
-/** 逐视频 BGM 行播放条 src（2026-09-18 用户裁决）：该行生效 BGM=逐行指派优先、
- *  未指派回退全局（同导出/合成口径）；无生效 BGM 返空串（不渲染播放条） */
-function rowBgmAudioSrc(videoPath: string): string {
-  const p = rowBgmForCandidate(videoPath)
-  return p ? toFileUrl(p) : ''
-}
-
 /** Step4 选中联动：右栏点块 = 左列表选中（成片预览由块内 video 直播） */
 function onStep4Select(i: number): void {
   finalSelIdx.value = i
@@ -409,11 +396,6 @@ async function onExportDraft(): Promise<void> {
     void syncStoryboardsToServer()
   }
 }
-// 2026-09-24 用户裁决：Step4 逐视频 BGM 行对应每个脚本——一行一分镜，
-// 键 = plan:{tabId}（与导出 bgmPaths 的 rowBgmForCandidate(planKey) 同键对齐）
-const scriptBgmRows = computed(() =>
-  storyboards.value.map((t) => ({ key: `plan:${t.id}`, name: t.name }))
-)
 watch(textFxStyleSamples, async () => {
   textFxExpanded.value = false
   await nextTick()
@@ -427,7 +409,6 @@ onMounted(async () => { await nextTick(); measureTextFxStyles() })
 // → textFxOverflow 恒 false → 按钮 v-if 永不出现（父布局无固定高度，非布局钳制）。
 // 补两路触发：①扫到第④步/勾选开关变化即重测；②画布实挂载即挂 ResizeObserver
 // （初始回调保证挂载即测一次，持续兜底尺寸与布局变化）
-watch([step, textFxEnabled], async () => { await nextTick(); measureTextFxStyles() })
 let textFxResizeObs: ResizeObserver | null = null
 watch(textFxCanvasEl, (el) => {
   textFxResizeObs?.disconnect()
@@ -508,10 +489,9 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
 </script>
 
 <template>
-      <section class="card">
-        <VdStepBar :step="step" :steps="steps" @go="go" />
+      <section v-if="section === 'fx'" class="card">
         <!-- 分镜脚本（2026-09-21 用户裁决：四步公共显示组件，本步 fx 态只读） -->
-        <CopywritingStoryboard mode="fx" :sfx-busy="sfxBusy" @sfx-regen="regenSfx" @sfx-remove="removeSfx" />
+        <CopywritingStoryboard mode="fx" single-script :sfx-busy="sfxBusy" @sfx-regen="regenSfx" @sfx-remove="removeSfx" />
         <!-- 特效包装分组（2026-09-13 用户裁决：字幕拆出单独成组、置于背景音乐上方）：花字 + 文字模板 -->
         <div class="action-box fx-pack-box">
           <div class="fx-pack-title">花字</div>
@@ -678,26 +658,8 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
           <span class="vd4-gain-label">{{ bgmVolume }} %</span>
         </div>
 
-        <!-- 2026-09-18 用户裁决：逐视频 BGM 指派列表（上一步整个视频列表）——默认最多 10 行高，
-             多则滚动、少则不撑满；每行 = 序号+视频名 + BGM 输入框（点击选本地文件）+ 选择BGM 按钮 -->
-        <div class="vd4-rowbgm">
-          <!-- 2026-09-24 用户裁决：逐视频 BGM 行对应每个脚本（分镜）——一行一分镜，
-               键 = plan:{tabId}（与导出 bgmPaths 的 rowBgmForCandidate(planKey) 同键），
-               未设置 BGM 的分镜跟随上方全局 BGM -->
-          <div class="vd4-rowbgm-title">逐视频 BGM（未设置的行跟随上方全局 BGM）</div>
-          <div class="vd4-rowbgm-list">
-            <div v-for="(c, i) in scriptBgmRows" :key="c.key" class="vd4-rowbgm-item">
-              <span class="vd4-rowbgm-name" :title="c.key">{{ i + 1 }}. {{ c.name }}</span>
-              <input :value="rowBgmName(c.key)" readonly class="input grow vd4-rowbgm-input"
-                placeholder="跟随全局 BGM（点击选本地文件）" @click="pickRowBgm(c.key)" />
-              <audio v-if="rowBgmAudioSrc(c.key)" :src="rowBgmAudioSrc(c.key)" controls preload="none"
-                class="vd4-rowbgm-audio" :title="`试听该行生效 BGM（${rowBgmName(c.key) ? '逐行指派' : '跟随全局'}）`" />
-              <TButton label="选择BGM" size="small" variant="secondary" @click="openBgmPickDlg(c.key)" />
-              <TButton v-if="rowBgmName(c.key)" label="清除" size="small" plain @click="clearRowBgm(c.key)" />
-            </div>
-            <div v-if="!scriptBgmRows.length" class="muted vd4-rowbgm-empty">暂无分镜脚本：请先在「文案编写」页生成或选择分镜脚本</div>
-          </div>
-        </div>
+        <!-- 逐视频 BGM 指派列表已删（2026-10-06 用户裁决：仿视频只有一条视频，逐行配置
+             不需要——全局 BGM 足够；导出/合成的逐行 BGM 键随行未指派自然回退全局） -->
 
         <!-- 音效包装（2026-09-23 用户裁决：智能匹配音效上线——服务端 /sfx/library
              306 条全带中文名+语义标签，逐镜按「音效建议」打分匹配并下载绑定；
@@ -742,7 +704,7 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
       </section>
 
     <!-- 导出/合成卡片（2026-09-21 用户裁决：导出处理功能单独成框，与特效包装分离） -->
-    <section class="card">
+    <section v-if="section === 'export'" class="card">
       <div class="fx-pack-title" style="margin-bottom: var(--space-2)">导出与合成</div>
         <!-- 2026-09-18 用户裁决：动作区加导出方案引导文案，竖排：
              标题「请选择导出方案」→ 方案一文案 → 其两按钮 → 方案二文案 → 服务端合成按钮 -->
@@ -770,8 +732,9 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
                引导图 + 文字提示常驻导出按钮下方（图=剪映 全局设置→通用 截图，
                src/assets 内联 data URI；点击新窗口放大） -->
           <div class="jy-import-hint">
-            <img :src="jyImportSettingImg" class="jy-import-img" alt="剪映全局设置：通用 → 打开「导入 PR或FCP 工程」"
-              title="点击放大查看" @click="openJyImportImg" />
+            <button type="button" class="jy-import-img-btn" title="点击放大查看" @click="openJyImportImg">
+              <img :src="jyImportSettingImg" class="jy-import-img" alt="剪映全局设置：通用 → 打开「导入 PR或FCP 工程」" />
+            </button>
             <span class="jy-import-text">导入的草稿需在剪映里开启「导入工程」才会加载：<b>剪映 → 全局设置 → 通用 → 打开「导入 PR或FCP…」开关</b>（可在启动时导入其他剪辑软件工程），然后重启剪映即可在首页看到导出的草稿。左图为该开关位置。</span>
           </div>
           <!-- 2026-09-18 用户裁决：导出剪映时间轴进度条+完成提示独立于服务端合成，
@@ -818,11 +781,6 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
           </div>
         </div><!-- /vd4-result -->
       </section>
-
-        <!-- 导航行（2026-09-21 用户裁决：上一步=视频素材） -->
-        <div class="row left">
-          <TButton label="上一步：视频素材" plain @click="go(2)" />
-        </div>
 
     <!-- 分镜声音批量克隆选择弹窗（BGM 选择组件复用为音频选择） -->
     <CopywritingBgmPickDialog ref="bgmDlgRef" />
@@ -1026,22 +984,7 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
 .bgm-pick-right .ag-num-input { width: auto; flex: 1 1 auto; min-width: 0; }
 .bgm-pick-right-audio { width: 100%; height: 36px; }
 .bgm-pick-right-tip { margin: 0; font-size: 11px; color: var(--muted-foreground); }
-/* 2026-09-18 用户裁决：Step4 逐视频 BGM 指派列表（最多 10 行高，多则滚动、少则不撑满） */
-.vd4-rowbgm { display: flex; flex-direction: column; margin-top: var(--space-2); }
-.vd4-rowbgm-title { font-size: 12px; font-weight: 600; color: var(--muted-foreground); margin-bottom: 4px; }
-.vd4-rowbgm-list {
-  display: flex; flex-direction: column; gap: 4px;
-  max-height: 340px; overflow-y: auto;
-  padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-md);
-}
-.vd4-rowbgm-item { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-.vd4-rowbgm-name {
-  flex: 0 0 160px; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap; font-size: 12px; color: var(--foreground);
-}
-.vd4-rowbgm-input { cursor: pointer; }
-.vd4-rowbgm-audio { flex: 0 0 240px; height: 32px; }
-.vd4-rowbgm-empty { padding: 12px; text-align: center; font-size: 12px; }
+/* 逐视频 BGM 指派列表样式已随块删除（2026-10-06 用户裁决：仿视频单视频场景全局 BGM 足够） */
 /* Step4 特效包装/字幕分组（2026-09-09 裁决：花字/文字模板自 Step3 迁入；
    2026-09-13 裁决：字幕拆出单独成组置于背景音乐上方，两盒共用本样式） */
 .fx-pack-box { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-4); }
@@ -1187,8 +1130,11 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
   background: var(--surface-container); border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
+.jy-import-img-btn { display: block; padding: 0; border: none; background: none; cursor: zoom-in; }
+/* 裸 img 原生点击在宿主不可靠（2026-10-06 灯箱死案）：入口统一 button 包图+img 禁指针 */
+.jy-import-img-btn img { pointer-events: none; }
 .jy-import-img {
-  width: 168px; flex: none; cursor: zoom-in;
+  width: 168px; flex: none;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
 .jy-import-text { font-size: 12px; line-height: 1.7; color: var(--muted-foreground); }

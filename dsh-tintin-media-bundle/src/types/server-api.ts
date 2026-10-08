@@ -157,19 +157,8 @@ export const API_PATHS = {
     adjustCopywriting: '/script/adjust-copywriting',
     list:  '/script/list',
   },
-  copywriting: {
-    // 智能混剪口播文案（服务端自持 prompt：product_desc + duration_s → 按目标时长控字数）
-    voiceover: '/copywriting/voiceover',
-  },
   asr: {
     transcribe: '/whisper/transcribe',
-  },
-  tts: {
-    // 2026-09-05 服务端将删 /voxcpm/*：原 generate:'/voxcpm/tts' 已移除，TTS 恒走 /indextts/tts
-    generate: '/indextts/tts',
-    voicesSamples: '/voice/samples',
-    // 2026-09-20：Qwen3-TTS 预置音色列表（GET → {speakers:[…]}}）
-    qwen3Voices: '/indextts/qwen3/voices',
   },
   workflow: {
     run: '/workflow/run',
@@ -227,9 +216,11 @@ export const API_PATHS = {
     enums: '/comfygen/enums',
   },
   copywriting: {
-    // 文案生成（VoiceoverIn：product_desc 必填/duration_s/hint）——仿视频第 2 步
-    // 「重新生成文案」按所选产品重写口播主稿（2026-10-02 用户裁决）
+    // 文案生成（VoiceoverIn：product_desc 必填/duration_s/hint/formula/platform/skill_id）
+    // ——文案混剪 Step1 十稿全量+仿视频第 2 步「重新生成文案」共用；formula 缺省=每次
+    // 返回约 10 种文案写法（2026-10-03 用户裁决），platforms=平台字典（下拉数据源）
     voiceover: '/copywriting/voiceover',
+    platforms: '/copywriting/platforms',
   },
   // TTS 统一入口（/indextts/tts，IndexTTSRequest：text 必填，engine/sample_id 可选——
   // 客户端默认 voxcpm=2026-09-28 用户裁决，整段直发不拆句）：仿视频口播配音
@@ -242,16 +233,28 @@ export const API_PATHS = {
   storyboard: {
     scriptsList: '/api/storyboard/scripts',
     scriptsItem: (id: string) => `/api/storyboard/scripts/${id}`,
+    // 九宫分镜粗稿整体确认（v4.3 闸门①：draft_status→confirmed，解锁 stage=frames 精稿）
+    draftConfirm: (id: string) => `/api/storyboard/scripts/${id}/draft/confirm`,
+    // 仿写文案分配到逐镜旁白（2026-10-04：text 缺省=主稿，服务端按镜切分写 shot.audio）
+    distributeVoiceover: (id: string) => `/api/storyboard/scripts/${id}/distribute-voiceover`,
+    // 仿写文案重写画面/旁白/场景（2026-10-04 上线：text 缺省=主稿；LLM 按新文案重出 visual/scene/audio）
+    rewriteVisuals: (id: string) => `/api/storyboard/scripts/${id}/rewrite-visuals`,
+    sixView: (id: string) => `/api/storyboard/scripts/${id}/six-view`,
+    sixViewResult: (taskId: string) => `/api/storyboard/scripts/six-view/result/${taskId}`,
     save:        '/api/storyboard/scripts',
     // 仿视频 V3.5（PRD-M-5，2026-10-02 v1.0+评审复核 §9 新增最小集）：
     // 实测（2026-10-02 openapi 探针）：imitate 挂在 scripts 集合下
     imitate:     '/api/storyboard/scripts/imitate',
-    // 本地视频预上传（2026-10-02 服务端开通）：multipart file → 入素材库
-    // （source=imitate_upload、file_hash 去重）→ 返 {material_id, material}，
-    // 客户端以 material://{id} 作 imitate.video 提交
+    // 本地视频预上传（multipart file → 入素材库 → material://{id} 作 imitate.video）
     imitateUpload: '/api/storyboard/scripts/imitate/upload',
     // HumanGate② 数据面（实测 multipart：first/last 文件 + confirmed 布尔）
     shotFrames:  (id: string, name: string) => `/api/storyboard/scripts/${id}/shots/${encodeURIComponent(name)}/frames`,
+    // 九宫图总览 PNG（v4.7 契约 2026-10-05：服务端 worker 落 FRAMES_ROOT/{sid}/storyboard.png
+    // + 回填 meta.storyboard_grid={path,source}；客户端 GET 本端点直取展示）
+    storyboardGrid: (id: string) => `/api/storyboard/scripts/${id}/storyboard-grid`,
+    // Seedance 交付包（v4.9 收口 2026-10-05：九宫格图一张+逐镜 prompt_zh/camera_zh/
+    // seed_base/duration/粗稿帧 URL 一次取全——九宫格图+提示词=Seedance 生成视频交付物）
+    storyboardPack: (id: string) => `/api/storyboard/scripts/${id}/storyboard-pack`,
   },
   agent: {
     registry:              '/agent/registry',
@@ -416,29 +419,49 @@ export namespace LLMAPI {
 }
 
 export namespace CopywritingAPI {
-  /**
-   * POST /copywriting/voiceover（2026-09-13 实测线上契约，openapi VoiceoverIn）：
-   * 服务端自持 prompt 按目标时长控字数（30s → budget 135 字），替代客户端本地拼 prompt。
-   */
+  /** POST /copywriting/voiceover（2026-10-03 契约，源码实读）：服务端自持 prompt；
+   *  formula 缺省=十稿全量（每写法一稿，客户端挑选确认），锁定=单稿；字典 GET /copywriting/formulas */
   export interface VoiceoverRequest {
     /** 产品描述（必填，缺失 400） */
     product_desc: string
-    /** 目标时长（秒），(0, 600] */
-    duration_s: number
+    /** 目标时长（秒），(0,600]，缺省 30 */
+    duration_s?: number
     /** 补充要求（可选） */
     hint?: string
+    /** 创作方法技能 id（GET /skills，可选） */
+    skill_id?: string
+    /** 目标平台（缺省抖音；GET /copywriting/platforms 查字典，未知 400） */
+    platform?: string
+    /** 文案写法（缺省空=十稿全量；锁定=单稿） */
+    formula?: string
   }
-  /** 响应 openapi 未定 schema，以下为实测结构 */
-  export interface VoiceoverResponse {
-    /** 口播文案正文（单段纯文本） */
+  /** 十稿全量响应：单稿失败该稿带 error 不拖垮整体，全部失败 502 */
+  export interface VoiceoverVariantsResponse {
+    variants: Array<{
+      formula: string
+      text?: string
+      chars?: number
+      duration_s?: number
+      budget?: number
+      retried?: boolean
+      error?: string
+    }>
+    platform?: string
+    skill_id?: string
+  }
+  /** 单稿响应（2026-09-13 旧版契约；新版 formula 锁定同形） */
+  export interface VoiceoverSingleResponse {
     text: string
-    /** 实际字数 */
     chars: number
-    /** 目标字数预算（≈ duration_s × 4.5） */
+    duration_s?: number
     budget: number
-    /** 服务端是否因超字数重试过 */
     retried: boolean
+    formula?: string
+    platform?: string
+    skill_id?: string
   }
+  /** 双形态 union：归一消费走 copywritingMontageStep2ConcatLogic.voiceoverCandidatesFromResponse */
+  export type VoiceoverResponse = VoiceoverVariantsResponse | VoiceoverSingleResponse
 }
 
 export namespace ASRAPI {

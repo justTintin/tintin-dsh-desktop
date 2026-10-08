@@ -729,9 +729,13 @@ const tintinClient = (() => {
       // Multipart upload: XHR gives native FormData multipart + real
       // upload progress (fetch cannot); host route /tintin/upload forwards
       // the body verbatim to the service. onProgress(ratio 0..1) optional.
-      const serverUpload = (path, fields, onProgress) => new Promise((resolve, reject) => {
+      const serverUpload = (path, fields, onProgress, method) => new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest()
-        xhr.open('POST', `/tintin/upload?path=${encodeURIComponent(path)}`)
+        // 上游方法透传（默认 POST；frames 端点=PUT multipart——405 修复 2026-10-06）：
+        // 传输层恒 POST /tintin/upload，上游方法经 query 带给宿主白名单转发
+        const upstreamMethod = method === 'PUT' ? 'PUT' : 'POST'
+        const methodQs = upstreamMethod === 'PUT' ? '&method=PUT' : ''
+        xhr.open('POST', `/tintin/upload?path=${encodeURIComponent(path)}${methodQs}`)
         if (typeof onProgress === 'function') {
           xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
         }
@@ -984,7 +988,16 @@ const tintinClient = (() => {
         return f.path || ''
       }
       const dialog = namespaced('dialog', {
-        openFile: async (params) => pickedPath((await pickInputFiles({ filters: params?.filters }))[0]) || null,
+        // openFile 选中即登记（2026-10-08）：pickedPath 拿到绝对路径后先等
+        // media:unlock 落地再交出路径——消费方（仿视频第 1 步等经 /tintin/media
+        // 取回 File）的读取必然晚于登记，根除「登记与读取赛跑→403」；原先
+        // setFile 里的 fire-and-forget unlock 保留作冗余双保险。登记失败静默
+        // （读取侧 403 已带宿主响应体可定位）。
+        openFile: async (params) => {
+          const p = pickedPath((await pickInputFiles({ filters: params?.filters }))[0]) || null
+          if (p) { try { await call('media:unlock', { args: [p] }) } catch { /* 读取侧 403 暴露 */ } }
+          return p
+        },
         openFiles: async (params) => {
           const paths = (await pickInputFiles({ multiple: true, filters: params?.filters })).map(pickedPath).filter(Boolean)
           return paths.length ? paths : null

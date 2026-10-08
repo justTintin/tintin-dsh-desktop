@@ -102,7 +102,12 @@ async function resolveFileFromPath(path: string): Promise<void> {
   fileResolving.value = true
   try {
     const res = await fetch(`/tintin/media?path=${encodeURIComponent(path)}`)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    if (!res.ok) {
+      // 403 带宿主响应体（Path outside allowed media roots / Request rejected）——定位不靠裸状态码
+      let detail = ''
+      try { detail = (await res.text()).slice(0, 200) } catch { /* 响应体缺失保持裸状态码 */ }
+      throw new Error(`HTTP ${res.status}${detail ? `：${detail}` : ''}`)
+    }
     const blob = await res.blob()
     const name = path.split(/[\\/]/).pop() || 'source.mp4'
     const file = new File([blob], name, { type: blob.type || 'video/mp4' })
@@ -195,36 +200,46 @@ const rpShots = computed<Array<Record<string, unknown>>>(() => {
       <input v-model="sourceUrl" class="input" placeholder="https://..." />
     </div>
 
+    <!-- 设置行（2026-10-03 用户裁决：提交拆解移本行右对齐） -->
     <div class="row">
       <label class="seg-field head-field"><span class="lbl">画幅</span>
-        <select v-model="ratio" class="input w90">
+        <select v-model="ratio" class="input w-ratio" title="生成目标画幅（枚举来自服务端 /comfygen/enums）">
           <option v-for="r in iv.enums.value?.ratios || []" :key="r.ratio" :value="r.ratio">
             {{ r.ratio }}（{{ r.width }}×{{ r.height }}）
           </option>
         </select>
       </label>
       <label class="seg-field head-field"><span class="lbl">保真档位</span>
-        <select v-model="fidelity" class="input w110">
+        <select v-model="fidelity" class="input w-fidelity">
           <option v-for="f in iv.enums.value?.fidelity || []" :key="f.value" :value="f.value">{{ f.label }}</option>
         </select>
       </label>
+      <span class="spacer"></span>
+      <TButton label="提交拆解" :loading="iv.part1Phase.value === 'running'" :disabled="!canSubmitPart1" @click="iv.submitImitate({
+        video: part1VideoInput,
+        options: { ratio, fidelity },
+        onUploadProgress: (r) => { uploadRatio = r },
+      })" />
+      <span v-if="iv.part1Note.value" class="muted">{{ iv.part1Note.value }}</span>
     </div>
 
     <div class="seg-field">
       <span class="lbl">A-roll 口播人像（可选，第 3 步配置）</span>
       <span class="muted">数字人 / 实拍上传在「3. 分镜头确认」中配置（数字人人物图上传通道待服务端契约，当前可先走实拍）</span>
     </div>
-
-    <div class="row">
-      <TButton label="提交拆解" :loading="iv.part1Phase.value === 'running'" :disabled="!canSubmitPart1" @click="iv.submitImitate({
-        video: part1VideoInput,
-        options: { ratio, fidelity },
-        onUploadProgress: (r) => { uploadRatio.value = r },
-      })" />
-      <span v-if="iv.part1Note.value" class="muted">{{ iv.part1Note.value }}</span>
+    <div v-if="uploadRatio >= 0 && uploadRatio < 1 && iv.part1Phase.value !== 'running'" class="muted">本地上传中 {{ Math.round(uploadRatio * 100) }}%</div>
+    <div v-if="iv.part1Phase.value === 'running'" class="iv-progress">
+      <div class="row between">
+        <span class="muted">分析进行中（已用时 {{ iv.part1ElapsedSec.value }} 秒）：拆镜头 → 运镜测量 → 转写文案 → 生成仿拍脚本…</span>
+        <span v-if="iv.part1Progress.value >= 0" class="muted">{{ iv.part1Progress.value }}%</span>
+      </div>
+      <!-- 进度条（2026-10-03 用户裁决：拆解中必须有进度条）：服务端报百分比走定态，
+           未报进度走不定态滑动动画；last_message=服务端阶段文案 -->
+      <div class="iv-bar" :class="{ 'is-indeterminate': iv.part1Progress.value < 0 }">
+        <div v-if="iv.part1Progress.value >= 0" class="iv-bar-fill" :style="{ width: iv.part1Progress.value + '%' }"></div>
+      </div>
+      <div v-if="iv.part1Message.value" class="muted">{{ iv.part1Message.value }}</div>
     </div>
-    <div v-if="uploadRatio.value >= 0 && uploadRatio.value < 1 && iv.part1Phase.value !== 'running'" class="muted">本地上传中 {{ Math.round(uploadRatio.value * 100) }}%</div>
-    <div v-if="iv.part1Phase.value === 'running'" class="muted">分析进行中（分钟级）：拆镜头 → 运镜测量 → 转写文案 → 生成仿拍脚本…</div>
     <div v-if="iv.part1Error.value" class="iv-err">{{ iv.part1Error.value }}</div>
     <div v-if="iv.enumsError.value" class="iv-err">枚举加载失败：{{ iv.enumsError.value }}（刷新重试：{{ ' ' }}<a class="iv-link" @click="iv.loadEnums">重试</a>）</div>
 
@@ -289,6 +304,9 @@ const rpShots = computed<Array<Record<string, unknown>>>(() => {
 .iv-divider { height: 1px; background: var(--border); margin: 8px 0; }
 .iv-orig { color: var(--muted-foreground); font-style: italic; }
 .w90 { width: 110px; } .w110 { width: 130px; }
+/* 画幅/保真下拉加宽（2026-10-03 用户裁决：完整显示「16:9（1280×704）」「均衡（约4.5分/镜）」） */
+.w-ratio { width: 168px; }
+.w-fidelity { width: 178px; }
 
 .iv-mode {
   display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;
@@ -324,4 +342,21 @@ const rpShots = computed<Array<Record<string, unknown>>>(() => {
 .dropzone__text { display: flex; flex-direction: column; gap: 2px; }
 .dropzone__main { font-size: var(--font-size-body); font-weight: var(--font-weight-medium); color: var(--foreground); }
 .dropzone__hint { font-size: 12px; color: var(--muted-foreground); }
+
+/* 拆解进度条（2026-10-03：定态=服务端 progress 百分比；不定态=滑动动画） */
+.iv-progress { display: flex; flex-direction: column; gap: 6px; }
+.iv-bar {
+  position: relative; height: 6px; overflow: hidden;
+  background: var(--border); border-radius: 999px;
+}
+.iv-bar-fill { height: 100%; background: var(--primary); border-radius: 999px; transition: width 0.6s ease; }
+.iv-bar.is-indeterminate::after {
+  content: ''; position: absolute; inset: 0; width: 40%;
+  background: var(--primary); border-radius: 999px;
+  animation: iv-indeterminate 1.2s ease-in-out infinite;
+}
+@keyframes iv-indeterminate {
+  0% { left: -40%; }
+  100% { left: 100%; }
+}
 </style>

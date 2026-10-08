@@ -153,6 +153,13 @@ export function isTrustedRequest(req, mutation = false) {
   }
 }
 
+// mediaUnlocked — 用户显式选择的任意位置文件预览解锁登记表：media:unlock 写入、
+// /tintin/media GET 放行（宿主进程单例，FIFO 上限）。必须挂在模块顶层——原先藏在
+// webServer 路由块内、与 media:unlock 处理器不同作用域，登记恒 502
+// 「mediaUnlocked is not defined」、对话框选中的白名单外文件恒 403
+// （2026-10-08 宿主日志实锤，media:unlock 处理器注释「见上方注记」即此物）。
+const mediaUnlocked = new Set()
+const MEDIA_UNLOCK_CAP = 512
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload)
   res.writeHead(status, {
@@ -1172,8 +1179,8 @@ export async function apply(ctx, config) {
     // 512 防无限增长），/tintin/media GET 对已登记路径放行。信任面评估（B1）：
     // 读范围 = 用户刚刚亲手选过/业务刚落盘的文件，登记只能由受信渲染层发起，
     // 不构成任意路径读取（白名单根仍然是主通道）。
-    const mediaUnlocked = new Set()
-    const MEDIA_UNLOCK_CAP = 512
+    // mediaUnlocked/MEDIA_UNLOCK_CAP=模块顶层声明（见 sendJson 上方）——本块
+    // 只持有 MEDIA_CT；曾把 Set 藏在本块导致 media:unlock 处理器看不到它。
     const MEDIA_CT = {
       '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.flac': 'audio/flac',
       '.aac': 'audio/aac', '.ogg': 'audio/ogg', '.opus': 'audio/opus',
@@ -1305,11 +1312,13 @@ export async function apply(ctx, config) {
           sendJson(res, 400, { error: 'Request rejected.' })
           return
         }
+        // 上游方法白名单（默认 POST；frames 端点=PUT multipart——405 修复 2026-10-06）
+        const upstreamMethod = url.searchParams.get('method') === 'PUT' ? 'PUT' : 'POST'
         const chunks = []
         for await (const c of req) chunks.push(c)
         const body = Buffer.concat(chunks)
         try {
-          const result = await httpRequest('POST', targetPath, {
+          const result = await httpRequest(upstreamMethod, targetPath, {
             body,
             headers: req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] } : {},
           })

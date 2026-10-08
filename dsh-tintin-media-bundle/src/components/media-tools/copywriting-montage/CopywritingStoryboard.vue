@@ -14,7 +14,7 @@ import TButton from '@/components/common/TButton.vue'
 import type { StoryboardShot } from '@/composables/opsStoryboardLogic'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 
-const props = defineProps<{ mode: 'edit' | 'voice' | 'material' | 'fx'; sfxBusy?: boolean }>()
+const props = defineProps<{ mode: 'edit' | 'voice' | 'material' | 'fx'; sfxBusy?: boolean; singleScript?: boolean }>()
 const emit = defineEmits<{ (e: 'sfx-regen', shot: StoryboardShot): void; (e: 'sfx-remove', shot: StoryboardShot): void }>()
 
 const shell = inject(copywritingMontageShellKey)!
@@ -126,11 +126,12 @@ const EMPTY_HINT: Record<string, string> = {
         <template v-else>
           <span class="sb-tab-name" :title="`${sb.name}（双击重命名）`" @dblclick.stop="startRename(sb.id, sb.name)">{{ sb.name }}</span>
         </template>
-        <button class="sb-tab-close" title="删除该分镜"
+        <button v-if="!singleScript" class="sb-tab-close" title="删除该分镜"
           @click.stop="onTabClose(sb.id)">×</button>
       </div>
-      <span v-if="storyboards.length < COPY_STORYBOARD_MAX" class="sb-info" title="生成新的分镜：在「文案编写」页点击「✨ AI 生成分镜」，或在「选择脚本」中选取脚本库脚本">{{ storyboards.length ? '' : '' }}可再添加 {{ COPY_STORYBOARD_MAX - storyboards.length }} 个分镜</span>
-      <span v-else class="sb-info">已达分镜数量上限（{{ COPY_STORYBOARD_MAX }}）</span>
+      <!-- singleScript（仿视频=一个视频脚本）：多分镜添加提示/删除入口不适用 -->
+      <span v-if="!singleScript && storyboards.length < COPY_STORYBOARD_MAX" class="sb-info" title="生成新的分镜：在「文案编写」页点击「✨ AI 生成分镜」，或在「选择脚本」中选取脚本库脚本">{{ storyboards.length ? '' : '' }}可再添加 {{ COPY_STORYBOARD_MAX - storyboards.length }} 个分镜</span>
+      <span v-else-if="!singleScript" class="sb-info">已达分镜数量上限（{{ COPY_STORYBOARD_MAX }}）</span>
     </div>
 
     <div class="row between">
@@ -314,7 +315,7 @@ const EMPTY_HINT: Record<string, string> = {
             </div>
           </div>
           <div class="modal-actions">
-            <TButton label="使用此脚本" :disabled="!scriptPickDlg.selectedId || !pickDetail.detail" @click="applySelectedScript" />
+            <TButton label="使用此脚本" :disabled="!scriptPickDlg.selectedId || !pickDetail.detail" @click="applySelectedScript()" />
             <TButton label="关闭" plain @click="scriptPickDlg.show = false" />
           </div>
         </div>

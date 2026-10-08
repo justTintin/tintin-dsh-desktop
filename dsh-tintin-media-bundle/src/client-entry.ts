@@ -116,12 +116,13 @@ window.__ModuleLoader__!.load({
 function registerContextBarSlot(host: SlotHost, require?: (id: string) => unknown): void {
   const slots = host?.slots
   if (typeof slots?.inject !== 'function' || typeof slots.register !== 'function') return
-  const React = require?.('react') as typeof import('react') | undefined
+  // React 薄壳（宿主 require 注入；包内无 react 类型依赖——局部 any 隔离动态面，2026-10-06）
+  const React = require?.('react' as string) as any
   if (!React || typeof React.createElement !== 'function' || typeof React.useEffect !== 'function') return
   const { createElement, useEffect, useRef } = React
 
   const TintinContextAccessory = () => {
-    const hostRef = useRef<HTMLDivElement | null>(null)
+    const hostRef = useRef(null)
     useEffect(() => {
       const el = hostRef.current
       if (!el) return
@@ -134,8 +135,10 @@ function registerContextBarSlot(host: SlotHost, require?: (id: string) => unknow
   // 展示函数名便于 React DevTools / slot 调试定位
   Object.defineProperty(TintinContextAccessory, 'name', { value: 'TintinContextAccessory' })
 
+  const injectFn = slots.inject
+  const registerFn = slots.register
   slots.inject('conversation.input.left', () =>
-    slots.register(
+    registerFn(
       { name: 'conversation.input.left', id: 'tintin-context-bar', order: 30 },
       TintinContextAccessory,
     ))

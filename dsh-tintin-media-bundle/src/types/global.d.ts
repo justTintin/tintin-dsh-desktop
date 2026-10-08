@@ -106,7 +106,9 @@ declare interface TintinBridgeServer {
   upload<T = any>(
     path: string,
     fields: Record<string, Blob | string>,
-    onProgress?: (percent: number) => void
+    onProgress?: (percent: number) => void,
+    /** 上游方法（默认 POST；frames 端点=PUT multipart——405 修复 2026-10-06） */
+    method?: 'POST' | 'PUT'
   ): Promise<T | null>
   sse(
     path: string,
@@ -235,7 +237,7 @@ declare interface TintinBridgeServer {
      *  pauseMs 为 2026-09-08 服务端句间停顿标记，写在 text 里不进载荷） */
     ttsParams?: { durationFactor: number; emoText: string; emoAlpha: number; pauseMs?: number; speaker?: string; instruct?: string }
     /** 2026-09-20（服务端 TTS 统一入口）：引擎=qwen3 → Qwen3-TTS（缺省 indextts） */
-    engine?: 'indextts' | 'qwen3'
+    engine?: 'indextts' | 'qwen3' | 'voxcpm'
     /** 2026-09-20 用户裁决：样本库样本 id（>0 走样本库渠道自动补 ref_text；0=Base 音色） */
     sampleId?: number
     /** 参考音频文稿（Qwen3 克隆必填 ref_text 的文稿源；渲染层参考样本转写/手输） */

@@ -23,8 +23,11 @@
 /** 生成后端（§3 gen.backend；v1 只实现 comfygen，其余留适配位） */
 export type GenBackend = 'comfygen' | 'jimeng' | 'runninghub' | 'manual'
 
-/** 镜头素材来源（§3：material=实拍缺省 / generate=AI 生成） */
-export type ShotSource = 'material' | 'generate'
+/** 镜头素材来源（§3。2026-10-07 批4 D5 起三值：material=实拍素材绑定 / generate=AI 生成 /
+ *  original=原片直切——videos 阶段服务端前置裁 source_start/source_end 源窗（净切+剥轨）
+ *  →入库 source=original_window→回填 material_path。客户端切换 UI 现仅二值
+ *  generate↔material，original 三态接线=C3 预选批待办） */
+export type ShotSource = 'material' | 'generate' | 'original'
 
 /** 分镜帧确认闸门（§3 状态机定稿：pending →(阶段C) generated →(人工确认) confirmed；
  *  中间态拼法唯一权威 = generated，原 frames_generated 拼法已废） */
@@ -41,7 +44,7 @@ export type ArollStatus = 'pending' | 'running' | 'done' | 'failed'
 
 /** 素材准备任务阶段（§5.1 输入；注意与 comfygen stage=frames|video|all 同名异值：
  *  任务级 videos ↔ comfygen video，联调传参勿混——流程规范 §11-9） */
-export type GenerateStage = 'aroll' | 'frames' | 'videos' | 'all'
+export type GenerateStage = 'aroll' | 'storyboard' | 'frames' | 'videos' | 'all'
 
 /** 保真档位（v4.1 §3：fast 约3分 / balanced 约4.5分 / high 约7分） */
 export type Fidelity = 'fast' | 'balanced' | 'high'
@@ -125,7 +128,8 @@ const SCENE_ELEMENT_ENUM_MAP: Record<SceneElementKey, 'surfaces' | 'environments
 }
 
 /** 取场景某要素的下拉选项（中文下拉值=comfygen 枚举，§5.3-2） */
-export function sceneElementOptions(enums: ServerEnums, key: SceneElementKey): EnumOption[] {
+export function sceneElementOptions(enums: ServerEnums | null, key: SceneElementKey): EnumOption[] {
+  if (!enums) return []
   return enums[SCENE_ELEMENT_ENUM_MAP[key]]
 }
 
@@ -145,7 +149,7 @@ export function ratioSize(enums: ServerEnums, ratio: unknown): { width: number; 
 export const GEN_BACKENDS: GenBackend[] = ['comfygen', 'jimeng', 'runninghub', 'manual']
 export const FRAMES_STATUS_VALUES: FramesStatus[] = ['pending', 'generated', 'confirmed']
 export const GEN_STATUS_VALUES: GenStatus[] = ['pending', 'submitted', 'done', 'failed']
-export const GENERATE_STAGE_VALUES: GenerateStage[] = ['aroll', 'frames', 'videos', 'all']
+export const GENERATE_STAGE_VALUES: GenerateStage[] = ['aroll', 'storyboard', 'frames', 'videos', 'all']
 
 /** duration 合法区间（§4：归一到 3~15s；v4.1 §3 下限 5→3 已放宽） */
 export const DURATION_MIN = 3
@@ -184,10 +188,123 @@ export interface ShotGenBlock {
   first_frame?: FrameRef | null
   last_frame?: FrameRef | null
   frames_status?: FramesStatus
+  /** v4.3 九宫分镜粗稿（低清，仅供九宫格整体确认；确认后解锁 frames 精稿） */
+  draft_status?: 'pending' | 'generated' | 'confirmed'
+  draft_first?: FrameRef | null
+  draft_last?: FrameRef | null
   status?: GenStatus
   job_id?: string | null
   check?: unknown
   error?: string | null
+  /** 该镜基础种子（v4.3 comfygen shots_done 回传；规范 §4 定稿：2026-10-05 起
+   *  服务端回填消费——storyboard/frames 两阶段均回填，frames 复用保构图。
+   *  客户端只随 PUT 原样透传不丢字段，不提交不消费语义） */
+  seed_base?: number | null
+  /** 选路建议（2026-10-07 批4 A4：拆解后置按规则标注——大运镜/环境镜/人物镜→original；
+   *  客户端预选可改。缺省/None=无建议，维持现有 source 逻辑） */
+  suggested_source?: ShotSource | null
+}
+
+/** meta.quality_report（批1 M0/D7：stage=frames 后置质量报告回填——评分挂只 warning
+ *  不阻塞交付（S6）；缺源记 null=N/A 不算 0；issues=哨兵 S1/S2/S3 采集模式） */
+export interface QualityReportIssue {
+  rule: string
+  shot?: string
+  level?: string
+  detail?: string
+}
+export interface QualityReportShotScore {
+  aesthetic?: number | null
+  product_sim?: number | null
+  env_coverage?: number | null
+  parallax_sim?: number | null
+}
+export interface QualityReport {
+  stage?: string
+  engine?: string
+  cost?: Record<string, unknown>
+  issues?: QualityReportIssue[]
+  per_shot?: Record<string, QualityReportShotScore>
+  cross_shot?: Record<string, unknown>
+}
+
+/** 六视图条目（§11-51：视角名 + 相对路径；相对路径由调用方 toAbsolute） */
+export interface SixViewEntry {
+  view: string
+  path: string
+  /** 服务端自包含 URL（新任务回填带 url 字段）；缺省由调用方按 sixViewFileUrl 拼 */
+  url?: string
+}
+/** 六视图取图路由（2026-10-08 commit 1a428020 上线；view ∈ 六视角白名单） */
+export function sixViewFileUrl(sid: string, view: string): string {
+  return `/api/storyboard/scripts/${sid}/six-view/file/${view}`
+}
+const SIX_VIEW_ORDER = ['front', 'right', 'back', 'left', 'top', 'bottom']
+
+/** 六视图提取（§11-51，2026-10-08 实测定稿两种形态）：
+ *  ① 键控对象（实测 result/meta 形态）：{status, views:{front:{path},…}} 或顶层即键控对象；
+ *     输出按 front/right/back/left/top/bottom 规范序，非标准视角名按插入序追加；
+ *  ② 数组形态（直数组或 views/paths/images/files 数组，元素=字符串或 {path}），view 留空由调用方标序号。 */
+export function parseSixViewEntries(src: unknown): SixViewEntry[] {
+  const asEntry = (e: unknown): SixViewEntry | null => {
+    if (typeof e === 'string') return e.trim() ? { view: '', path: e } : null
+    if (e && typeof e === 'object') {
+      const rec = e as Record<string, unknown>
+      const path = String(rec.path ?? '')
+      if (!path.trim()) return null
+      const url = typeof rec.url === 'string' && rec.url.trim() ? rec.url : undefined
+      const view = typeof rec.view === 'string' && rec.view.trim() ? rec.view : undefined
+      return { view: view || '', path, url }
+    }
+    return null
+  }
+  let cur = src
+  // 轮询响应把载荷嵌在 result 下（task_queue 通用面）——剥一层再解析
+  if (cur && typeof cur === 'object' && !Array.isArray(cur)) {
+    const r = (cur as Record<string, unknown>).result
+    if (r && typeof r === 'object' && !Array.isArray(r)) cur = r
+  }
+  // ② 数组形态
+  let arr: unknown[] | null = null
+  if (Array.isArray(cur)) arr = cur
+  else {
+    const o = cur as Record<string, unknown> | null | undefined
+    if (o) for (const k of ['views', 'paths', 'images', 'files']) {
+      if (Array.isArray(o[k])) { arr = o[k] as unknown[]; break }
+    }
+  }
+  if (arr) {
+    return arr
+      .map(asEntry)
+      .filter((e): e is SixViewEntry => !!e)
+      .map((e, i) => ({ ...e, view: e.view || String(i + 1) }))
+  }
+  // ① 键控对象形态（views 键优先，其次顶层即键控对象）
+  const o = cur as Record<string, unknown> | null | undefined
+  if (!o) return []
+  const viewsObj = o.views && typeof o.views === 'object' && !Array.isArray(o.views)
+    ? (o.views as Record<string, unknown>)
+    : null
+  const entries: SixViewEntry[] = []
+  const collect = (obj: Record<string, unknown>): void => {
+    for (const k of SIX_VIEW_ORDER) {
+      const e = asEntry(obj[k])
+      if (e) entries.push({ ...e, view: k })
+    }
+    for (const [k, e0] of Object.entries(obj)) {
+      if (SIX_VIEW_ORDER.includes(k)) continue
+      const e = asEntry(e0)
+      if (e) entries.push({ ...e, view: e.view || k })
+    }
+  }
+  if (viewsObj) collect(viewsObj)
+  else {
+    // 数组形态键名（views/paths/images/files）不是视角条目——非数组值时必须排除
+    const skip = ['status', 'job_id', 'source', 'progress', 'task_id', 'views', 'paths', 'images', 'files']
+    const keys = Object.keys(o).filter((k) => !skip.includes(k))
+    if (keys.length && keys.every((k) => asEntry(o[k]))) collect(o)
+  }
+  return entries
 }
 
 /** 仿视频 shot（文案线既有字段 shot_type/visual/audio/sfx 等经 extra 透传） */
@@ -491,9 +608,22 @@ export interface StoryboardGenerateParams {
   onlyShots?: string[]
   fidelityOverride?: Fidelity
   autoMontage?: boolean
+  /** 产品图（2026-10-03 用户裁决：第 2 步必须先选产品图）——http url 或服务端本地
+   *  路径字符串数组（worker _collect_product_files 只认这两形，material:// 不认），
+   *  服务端 ≤6 张、≥1 张校验（产品锚定必需；2026-10-06 服务端放宽 2→6） */
+  productImages?: string[]
+  /** A-roll 实拍素材 id（stage=aroll 且 aroll.source=material 时必需，worker 直绑） */
+  arollMaterialId?: number
+  /** A-roll 数字人人物图引用（stage=aroll 且 source=digital_human，material:// 形态） */
+  arollImage?: string
+  /** 质量档（2026-10-07 批3 D4：draft 缺省（turbo）/ final 定稿非 turbo——非法值服务端
+   *  出口即拒；定稿重跑按钮用 final） */
+  quality?: 'draft' | 'final'
 }
 
-/** POST /scheduled/tasks body：task_type=storyboard_generate（§5.1；auto_montage 默认 false，§11-2 两段式） */
+/** POST /scheduled/tasks body：task_type=storyboard_generate（§5.1；auto_montage 默认 false，§11-2 两段式）。
+ *  契约参数面={script_id, stage?, only_shots?, fidelity_override?, auto_montage?}（规范 §5.1 定稿）——
+ *  seed_base 不在提交面：服务端自回填自消费（gen.seed_base，2026-10-05 起），客户端发明提交形会被拒/忽略 */
 export function buildStoryboardGenerateBody(p: StoryboardGenerateParams): Record<string, unknown> {
   if (!GENERATE_STAGE_VALUES.includes(p.stage)) {
     throw new Error(`非法 stage：${p.stage}（合法值 ${GENERATE_STAGE_VALUES.join('|')}；与 comfygen stage 同名异值勿混）`)
@@ -502,16 +632,36 @@ export function buildStoryboardGenerateBody(p: StoryboardGenerateParams): Record
   if (p.onlyShots?.length) params.only_shots = p.onlyShots
   if (p.fidelityOverride) params.fidelity_override = p.fidelityOverride
   params.auto_montage = p.autoMontage ?? false
+  // 产品图（2026-10-03 用户裁决：第 2 步选产品图后随生成任务直传；服务端 ≤6 张截断（2026-10-06 服务端放宽 2→6））
+  if (p.productImages?.length) params.product_images = p.productImages.slice(0, 6)
+  // A-roll 阶段③参数（2026-10-04 用户裁决：口播音频+图片→A-roll；worker 按 aroll.source 消费）
+  if (p.arollMaterialId) params.aroll_material_id = p.arollMaterialId
+  if (p.arollImage) params.aroll_image = p.arollImage
+  // 质量档（批3 D4：draft 缺省/final 定稿非 turbo；不传=服务端缺省 draft）
+  if (p.quality) params.quality = p.quality
   return { task_type: 'storyboard_generate', params }
 }
 
-/**
- * HumanGate② 帧确认表单值（实测 2026-10-02：PUT frames 为 multipart/form-data，
+/** HumanGate② 帧确认表单值（实测 2026-10-02：PUT frames 为 multipart/form-data，
  * 字段 first/last 文件可选 + confirmed 布尔；本函数返回确认形态的表单值，
  * 由调用方以 multipart 编码发送，无文件）。
  */
 export function buildFramesConfirmBody(): Record<string, unknown> {
   return { confirmed: true }
+}
+
+/** A-roll 产物预览相对 URL（2026-10-05：aroll.material_id 回填后 /material/serve 流式；
+ *  0/空/非数字=未回填 → 空串。绝对化由调用方 toAbsolute 承担） */
+export function arollPreviewUrlFrom(materialId: unknown): string {
+  const mid = Number(materialId)
+  return Number.isInteger(mid) && mid > 0 ? `/material/serve?material_id=${mid}` : ''
+}
+
+/** 九宫图总览相对 URL（v4.7 契约 2026-10-05：meta.storyboard_grid 回填后 GET
+ *  storyboard-grid 直取；旧脚本无引用 → 空串，客户端落回逐镜粗稿网格） */
+export function storyboardGridUrlFrom(meta: unknown, scriptId: string): string {
+  const hasGrid = !!((meta as Record<string, unknown> | undefined)?.storyboard_grid)
+  return hasGrid && scriptId ? `/api/storyboard/scripts/${scriptId}/storyboard-grid` : ''
 }
 
 /** HumanGate② 手动换帧 multipart 文件组（§9：multipart 上传首/尾帧；

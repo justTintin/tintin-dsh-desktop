@@ -81,7 +81,7 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
       // 仿爆款旧卡已退役（2026-10-02 用户裁决：旧款未投产，V3.5 仿视频向导链取代；
       // 服务端 /viral/clone/* 契约面与类型保留，客户端 UI/composable/logic 移除）
       { id: 'live-slice', title: '直播切片', desc: '视频分析热点发现→切片与封面生成', emoji: '📡', accent: 'linear-gradient(135deg,#EF4444 0%,#DC2626 100%)' },
-      { id: 'video-repair', title: '视频修复', desc: '画质修复 / 工作流处理', emoji: '🛠️', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)', disabled: true },
+      // 视频修复占位卡已删（2026-10-06 用户裁决：卡片及功能移除；从未实现，仅禁用占位）
       { id: 'subtitle-removal', title: '视频去水印字幕', desc: '去除字幕 / 台标水印', emoji: '🔤', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)' },
       { id: 'video-download', title: '参考视频下载', desc: '粘贴 YouTube/B 站 链接选档位下载', emoji: '⬇️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#6366F1 100%)' },
     ],

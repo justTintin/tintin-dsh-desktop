@@ -1138,9 +1138,11 @@ async function exportAllToJianyingDraft(): Promise<void> {
 
   /** 轨 2（2026-09-17 用户裁决）：导入服务端草稿包——服务端封装好的剪映格式 zip，
    *  客户端只做 解压→数据/路径校验→落盘剪映草稿目录（映射关系属客户端职责；
-   *  服务端给映射=服务端出草稿包，即本轨）。逐任务一个草稿。 */
-  async function exportJianyingPackageDraft(): Promise<void> {
-    const tasks = lastComposeTasks.value
+   *  服务端给映射=服务端出草稿包，即本轨）。逐任务一个草稿。
+   *  overrideTaskIds（2026-10-08）：仿视频「生成任务转草稿」入口——直接传生成任务 id
+   *  （E-1.2 from-task 已支持 storyboard_generate），不传=旧行为（文案线 lastComposeTasks）。 */
+  async function exportJianyingPackageDraft(overrideTaskIds?: string[]): Promise<void> {
+    const tasks = overrideTaskIds?.length ? overrideTaskIds.map((id) => ({ taskId: id })) : lastComposeTasks.value
     if (!tasks.length) {
       notify('无法导入', '没有可导入的合成任务：请先执行「服务端合成」')
       return

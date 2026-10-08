@@ -46,7 +46,7 @@ function scheduleWrite(): void {
         scripts: scripts.value,
         audios: audios.value,
       })
-      const r = await window.tintin?.context?.writeTask(task)
+      const r = await window.tintin?.context?.writeTask(task as unknown as Parameters<NonNullable<NonNullable<typeof window.tintin>['context']>['writeTask']>[0])
       if (r && typeof r === 'object' && 'error' in r && r.error) throw new Error(String(r.error))
       if (!r || typeof r !== 'object' || !('ok' in r) || !r.ok) throw new Error('宿主未确认写入')
       syncState.value = 'saved'
