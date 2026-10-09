@@ -690,9 +690,29 @@ const sixViewDisplay = computed(() => {
   const raw = iv.sixViews.value.length ? iv.sixViews.value : parseSixViewEntries((record.value?.meta as Record<string, unknown> | undefined)?.six_view)
   return raw.map((e) => ({ view: e.view, url: toAbsolute(e.url || sixViewFileUrl(scriptId.value, e.view)) }))
 })
+/** 删除六视图（两段式确认：首点武装、再点执行、3 秒自动解除；不可逆，整组可重出） */
+const armedDeleteView = ref('')
+let armedDeleteTimer: ReturnType<typeof setTimeout> | null = null
+function onDeleteSixView(view: string): void {
+  if (iv.sixViewPhase.value === 'running') return
+  if (armedDeleteView.value !== view) {
+    armedDeleteView.value = view
+    if (armedDeleteTimer) clearTimeout(armedDeleteTimer)
+    armedDeleteTimer = setTimeout(() => { if (armedDeleteView.value === view) armedDeleteView.value = '' }, 3000)
+    return
+  }
+  armedDeleteView.value = ''
+  void iv.deleteSixView(view).then((ok) => {
+    if (!ok) return
+    notify('六视图已删除', `${view} 已物理删除——videos 参考自动少一张；整组重出请点「生成六视图」（约 3 分钟）`)
+    if (!iv.sixViews.value.length) void reloadScript()
+  })
+}
 async function regenSixView(): Promise<void> {
   await iv.submitSixView(productImages.value)
 }
+/** 六视图就绪=done 且有图——第 3→4 步闸门（§11-51：videos 阶段服务端消费六视图） */
+const sixViewReady = computed(() => iv.sixViewPhase.value === 'done' && iv.sixViews.value.length > 0)
 
 /** 第 4 步阶段①「重新生成九宫格图」：重提 storyboard 任务（全部镜头重生成，带产品图） */
 async function regenStoryboard(): Promise<void> {
@@ -910,29 +930,38 @@ watch(() => [draftConfirmed.value, framesReadyCount.value, iv.genPhase.value, iv
         <!-- 六视图（§11-51：选品图确认自动生成，九宫格回填前先出——2026-10-08 用户裁决移本行右侧） -->
         <span class="spacer"></span>
         <div class="iv-sixview-inline">
-          <TButton
-            label="生成六视图"
-            variant="secondary"
-            size="small"
-            :disabled="iv.sixViewPhase.value === 'running'"
-            :loading="iv.sixViewPhase.value === 'running'"
-            title="按当前选品的产品图生成六面视图（九宫格回填前先出）"
-            @click="regenSixView"
-          />
           <div v-if="sixViewDisplay.length" class="iv-sixview2-row">
-            <img v-for="(v, i) in sixViewDisplay" :key="i" :src="v.url" class="iv-sixview2-img" :title="`六视图 · ${v.view}`" />
+            <div v-for="(v, i) in sixViewDisplay" :key="i" class="iv-sixview2-item">
+              <img :src="v.url" class="iv-sixview2-img" :title="`六视图 · ${v.view}`" />
+              <button class="iv-sixview2-del" :class="{ 'is-arm': armedDeleteView === v.view }"
+                :disabled="iv.sixViewPhase.value === 'running'"
+                :title="armedDeleteView === v.view ? '再次点击确认删除（不可逆）' : `删除视角 ${v.view}（不可逆，整组可重出）`"
+                @click="onDeleteSixView(v.view)">{{ armedDeleteView === v.view ? '确认?' : '×' }}</button>
+            </div>
           </div>
           <span v-else-if="iv.sixViewPhase.value === 'running'" class="muted">生成中…</span>
           <span v-else-if="iv.sixViewError.value" class="iv-err">{{ iv.sixViewError.value }}</span>
         </div>
       </div>
-      <TButton
-        label="选择产品图"
-        variant="primary"
-        style="width: 100%"
-        title="打开素材库图片弹窗（仅图片）；选中的产品图随脚本保存并随生成任务直传"
-        @click="productImgDlgOpen = true"
-      />
+      <!-- 双按钮各占一半（2026-10-08 用户裁决）：左=选择产品图，右=生成六视图 -->
+      <div class="row">
+        <TButton
+          label="选择产品图"
+          variant="secondary"
+          style="flex: 1 1 0"
+          title="打开素材库图片弹窗（仅图片）；选中的产品图随脚本保存并随生成任务直传"
+          @click="productImgDlgOpen = true"
+        />
+        <TButton
+          label="生成六视图"
+          variant="primary"
+          style="flex: 1 1 0"
+          :disabled="iv.sixViewPhase.value === 'running'"
+          :loading="iv.sixViewPhase.value === 'running'"
+          title="按当前选品的产品图生成六面视图（九宫格回填前先出）"
+          @click="regenSixView"
+        />
+      </div>
       <!-- 参考声音（同文案混剪 Step3：TSelect+常驻播放条，源 GET /voice/samples） -->
       <div class="row ref-row">
         <span class="lbl">参考声音:</span>
@@ -1055,6 +1084,7 @@ watch(() => [draftConfirmed.value, framesReadyCount.value, iv.genPhase.value, iv
       :shots="shots"
       :grid-url="storyboardGridUrl"
       :quality-report="qualityReport"
+      :six-view-ready="sixViewReady"
       @toggle-badcase="toggleBadcase"
       :pack="iv.storyboardPack.value"
       :gen-result-summary="genResultSummary"
@@ -1097,6 +1127,7 @@ watch(() => [draftConfirmed.value, framesReadyCount.value, iv.genPhase.value, iv
       :shots="shots"
       :grid-url="storyboardGridUrl"
       :quality-report="qualityReport"
+      :six-view-ready="sixViewReady"
       @toggle-badcase="toggleBadcase"
       :pack="iv.storyboardPack.value"
       :gen-result-summary="genResultSummary"
@@ -1219,9 +1250,15 @@ watch(() => [draftConfirmed.value, framesReadyCount.value, iv.genPhase.value, iv
 /* 六视图（§11-51）：产品图行右侧——按钮+六张 3:4 缩略一排 */
 .iv-sixview-inline { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .iv-sixview2-row { display: flex; gap: 6px; }
+.iv-sixview2-item { position: relative; }
+.iv-sixview2-del { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0;
+  line-height: 15px; font-size: 12px; background: rgba(0, 0, 0, 0.55); color: #fff;
+  border: none; border-radius: 50%; cursor: pointer; }
+.iv-sixview2-del:hover { background: var(--danger, #e74c3c); }
+.iv-sixview2-del.is-arm { width: auto; padding: 0 6px; border-radius: 9px; background: var(--danger, #e74c3c); }
 .iv-sixview2-img { height: 72px; aspect-ratio: 3 / 4; object-fit: cover;
   border: 1px solid var(--border); border-radius: var(--radius-md); background: #101010; }
-.product-img-thumb { position: relative; width: 84px; aspect-ratio: 1 / 1; overflow: hidden;
+.product-img-thumb { position: relative; width: 168px; aspect-ratio: 1 / 1; overflow: hidden;
   border: 1px solid var(--border); border-radius: var(--radius-sm); background: #101010; }
 .product-img-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .product-img-del { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0;

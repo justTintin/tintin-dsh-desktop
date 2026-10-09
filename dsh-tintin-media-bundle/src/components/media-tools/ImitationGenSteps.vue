@@ -58,6 +58,8 @@ const props = defineProps<{
   retrying: string
   retryFidelity: string
   startVideos: string
+  /** 六视图就绪（§11-51：videos 阶段服务端消费六视图；未生成禁入第 4 步） */
+  sixViewReady: boolean
   frameUrl: (name: unknown, which: 'first' | 'last' | 'draft_first' | 'draft_last') => string
   videoUrlOf: (materialId: unknown) => string
   liveShots: { done: number; total: number } | null
@@ -177,9 +179,8 @@ function openLightbox(name: unknown, which: 'first' | 'last', index: number): vo
   lightbox.value = { src: props.frameUrl(name, which), caption: `#${index + 1} ${String(name || '')} ${which === 'first' ? '首帧' : '尾帧'}` }
   clientInfo('imitation-video', `灯箱打开：${lightbox.value.caption}`)
 }
-function openGridLightbox(): void {
-  if (!props.gridUrl) return
-  lightbox.value = { src: props.gridUrl, caption: '九宫格分镜总览' }
+function openDraftLightbox(name: unknown, index: number): void {
+  lightbox.value = { src: props.frameUrl(name, 'draft_first'), caption: `#${index + 1} ${String(name || '')} 粗稿首帧` }
 }
 /** 九宫格图缓存击穿在父级 URL 上（storyboardGridUrl 带脚本 version——2026-10-07 服务端
  *  重生成换种子后"同 URL 不同图"成为常态）；旧 gridStamp ?t 机制从未接线已删 */
@@ -276,16 +277,25 @@ async function copyPrompts(): Promise<void> {
           <div class="iv-grid-cols">
             <div class="iv-grid-left">
               <div class="row between">
-                <span class="lbl">九宫格图（服务端拼版整图，点击可放大）</span>
-                <TButton label="下载九宫格图" variant="secondary" size="small" :disabled="!gridUrl" :loading="gridDlBusy" @click="downloadGrid" />
+                <span class="lbl">分镜总览（按镜头号，每镜=粗稿首帧，点击放大）</span>
+                <TButton label="下载九宫格图（整图）" variant="secondary" size="small" :disabled="!gridUrl" :loading="gridDlBusy" title="服务端拼版整图仍可下载（Seedance 交付物），页面不再展示" @click="downloadGrid" />
               </div>
-              <div v-if="gridUrl">
-                <button type="button" class="iv-fig-btn" title="点击查看大图" @click="openGridLightbox">
-                  <img :src="gridUrl" alt="九宫格图" class="iv-grid-img" />
-                </button>
-              </div>
-              <div v-else class="muted">九宫格图生成中或未回填——生成完成后自动显示；右上「重新生成九宫格图」可重提任务。</div>
               <div v-if="gridDlNote" class="muted">{{ gridDlNote }}</div>
+              <!-- 按镜头号散排（2026-10-08 用户裁决：不拼整图；每格=粗稿首帧，尺寸约为拼版格两倍） -->
+              <div class="iv-draft-grid">
+                <figure v-for="(shot, i) in shots.filter((s) => s.source === 'generate')" :key="shot.gen?.name || i" class="iv-draft-cell">
+                  <button
+                    v-if="shot.gen?.draft_first"
+                    type="button" class="iv-fig-btn"
+                    :title="`#${i + 1} ${shot.gen?.name || ''} 粗稿首帧（点击查看大图）`"
+                    @click="openDraftLightbox(shot.gen?.name, i)"
+                  >
+                    <img :src="frameUrl(shot.gen?.name, 'draft_first')" alt="粗稿首帧" class="iv-draft-img" loading="lazy" />
+                  </button>
+                  <div v-else class="iv-fig-empty">粗稿待生成</div>
+                  <figcaption class="muted">镜{{ i + 1 }} · {{ shot.gen?.name }}</figcaption>
+                </figure>
+              </div>
             </div>
             <div v-if="packShots.length" class="iv-pack-prompts">
               <div class="row between">
@@ -383,7 +393,7 @@ async function copyPrompts(): Promise<void> {
                     <button v-if="shot.gen?.last_frame" type="button" class="iv-fig-btn" :title="`${shots.indexOf(shot) + 1} ${shot.gen?.name || ''} 尾帧（点击查看全图）`" @click="openLightbox(shot.gen?.name, 'last', shots.indexOf(shot))">
                       <img :src="frameUrl(shot.gen.name, 'last')" alt="尾帧" loading="lazy" />
                     </button>
-                    <span v-else class="iv-fig-empty">尾帧待生成</span>
+                    <span v-else class="iv-fig-empty">无尾帧（关键帧交付模式）</span>
                     <figcaption>尾帧</figcaption>
                   </figure>
                 </div>
@@ -423,12 +433,13 @@ async function copyPrompts(): Promise<void> {
       <div class="row">
         <TButton label="← 上一步" variant="primary" @click="onBack" />
         <span v-if="ivRef<string>('genError').value" class="iv-err">{{ ivRef<string>('genError').value }}</span>
+        <span v-if="stageDReady && !sixViewReady" class="muted">六视图未生成——回第 2 步产品图行右侧「生成六视图」</span>
         <span class="spacer"></span>
         <TButton
           label="下一步：视频生成"
           :loading="!!startVideos"
-          :disabled="!stageDReady || !!startVideos"
-          :title="stageDReady ? '' : '全部分镜帧确认后解锁'"
+          :disabled="!stageDReady || !sixViewReady || !!startVideos"
+          :title="!stageDReady ? '全部分镜帧确认后解锁' : !sixViewReady ? '六视图未生成——回第 2 步产品图行右侧「生成六视图」' : ''"
           @click="emit('start-videos')"
         />
       </div>
@@ -633,8 +644,11 @@ async function copyPrompts(): Promise<void> {
    minmax(0,1fr) 防 min-content 撑爆轨道（长提示词 word-break 已断行） */
 .iv-grid-cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
 .iv-grid-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.iv-grid-img { width: 100%; max-width: 100%; height: auto; max-height: 520px; object-fit: contain; margin: 0 auto; border: 1px solid var(--border);
-  border-radius: var(--radius-md); background: #101010; display: block; }
+.iv-draft-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.iv-draft-cell { width: 190px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.iv-draft-cell .iv-fig-btn { display: block; }
+.iv-draft-img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: #101010; display: block; }
 .iv-pack-prompts { display: flex; flex-direction: column; gap: 6px; }
 .iv-pack-prompt { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
   background: var(--card); border: 1px dashed var(--border); border-radius: var(--radius-md); }

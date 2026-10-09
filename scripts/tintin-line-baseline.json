@@ -8,6 +8,7 @@
  "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStep4Panel.vue": 1236,
  "dsh-tintin-media-bundle/src/composables/copywritingMontage/useCopywritingMontageStep3Voice.ts": 1690,
  "dsh-tintin-media-bundle/src/composables/copywritingMontage/useCopywritingMontageStep4Final.ts": 1213,
- "dsh-tintin-media-bundle/src/components/media-tools/ImitationVideo.vue": 1304,
+ "dsh-tintin-media-bundle/src/components/media-tools/ImitationVideo.vue": 1341,
+ "dsh-tintin-media-bundle/src/types/server-api.ts": 1001,
  "dsh-tintin-media-bundle/src/components/media-tools/ImitationFxPackPanel.vue": 1228
 }

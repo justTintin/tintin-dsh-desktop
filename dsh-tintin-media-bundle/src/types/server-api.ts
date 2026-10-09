@@ -241,6 +241,7 @@ export const API_PATHS = {
     rewriteVisuals: (id: string) => `/api/storyboard/scripts/${id}/rewrite-visuals`,
     sixView: (id: string) => `/api/storyboard/scripts/${id}/six-view`,
     sixViewResult: (taskId: string) => `/api/storyboard/scripts/six-view/result/${taskId}`,
+    sixViewDelete: (id: string, view: string) => `/api/storyboard/scripts/${id}/six-view/${view}`,
     save:        '/api/storyboard/scripts',
     // 仿视频 V3.5（PRD-M-5，2026-10-02 v1.0+评审复核 §9 新增最小集）：
     // 实测（2026-10-02 openapi 探针）：imitate 挂在 scripts 集合下

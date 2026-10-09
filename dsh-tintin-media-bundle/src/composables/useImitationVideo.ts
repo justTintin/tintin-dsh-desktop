@@ -501,6 +501,35 @@ export function useImitationVideo() {
     }
   }
 
+  /** 删除单张六视图（§11-51 闭环：meta 删键+物理删文件，不可逆；
+   *  videos 阶段 products 自动少一张；404=未知视角/未生成/已删） */
+  async function deleteSixView(view: string): Promise<boolean> {
+    if (!scriptId.value) return false
+    if (sixViewPhase.value === 'running') {
+      sixViewError.value = '六视图生成中——等本轮完成后再删除'
+      clientError(TAG, sixViewError.value)
+      return false
+    }
+    stopSixViewPolling()
+    try {
+      const resp = (await serverBridge().delete(API_PATHS.storyboard.sixViewDelete(scriptId.value, view))) as Record<string, unknown> | null
+      if (!resp || resp.ok !== true) {
+        sixViewError.value = `删除六视图 ${view} 失败：${String(resp?.error ?? resp?.detail ?? `响应异常（实得字段：${resp ? Object.keys(resp).join(',') : 'null'}）`)}`
+        clientError(TAG, sixViewError.value, { resp })
+        return false
+      }
+      sixViews.value = sixViews.value.filter((e) => e.view !== view)
+      sixViewError.value = ''
+      sixViewPhase.value = 'done'
+      clientInfo(TAG, `六视图 ${view} 已删除（剩余：${JSON.stringify(resp.views ?? null)}）`)
+      return true
+    } catch (e) {
+      sixViewError.value = `删除六视图 ${view} 失败：${(e as Error).message}`
+      clientError(TAG, sixViewError.value, e)
+      return false
+    }
+  }
+
   function startSixViewPolling(): void {
     stopSixViewPolling()
     const tick = async (): Promise<void> => {
@@ -552,7 +581,7 @@ export function useImitationVideo() {
     // Part 2
     genTaskId, genPhase, genError, genResult, genProgress, genElapsedSec, genMessage, genStage, genJobIds, videosTaskId,
     // 六视图（§11-51）
-    sixViewTaskId, sixViewPhase, sixViews, sixViewError, submitSixView,
+    sixViewTaskId, sixViewPhase, sixViews, sixViewError, submitSixView, deleteSixView,
     submitGenerate, preflightGenerate, timelineWarning,
   }
 }
