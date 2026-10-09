@@ -135,13 +135,6 @@ const {
         :disabled="!srcPath"
         @seek="seekToTime"
       />
-      <VsrFrameScrubber
-        :duration-s="durationS"
-        :fps="fps"
-        :current-t="currentT"
-        :disabled="!srcPath"
-        @seek="seekToTime"
-      />
         </div>
       </div>
 

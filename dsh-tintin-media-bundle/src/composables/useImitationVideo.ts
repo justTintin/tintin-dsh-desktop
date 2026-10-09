@@ -11,7 +11,7 @@
 // File/Blob 属 DOM 概念留在本层（UI 文件选择器供给）；纯逻辑层只处理字符串形态。
 // ═══════════════════════════════════════════════════════════════
 
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { API_PATHS } from '../types/server-api'
 import { clientError, clientInfo } from '../utils/clientLog'
 import { extractTaskObj, mapTaskStatus } from './copywritingMontageCommonLogic'
@@ -20,6 +20,7 @@ import {
   buildFramesConfirmBody,
   buildImitateBody,
   buildStoryboardGenerateBody,
+  classifySixViewPollStatus,
   isStageDReady,
   normalizeServerEnums,
   parseSixViewEntries,
@@ -376,7 +377,7 @@ export function useImitationVideo() {
       return false
     }
     try {
-      const body = buildStoryboardGenerateBody(input)
+      const body = buildStoryboardGenerateBody({ ...input, referenceMode: referenceMode.value })
       const resp = (await serverBridge().post(API_PATHS.scheduled.tasksList, body)) as Record<string, unknown> | null
       const taskId = resp && (resp.task_id ?? resp.id)
       if (taskId === undefined || taskId === null || taskId === '') {
@@ -447,9 +448,14 @@ export function useImitationVideo() {
     return arollTimelineWarning(shots, voiceDurSec)
   }
 
+  // ── 参考模式（方向档位字典 /comfygen/enums.reference_mode 下发）：
+  //    scene_refs=画面级还原（原片帧参考）/ style_anchor=风格级相似（文字+产品图）。
+  //    默认 scene_refs（字典首项）；submitGenerate 对每次 storyboard_generate 注入
+  //    params.reference_mode，父组件调用点零改动 ──
+  const referenceMode = ref('scene_refs')
   // ── 六视图（§11-51：选品/上传产品图触发；九宫格回填前左栏展示，2026-10-08 用户裁决上下共存）──
   const sixViewTaskId = ref('')
-  const sixViewPhase = ref<'' | 'running' | 'done' | 'failed'>('')
+  const sixViewPhase = ref<'' | 'running' | 'done' | 'failed' | 'cancelled'>('')
   const sixViews = ref<SixViewEntry[]>([])
   const sixViewError = ref('')
   let sixViewTimer: ReturnType<typeof setInterval> | null = null
@@ -530,18 +536,51 @@ export function useImitationVideo() {
     }
   }
 
+  /** 中途取消六视图生成任务（2026-10-09 服务端联动取消上线：batch_cancel→worker 轮询
+   *  ≤15s 感知→请求取消 comfygen 远端 job 并留痕 remote_cancelled；本地终态 CANCELLED
+   *  非失败。发起后保持轮询——终态由轮询分支落 cancelled；服务端仅 pending/running
+   *  可取消，已完成时 cancelled:0，轮询自然落 done。路径内联同 useImitationMontage
+   *  先例（server-api.ts 千行红线不加行）。 */
+  async function cancelSixView(): Promise<boolean> {
+    if (!sixViewTaskId.value || sixViewPhase.value !== 'running') return false
+    try {
+      const resp = (await serverBridge().post('/tasks/batch_cancel', {
+        task_ids: [sixViewTaskId.value],
+      })) as Record<string, unknown> | null
+      clientInfo(TAG, `六视图取消请求已发送 task=${sixViewTaskId.value}（${JSON.stringify(resp ?? null)}）`)
+      return true
+    } catch (e) {
+      sixViewError.value = `六视图取消请求失败：${(e as Error).message}`
+      clientError(TAG, sixViewError.value, e)
+      return false
+    }
+  }
+
+  /** 轮询态文案（running/cancelled 两个非终态展示；failed 走 sixViewError 红字） */
+  const sixViewStatusText = computed(() => {
+    if (sixViewPhase.value === 'running') return '生成中…'
+    if (sixViewPhase.value === 'cancelled') return '已取消（可重出）'
+    return ''
+  })
+
   function startSixViewPolling(): void {
     stopSixViewPolling()
     const tick = async (): Promise<void> => {
       try {
         const resp = (await serverBridge().get(API_PATHS.storyboard.sixViewResult(sixViewTaskId.value))) as Record<string, unknown> | null
-        const st = String(resp?.status ?? '').toLowerCase()
-        if (st === 'running' || st === 'pending' || st === '') return
+        const outcome = classifySixViewPollStatus(resp?.status)
+        if (outcome === 'pending') return
         stopSixViewPolling()
-        if (st === 'failed' || st === 'error') {
+        if (outcome === 'failed') {
           sixViewPhase.value = 'failed'
           sixViewError.value = String(resp?.error || '六视图任务失败')
           clientError(TAG, `六视图任务失败 task=${sixViewTaskId.value}`, { resp })
+          return
+        }
+        if (outcome === 'cancelled') {
+          sixViewPhase.value = 'cancelled'
+          sixViewError.value = ''
+          clientInfo(TAG, `六视图任务已取消（status=${String(resp?.status)}）task=${sixViewTaskId.value}——远端联动取消留痕见脚本 meta.six_view`)
           return
         }
         const urls = parseSixViewEntries((resp?.result ?? resp) as Record<string, unknown>)
@@ -581,7 +620,7 @@ export function useImitationVideo() {
     // Part 2
     genTaskId, genPhase, genError, genResult, genProgress, genElapsedSec, genMessage, genStage, genJobIds, videosTaskId,
     // 六视图（§11-51）
-    sixViewTaskId, sixViewPhase, sixViews, sixViewError, submitSixView, deleteSixView,
+    sixViewTaskId, sixViewPhase, sixViews, sixViewError, submitSixView, deleteSixView, cancelSixView, sixViewStatusText, referenceMode,
     submitGenerate, preflightGenerate, timelineWarning,
   }
 }

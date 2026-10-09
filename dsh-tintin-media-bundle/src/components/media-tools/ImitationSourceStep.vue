@@ -13,6 +13,7 @@ import type { useImitationVideo } from '@/composables/useImitationVideo'
 import { clientError } from '@/utils/clientLog'
 import { acceptFileDragOver } from '@/utils/fileUrl'
 import { MAX_SOURCE_VIDEO_SEC, probeDurationSec } from '@/utils/videoDuration'
+import { setPendingMediaTool } from '@/composables/pendingMediaTool'
 import {
   enumLabel,
   shotsTotalDuration,
@@ -36,7 +37,7 @@ const sourceMode = ref<SourceMode>('file')
 const sourceMaterial = ref('')
 const sourceUrl = ref('')
 const ratio = ref('9:16')
-const fidelity = ref('balanced')
+const fidelity = ref('off')  // 2026-10-09 用户裁决：默认不启用 FlashVSR（fidelity=off）
 /** 本地文件上传进度（0..1；<0 未在上传） */
 const uploadRatio = ref(-1)
 
@@ -167,6 +168,11 @@ const rpShots = computed<Array<Record<string, unknown>>>(() => {
       <label class="iv-mode" :class="{ on: sourceMode === 'file' }"><input v-model="sourceMode" type="radio" value="file" />本地上传</label>
       <label class="iv-mode" :class="{ on: sourceMode === 'material' }"><input v-model="sourceMode" type="radio" value="material" />素材库</label>
       <label class="iv-mode" :class="{ on: sourceMode === 'url' }"><input v-model="sourceMode" type="radio" value="url" />链接</label>
+      <!-- 2026-10-09 用户裁决：行尾直达「视频去水印字幕」工具（原视频含字幕时先去字再拆解） -->
+      <button type="button" class="iv-goto-vsr" title="打开「视频去水印字幕」工具" @click="setPendingMediaTool('subtitle-removal')">
+        视频去字幕
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7" /></svg>
+      </button>
     </div>
 
     <div v-if="sourceMode === 'file'" class="iv-filepick">
@@ -212,6 +218,12 @@ const rpShots = computed<Array<Record<string, unknown>>>(() => {
       <label class="seg-field head-field"><span class="lbl">保真档位</span>
         <select v-model="fidelity" class="input w-fidelity">
           <option v-for="f in iv.enums.value?.fidelity || []" :key="f.value" :value="f.value">{{ f.label }}</option>
+        </select>
+      </label>
+      <label class="seg-field head-field"><span class="lbl">参考模式</span>
+        <select v-model="iv.referenceMode.value" class="input w-fidelity"
+          title="画面级还原=原片帧参考（构图/姿态以场景帧为准）；风格级相似=文字+产品图（现行为）">
+          <option v-for="r in iv.enums.value?.referenceModes || []" :key="r.value" :value="r.value">{{ r.label }}</option>
         </select>
       </label>
       <span class="spacer"></span>
@@ -314,6 +326,17 @@ const rpShots = computed<Array<Record<string, unknown>>>(() => {
   font-size: 12px; color: var(--muted-foreground); cursor: pointer;
 }
 .iv-mode.on { color: var(--primary); font-weight: 600; border-color: var(--primary); }
+
+/* 行尾直达按钮（2026-10-09）：同 .iv-mode 芯片形态，主色描边区分动作属性 */
+.iv-goto-vsr {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface-container));
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border)); border-radius: var(--radius-md);
+  font-size: 12px; color: var(--primary); cursor: pointer;
+  transition: background var(--duration-fast) var(--easing-default);
+}
+.iv-goto-vsr:hover { background: color-mix(in srgb, var(--primary) 16%, var(--surface-container)); }
 
 .seg-card { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
   background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md); }

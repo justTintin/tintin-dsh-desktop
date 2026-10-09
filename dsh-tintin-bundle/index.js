@@ -581,8 +581,11 @@ export async function apply(ctx, config) {
     // shell.showItemInFolder）。Windows `explorer /select,"<path>"`、macOS
     // `open -R`；Linux 无选中语义退化为打开所在目录。每次调用落 harness.log。
     'shell:revealInFolder': (args) => {
-      const p = String(args?.[0] ?? '')
-      if (!p) return { error: 'shell:revealInFolder requires path' }
+      const raw = String(args?.[0] ?? '')
+      if (!raw) return { error: 'shell:revealInFolder requires path' }
+      // explorer /select 只认反斜杠路径：正斜杠（渲染层拼 savePath 的产物）会
+      // 静默回退到资源管理器默认视图，不定位到目标（2026-10-09 实障）
+      const p = normalize(raw)
       try {
         if (!existsSync(p)) {
           ctx.logger.warn('shell:revealInFolder: 路径不存在 %s', p)

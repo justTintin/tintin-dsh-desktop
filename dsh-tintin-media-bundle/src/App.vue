@@ -39,6 +39,9 @@ import CoverMaker from './components/media-tools/CoverMaker.vue'
 // 「前往分镜」跨视图跳转（2026-09-27）：产品资料文案面板写入 pendingStoryboard
 // 信号后，本视图侦听并自动打开分镜脚本创作卡
 import { pendingStoryboard } from './composables/pendingStoryboard'
+// 工具内跨卡跳转（2026-10-09）：仿视频第 1 步「视频去字幕」等按钮写入
+// 目标卡 id（pendingMediaTool），本视图侦听后切换 active（一次性消费）
+import { pendingMediaTool } from './composables/pendingMediaTool'
 
 interface ToolCard {
   id: string
@@ -93,6 +96,13 @@ const active = ref<string | null>(null)
 // 「前往分镜」跨视图跳转（2026-09-27）：产品资料·文案面板写入 pendingStoryboard
 // 信号后自动打开分镜脚本创作卡（信号由 OtStoryboard 挂载/在位时消费）
 watch(pendingStoryboard, (v) => { if (v) active.value = 'storyboard' })
+// 工具内跨卡跳转（2026-10-09）：仿视频第 1 步「视频去字幕」等按钮写入目标卡
+// id 后在此切卡；立即清空（一次性消费，防残留重复触发）
+watch(pendingMediaTool, (id) => {
+  if (!id) return
+  active.value = id
+  pendingMediaTool.value = null
+})
 const activeTool = computed(() => ALL_TOOLS.find((t) => t.id === active.value) ?? null)
 
 function openTool(t: ToolCard): void {

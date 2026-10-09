@@ -72,6 +72,9 @@ export interface ServerEnums {
   compositions: EnumOption[]
   cameras: EnumOption[]
   fidelity: EnumOption[]
+  /** 参考模式（方向档位字典，2026-10-09 /comfygen/enums 下发）：
+   *  scene_refs=画面级还原（原片帧参考）/ style_anchor=风格级相似（文字+产品图） */
+  referenceModes: EnumOption[]
   ratios: Array<{ ratio: string; width: number; height: number }>
 }
 
@@ -109,9 +112,14 @@ export function normalizeServerEnums(raw: unknown): ServerEnums | null {
     compositions: toOptions(o.compositions),
     cameras: toOptions(o.cameras),
     fidelity: toOptions(o.fidelity),
+    referenceModes: toOptions(o.reference_mode),
     ratios,
   }
   if (!enums.cameras.length || !enums.fidelity.length) return null
+  // off 档（2026-10-09 用户裁决：FlashVSR LoRA 默认不启用）服务端下发空 label——补可读文案
+  for (const f of enums.fidelity) {
+    if (f.value === 'off' && !f.label) f.label = '关（默认，不启用 FlashVSR）'
+  }
   return enums
 }
 
@@ -240,6 +248,20 @@ export function sixViewFileUrl(sid: string, view: string): string {
   return `/api/storyboard/scripts/${sid}/six-view/file/${view}`
 }
 const SIX_VIEW_ORDER = ['front', 'right', 'back', 'left', 'top', 'bottom']
+
+/** 六视图轮询状态分类（2026-10-09 服务端联动取消：任务终态族 cancelled/canceled +
+ *  重启对账 interrupted 是「已取消/已中断」终态，不是失败——服务端 meta.six_view
+ *  留痕 job_id+remote_cancelled；大小写不敏感，未知状态按完成处理（沿用旧兜底）。 */
+export type SixViewPollOutcome = 'pending' | 'failed' | 'cancelled' | 'complete'
+
+export function classifySixViewPollStatus(status: unknown): SixViewPollOutcome {
+  const st = String(status ?? '').toLowerCase()
+  if (st === '' || st === 'pending' || st === 'running') return 'pending'
+  if (st === 'failed' || st === 'error') return 'failed'
+  if (st === 'cancelled' || st === 'canceled' || st === 'interrupted') return 'cancelled'
+  return 'complete'
+}
+
 
 /** 六视图提取（§11-51，2026-10-08 实测定稿两种形态）：
  *  ① 键控对象（实测 result/meta 形态）：{status, views:{front:{path},…}} 或顶层即键控对象；
@@ -619,6 +641,9 @@ export interface StoryboardGenerateParams {
   /** 质量档（2026-10-07 批3 D4：draft 缺省（turbo）/ final 定稿非 turbo——非法值服务端
    *  出口即拒；定稿重跑按钮用 final） */
   quality?: 'draft' | 'final'
+  /** 参考模式（方向档位字典：scene_refs=画面级还原 / style_anchor=风格级相似；
+   *  字典 /comfygen/enums.reference_mode 下发，缺省 scene_refs） */
+  referenceMode?: string
 }
 
 /** POST /scheduled/tasks body：task_type=storyboard_generate（§5.1；auto_montage 默认 false，§11-2 两段式）。
@@ -639,6 +664,8 @@ export function buildStoryboardGenerateBody(p: StoryboardGenerateParams): Record
   if (p.arollImage) params.aroll_image = p.arollImage
   // 质量档（批3 D4：draft 缺省/final 定稿非 turbo；不传=服务端缺省 draft）
   if (p.quality) params.quality = p.quality
+  // 参考模式（方向档位字典；不传=服务端缺省）
+  if (p.referenceMode) params.reference_mode = p.referenceMode
   return { task_type: 'storyboard_generate', params }
 }
 

@@ -10,6 +10,7 @@ import {
   buildImitateBody,
   buildStoryboardGenerateBody,
   canConfirmFrames,
+  classifySixViewPollStatus,
   clampDuration,
   composedDuration,
   enumLabel,
@@ -313,6 +314,27 @@ describe('Part 2 请求体（§5.1 / §11-9 stage 显式）', () => {
   })
 })
 
+describe('保真枚举 off 档（§11-52③：FlashVSR LoRA 默认不启用）', () => {
+  it('normalizeServerEnums 为空 label 的 off 档补可读文案', () => {
+    const e = normalizeServerEnums({
+      ok: true, source: 'gen_spec',
+      surfaces: { dark_wood_desk: '深色木纹桌面' }, environments: { none: '无（纯台面）' },
+      lightings: { soft_studio: '柔和顶光' }, styles: { ecommerce: '电商大片' },
+      compositions: { centered: '居中构图' }, cameras: { push_in: '推近' },
+      fidelity: { off: '', balanced: '均衡（约4.5分/镜头）' },
+      reference_mode: { scene_refs: '画面级还原（原片帧参考）', style_anchor: '风格级相似（文字+产品图）' },
+      ratios: { '9:16': [704, 1248] },
+    })!
+    expect(e.referenceModes).toEqual([
+      { value: 'scene_refs', label: '画面级还原（原片帧参考）' },
+      { value: 'style_anchor', label: '风格级相似（文字+产品图）' },
+    ])
+    const off = e.fidelity.find((f) => f.value === 'off')
+    expect(off?.label).toBe('关（默认，不启用 FlashVSR）')
+    expect(e.fidelity.find((f) => f.value === 'balanced')?.label).toBe('均衡（约4.5分/镜头）')
+  })
+})
+
 describe('六视图提取（§11-51，2026-10-08 实测定稿两形态）', () => {
   it('键控对象形态（实测 result/meta）：views 按视角名键控，规范序输出，view 名入条目', () => {
     const real = {
@@ -352,5 +374,27 @@ describe('六视图提取（§11-51，2026-10-08 实测定稿两形态）', () =
     expect(parseSixViewEntries({ status: 'running' })).toEqual([])
     expect(parseSixViewEntries(null)).toEqual([])
     expect(parseSixViewEntries({ views: 'not-array' })).toEqual([])
+  })
+})
+
+describe('classifySixViewPollStatus（2026-10-09 服务端联动取消：取消族是终态不是失败）', () => {
+  it('pending 族（空/进行中）→ 继续轮询', () => {
+    for (const st of ['', 'running', 'pending', null, undefined]) {
+      expect(classifySixViewPollStatus(st)).toBe('pending')
+    }
+  })
+  it('失败族 → failed（走既有失败分支）', () => {
+    expect(classifySixViewPollStatus('failed')).toBe('failed')
+    expect(classifySixViewPollStatus('error')).toBe('failed')
+  })
+  it('取消族（双拼写+服务端重启对账 interrupted，大小写不敏感）→ cancelled', () => {
+    for (const st of ['cancelled', 'canceled', 'interrupted', 'CANCELLED', 'Interrupted']) {
+      expect(classifySixViewPollStatus(st)).toBe('cancelled')
+    }
+  })
+  it('其余一律按完成处理（done/completed/succeeded）', () => {
+    for (const st of ['done', 'completed', 'succeeded', 'generated']) {
+      expect(classifySixViewPollStatus(st)).toBe('complete')
+    }
   })
 })

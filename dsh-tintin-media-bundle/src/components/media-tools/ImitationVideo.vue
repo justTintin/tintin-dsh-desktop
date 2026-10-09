@@ -231,10 +231,10 @@ function isWhiteBgImage(url: string): Promise<boolean> {
     img.src = url
   })
 }
-/** 选品自动配图（2026-10-08 用户裁决·二改：走服务端向量语义搜索——产品图在向量库
- *  （POST /material/search：WeMM 编码查询文本→pgvector 余弦，实测 G304 查询全中纯品图），
- *  查询=产品标签+「产品图 白底」语义偏置，top 12 → 白底像素重排（CORS 缺失静默跳过）→ 取 6；
- *  零结果/失败不自动配，仍可「选择产品图」手动选） */
+/** 选品自动配图（2026-10-08 二改：POST /material/search 向量检索产品图；查询=标签+「产品图
+ *  白底」偏置+purpose=product（1009 服务端产品图模式=底型白名单 white/solid/transparent+强制
+ *  image+形态闸 0.4~2.6+白底→透明底排序，堵缺类型行混视频），top 12 → 白底像素重排（CORS
+ *  缺失静默跳过）→ 取 6；零结果/失败不自动配，仍可「选择产品图」手动选） */
 const autoMatchBusy = ref(false)
 async function autoMatchProductImages(): Promise<void> {
   if (!record.value || autoMatchBusy.value) return
@@ -243,7 +243,7 @@ async function autoMatchProductImages(): Promise<void> {
   autoMatchBusy.value = true
   try {
     const res = (await window.tintin.server.post('/material/search', {
-      query: `${label} 产品图 白底`,
+      query: `${label} 产品图 白底`, purpose: 'product',
       top_k: 12,
     })) as { results?: Array<Record<string, unknown>> } | null
     const keyOf = (it: Record<string, unknown>) => String(it.id ?? it.material_id ?? '')
@@ -939,7 +939,7 @@ watch(() => [draftConfirmed.value, framesReadyCount.value, iv.genPhase.value, iv
                 @click="onDeleteSixView(v.view)">{{ armedDeleteView === v.view ? '确认?' : '×' }}</button>
             </div>
           </div>
-          <span v-else-if="iv.sixViewPhase.value === 'running'" class="muted">生成中…</span>
+          <span v-else-if="iv.sixViewPhase.value === 'running' || iv.sixViewPhase.value === 'cancelled'" class="muted">{{ iv.sixViewStatusText.value }}<button v-if="iv.sixViewPhase.value === 'running'" class="product-img-clear" title="取消六视图生成任务（服务端联动取消远端任务，取消留痕可查）" @click="iv.cancelSixView()">取消</button></span>
           <span v-else-if="iv.sixViewError.value" class="iv-err">{{ iv.sixViewError.value }}</span>
         </div>
       </div>

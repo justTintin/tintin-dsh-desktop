@@ -77,7 +77,32 @@ const frameTickPct = (f: number) =>
 </script>
 
 <template>
-          <!-- 时间轴把手：拖拽到目标帧（逐帧），当前帧同步到上方预览 -->
+  <!-- 时间轴把手：拖拽到目标帧（逐帧），当前帧同步到上方预览 -->
+  <div
+    ref="scrubEl"
+    class="frame-scrub"
+    :class="{ 'is-scrubbing': scrubbing, 'is-disabled': disabled }"
+    @pointerdown="scrubDown"
+    @pointermove="scrubMove"
+    @pointerup="scrubUp"
+    @pointerleave="scrubUp"
+  >
+    <div class="frame-scrub__track">
+      <div
+        v-for="f in tickList"
+        :key="f"
+        class="frame-scrub__tick"
+        :style="{ left: frameTickPct(f) }"
+      />
+      <div class="frame-scrub__fill" :style="{ width: scrubPct }" />
+      <div class="frame-scrub__handle" :style="{ left: scrubPct }" />
+    </div>
+    <div class="frame-scrub__meta">
+      <span class="frame-scrub__time">{{ fmtTime(currentT) }}</span>
+      <span>/ {{ fmtTime(durationS) }}</span>
+      <span v-if="totalFrames">· 帧 {{ frameIdx }}/{{ totalFrames }}</span>
+    </div>
+  </div>
 </template>
 
 <style scoped>
