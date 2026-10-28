@@ -211,12 +211,15 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | 契约 | `dsh-plugin-desktop-tintin/src/openfilm-view-contract.ts`(三通道镜像) |
 | 客户端视图 | `dsh-tintin-client-ui/client.js`(mountOpenFilm + 抽屉/日志条/接管) |
 | 宿主桥插件 | `dsh-tintin-bundle/lib/openfilm/*`(studio-runtime 对账、providers-seed、skill-sync、libs-sync) |
-| 官方运行时 | `dsh-plugin-desktop-tintin/tintin-resources/openfilm`(0.2.5,editor dist 由 shell 构建覆盖) |
+| 官方运行时 | `dsh-plugin-desktop-tintin/tintin-resources/openfilm`(0.2.5,editor dist 由 shell 构建覆盖;**覆盖后自验 shell 标记**[build.mjs 2026-10-26],`verify-tintin-resources.mjs` 同步内容闸门——防 fetch:openfilm/热调把官方原版 dist 静默带进包) |
 
 ## 13. 生命周期与自愈
 
 - **接管**:快轮询 → 命中接管;未命中清陈旧 run.json → `startStudio` 全新拉起(附着前**指纹对账**:editor dist 摘要 + 版本);
 - **净场**:`will-quit` + `process 'exit'`(failLoud 崩溃路径)同步收场;开机对账按可执行路径甄别清理 openfilm node 孤儿(不碰其它 node);
+- **轮次自愈(2026-10-26)**:film-acp 看门狗 —— prompt/工具调用 **5 分钟无任何语义事件**即判定挂死:失败回执 + 终结智能体(会话已持久,下次 start 以 resume 续上);等待用户审批/提问期间挂起计时(等人是合法状态);智能体进程退出 → 在途轮次立即错误收尾;**回执按轮重置**(trackTurn 清上一轮 done/events,条目按项目复用)。背景:ACP 长请求无超时,实测轮次在第 13 步的模型/工具调用上无限等待(16:32 包,12 步后冻结,「已发送、无下文」)。
+- **事件直发本体(2026-10-26)**:`local-event` 通道载荷必须是 LocalAgentEvent 本体(`{key,kind,…}`)—— 曾发 `{project,event}` 包装壳,页面读 `event.kind` 恒 undefined,**所有 sessionUpdate 被静默丢弃**(实锤:项目 `.film/chat.json` 20 个轮次 items 全空、「没有进度与结果」;轮次状态只能靠 prompt IPC 的 Promise 翻转)。bridge.ts 对 localAgents 是原样透传,不拆包。
+- **dsh 固化全模式(2026-10-26)**:目录构建收尾统一用已验证构建覆盖打包副本(`package-dir.mjs` → resources/dsh-cli-lib → win-unpacked)—— 原覆盖只挂在 local 收尾,full/unpack 曾直发未固化副本(§16 挂死缺陷)。
 - **观测**:页面启动错误浮层(含行号)、底部日志条、统一 `diagnosticLog`(`%APPDATA%\TinTin\logs\dsh-*.log` + host 分册)。
 
 ## 14. 服务端契约(实测摘要)

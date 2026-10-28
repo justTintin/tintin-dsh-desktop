@@ -29,6 +29,7 @@ const allowedTintinAdditions = new Set([
   'tintin/browser-page-preload.ts',
   'tintin/film-acp.ts',
   'tintin/film-chat.ts',
+  'tintin/cover-acp.ts',
 ])
 const normalizeIdentity = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop').replaceAll('DSH Desktop Beta', 'DSH Desktop')
 const normalizeTintin = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop-tintin').replaceAll('DSH Desktop Beta', 'TinTin')

@@ -1,8 +1,9 @@
 <!doctype html>
 <!-- tintin-browser.html — TinTin 浏览器窗口整体页面（2026-09-28 用户裁决：浏览器整体
      按原客户端实现，废弃 harness tab 内嵌）。结构对照 SRC desktop/renderer/src/browser/
-     Browser.vue：顶部工具条 + 左栏（平台/功能扩展）+ 主区（原生 WebContentsView 经
-     bounds 同步覆盖 #view-host）+ 右栏（媒体嗅探位）+ 下载栏。
+     Browser.vue：顶部工具条 + 书签栏（平台/功能扩展——2026-10-26 用户裁决：原左栏改到
+     地址栏下方书签栏形态）+ 主区（原生 WebContentsView 经 bounds 同步覆盖 #view-host）
+     + 右栏（媒体嗅探位）+ 下载栏。
      桥：复用 preload index.cjs 的 window.dshDesktopBrowser（platforms/loginStatus/
      onDownloadEvent）+ tintinBrowserPage 通道（bounds/nav/open/state）。 -->
 <html lang="zh-CN">
@@ -14,7 +15,6 @@
     :root {
       color-scheme: light dark;
       --bar-h: 46px;
-      --side-w: 208px;
       --right-w: 260px;
       --bg: #f7f7f8; --surface: #ffffff; --line: #e4e4e7; --ink: #18181b;
       --muted: #71717a; --primary: #4f7cff; --ok: #16a34a; --bad: #dc2626;
@@ -35,20 +35,20 @@
     #addr:focus { border-color: var(--primary); }
     #dlBtn { position: relative; }
     #dlBadge { position: absolute; top: 1px; right: 1px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--primary); color: #fff; font-size: 10px; line-height: 15px; text-align: center; display: none; }
-    /* ── 主体 ── */
-    #body { flex: 1 1 auto; display: flex; min-height: 0; }
-    #side { width: var(--side-w); flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--line); overflow-y: auto; padding: 10px 8px; display: flex; flex-direction: column; }
-    .side-title { font-size: 11px; color: var(--muted); padding: 6px 8px 4px; }
-    .side-title.ext { margin-top: 10px; }
-    .plat-btn { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; }
+    /* ── 书签栏（平台/功能扩展；2026-10-26 用户裁决：原左栏改地址栏下方书签栏）── */
+    #bmbar { flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+    .bm-title { flex-shrink: 0; font-size: 11px; color: var(--muted); padding: 0 4px; }
+    .bm-sep { flex-shrink: 0; width: 1px; height: 16px; background: var(--line); margin: 0 6px; }
+    .plat-btn { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 0; border-radius: 13px; background: transparent; color: var(--ink); text-align: left; white-space: nowrap; }
     .plat-btn:hover { background: rgba(127,127,127,.12); }
     .plat-btn.active { background: var(--primary); color: #fff; }
-    .plat-badge { width: 22px; height: 22px; flex-shrink: 0; border-radius: 6px; background: rgba(127,127,127,.18); color: var(--ink); font-size: 11px; line-height: 22px; text-align: center; }
+    .plat-badge { width: 18px; height: 18px; flex-shrink: 0; border-radius: 5px; background: rgba(127,127,127,.18); color: var(--ink); font-size: 10px; line-height: 18px; text-align: center; }
     .plat-btn.active .plat-badge { background: rgba(255,255,255,.25); color: #fff; }
-    .plat-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .plat-name { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
     .plat-state { flex-shrink: 0; font-size: 10px; color: var(--muted); }
     .plat-btn.active .plat-state { color: rgba(255,255,255,.85); }
-    .side-foot { margin-top: auto; padding-top: 10px; }
+    /* ── 主体 ── */
+    #body { flex: 1 1 auto; display: flex; min-height: 0; }
     /* ── 主区 ── */
     #main { flex: 1 1 auto; min-width: 0; position: relative; background: var(--bg); }
     .view { position: absolute; inset: 0; display: none; overflow: auto; padding: 16px; }
@@ -123,16 +123,16 @@
       ⬇<span id="dlBadge">0</span>
     </button>
   </div>
+  <div id="bmbar">
+    <span class="bm-title">平台</span>
+    <div id="platList" style="display:flex;align-items:center;gap:2px;"></div>
+    <span class="bm-sep"></span>
+    <span class="bm-title">功能扩展</span>
+    <div id="extList" style="display:flex;align-items:center;gap:2px;"></div>
+    <span style="flex:1 1 auto;"></span>
+    <button class="plat-btn" id="serverBtn" title="打开系统设置中配置的服务端地址"><span class="plat-badge">服</span><span class="plat-name">服务端</span></button>
+  </div>
   <div id="body">
-    <aside id="side">
-      <div class="side-title">平台</div>
-      <div id="platList"></div>
-      <div class="side-title ext">功能扩展</div>
-      <div id="extList"></div>
-      <div class="side-foot">
-        <button class="plat-btn" id="serverBtn" title="打开系统设置中配置的服务端地址"><span class="plat-badge">服</span><span class="plat-name">服务端</span></button>
-      </div>
-    </aside>
     <main id="main">
       <section class="view active" id="view-browser">
         <div id="view-host"></div>
@@ -209,10 +209,31 @@
         </div>
         <div id="clList2" style="display:flex;flex-direction:column;gap:6px;"></div>
       </section>
+      <section class="view" id="view-extensions">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <span style="font-weight:700;">扩展管理</span>
+          <span id="extCount" style="color:var(--muted);font-size:12px;"></span>
+          <span style="flex:1 1 auto;"></span>
+          <button id="extInstall" class="da-btn" style="height:26px;">+ 安装扩展（crx / zip）</button>
+        </div>
+        <div id="extViewList" style="display:flex;flex-direction:column;gap:6px;"></div>
+      </section>
     </main>
     <aside id="right">
       <h4>媒体嗅探 <button id="sniffClear" title="清空当前平台嗅探列表" style="float:right;border:0.5px solid var(--line);border-radius:5px;background:transparent;color:var(--muted);font:inherit;font-size:11px;padding:2px 8px;cursor:pointer;">清空</button></h4>
       <div id="sniffList" style="display:flex;flex-direction:column;gap:6px;"></div>
+      <!-- B站下载助手（2026-10-26 复活：SRC SniffTab B站扩展推送区；数据=browser:bili-ext-dl） -->
+      <h4 id="biliExtHead" style="display:none;">B站下载助手 <span id="biliExtState" style="float:right;color:var(--muted);font-size:10px;"></span></h4>
+      <div id="biliExtList" style="display:none;flex-direction:column;gap:6px;"></div>
+      <!-- 抖音分享链接解析（SRC SniffTab dy-parse-section；chrom-douyin 预装扩展能力） -->
+      <div id="douyinParseSec" style="display:none;">
+        <h4>抖音视频下载助手</h4>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">预装扩展能力：粘贴分享文本，解析后自动开始下载（无水印完整视频）</div>
+        <input id="dyShare" placeholder="粘贴分享文本或 v.douyin.com 链接" spellcheck="false"
+          style="width:100%;height:26px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:11px;outline:none;user-select:text;" />
+        <button id="dyParseBtn" style="width:100%;height:26px;margin-top:6px;border:0;border-radius:5px;background:var(--primary);color:#fff;font:inherit;font-size:11px;cursor:pointer;">解析下载</button>
+        <div id="dyMsg" style="margin-top:6px;font-size:11px;color:var(--muted);user-select:text;"></div>
+      </div>
     </aside>
   </div>
   <div id="shelf"></div>
@@ -260,6 +281,7 @@
     { id: 'dailyassets', name: '每日素材', badge: '📅' },
     { id: 'creators', name: '达人库', badge: '👤' },
     { id: 'collect', name: '素材采集', badge: '🧺' },
+    { id: 'extensions', name: '扩展管理', badge: '🧩' },
   ]
   function paintSidebar() {
     var list = $('platList')
@@ -297,6 +319,7 @@
     if (name === 'favorites') fvLoad()
     else if (name === 'creators' || name === 'collect') crLoad()
     else if (name === 'history') hsLoad()
+    else if (name === 'extensions') extMgrLoad()
   }
 
   $('serverBtn').onclick = function () {
@@ -497,119 +520,154 @@
       sniffRender((r && r.data) || [])
     }).catch(function () { /* 桥不可达保持原状 */ })
   }
-  function sniffWatch(platform) { sniffPlatform = platform || ''; sniffTick() }
+  function sniffWatch(platform) {
+    sniffPlatform = platform || ''
+    sniffTick()
+    // 下载扩展链分区联动（2026-10-26 复活）：B站=扩展推送下载列表；抖音=分享链接解析
+    var isBili = platform === 'bilibili'
+    var isDy = platform === 'douyin'
+    document.getElementById('biliExtHead').style.display = isBili ? 'block' : 'none'
+    document.getElementById('biliExtList').style.display = isBili ? 'flex' : 'none'
+    document.getElementById('douyinParseSec').style.display = isDy ? 'block' : 'none'
+    if (isBili) biliExtRender()
+  }
   document.getElementById('sniffClear').onclick = function () {
     if (bridge && sniffPlatform) bridge.sniffClear(sniffPlatform).then(sniffTick).catch(function () {})
   }
   sniffTimer = setInterval(sniffTick, 2000)
 
-  // ── 自动上架（SRC AutoListingView/useAutoListing 移植；autoListing:* 七通道）──
-  var alRunId = ''
-  var alLastRunId = ''
+  // ── 下载扩展链（2026-10-26 复活；SRC SniffTab 扩展推送区 + downloadBiliExtLink +
+  //    douyinParseDownload + 扩展管理浮面板，统一并入本页面）──
+  // B站下载助手推送（browser:bili-ext-dl：console 捕获 + 2s 轮询双通道，主进程去重后推送）
+  var biliExt = { title: '', items: [] }
+  var biliBusy = {}
+  function biliExtRender() {
+    var head = document.getElementById('biliExtState')
+    head.textContent = biliExt.items.length ? (biliExt.title ? biliExt.items.length + ' 条 · ' + biliExt.title : biliExt.items.length + ' 条') : '播放视频后由扩展解析下载地址…'
+    var list = document.getElementById('biliExtList')
+    list.textContent = ''
+    if (!biliExt.items.length) return
+    biliExt.items.forEach(function (dl) {
+      var card = document.createElement('div'); card.className = 'sn-card'
+      var nm = document.createElement('div'); nm.className = 'sn-name'; nm.textContent = dl.text || dl.url; nm.title = dl.url
+      var meta = document.createElement('div'); meta.className = 'sn-meta'
+      var badge = document.createElement('span'); badge.className = 'sn-badge'; badge.textContent = dl.sizeText || (dl.audioUrl ? '音视频' : '视频')
+      var btn = document.createElement('button'); btn.className = 'sn-btn'; btn.textContent = biliBusy[dl.url] ? '下载中…' : '下载'
+      btn.onclick = function () {
+        if (!bridge || biliBusy[dl.url]) return
+        biliBusy[dl.url] = true; btn.textContent = '下载中…'
+        // SRC downloadBiliExtLink 口径：直链 + Referer=当前页 + 音视频分离时双流下载 FFmpeg 合并
+        bridge.downloadMediaStart({
+          url: dl.url,
+          ...(dl.audioUrl ? { audioUrl: dl.audioUrl } : {}),
+          title: dl.text || '',
+          filename: dl.download || dl.text || 'video.mp4',
+          referer: $('addr').value || 'https://www.bilibili.com/',
+          platformId: 'bilibili',
+          subDir: 'bilibili',
+          useYtdlp: false,
+        }).then(function (r) {
+          biliBusy[dl.url] = false
+          btn.textContent = r && r.success ? '已提交 ✓' : '失败'
+          setTimeout(function () { btn.textContent = '下载' }, 2500)
+        }).catch(function () { biliBusy[dl.url] = false; btn.textContent = '失败' })
+      }
+      meta.append(badge, btn)
+      card.append(nm, meta)
+      list.appendChild(card)
+    })
+  }
+  if (bridge && bridge.onBiliExtDownloads) {
+    bridge.onBiliExtDownloads(function (msg) {
+      var payload = (msg && msg.payload) || {}
+      biliExt.title = payload.title || ''
+      biliExt.items = Array.isArray(payload.downloads) ? payload.downloads : []
+      if (sniffPlatform === 'bilibili') biliExtRender()
+    })
+  }
+  // 抖音分享链接解析（SRC douyinParseDownload：主链路 videoPageUrl→yt-dlp；API 兜底直链）
+  function dySetMsg(ok, text) {
+    var el = document.getElementById('dyMsg')
+    el.style.color = ok ? 'var(--ok)' : 'var(--bad)'
+    el.textContent = text
+  }
+  function dyParse() {
+    if (!bridge) { dySetMsg(false, '桥不可达（客户端需更新）'); return }
+    var text = document.getElementById('dyShare').value.trim()
+    if (!text) { dySetMsg(false, '先粘贴抖音分享文本或 v.douyin.com 链接'); return }
+    var btn = document.getElementById('dyParseBtn')
+    btn.disabled = true; btn.textContent = '解析中…'; dySetMsg(true, '')
+    bridge.douyinParse(text).then(function (r) {
+      btn.disabled = false; btn.textContent = '解析下载'
+      if (!r || !r.ok) { dySetMsg(false, (r && r.reason) || '解析失败'); return }
+      var baseName = String(r.desc || r.author || ('douyin_video_' + Date.now())).slice(0, 40).replace(/[\\/:*?"<>|\s]+/g, '_') || ('douyin_video_' + Date.now())
+      var params = r.videoPageUrl
+        ? { url: r.videoPageUrl, filename: baseName + '.mp4', referer: 'https://www.douyin.com/', platformId: 'douyin', subDir: 'douyin', useYtdlp: true }
+        : { url: r.videoUrl, filename: baseName + '.mp4', referer: 'https://www.douyin.com/', platformId: 'douyin', subDir: 'douyin', useYtdlp: false }
+      return bridge.downloadMediaStart(params).then(function (d) {
+        dySetMsg(!!(d && d.success), (d && d.success)
+          ? ('解析成功，已开始下载' + (r.videoPageUrl ? '（无水印完整视频）' : ''))
+          : ((d && d.error) || '下载发起失败'))
+      })
+    }).catch(function (e) {
+      btn.disabled = false; btn.textContent = '解析下载'
+      dySetMsg(false, '解析失败：' + (e && e.message || e))
+    })
+  }
+  document.getElementById('dyParseBtn').onclick = dyParse
+  document.getElementById('dyShare').addEventListener('keydown', function (e) { if (e.key === 'Enter') dyParse() })
+  // 扩展管理（SRC extensions-panel.html：列表/内置标识/安装 crx|zip/卸载；独立浮窗改并入本页面视图）
+  var extItems = []
+  function extMgrLoad() {
+    if (!bridge) return
+    bridge.extensionList().then(function (r) {
+      extItems = (r && r.success && r.data && Array.isArray(r.data.extensions)) ? r.data.extensions : []
+      extMgrRender()
+    }).catch(function () { /* 桥不可达保持原状 */ })
+  }
+  function extMgrRender() {
+    document.getElementById('extCount').textContent = extItems.length + ' 个'
+    var list = document.getElementById('extViewList')
+    list.textContent = ''
+    if (!extItems.length) {
+      list.appendChild(mkEmpty('未安装任何扩展。点右上角「+ 安装扩展」上传 crx 或 zip；B站/抖音下载助手为内置预装，无需安装。'))
+      return
+    }
+    extItems.forEach(function (e) {
+      list.appendChild(liCard({
+        name: (e.name || e.id) + (e.version ? ' v' + e.version : ''),
+        sub: e.description || e.path || '',
+        badge: e.builtin ? '内置' : '已装',
+        actions: e.builtin ? [] : [
+          { label: '卸载', danger: true, on: function () { if (bridge) bridge.extensionUninstall(e.id).then(extMgrLoad) } },
+        ],
+      }))
+    })
+  }
+  document.getElementById('extInstall').onclick = function () {
+    if (!bridge) return
+    bridge.extensionPickAndInstall().then(function (r) {
+      if (r && r.success) window.alert(r.message || '已安装')
+      else if (r && !r.cancelled) window.alert((r && r.message) || '安装失败')
+      extMgrLoad()
+    }).catch(function (e) { window.alert('安装失败：' + (e && e.message || e)) })
+  }
+  if (bridge && bridge.onExtensionsChanged) {
+    bridge.onExtensionsChanged(function () { extMgrLoad() })
+  }
+
+  // ── 自动上架进度日志（2026-09-29 裁决：操作面板已移至「运营工具 → 自动上架」卡片，
+  // 浏览器页不再承载面板与 autoListing:* 通道接线；本函数仅供页内进度订阅复用
+  // （达人采集进度），alLog 元素已随面板移除，缺失时安全降级为无操作。
+  // 2026-10-26 修复：此前脚本仍无条件给已删除的 al* 元素绑 onclick/取 disabled，
+  // 顶层 TypeError 使整个页面脚本崩死（左栏平台/功能扩展全空、主区空白）──
   function alLogLine(stage, message, ts) {
     var el = document.getElementById('alLog')
+    if (!el) return
     var line = document.createElement('div')
     line.textContent = '[' + new Date(ts || Date.now()).toTimeString().slice(0, 8) + '][' + (stage || '…') + '] ' + (message || '')
     el.appendChild(line)
     el.scrollTop = el.scrollHeight
-  }
-  function alSetBusy(busy) {
-    document.getElementById('alStart').disabled = busy
-    document.getElementById('alValidate').disabled = busy
-    document.getElementById('alStop').disabled = !busy
-    var badge = document.getElementById('alRunBadge')
-    badge.style.display = busy ? '' : 'none'
-  }
-  function alLoadRuns() {
-    if (!bridge) return
-    bridge.autoListingListRuns().then(function (r) {
-      var runs = (r && r.data && r.data.runs) || []
-      document.getElementById('alRuns').textContent = runs.length
-        ? ('历史 ' + runs.length + ' 次，最近：' + (runs[0].title || runs[0].runId) + '（' + runs[0].status + '）')
-        : ''
-      if (runs[0]) alLastRunId = runs[0].runId
-    }).catch(function () {})
-  }
-  document.getElementById('alValidate').onclick = function () {
-    if (!bridge) return
-    var path = document.getElementById('alPath').value.trim()
-    if (!path) return
-    var b = this; b.disabled = true; b.textContent = '校验中…'
-    document.getElementById('alSummary').style.display = 'none'
-    document.getElementById('alValidateError').style.display = 'none'
-    bridge.autoListingValidate({ inputPath: path }).then(function (r) {
-      b.disabled = false; b.textContent = '校验'
-      if (r && r.success && r.data) {
-        alRunId = r.data.runId || ''
-        var sum = document.getElementById('alSummary')
-        sum.textContent = '标题：' + (r.data.title || '（未命名）') + '\nSKU：' + ((r.data.skus && r.data.skus.length) || 0) + ' 个' + (alRunId ? ('\nrunId：' + alRunId) : '')
-        sum.style.display = ''
-      } else {
-        var err = document.getElementById('alValidateError')
-        err.textContent = '校验失败：' + ((r && r.error) || '?')
-        err.style.display = ''
-      }
-    }).catch(function (e) {
-      b.disabled = false; b.textContent = '校验'
-      var err = document.getElementById('alValidateError')
-      err.textContent = '校验失败：' + (e.message || e)
-      err.style.display = ''
-    })
-  }
-  document.getElementById('alStart').onclick = function () {
-    if (!bridge) return
-    var path = document.getElementById('alPath').value.trim()
-    var payload = {
-      shopKey: document.getElementById('alShop').value,
-      publishAfterSave: document.getElementById('alPublish').checked,
-    }
-    if (alRunId) payload.runId = alRunId
-    else if (path) payload.inputPath = path
-    var b = this
-    bridge.autoListingStart(payload).then(function (r) {
-      if (r && r.success) { document.getElementById('alLog').textContent = ''; alSetBusy(true) }
-      else alLogLine('错误', (r && r.error) || '启动失败')
-    }).catch(function (e) { alLogLine('错误', e.message || e) })
-  }
-  document.getElementById('alStop').onclick = function () {
-    if (!bridge) return
-    bridge.autoListingStop().then(function () { alSetBusy(false) }).catch(function () {})
-  }
-  document.getElementById('alResume').onclick = function () {
-    if (!bridge) return
-    var runId = alLastRunId || alRunId
-    if (!runId) { alLogLine('提示', '暂无可续跑的任务（先校验/启动一次）'); return }
-    bridge.autoListingResume({ runId: runId, publishAfterSave: document.getElementById('alPublish').checked }).then(function (r) {
-      if (r && r.success) { alRunId = runId; document.getElementById('alLog').textContent = ''; alSetBusy(true) }
-      else alLogLine('错误', (r && r.error) || '续跑失败')
-    }).catch(function (e) { alLogLine('错误', e.message || e) })
-  }
-  document.getElementById('alOpenResult').onclick = function () {
-    if (bridge && alLastRunId) bridge.autoListingOpenResultDir(alLastRunId).catch(function () {})
-  }
-  if (bridge && bridge.onAutoListingProgress) {
-    bridge.onAutoListingProgress(function (p) {
-      alLogLine(p.stage, p.message, p.ts)
-      if (p.runId) { alLastRunId = p.runId; document.getElementById('alOpenResult').disabled = false }
-      // 终态粗判：stage 含 done/failed/finish 时解锁按钮
-      var st = String(p.stage || '').toLowerCase()
-      if (st.indexOf('done') >= 0 || st.indexOf('fail') >= 0 || st.indexOf('finish') >= 0 || st.indexOf('stop') >= 0) {
-        alSetBusy(false); alLoadRuns()
-      }
-    })
-  }
-  document.getElementById('alOpenFxg').onclick = function () { /* 抖店登录入口（保留） */
-    if (!page) return
-    var b = this
-    b.disabled = true; b.textContent = '打开中…'
-    page.open({ platform: 'fxg' })
-    setTimeout(function () { switchView('browser'); b.disabled = false; b.textContent = '打开抖店工作台' }, 800)
-  }
-  if (bridge) {
-    bridge.autoListingStatus().then(function (r) {
-      if (r && r.data && r.data.running) { alSetBusy(true); if (r.data.runId) alRunId = r.data.runId }
-    }).catch(function () {})
-    alLoadRuns()
   }
 
   // ── 网页收藏（SRC FavoritesView；mediaStorageGetFavorites 三通道）──

@@ -1,0 +1,38 @@
+{
+  "name": "dsh-tintin-cover-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TinTin 封面制作插件(需求文档 docs/cover-generation-requirements.md;WP-1 引擎 + WP-6 编辑器 MVP)。独立 workspace,暂以自带 package-lock 独立安装,入根 workspaces 与通道打包链为 WP-1 收尾项。",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build:editor": "vite build",
+    "build:engine": "esbuild src/engine.ts --bundle --format=esm --platform=node --outfile=dist/engine.mjs --external:@remotion/bundler --external:@remotion/renderer --external:remotion --log-level=warning",
+    "build:bundle": "node scripts/build-bundle.mjs",
+    "render": "node scripts/render.mjs"
+  },
+  "dependencies": {
+    "@remotion/renderer": "4.0.539",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.539"
+  },
+  "devDependencies": {
+    "@remotion/bundler": "4.0.539",
+    "@remotion/cli": "4.0.539",
+    "@remotion/player": "4.0.539",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "@vitejs/plugin-react": "4.3.4",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vitest": "2.1.8",
+    "zundo": "2.3.0",
+    "zustand": "5.0.3"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "esbuild@0.21.5": true
+  }
+}

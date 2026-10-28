@@ -10,6 +10,22 @@ import { compileTimeline, validateTimeline, assetSourceOf } from './film-timelin
 import { resolveOpenfilmRuntime, studioEnv } from './openfilm/studio-runtime.js'
 
 const errText = (error) => (error instanceof Error ? error.message : String(error))
+const basenameOf = (p) => String(p || '').split(/[\\/]/).filter(Boolean).pop()?.replace(/\.[^.]+$/, '') || 'film'
+
+/**
+ * WP-4 联动(2026-10-27):成片配套封面——视频缩略图模板,封面与 mp4 同目录同基名。
+ * 独立导出供单测;调用方负责尽力而为语义(失败不影响成片)。
+ */
+export async function renderFilmCover(renderCover, { project, path }) {
+  const base = String(path || '').replace(/\.mp4$/i, '')
+  const name = String(project.split(/[\\/]/).filter(Boolean).pop() || basenameOf(base))
+  return renderCover({
+    templateId: 'video',
+    props: { hookLines: [name], subTag: '正片', brand: name },
+    fileName: `${basenameOf(base)}.png`,
+    outDir: dirname(path),
+  })
+}
 const jsonText = (value) => { try { return JSON.stringify(value) } catch { return String(value) } }
 const render = (_args, value) => [{ type: 'text', text: jsonText(value) }]
 const output = (properties) => ({
@@ -50,7 +66,7 @@ function timelineOf(args, project) {
  *   env?: Record<string, string | undefined>,
  * }} deps
  */
-export function createOpenfilmFilmTools({ httpRequest, getServerUrl, log = () => {}, warn = () => {}, env = process.env } = {}) {
+export function createOpenfilmFilmTools({ httpRequest, getServerUrl, log = () => {}, warn = () => {}, env = process.env, renderCover } = {}) {
   const baseUrl = () => String(getServerUrl?.() || '').replace(/\/+$/, '')
 
   const fetchToFile = async (url, target) => {
@@ -169,9 +185,20 @@ export function createOpenfilmFilmTools({ httpRequest, getServerUrl, log = () =>
         const match = /([^\s"'\\/]+\.mp4)/i.exec(result.stdout) || /([^\s"'\\/]+\.mp4)/i.exec(result.stderr)
         const path = match ? join(project, match[1]) : ''
         log('film_render: rendered', project, Date.now() - started, 'ms')
+        // WP-4 联动(2026-10-27):成片成功后自动配套封面(视频缩略图模板,封面与 mp4
+        // 同目录同基名;尽力而为——封面失败绝不影响成片结果)
+        let cover
+        if (typeof renderCover === 'function' && path && existsSync(path)) {
+          try {
+            const r = await renderFilmCover(renderCover, { project, path })
+            if (r?.ok && r.file) cover = r.file
+            else warn('film_render: cover hook skipped:', r?.error || '')
+          } catch (error) { warn('film_render: cover hook failed:', errText(error)) }
+        }
         return {
           ok: true,
           ...(path && existsSync(path) ? { path } : {}),
+          ...(cover ? { cover } : {}),
           output: (result.stdout || result.stderr).trim().slice(-1200),
           ms: Date.now() - started,
         }

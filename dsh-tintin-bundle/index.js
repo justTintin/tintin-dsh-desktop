@@ -12,7 +12,7 @@ import { basename, dirname, extname, isAbsolute, join, normalize, sep } from 'no
 import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
-import { resolveMachineIdSync } from './lib/machine-id.js'
+import { createMachineIdResolver } from './lib/machine-id-store.js'
 import { installSkillPackage } from './lib/skills-install.js'
 import { findLegacyConfigDir, planImportedSettingsRecovery, planLegacyMigration, readImportedTintinSection } from './lib/legacy-config.js'
 import { mergeConfigDocs, mergeTintinConfigStore, readTintinConfigStore, stripEmptyObjectLeaves } from './lib/tintin-config-store.js'
@@ -35,6 +35,8 @@ import { createOpenfilmFilmTools } from './lib/film-tools.js'
 import { createOpenfilmMediaTools } from './lib/openfilm-tools.js'
 import { createContextTaskApi, defaultWorkspaceDir } from './lib/context-task.js'
 import { registerWorkspaceEnsureRoute } from './lib/workspace-ensure-route.js'
+import { registerCoverPluginRoute, loadCoverEngine, resolvePluginDir as resolveCoverPluginDir } from './lib/cover-plugin-route.js'
+import { createCoverTools } from './lib/cover-tools.js'
 import { createYtdlpApi } from './lib/ytdlp.js'
 import { loadPresetDefinitions } from './lib/preset-definitions.js'
 import { createOpenfilmChannels, createOpenfilmSync } from './lib/openfilm/plugin.js'
@@ -349,7 +351,9 @@ export async function apply(ctx, config) {
   // 告警：OpenFilm 是附加能力，不得阻断会话与桥。
   const syncOpenfilmAssets = createOpenfilmSync({ getServerUrl, logger: ctx.logger, openfilmCompat: config?.server?.openfilmCompat !== false })
   try { syncOpenfilmAssets() } catch (error) { ctx.logger.warn('tintin-bundle: openfilm sync skipped: %s', error?.message ?? error) }
-  const getMachineId = () => resolveMachineIdSync()
+  // 机器码持久缓存见 lib/machine-id-store.js(2026-10-26 链路修复: cache-first +
+  // tintin store 持久化 + 进程级 memo, 消除 X-Machine-ID 随网卡漂移)。
+  const getMachineId = createMachineIdResolver()
   const httpRequest = createHttpRequest({
     getServerUrl,
     getMachineId,
@@ -619,6 +623,17 @@ export async function apply(ctx, config) {
     for (const def of createOpenfilmFilmTools({
       httpRequest,
       getServerUrl,
+      renderCover: (input) => loadCoverEngine().then((engine) => engine.renderCover(input)),
+      log: (...a) => ctx.logger.info('tintin-bundle:', ...a),
+      warn: (...a) => ctx.logger.warn('tintin-bundle:', ...a),
+    })) {
+      registerTool(def)
+    }
+    // 封面工具组(WP-7/WP-4,2026-10-27):会话内出封面;与编辑器/路由共用引擎单例;
+    // cover_background 走服务端文生图(2026-10-27 WP-3 AI 底图)
+    for (const def of createCoverTools({
+      loadEngine: loadCoverEngine,
+      generateBackground: (input) => import('./lib/cover-background.js').then((m) => m.generateCoverBackground(input, { httpRequest, getServerUrl, resolveDir: resolveCoverPluginDir })),
       log: (...a) => ctx.logger.info('tintin-bundle:', ...a),
       warn: (...a) => ctx.logger.warn('tintin-bundle:', ...a),
     })) {
@@ -936,6 +951,7 @@ export async function apply(ctx, config) {
 
     // Workspace directory ensure for client-side first-boot provisioning.
     const disposeWorkspaceEnsure = registerWorkspaceEnsureRoute({ webServer: webCtx.webServer, isTrustedRequest, sendJson, mkdirSync, defaultWorkspaceDir })
+    const disposeCoverPlugin = registerCoverPluginRoute({ webServer: webCtx.webServer, isTrustedRequest, sendJson, httpRequest, getServerUrl })
 
     // First-boot setup wizard probe: the browser cannot reach an arbitrary LAN
     // address directly (cross-origin), so the host probes the candidate server
@@ -988,6 +1004,7 @@ export async function apply(ctx, config) {
       disposeMedia()
       disposeSse()
       disposeWorkspaceEnsure()
+      disposeCoverPlugin()
       disposeSetupProbe()
     }
   }, 'tintin-bundle: probe routes'))

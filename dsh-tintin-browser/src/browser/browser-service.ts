@@ -15,7 +15,7 @@
 //   分区（exportCurrentCookies/ensureBrowserView 时幂等触发）；宿主门另在 probe/download
 //   前经回环主动同步（免手动导出，用户裁决）。
 // ═══════════════════════════════════════════════════════════════
-import { app, BrowserWindow, ipcMain, session, shell, WebContentsView } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
@@ -34,6 +34,9 @@ import { startLoopbackService, type LoopbackService } from './loopback-service.t
 import { scanDailyAssets, resolveDailyAssetDirs } from './daily-assets-logic.ts'
 import { createMediaSniffer, type MediaSniffer } from './media-sniffer.ts'
 import { createCreatorsStoreIpc } from './creators-store.ts'
+// 下载扩展链复活（2026-10-26；SRC thick-shell-viewpool.js / media-downloader.js / douyin-parse-logic.js）
+import { attachBiliDlConsoleCapture, startBiliExtPolling } from './bili-ext-dl.ts'
+import { createMediaDownloaderIpc } from './media-downloader.ts'
 // 自动上架编排（SRC auto-listing/* 纯 JS 移植件；类型声明见 auto-listing/ipc.d.ts）
 // @ts-expect-error 纯 JS ESM 移植件（附 ipc.d.ts 通配声明）
 import { createAutoListingIpc } from './auto-listing/ipc.js'
@@ -347,6 +350,17 @@ function ensureBrowserView(platform: string): WebContentsView {
   view.webContents.on('did-navigate-in-page', onNavEvent)
   view.webContents.on('did-start-loading', () => pushPageState())
   view.webContents.on('did-stop-loading', () => pushPageState())
+  // B站扩展下载链接捕获（2026-10-26 复活，SRC viewpool L237-254/L371-396）：
+  // console-message 推送捕获（冗余通道）+ 2s 主动轮询 shadow DOM（主通道）。
+  // 轮询在 wc 销毁时自停；页面非 B站域名时该轮跳过。
+  if (platform === 'bilibili') {
+    attachBiliDlConsoleCapture(view.webContents, pushBiliExtDl)
+    startBiliExtPolling({
+      getWebContents: () => (view.webContents.isDestroyed() ? null : view.webContents),
+      push: pushBiliExtDl,
+      log: (msg) => ctxLog(msg),
+    })
+  }
   // 分区存量救援：分区空而默认 session 有该平台登录（分区事故期间落的）→ 迁回
   void migrateDefaultSessionCookies(platform)
   browserViews.set(platform, view)
@@ -495,6 +509,14 @@ function pushPageDownloads(): void {
   const host = pageHost()
   if (!host) return
   try { host.webContents.send('tintin-browser-page:downloads', [...pageDownloads.values()]) } catch { /* 页面未就绪 */ }
+}
+
+/** B站扩展下载链接推送页面（browser:bili-ext-dl；SRC viewpool biliExtDlSubKey 推送
+ *  语义——右栏「下载助手」区渲染下载列表。轮询与 console 推送共用此出口） */
+function pushBiliExtDl(payload: unknown): void {
+  const host = pageHost()
+  if (!host) return
+  try { host.webContents.send('browser:bili-ext-dl', { platformId: 'bilibili', payload, ts: Date.now() }) } catch { /* 页面未就绪 */ }
 }
 
 /** 注册壳侧 IPC（createWindow 之后调用；mainWindow 用于独立窗口生命周期联动） */
@@ -669,22 +691,47 @@ export function registerBrowserService(
   extManager.init()
   extManager.preloadBuiltinDouyin()
   void extManager.reloadInstalled()
+  // 扩展安装：页面内一键选包（SRC extensions-panel.html 安装流 1:1：dialog crx/zip → install）
+  ipcMain.handle('browser:extensionPickAndInstall', async () => {
+    try {
+      const r = await dialog.showOpenDialog(mainWindow, {
+        title: '安装扩展（crx / zip）',
+        properties: ['openFile'],
+        filters: [{ name: '扩展', extensions: ['crx', 'zip'] }],
+      })
+      if (r.canceled || !r.filePaths?.length) return { success: false, cancelled: true }
+      return extManager ? extManager.install(r.filePaths[0]!) : { success: false, message: '扩展管理器未初始化' }
+    } catch (err) {
+      return { success: false, message: '安装失败：' + (err instanceof Error ? err.message : String(err)) }
+    }
+  })
 
   // ── 下载管理器 + 媒体存储（SRC thickShell ctx.downloadManager / media-storage 移植）──
   // 下载落盘根 = 默认工作区 materials（/tintin/media 白名单根内，产物可直接预览）
   const workspaceDir = (): string =>
     process.env.TINTIN_WORKSPACE_DIR
       || join(homedir(), 'Documents', 'tintin-workspace')
+  // 下载总线出口：download-manager（视图/URL 下载）与 media-downloader（媒体下载器
+  // 复活件：yt-dlp 主链路/直链/音视频合并）共用，页面底部下载栏统一渲染进度
+  const downloadEmit = (channel: 'downloads:progress' | 'downloads:done' | 'downloads:error', payload: Record<string, unknown>): void => {
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
+    } catch { /* 窗口已销毁 */ }
+    mirrorPageDownload(channel, payload)
+  }
   downloadManager = createDownloadManager({
     workspacePath: workspaceDir,
-    emit: (channel, payload) => {
-      try {
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
-      } catch { /* 窗口已销毁 */ }
-      mirrorPageDownload(channel, payload)
-    },
+    emit: downloadEmit,
   })
   downloadManager.registerIpc(ipcMain)
+  const mediaDownloader = createMediaDownloaderIpc({
+    ipcMain,
+    appLike: { isPackaged: app.isPackaged, getPath: (name) => app.getPath(name) },
+    sessionFromPartition: (partition) => session.fromPartition(partition),
+    emit: downloadEmit,
+    downloadDir: () => join(workspaceDir(), 'materials'),
+    log: (msg) => ctxLog(msg),
+  })
   mediaStorage = createMediaStorage(ipcMain, {
     storeFile: join(app.getPath('userData'), 'tintin', 'browser', 'media-storage.json'),
     downloadsDir: () => app.getPath('downloads'),
@@ -781,8 +828,20 @@ export function registerBrowserService(
     const url = String(p.url || '')
     if (!/^https?:\/\/.*/.test(url)) return { success: false, error: '非法媒体地址' }
     const tail = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'media.mp4').slice(0, 120) || 'media.mp4'
-    const taskId = await downloadManager!.startUrlDownload(url, join(workspaceDir(), 'materials', tail))
-    return { success: true, taskId }
+    // 2026-10-26 复活：改走 media-downloader 引擎（SRC SniffTab downloadSniffedMedia 口径：
+    // 分区 Cookie/Referer 注入；真分片流 m3u8/flv 与 videoplayback 交 yt-dlp）。此前为
+    // 最简直链 startUrlDownload（无 Cookie/Referer，签名 CDN 直链会 403）。
+    const cur = currentPlatform && PLATFORM_DEFS[currentPlatform] ? currentPlatform : undefined
+    const viewUrl = activeView()?.webContents.getURL?.() || ''
+    const needsYtdlp = /\.(m3u8|flv)/i.test(url) || url.includes('videoplayback')
+    const r = await mediaDownloader.startMedia({
+      url,
+      filename: tail,
+      ...(viewUrl ? { referer: viewUrl } : {}),
+      ...(cur ? { platformId: cur, subDir: cur } : {}),
+      useYtdlp: needsYtdlp,
+    })
+    return r.success ? { success: true, taskId: r.taskId } : { success: false, error: r.error }
   })
 
   createCreatorsStoreIpc(ipcMain, { app, getBrowserWindow: () => browserWindow })

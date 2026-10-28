@@ -18,6 +18,7 @@ const tintinClient = (() => {
         { id: 'creation', label: '创作模式' },
         { id: 'ops', label: '运营工具' },
         { id: 'media', label: '媒体工具' }, { id: 'skills', label: '技能管理', glyph: '<path d="M8 2.2 13.6 4.8 8 7.4 2.4 4.8z"/><path d="M2.4 8 8 10.6 13.6 8"/><path d="M2.4 11.2 8 13.8l5.6-2.6"/>' }, // 技能管理（2026-10-16 裁决）：服务端技能库安装/删除，装后创作模式 /技能名 调用
+        { id: 'cover', label: '封面制作', glyph: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="5.4" cy="6" r="1.2"/><path d="M4 11.4 7.6 8.2l2.6 2.1 2-1.7 2.8 2.6"/>' }, // 封面制作(2026-10-27 用户裁决:独立菜单置于视频剪辑上方;封面编辑器 dsh-tintin-cover-plugin)
         { id: 'openfilm', label: '视频剪辑', glyph: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2 6.2h12"/><path d="M4.6 4.85h.01M7 4.85h.01M9.4 4.85h.01M11.8 4.85h.01"/><path d="M6.9 8.3v3.1l2.9-1.55z"/>' }, // 视频剪辑（2026-10-19 用户裁决：原「OpenFilm」改名）
       ]
       let activeId = 'workbench'
@@ -30,6 +31,27 @@ const tintinClient = (() => {
         register(id, provider) { this.providers.set(id, provider); try { window.__tintinChrome?.onProvider?.(id) } catch { /* 未就绪 */ } },
         unregister(id) { this.providers.delete(id) },
       }
+      // 封面制作视图(2026-10-27):dsh-tintin-cover-plugin 的三栏编辑器,经 bundle
+      // webServer /tintin/cover/editor 提供(同源 loopback);iframe 承载,KeepAlive
+      // 由 chrome 的常驻子元素语义保证(切走不销毁,图层/会话状态驻留)。
+      // 高度用 100vh(视口单位)而非 height:100%——覆盖层容器链是 min-height 百分比,
+      // 对 iframe 的百分比高度不解析,会塌成默认 150px(2026-10-27 兼容模式实测白条)。
+      let coverFrame = null
+      registry.register('cover', {
+        mount(el) {
+          if (coverFrame) return
+          el.style.position = 'relative'
+          coverFrame = document.createElement('iframe')
+          coverFrame.src = '/tintin/cover/editor'
+          coverFrame.title = '封面制作'
+          coverFrame.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100vh;border:0;display:block;background:#141416'
+          el.appendChild(coverFrame)
+        },
+        unmount() {
+          coverFrame?.remove()
+          coverFrame = null
+        },
+      })
 
       // ── 左侧「插件」区入口（2026-09-28 用户裁决：撤顶部 Tab 栏；入口行克隆插件面板行同层注入）──
       let entryButtons = []
@@ -281,17 +303,10 @@ const tintinClient = (() => {
 
     // 按功能测试连接 → dsh-tintin-client-ui（独立 client 包自己安装）。
 
-    // ── WP-2 window.tintin polyfill ─────────────────────────────────────────
-    // Rebuild the old client's preload bridge with identical signatures so the
-    // ported Vue views run unmodified. server.* forwards to /tintin/ipc/*;
-    // event-style subscriptions (progress) become jobId polling (主方案 §3.1).
-    // WP-3 growth: the 文案混剪 closure also drives the preload's named
-    // channels — server.montageSplit/llmChat/downloadResult/…, ffmpeg.*,
-    // liveclip.* and the dialog/shell surfaces. Namespaces are Proxies over a
-    // base object: known members carry browser-capable implementations, any
-    // other member forwards to /tintin/ipc/<ns>:<method> so an unbridged call
-    // fails loudly with its exact channel name (铁律 7) instead of
-    // "not a function"; the host whitelist grows channel by channel.
+    // ── WP-2 window.tintin polyfill：旧 preload 桥同签名重建，搬运视图零改动；
+    // server.* → /tintin/ipc/*，进度事件改 jobId 轮询（主方案 §3.1）。命名空间
+    // =Proxy：已知成员带浏览器可实现版本，未知成员转发 /tintin/ipc/<ns>:<method>
+    // 让未桥调用按通道名响亮失败（铁律 7）；宿主白名单逐通道增长。
     function installTintinBridge() {
       if (window.tintin && window.tintin.__dshPolyfill) return // idempotent
       const call = (channel, payload) =>
@@ -322,8 +337,7 @@ const tintinClient = (() => {
           }
           return j.result
         })
-      // ipcRenderer.invoke 是位置参数；宿主 IPC 走单 JSON body，约定包成 { args }。
-      // 回调参数（进度等）不可序列化且按主方案走轮询，置 undefined 剔除。
+      // ipcRenderer.invoke 位置参数→宿主单 JSON body 约定包成 {args}；回调参数（进度）不可序列化，按主方案走轮询剔除。
       const forwardArgs = (args) => Array.from(args, (a) => (typeof a === 'function' ? undefined : a))
       const namespaced = (ns, base) => new Proxy(base, {
         get: (target, prop) => {
@@ -333,9 +347,8 @@ const tintinClient = (() => {
           return (...args) => call(`${ns}:${prop}`, { args: forwardArgs(args) })
         },
       })
-      // Multipart upload: XHR gives native FormData multipart + real
-      // upload progress (fetch cannot); host route /tintin/upload forwards
-      // the body verbatim to the service. onProgress(ratio 0..1) optional.
+      // Multipart 上传：XHR 原生 FormData multipart + 真实进度（fetch 不支持）；
+      // 宿主 /tintin/upload 原样转发。onProgress(ratio 0..1) 可选。
       const serverUpload = (path, fields, onProgress, method) => new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest()
         // 上游方法透传（默认 POST；frames 端点=PUT multipart——405 修复 2026-10-06）：
@@ -361,14 +374,11 @@ const tintinClient = (() => {
         put: (path, body, headers) => call('server:put', { path, body, headers }),
         delete: (path, params) => call('server:delete', { path, params }),
         upload: serverUpload,
-        // SSE progress streams (2026-09-25, 封面制作卡首发)：渲染层 fetch 宿主
-        // 透传路由 /tintin/sse（宿主把上游 text/event-stream body 原样转发）。
-        // 解析语义对齐 SRC server:sse（L556-601）：只认 `data:` 行、[DONE] →
-        // {done:true}、JSON 解析失败透传原始字符串、流结束补 {done:true}。
-        // 退订 abort fetch → 宿主检测连接关闭销毁上游（SRC 只移除监听不关上游，
-        // 这里按更严格语义关连接）。服务端离线表现为非 2xx fetch → onError。
-        // 注意用具名 pump 而非 async IIFE 收尾——polyfill-coverage 审计以 IIFE
-        // 立即调用序列定位 server 块结束，块内注释/代码不得提前出现该序列。
+        // SSE 进度流（2026-09-25 封面制作卡首发）：fetch 宿主 /tintin/sse 透传并
+        // 解析，语义对齐 SRC server:sse——只认 data: 行、[DONE]→{done:true}、
+        // JSON 失败透传原串、流结束补 {done:true}；退订 abort → 宿主关上游；
+        // 离线=非 2xx → onError。具名 pump 收尾（审计以 IIFE 序列定位块尾，
+        // 块内注释/代码不得提前出现该序列）。
         sse: (path, onEvent, onError) => {
           const ctrl = new AbortController()
           const emit = typeof onEvent === 'function' ? onEvent : () => {}
@@ -506,6 +516,17 @@ const tintinClient = (() => {
         viralCloneGenerate: (payload) => call('server:post', { path: '/viral/clone/generate', body: payload }),
         viralCloneMontage: (payload) => call('server:post', { path: '/viral/clone/montage', body: payload }),
         viralCloneReview: (payload) => call('server:post', { path: '/viral/clone/review', body: payload }),
+        // 即梦创作 CLI（2026-10-25 用户裁决；宿主通道 lib/dreamina-cli.js）
+        dreaminaStatus: () => call('dreamina:status', { args: [] }),
+        dreaminaCredit: () => call('dreamina:credit', { args: [] }),
+        dreaminaGenerate: (p) => call('dreamina:generate', { args: [p] }),
+        dreaminaQuery: (p) => call('dreamina:query', { args: [p] }),
+        dreaminaTasks: (p) => call('dreamina:tasks', { args: [p] }),
+        dreaminaLoginHeadless: () => call('dreamina:loginHeadless', { args: [] }),
+        dreaminaLoginCheck: (p) => call('dreamina:loginCheck', { args: [p] }),
+        dreaminaLogout: () => call('dreamina:logout', { args: [] }),
+        // 三轴版本信息（2026-10-26 用户裁决；宿主通道 lib/version-info.js）
+        tintinVersions: () => call('tintin:versions', { args: [] }),
         listServerWorkflows: (scope) => call('server:get', { path: '/workflows', params: { scope } }),
         // SRC preload L299-302：multipart POST /workflows/{id}/run（fields+__values JSON），返回 {task_id}
         runServerWorkflow: (workflowId, fields, onProgress) => {
@@ -694,8 +715,7 @@ const tintinClient = (() => {
         // 2026-09-24 补链：serverPing（SRC env-ipc.js pingServer 契约）——
         // context.ts/useAudioGen 等经它取服务端地址做媒体直连基址。
         serverPing: () => call('env:serverPing', { args: [] }),
-        // 固定缓存目录（$DSH_HOME/tintin/cache，2026-09-23 裁决不做设置项）——
-        // 渲染层 readCacheDir 的数据源。
+        // 固定缓存目录（$DSH_HOME/tintin/cache，2026-09-23 裁决不做设置项）——渲染层 readCacheDir 数据源。
         cacheDir: () => call('env:cacheDir', { args: [] }),
         // 清空固定缓存目录内容（设置卡「本地配置 → 立即清理」用）。
         clearCache: () => call('env:clearCache', { args: [] }),
@@ -722,8 +742,7 @@ const tintinClient = (() => {
       const context = namespaced('context', {
         writeTask: (task) => call('context:writeTask', { args: [task] }),
       })
-      // config:store — TinTin 自有配置存储（0.1.7 起设置服务拒写宿主插件条目，
-      // 设置卡/首启向导的持久化走这里；读返回合并视图 自有存储∪profile config）。
+      // config:store — TinTin 自有配置存储（0.1.7 起设置服务拒写宿主插件条目）；读=自有存储∪profile config。
       const config = namespaced('config', {})
 
       window.tintin = {
@@ -751,8 +770,7 @@ const tintinClient = (() => {
       console.info('[tintin] window.tintin polyfill installed')
     }
 
-    // Generic settings RPC for the card below (same-origin fetch carries the
-    // harness session cookie; settings/describe + settings/mutate are public).
+    // Generic settings RPC（同源 fetch 自带 harness 会话 cookie；describe/mutate 公开）。
     const settingsRpc = (method, args) => fetch(method === 'settings/describe' ? '/api/settings/describe' : '/api/settings/mutate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -764,10 +782,9 @@ const tintinClient = (() => {
     })
 
     // ── 服务端自动注册(2026-09-30 用户裁决:服务菜单方向)─────────────────
-    // 旧版在 Electron main(src/main/tintin-first-boot.ts 的 ensureTinTinProvider/
-    // ensureDefaultWorkspace)经 token→cookie 换取会话后走公开 RPC;新框架宿主
-    // 插件拿不到 web token,而本 chrome 每次加载都带会话 cookie 且 settingsRpc
-    // 在位——自愈移到这里,每次页面加载幂等执行:
+    // 旧版在 Electron main 经 token→cookie 换会话走公开 RPC;宿主插件拿不到 web
+    // token,而本 chrome 每次加载都带会话 cookie 且 settingsRpc 在位——自愈移到
+    // 这里,每次页面加载幂等执行:
     //   server.url 已配置时:缺失则注册 tintin-server provider(模型列表经宿主
     //   probe 拉全量)、凭据占位补齐、默认工作区登记;默认模型仅在用户尚未
     //   改动系统默认(deepseek-official)时接管。
@@ -862,8 +879,8 @@ const tintinClient = (() => {
   })()
 
 // ── 插件定义（factory 期执行；React 只在此处可用）────────────────────────
-// 设置卡走 settings.plugin.item slot（ConfigurablePluginsTab 契约：列表只
-// 分发 key，卡片组件由插件 client 贡献——image-generation 同款注册式样）。
+// 设置卡走 settings.plugin.item slot（ConfigurablePluginsTab 契约：key 列表分发、
+// 卡片组件由插件 client 贡献——image-generation 同款；按功能测试连接在 client-ui）。
 window.__ModuleLoader__.load({
   id: 'dsh-tintin-bundle',
   factory: (require) => {
@@ -874,15 +891,17 @@ window.__ModuleLoader__.load({
       const [url, setUrl] = React.useState('')
       const [state, setState] = React.useState('loading') // loading|ready|saving|saved|error
       const [error, setError] = React.useState('')
+      // 三轴版本（2026-10-26 用户裁决）：上游 DSH / 桌面渠道 / TinTin 业务插件；
+      // 段缺失=「未知」不阻塞（开发态/缺供应商包属常态），挂载取一次不轮询。
+      const [versions, setVersions] = React.useState(null)
       React.useEffect(() => {
-        // 读自有存储合并视图（0.1.7 起本插件条目配置设置服务拒写，持久化在
-        // <DSH_HOME>/tintin/config.json；settings/describe 读 profile 层不再是
-        // 权威源）。
+        // 读自有存储合并视图（0.1.7 起本插件条目配置设置服务拒写，持久化在 tintin/config.json）
         window.tintin?.config?.get?.().then((res) => {
           const u = res?.value?.server?.url
           setUrl(typeof u === 'string' ? u : '')
           setState('ready')
         }).catch((e) => { setError(String(e?.message ?? e)); setState('error') })
+        window.tintin?.server?.tintinVersions?.().then((v) => setVersions(v && typeof v === 'object' ? v : null)).catch(() => {})
       }, [])
       const save = () => {
         setState('saving'); setError('')
@@ -890,8 +909,7 @@ window.__ModuleLoader__.load({
           .then(() => setState('saved'))
           .catch((e) => { setError(String(e?.message ?? e)); setState('error') })
       }
-      // 测试连接（对齐 SRC useSettingsGeneral.pingServer）：env:serverPing 回显
-      // 当前生效地址 + 在线状态 + 延迟；成功后回填输入框为解析链实际地址。
+      // 测试连接（对齐 SRC useSettingsGeneral.pingServer）：env:serverPing 回显地址+在线态+延迟，成功回填实际地址。
       const [pingState, setPingState] = React.useState('idle') // idle|pinging|done
       const [pingText, setPingText] = React.useState('')
       const pingOk = pingText.includes('运行中')
@@ -940,12 +958,20 @@ window.__ModuleLoader__.load({
         state === 'error' && h('span', { style: { fontSize: '12px', color: '#f87171' } }, `保存失败：${error}`),
         h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #888)' } },
           'AI 推理服务地址（FastAPI）。修改后模型提供方的 API 地址需在「设置 → 模型 → TinTin」同步更新。'),
+        // 版本信息区块（三轴；桌面渠道版本带打包时间戳属正常——packaging 追加）
+        versions && h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px', borderTop: '0.5px solid var(--dsw-alias-border-l4, #555)', paddingTop: '8px', marginTop: '2px' } },
+          h('div', { style: { fontSize: '13px', fontWeight: 600 } }, '版本信息'),
+          h('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary, #aaa)' } },
+            `上游 DSH：${versions.dsh || '未知'}　·　桌面渠道：${versions.desktop ? `${versions.desktop.name} ${versions.desktop.version}` : '未知（开发态）'}`),
+          ...((versions.plugins || []).length ? [h('div', { key: 'plugins', style: { display: 'flex', flexWrap: 'wrap', gap: '4px 14px' } },
+            versions.plugins.map((p) => h('span', { key: p.name, style: { fontSize: '12px', fontFamily: 'monospace', color: 'var(--dsw-alias-label-tertiary, #888)' } }, `${p.name} ${p.version}`)),
+          )] : []),
+        ),
       )
     }
 
-    // 本地配置卡（2026-09-24 用户裁决：挂在「通用设置」页 settings.general.item
-    // 插槽；缓存目录默认 = 本机工作区目录，「更改」弹目录选择器持久化到
-    // local.cacheDir——对齐原客户端 CardLocalConfig/useSettingsIntegration 流程）。
+    // 本地配置卡（2026-09-24 用户裁决：挂「通用设置」页 settings.general.item 插槽；
+    // 缓存目录默认=本机工作区目录，「更改」弹目录选择器持久化 local.cacheDir）。
     function LocalConfigCard() {
       const [cacheDir, setCacheDir] = React.useState('')
       const [pickHint, setPickHint] = React.useState('')
@@ -961,14 +987,10 @@ window.__ModuleLoader__.load({
           setClearState(res && !res.error ? 'cleared' : 'error')
         }).catch(() => setClearState('error'))
       }
-      // 更改（2026-09-24 用户裁决：与原客户端一致——弹出原生文件夹选择框，
-      // 选择后持久化为新的缓存目录。桌面端经 dshDesktopDirectoryPicker 出
-      // 原生对话框，选定路径写 TinTin 自有存储（0.1.7 起设置服务拒写宿主插件
-      // 条目），解析链即时生效。）
+      // 更改（2026-09-24 用户裁决：弹原生文件夹选择框，选定路径写 TinTin 自有存储即时生效；
+      // 桥名以桌面壳 preload 实际暴露为准（verify-bridge-surface 把关）：上游 __DSH_DIRECTORY_PICKER__.pick()，
+      // 旧名 dshDesktopDirectoryPicker 仅降级兜底。
       const pickCacheDir = async () => {
-        // 桥名以桌面壳 preload 实际暴露为准（verify-bridge-surface 把关）：
-        // 上游契约 __DSH_DIRECTORY_PICKER__.pick()；旧名 dshDesktopDirectoryPicker
-        // （带标题参数）仅作降级兜底。
         const picker = window.__DSH_DIRECTORY_PICKER__?.pick
           ? { pick: () => window.__DSH_DIRECTORY_PICKER__.pick() }
           : window.dshDesktopDirectoryPicker
@@ -1056,8 +1078,7 @@ window.__ModuleLoader__.load({
 })
 
 async function maybeShowSetupWizard() {
-  // Provisioned 状态与预填地址读 TinTin 自有存储合并视图（0.1.7 起设置服务
-  // 拒写宿主插件条目，describe 的 tintin-bundle 命名空间不再是权威源）；
+  // Provisioned 状态与预填地址读 TinTin 自有存储合并视图（0.1.7 起设置服务拒写宿主插件条目）；
   // Settings may still be loading when plugins activate; retry briefly.
   let value
   for (let i = 0; i < 10 && value === undefined; i++) {

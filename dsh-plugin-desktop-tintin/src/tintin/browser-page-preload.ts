@@ -22,6 +22,7 @@ const BROWSER_PAGE_OPEN = 'tintin-browser-page:open'
 const BROWSER_PAGE_ACTION = 'tintin-browser-page:action'
 const BROWSER_PAGE_STATE = 'tintin-browser-page:state'
 const EXTENSIONS_CHANGED = 'browser:extensions-changed'
+const BILI_EXT_DL = 'browser:bili-ext-dl'
 const DOWNLOAD_PROGRESS = 'downloads:progress'
 const DOWNLOAD_DONE = 'downloads:done'
 const DOWNLOAD_ERROR = 'downloads:error'
@@ -48,7 +49,16 @@ const desktopBrowser = {
   extensionList: () => invoke('browser:extensionList'),
   extensionInstall: (payload: unknown) => invoke('browser:extensionInstall', payload),
   extensionUninstall: (payload: unknown) => invoke('browser:extensionUninstall', payload),
+  extensionPickAndInstall: () => invoke('browser:extensionPickAndInstall'),
   onExtensionsChanged: (listener: (payload: unknown) => void) => on(EXTENSIONS_CHANGED, listener),
+  // 下载扩展链（2026-10-26 复活：SRC media-downloader / thick-shell-viewpool 语义）
+  /** B站下载助手推送（console 捕获 + 2s 轮询 shadow DOM 双通道） */
+  onBiliExtDownloads: (listener: (payload: unknown) => void) => on(BILI_EXT_DL, listener),
+  /** 抖音分享链接解析（主链路短链 302 → 视频页；API 兜底直链） */
+  douyinParse: (payload: unknown) => invoke('browser:douyinParse', payload),
+  /** 媒体下载（yt-dlp 主链路 / Cookie+Referer 直链 / 音视频分离 FFmpeg 合并） */
+  downloadMediaStart: (payload: unknown) => invoke('browser:downloadMediaStart', payload),
+  downloadMediaCancel: (payload: unknown) => invoke('browser:downloadMediaCancel', payload),
   // 自动上架（抖店工作台）
   autoListingListRuns: (payload?: unknown) => invoke('autoListing:listRuns', payload),
   autoListingValidate: (payload: unknown) => invoke('autoListing:validate', payload),

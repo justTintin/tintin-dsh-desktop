@@ -142,5 +142,365 @@
     "path": "dsh-plugin-desktop-tintin/src/tintin/main-hook.ts",
     "pattern": "openfilm:library:list",
     "minCount": 1
+  },
+  {
+    "comment": "browser domain (SRC TinTin_Client_Electron@9ca9050, 2026-10-26 anchor batch): the shell engine keeps its IPC entry",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "registerBrowserService",
+    "minCount": 1
+  },
+  {
+    "comment": "browser page channels stay wired (bounds/open/action/state/downloads)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "tintin-browser-page:",
+    "minCount": 4
+  },
+  {
+    "comment": "platform partition cookies export keeps def + call (yt-dlp handshake)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "exportPlatformCookies",
+    "minCount": 2
+  },
+  {
+    "comment": "default-session login rescue keeps def + wiring (2026-09-28 partition incident)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "migrateDefaultSessionCookies",
+    "minCount": 3
+  },
+  {
+    "comment": "embedded-mode two-layer bounds composition stays",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "composeEmbedBounds",
+    "minCount": 2
+  },
+  {
+    "comment": "DOM extraction route stays registered",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "browser:extractDOM",
+    "minCount": 1
+  },
+  {
+    "comment": "extension manifest change broadcast stays (ext-manager bump consumer)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "browser:extensions-changed",
+    "minCount": 1
+  },
+  {
+    "comment": "extension install IPC stays (crx/zip upload channel)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "browser:extensionInstall",
+    "minCount": 1
+  },
+  {
+    "comment": "download progress bus mirror to the page download shelf stays",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "downloads:progress",
+    "minCount": 1
+  },
+  {
+    "comment": "extension manager factory stays (ext-manager.js 1:1)",
+    "path": "dsh-tintin-browser/src/browser/ext-manager.ts",
+    "pattern": "createExtensionManager",
+    "minCount": 1
+  },
+  {
+    "comment": "crx/zip package extraction stays (Cr24 header parse, 1:1)",
+    "path": "dsh-tintin-browser/src/browser/ext-manager.ts",
+    "pattern": "extractPackage",
+    "minCount": 2
+  },
+  {
+    "comment": "builtin douyin helper preload stays (chrom-douyin 2026-09-02 ruling)",
+    "path": "dsh-tintin-browser/src/browser/ext-manager.ts",
+    "pattern": "preloadBuiltinDouyin",
+    "minCount": 2
+  },
+  {
+    "comment": "bilibili helper shadow-DOM download-link extract script stays verbatim (download-extension chain core asset)",
+    "path": "dsh-tintin-browser/src/browser/bilibili-ext.ts",
+    "pattern": "BILI_DL_EXTRACT_SCRIPT",
+    "minCount": 1
+  },
+  {
+    "comment": "tintin-ext protocol serving extension assets stays",
+    "path": "dsh-tintin-browser/src/browser/bilibili-ext.ts",
+    "pattern": "tintin-ext",
+    "minCount": 4
+  },
+  {
+    "comment": "bilibili helper content-script injection stays",
+    "path": "dsh-tintin-browser/src/browser/bilibili-ext.ts",
+    "pattern": "injectBilibiliHelper",
+    "minCount": 1
+  },
+  {
+    "comment": "native download takeover stays (will-download handler)",
+    "path": "dsh-tintin-browser/src/browser/download-manager.ts",
+    "pattern": "handleNativeDownload",
+    "minCount": 2
+  },
+  {
+    "comment": "manual URL download with redirect following stays",
+    "path": "dsh-tintin-browser/src/browser/download-manager.ts",
+    "pattern": "startUrlDownload",
+    "minCount": 2
+  },
+  {
+    "comment": "downloads IPC face stays",
+    "path": "dsh-tintin-browser/src/browser/download-manager.ts",
+    "pattern": "downloads:start",
+    "minCount": 1
+  },
+  {
+    "comment": "session will-download attach stays",
+    "path": "dsh-tintin-browser/src/browser/download-manager.ts",
+    "pattern": "will-download",
+    "minCount": 1
+  },
+  {
+    "comment": "media URL sniff rules stay (browser-webview.js 1:1)",
+    "path": "dsh-tintin-browser/src/browser/media-sniffer-logic.ts",
+    "pattern": "isMediaUrl",
+    "minCount": 1
+  },
+  {
+    "comment": "sniffer session attach keeps consuming the URL rules",
+    "path": "dsh-tintin-browser/src/browser/media-sniffer.ts",
+    "pattern": "isMediaUrl",
+    "minCount": 1
+  },
+  {
+    "comment": "media storage (downloads/sniffed/favorites records) stays",
+    "path": "dsh-tintin-browser/src/browser/media-storage.ts",
+    "pattern": "createMediaStorage",
+    "minCount": 1
+  },
+  {
+    "comment": "creators store IPC stays (creators:* five channels)",
+    "path": "dsh-tintin-browser/src/browser/creators-store.ts",
+    "pattern": "createCreatorsStoreIpc",
+    "minCount": 1
+  },
+  {
+    "comment": "daily assets scan stays (browser:getDailyAssets data source)",
+    "path": "dsh-tintin-browser/src/browser/daily-assets-logic.ts",
+    "pattern": "scanDailyAssets",
+    "minCount": 1
+  },
+  {
+    "comment": "hotspot capture stays (今日热点采集)",
+    "path": "dsh-tintin-browser/src/browser/hotspot-capture.ts",
+    "pattern": "captureHotspots",
+    "minCount": 1
+  },
+  {
+    "comment": "loopback facade stays (agent tools -> shell engine HTTP+token)",
+    "path": "dsh-tintin-browser/src/browser/loopback-service.ts",
+    "pattern": "startLoopbackService",
+    "minCount": 1
+  },
+  {
+    "comment": "Netscape cookie formatting stays (yt-dlp handshake file)",
+    "path": "dsh-tintin-browser/src/browser/netscape-cookies.ts",
+    "pattern": "formatNetscapeCookies",
+    "minCount": 1
+  },
+  {
+    "comment": "per-platform isolated partitions stay (9 platform defs incl. web/fxg)",
+    "path": "dsh-tintin-browser/src/browser/platform-meta.ts",
+    "pattern": "persist:tintin-",
+    "minCount": 8
+  },
+  {
+    "comment": "detail-page sniff gating table stays",
+    "path": "dsh-tintin-browser/src/browser/platform-meta.ts",
+    "pattern": "PLATFORM_DETAIL_PATTERNS",
+    "minCount": 2
+  },
+  {
+    "comment": "extractor common contract stays (prepended to all platform scripts)",
+    "path": "dsh-tintin-browser/extractors/_common.ts",
+    "pattern": "__TIN_EX_COMMON__",
+    "minCount": 2
+  },
+  {
+    "comment": "browser UI page keeps the page bridge consumption",
+    "path": "dsh-plugin-desktop-tintin/build/tintin-browser.html",
+    "pattern": "tintinBrowserPage",
+    "minCount": 2
+  },
+  {
+    "comment": "browser page preload keeps the extension-change channel literal",
+    "path": "dsh-plugin-desktop-tintin/src/tintin/browser-page-preload.ts",
+    "pattern": "browser:extensions-changed",
+    "minCount": 1
+  },
+  {
+    "comment": "channel main hook keeps wiring the browser shell engine",
+    "path": "dsh-plugin-desktop-tintin/src/tintin/main-hook.ts",
+    "pattern": "registerBrowserService",
+    "minCount": 1
+  },
+  {
+    "comment": "download-extension chain revival (2026-10-26, P0 #1/#2/#4): douyin parse API endpoint literal stays (SRC douyin-parse-logic.js)",
+    "path": "dsh-tintin-browser/src/browser/douyin-parse-logic.ts",
+    "pattern": "DOUYIN_PARSE_API",
+    "minCount": 1
+  },
+  {
+    "comment": "douyin share-url extraction pure fn stays (def; import+use anchored in media-downloader) (SRC 1:1)",
+    "path": "dsh-tintin-browser/src/browser/douyin-parse-logic.ts",
+    "pattern": "extractDouyinShareUrl",
+    "minCount": 1
+  },
+  {
+    "comment": "douyin parse IPC stays (SRC media-downloader.js browser:douyinParse)",
+    "path": "dsh-tintin-browser/src/browser/media-downloader.ts",
+    "pattern": "browser:douyinParse",
+    "minCount": 1
+  },
+  {
+    "comment": "media download start stays (yt-dlp main path + stream engine, SRC browser:downloadMediaStart)",
+    "path": "dsh-tintin-browser/src/browser/media-downloader.ts",
+    "pattern": "browser:downloadMediaStart",
+    "minCount": 1
+  },
+  {
+    "comment": "media download cancel/pause stays (SRC kill-active-task channels)",
+    "path": "dsh-tintin-browser/src/browser/media-downloader.ts",
+    "pattern": "browser:downloadMediaCancel",
+    "minCount": 1
+  },
+  {
+    "comment": "PCDN 206 progress via content-range parsing stays (SRC download stream)",
+    "path": "dsh-tintin-browser/src/browser/media-downloader.ts",
+    "pattern": "content-range",
+    "minCount": 1
+  },
+  {
+    "comment": "ffmpeg merge path stays (dual-stream audio+video, SRC media-downloader.js)",
+    "path": "dsh-tintin-browser/src/browser/media-downloader.ts",
+    "pattern": "ffmpeg",
+    "minCount": 2
+  },
+  {
+    "comment": "bili extension download push channel stays (SRC viewpool biliExtDlSubKey semantics)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "browser:bili-ext-dl",
+    "minCount": 1
+  },
+  {
+    "comment": "bili extension polling revive stays (SRC thick-shell-viewpool.js 2s poll)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "startBiliExtPolling",
+    "minCount": 1
+  },
+  {
+    "comment": "bili extension console capture stays (SRC viewpool [TINTIN_BILI_DL] branch)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "attachBiliDlConsoleCapture",
+    "minCount": 1
+  },
+  {
+    "comment": "extension pick-and-install stays (SRC extensions-panel.html dialog flow)",
+    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "pattern": "browser:extensionPickAndInstall",
+    "minCount": 1
+  },
+  {
+    "comment": "preload keeps the download-extension bridge methods",
+    "path": "dsh-plugin-desktop-tintin/src/tintin/browser-page-preload.ts",
+    "pattern": "browser:downloadMediaStart",
+    "minCount": 1
+  },
+  {
+    "comment": "browser page keeps bili ext push consumption (right panel download list)",
+    "path": "dsh-plugin-desktop-tintin/build/tintin-browser.html",
+    "pattern": "onBiliExtDownloads",
+    "minCount": 1
+  },
+  {
+    "comment": "browser page keeps douyin parse + media download consumption (share link box)",
+    "path": "dsh-plugin-desktop-tintin/build/tintin-browser.html",
+    "pattern": "douyinParse",
+    "minCount": 1
+  },
+  {
+    "comment": "cover plugin (2026-10-27 WP-1/WP-6): template registry stays (layer defs = props projection)",
+    "path": "dsh-tintin-cover-plugin/src/registry.ts",
+    "pattern": "TEMPLATES",
+    "minCount": 2
+  },
+  {
+    "comment": "cover render engine stays (renderStill flow, output to workspace cover/)",
+    "path": "dsh-tintin-cover-plugin/src/engine.ts",
+    "pattern": "renderCover",
+    "minCount": 2
+  },
+  {
+    "comment": "bundle route serving cover editor + render API stays",
+    "path": "dsh-tintin-bundle/lib/cover-plugin-route.js",
+    "pattern": "/tintin/cover/api/render",
+    "minCount": 1
+  },
+  {
+    "comment": "cover image upload endpoint stays (product/bg image swap in editor)",
+    "path": "dsh-tintin-bundle/lib/cover-plugin-route.js",
+    "pattern": "/tintin/cover/api/upload-image",
+    "minCount": 1
+  },
+  {
+    "comment": "cover agent tool group stays (session-driven cover generation, WP-7/WP-4)",
+    "path": "dsh-tintin-bundle/lib/cover-tools.js",
+    "pattern": "cover_generate",
+    "minCount": 2
+  },
+  {
+    "comment": "cover AI background generation stays (WP-3 hybrid pipeline: server text2image → plugin public/; wired in index.js/route)",
+    "path": "dsh-tintin-bundle/lib/cover-background.js",
+    "pattern": "generateCoverBackground",
+    "minCount": 1
+  },
+  {
+    "comment": "cover asset provenance ledger stays (§7 copyright trace: upload/ai records + export sidecar)",
+    "path": "dsh-tintin-bundle/lib/cover-provenance.js",
+    "pattern": "appendAssetProvenance",
+    "minCount": 1
+  },
+  {
+    "comment": "cover output dir reveal endpoint stays (explorer open, cover dir only)",
+    "path": "dsh-tintin-bundle/lib/cover-plugin-route.js",
+    "pattern": "/tintin/cover/api/reveal",
+    "minCount": 1
+  },
+  {
+    "comment": "film_render cover hook stays (WP-4: cover lands next to the rendered mp4, best-effort)",
+    "path": "dsh-tintin-bundle/lib/film-tools.js",
+    "pattern": "renderCover",
+    "minCount": 1
+  },
+  {
+    "comment": "cover editor conversation loop stays (2026-10-27 batch B: LLM + layer action protocol; route wired)",
+    "path": "dsh-tintin-bundle/lib/cover-chat.js",
+    "pattern": "coverChatTurn",
+    "minCount": 1
+  },
+  {
+    "comment": "cover chat route stays (editor right panel conversation)",
+    "path": "dsh-tintin-bundle/lib/cover-plugin-route.js",
+    "pattern": "/tintin/cover/api/chat",
+    "minCount": 1
+  },
+  {
+    "comment": "cover product img2img stays (jimeng image2image, current product image as reference)",
+    "path": "dsh-tintin-bundle/lib/cover-background.js",
+    "pattern": "generateCoverProductImage",
+    "minCount": 1
+  },
+  {
+    "comment": "sidebar menu entry for cover editor stays (above video editing, 2026-10-27 ruling)",
+    "path": "dsh-tintin-bundle/client.js",
+    "pattern": "封面制作",
+    "minCount": 2
   }
 ]

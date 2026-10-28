@@ -17,6 +17,8 @@ import { preprocessTtsKeepingPause } from './montage/voice-tts-logic.js'
 import { createRembgApi, createAudioArchiveApi, createVsrApi, createTtsUploadSampleApi } from './media-proxy.js'
 import { createContextTaskApi, defaultWorkspaceDir } from './context-task.js'
 import { createYtdlpApi } from './ytdlp.js'
+import { createDreaminaApi } from './dreamina-cli.js'
+import { createVersionInfoApi } from './version-info.js'
 import { createOpenfilmChannels } from './openfilm/plugin.js'
 
 /**
@@ -76,6 +78,18 @@ export function createChannelTable(deps) {
       log: (...a) => ctx.logger.info('tintin-bundle:', ...a),
       warn: (...a) => ctx.logger.warn('tintin-bundle:', ...a),
     }),
+    // dreamina:* — 即梦创作 CLI 宿主门（2026-10-25 用户裁决：创作模式加「即梦 CLI」
+    // 后端；通道面 status/generate/query/tasks/credit/loginHeadless/loginCheck/
+    // login/logout，策略在 lib/dreamina-logic.js、进程封装在 lib/dreamina-cli.js）。
+    // 二进制不随包分发——本机已装（官方脚本 %USERPROFILE%\bin）时 available=true，
+    // 未装呈现「未安装」态（同 yt-dlp 卡口径）。
+    ...createDreaminaApi({
+      log: (...a) => ctx.logger.info('tintin-bundle:', ...a),
+      warn: (...a) => ctx.logger.warn('tintin-bundle:', ...a),
+    }),
+    // tintin:versions — 三轴版本信息（2026-10-26 用户裁决：上游 DSH / 桌面渠道 /
+    // TinTin 业务插件；读打包树 package.json，段缺失不阻塞——见 lib/version-info.js）
+    ...createVersionInfoApi(),
     ...createOpenfilmChannels({
       sync: syncOpenfilmAssets,
       httpRequest,
@@ -119,6 +133,9 @@ export function createChannelTable(deps) {
       }
     },
     // env:serverPing — 服务端连通探测+地址回显（SRC env-ipc.js pingServer 契约 {online,url,status?,latencyMs?}，永不 reject）；渲染层经它拿媒体直连基址。
+    // 2026-10-26 链路修复: 离线分支补 error 字段(ECONNREFUSED 等 + 实际探测的 url)
+    // —— 此前 UI 只拿到 {online:false}，「为什么不通、试的是哪个地址」完全不可见，
+    // 链路断点只能靠猜。附加字段不破坏旧契约。
     'env:serverPing': async () => {
       const url = getServerUrl()
       const started = Date.now()
@@ -126,7 +143,7 @@ export function createChannelTable(deps) {
         const res = await httpRequest('GET', '/', { timeout: 3000 })
         return { online: true, url, status: res.status, latencyMs: Date.now() - started }
       } catch (err) {
-        return { online: false, url }
+        return { online: false, url, error: String(err?.code || err?.message || err) }
       }
     },
     // env:getMachineId — 机器码（SRC env-ipc.js env:getMachineId 契约：
