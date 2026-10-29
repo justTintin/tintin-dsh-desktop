@@ -83,6 +83,7 @@ export function serverSkillToCreationSkill(skill: ServerSkill, fullInstruction?:
     emoji: '🧩',
     template,
     backend: 'llm',
+    version: skill.version || undefined,
   }
 }
 
@@ -111,6 +112,36 @@ export function removeServerSkill(serverId: string, skills: readonly CreationSki
 /** 当前安装列表（从创作技能表过滤来源前缀；经 sanitize 容错回读） */
 export function installedServerSkills(skills: readonly CreationSkill[]): CreationSkill[] {
   return sanitizeSkills(skills).filter((s) => s.id.startsWith(SERVER_SKILL_ID_PREFIX))
+}
+
+/** 版本比较：服务端版本是否**新于**已装版本（按「.」分段数值比较，缺段=0，
+ *  「1.0」与「1.0.0」相等；容忍前导 v）。任一版本缺失/含非数字段 → false——
+ *  旧安装（无 version 字段）与服务端缺版本都保守不提示，不误报可更新。 */
+export function serverVersionNewer(serverVersion: string, installedVersion: string | undefined): boolean {
+  const parse = (v: string | undefined): number[] | null => {
+    const text = String(v ?? '').trim().replace(/^v/i, '')
+    if (!text) return null
+    const parts = text.split('.').map((p) => (/^\d+$/.test(p) ? Number(p) : -1))
+    return parts.some((p) => p < 0) ? null : parts
+  }
+  const sv = parse(serverVersion)
+  const iv = parse(installedVersion)
+  if (!sv || !iv) return false
+  const len = Math.max(sv.length, iv.length)
+  for (let i = 0; i < len; i++) {
+    const a = sv[i] ?? 0
+    const b = iv[i] ?? 0
+    if (a !== b) return a > b
+  }
+  return false
+}
+
+/** 服务端技能是否有更新：本地派生条目存在且其 version 落后于注册表 version。
+ *  检查时机现成——技能管理每次打开/刷新都现拉 GET /skills。 */
+export function serverSkillHasUpdate(skill: ServerSkill, skills: readonly CreationSkill[]): boolean {
+  const local = skills.find((s) => s.id === serverSkillId(skill.id))
+  if (!local) return false
+  return serverVersionNewer(skill.version, local.version)
 }
 
 /** 卡片搜索（2026-10-18 界面改版）：任一字段含关键词即命中（大小写不敏感；

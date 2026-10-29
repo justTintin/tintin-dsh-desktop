@@ -18,6 +18,7 @@ import {
   parseSkillsResponse,
   removeServerSkill,
   SERVER_SKILL_ID_PREFIX,
+  serverSkillHasUpdate,
   skillMatchesQuery,
 } from '../composables/skillManagerLogic'
 import { loadSkills, saveSkills, type CreationSkill } from '../composables/creationStudioLogic'
@@ -80,9 +81,15 @@ function installed(id: string): boolean {
   return isServerSkillInstalled(id, creationSkills.value)
 }
 
+/** 已装版本落后于服务端注册表（2026-10-29 用户裁决：版本检查+一键更新） */
+function hasUpdate(skill: ServerSkill): boolean {
+  return serverSkillHasUpdate(skill, creationSkills.value)
+}
+
 async function install(skill: ServerSkill): Promise<void> {
   if (busyId.value) return
   busyId.value = skill.id
+  const wasInstalled = installed(skill.id)
   try {
     // 安装升级（2026-10-16 用户裁决）=真技能包落盘+真实指令注册一体：宿主拉
     // GET /skills/{id}/download 解压到 <DSH_HOME>/skills/<id>/（重装覆盖），
@@ -96,7 +103,7 @@ async function install(skill: ServerSkill): Promise<void> {
       : `；技能包落盘失败：${r?.error || '桥不可用'}（技能按注册表简介注册可用）`
     saveSkills(installServerSkill(skill, loadSkills(), full))
     syncInstalled()
-    note.value = `已安装「${skill.name}」——创作模式输入 /${skill.name} 调用${pkgNote}`
+    note.value = `${wasInstalled ? '已更新' : '已安装'}「${skill.name}」${skill.version ? `（v${skill.version}）` : ''}——创作模式输入 /${skill.name} 调用${pkgNote}`
   } catch (e) {
     note.value = `安装失败：${(e as Error).message}`
   } finally {
@@ -168,7 +175,8 @@ onMounted(() => {
           <div v-for="s in filteredServer" :key="s.id" class="card">
             <div class="cover">
               <span class="cover-emoji">🧩</span>
-              <span v-if="installed(s.id)" class="cover-badge">✓ 已安装</span>
+              <span v-if="hasUpdate(s)" class="cover-badge is-update" title="服务端有更新版本——点「更新」覆盖本地">⟳ 有新版本</span>
+              <span v-else-if="installed(s.id)" class="cover-badge">✓ 已安装</span>
             </div>
             <div class="card-body">
               <div class="card-name">{{ s.name }}</div>
@@ -179,6 +187,9 @@ onMounted(() => {
               <div class="card-desc" :title="s.description">{{ s.description || '（无描述）' }}</div>
             </div>
             <div class="card-foot">
+              <button v-if="hasUpdate(s)" type="button" class="btn primary" :disabled="busyId === s.id" @click="install(s)">
+                {{ busyId === s.id ? '更新中…' : '更新' }}
+              </button>
               <button v-if="!installed(s.id)" type="button" class="btn primary" :disabled="busyId === s.id" @click="install(s)">
                 {{ busyId === s.id ? '安装中…' : '安装' }}
               </button>
@@ -273,6 +284,11 @@ onMounted(() => {
   color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, var(--card));
   border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent); border-radius: 999px; padding: 1px 8px;
 }
+/* 有新版本角标（2026-10-29 用户裁决：版本检查+一键更新）——暖色与「已安装」区分 */
+.cover-badge.is-update {
+  color: var(--warning, #e8890c); background: color-mix(in srgb, var(--warning, #e8890c) 14%, var(--card));
+  border-color: color-mix(in srgb, var(--warning, #e8890c) 40%, transparent);
+}
 .card-body { flex: 1 1 auto; min-width: 0; padding: 10px 12px 0; }
 .card-name { font-size: var(--font-size-h4); font-weight: 700; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-chips { display: flex; gap: var(--space-1); flex-wrap: wrap; margin-top: 4px; }
@@ -282,7 +298,7 @@ onMounted(() => {
   color: var(--muted-foreground);
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.card-foot { padding: 10px 12px 12px; display: flex; justify-content: flex-end; }
+.card-foot { padding: 10px 12px 12px; display: flex; justify-content: flex-end; gap: var(--space-2); }
 .btn { font: inherit; border-radius: var(--radius-md); padding: 5px 16px; cursor: pointer; border: 1px solid transparent; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn.primary { background: var(--primary); color: var(--primary-foreground); }

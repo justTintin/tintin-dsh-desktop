@@ -19,8 +19,10 @@ import {
   isServerSkillInstalled,
   parseSkillsResponse,
   removeServerSkill,
+  serverSkillHasUpdate,
   serverSkillId,
   serverSkillToCreationSkill,
+  serverVersionNewer,
   skillMatchesQuery,
 } from '../src/composables/skillManagerLogic'
 import { BUILTIN_CREATION_SKILLS, loadSkills, saveSkills, sanitizeSkills } from '../src/composables/creationStudioLogic'
@@ -176,5 +178,47 @@ describe('生成素材类过滤（2026-10-21 用户裁决：创作模式只承�
     expect(parsed).toHaveLength(3)
     const kept = filterGenerationSkills(parsed)
     expect(kept.map((s) => s.id)).toEqual(['tintin-video-gen'])
+  })
+})
+
+// ── 版本检查与更新（2026-10-29 用户裁决：安装存 version+卡片比对+一键更新）──
+describe('版本检查与更新', () => {
+  it('serverVersionNewer：分段数值比较，缺段=0，v 前缀容忍；缺版本/坏版本/降级一律 false', () => {
+    expect(serverVersionNewer('1.1.0', '1.0.0')).toBe(true)
+    expect(serverVersionNewer('1.0', '1.0.0')).toBe(false) // 缺段=0 → 相等
+    expect(serverVersionNewer('1.0.0', '1.0.0')).toBe(false)
+    expect(serverVersionNewer('0.9.9', '1.0.0')).toBe(false) // 降级不提示
+    expect(serverVersionNewer('v1.1.0', '1.0.0')).toBe(true)
+    expect(serverVersionNewer('2.0', '1.9.9')).toBe(true)
+    // 保守边界：任一侧缺失或含非数字段（如 1.0.0-beta）→ 不误报
+    expect(serverVersionNewer('1.1.0', undefined)).toBe(false)
+    expect(serverVersionNewer('', '1.0.0')).toBe(false)
+    expect(serverVersionNewer('1.0.0-beta', '1.0.0')).toBe(false)
+  })
+
+  it('安装把 version 存进 CreationSkill；重装同步刷新版本', () => {
+    const v1 = installServerSkill({ ...ENTRY, version: '1.0.0' }, [])
+    expect(v1[0]!.version).toBe('1.0.0')
+    const v2 = installServerSkill({ ...ENTRY, version: '1.1.0' }, v1)
+    expect(v2).toHaveLength(1)
+    expect(v2[0]!.version).toBe('1.1.0')
+  })
+
+  it('sanitizeSkills 往返保留 version（localStorage 存取后不丢，更新检测才有依据）', () => {
+    const installed = installServerSkill(ENTRY, [])
+    const roundTrip = sanitizeSkills(JSON.parse(JSON.stringify(installed)))
+    expect(roundTrip[0]!.version).toBe('1.1.0')
+  })
+
+  it('serverSkillHasUpdate：落后=true；同版/旧安装无 version/未安装=false', () => {
+    const skill = { ...ENTRY, version: '1.1.0' }
+    const outdated = installServerSkill({ ...ENTRY, version: '1.0.0' }, [])
+    expect(serverSkillHasUpdate(skill, outdated)).toBe(true)
+    const current = installServerSkill(skill, [])
+    expect(serverSkillHasUpdate(skill, current)).toBe(false)
+    // 旧安装（无 version 字段）保守不提示，重装一次后开始参与比对
+    const legacy = installServerSkill({ ...ENTRY, version: '' }, [])
+    expect(serverSkillHasUpdate(skill, legacy)).toBe(false)
+    expect(serverSkillHasUpdate(skill, [])).toBe(false)
   })
 })

@@ -38,6 +38,8 @@ export interface CreationSkill {
   /** 芯片徽标（即梦口径：New=蓝 / Hot=橙；提取自 2026-10-16 运行态） */
   badge?: 'New' | 'Hot'
   builtin?: boolean
+  /** 服务端技能库版本（安装时记录；更新检测=与 GET /skills 的 version 比较） */
+  version?: string
 }
 
 export interface CreationSubject {
@@ -226,6 +228,7 @@ export function sanitizeSkills(raw: unknown): CreationSkill[] {
     const tool = typeof it.tool === 'string' && it.tool.trim() ? (it.tool.trim() as CreationToolId) : undefined
     const backend = it.backend === 'voiceover' || it.backend === 'copy' || it.backend === 'llm' ? it.backend : undefined
     const badge = it.badge === 'New' || it.badge === 'Hot' ? it.badge : undefined
+    const version = typeof it.version === 'string' && it.version.trim() ? it.version.trim() : undefined
     out.push({
       id,
       name,
@@ -235,6 +238,7 @@ export function sanitizeSkills(raw: unknown): CreationSkill[] {
       ...(backend ? { backend } : {}),
       ...(badge ? { badge } : {}),
       ...(it.builtin === true ? { builtin: true } : {}),
+      ...(version ? { version } : {}),
     })
   }
   return out.length > 0 ? out : cloneSkills(BUILTIN_CREATION_SKILLS)
