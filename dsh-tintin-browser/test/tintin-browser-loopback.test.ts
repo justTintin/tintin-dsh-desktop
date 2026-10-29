@@ -2,6 +2,7 @@
 // loopback-service：token 鉴权（401）/未知路由（404）/open+extract 分发/握手文件。
 // 用真实 http 服务器（127.0.0.1:0）+ 假 handlers，host 侧 helper（读握手文件 + 调用）一并验到。
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import http from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -99,23 +100,38 @@ describe('host-side helpers (tintin-bundle lib/loopback-helpers.js)', () => {
 
 // ── 助手 ──
 function rawGet(port: number, token: string): Promise<{ status: number }> {
-  return new Promise((resolve) => {
-    const req = new globalThis.Request(`http://127.0.0.1:${port}/tintin-browser/open`, {
-      method: 'POST',
-      headers: { 'x-tintin-loopback-token': token, 'content-type': 'application/json' },
-      body: '{}',
-    })
-    fetch(req).then(async (r) => resolve({ status: r.status }))
-  })
+  return loopbackRequest(port, token, '/tintin-browser/open', {}).then((r) => ({ status: r.status }))
 }
 function loopbackCallAt(port: number, token: string, path: string, body: unknown): Promise<unknown> {
-  return new Promise((resolve) => {
+  return loopbackRequest(port, token, path, body).then((r) => r.json)
+}
+/** node:http 直连（与生产 loopbackCall 同路径）。不能走 fetch：fetch 规范坏端口黑名单
+ *  会直接拒绝部分合法回环端口（本机动态区间 1024-15000 与黑名单交集 17 个，listen(0) 可踩中，
+ *  19:55 打包门禁实撞），且无 reject 的 fetch 会把用例挂到超时——http.request 无黑名单 + error 显式 reject。 */
+function loopbackRequest(port: number, token: string, path: string, body: unknown): Promise<{ status: number; json: unknown }> {
+  return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body)
-    const req = new globalThis.Request(`http://127.0.0.1:${port}${path}`, {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path,
       method: 'POST',
-      headers: { 'x-tintin-loopback-token': token, 'content-type': 'application/json' },
-      body: payload,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(payload),
+        'x-tintin-loopback-token': token,
+      },
+    }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (c: Buffer) => chunks.push(c))
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8')
+        try { resolve({ status: res.statusCode ?? 0, json: JSON.parse(text) }) }
+        catch { reject(new Error(`回环响应非 JSON（status=${res.statusCode}）: ${text.slice(0, 120)}`)) }
+      })
     })
-    fetch(req).then(async (r) => resolve(await r.json()))
+    req.on('error', reject)
+    req.write(payload)
+    req.end()
   })
 }
