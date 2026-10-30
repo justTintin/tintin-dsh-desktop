@@ -408,7 +408,10 @@ export class FilmAgentManager {
       }
     } catch { /* 技能同步失败不阻断启动 */ }
     const bin = resolveDshBin()
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_HOME: home, TINTIN_SERVER_API_KEY: 'sk-tintin-local' }
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_HOME: home, TINTIN_SERVER_API_KEY: 'sk-tintin-local',
+      /* 2026-10-29 用户裁决:TinTin 智能体=完全权限——基础补丁按此 env 映射 沙箱 danger-full-access + 审批 never;
+         缺它则落回 workspace-write+ask,审批卡链路一旦没接住就是「仍在处理」永挂(当晚实锤) */
+      DSH_PERMISSION_MODE: 'danger-full-access' }
     const child = spawn(process.execPath, [bin, '--profile', 'acp', '--patch', patchPath], {
       cwd: project,
       env,

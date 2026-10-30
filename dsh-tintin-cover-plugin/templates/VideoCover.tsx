@@ -2,18 +2,26 @@
 import React from 'react'
 import { AbsoluteFill, Img, staticFile } from 'remotion'
 import { layerStyle, type StyleProps } from './text-style'
+import { CustomLayerOverlay, layerZ, type CustomLayer, type LayerOrder } from './CustomLayers'
 
 export type VideoCoverProps = {
   hookLines: string[]
+  subtitle: string
   subTag: string
   brand: string
   image: string
   hiddenLayers?: string[]
+  customLayers?: CustomLayer[]
+  layerOrder?: LayerOrder
 } & StyleProps
 
-export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subTag, brand, image, hiddenLayers = [], styles }) => {
+export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, subTag, brand, image, hiddenLayers = [], customLayers, layerOrder, styles }) => {
   const hidden = (id: string): boolean => hiddenLayers.includes(id)
   const hookStyle = layerStyle({ styles }, 'title', { fontSize: 110, color: '#ffffff' })
+  const subtitleStyle = layerStyle({ styles }, 'subtitle', { fontSize: 34, color: '#bfdbfe' })
+  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;translateY(-50%) 为原定位,叠加用户位移/旋转)
+  const productOverride = styles?.product
+  const productTransform = `translateY(-50%) translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) rotate(${productOverride?.rotate ?? 0}deg)`
   return (
     <AbsoluteFill style={{ background: '#070b18' }}>
       {!hidden('environment') && (
@@ -26,14 +34,14 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subTag, brand
       )}
 
       {!hidden('subTag') && (
-        <div style={{ position: 'absolute', left: 56, top: 48, display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ position: 'absolute', left: 56, top: 48, zIndex: layerZ(layerOrder, 'subTag'), display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ padding: '8px 20px', borderRadius: 8, background: '#22d3ee', color: '#04121a', fontSize: 26, fontWeight: 900, letterSpacing: 2, transform: 'skewX(-8deg)' }}>{subTag}</div>
           <div style={{ width: 180, height: 3, background: 'linear-gradient(90deg,#22d3ee,rgba(34,211,238,0))' }} />
         </div>
       )}
 
       {!hidden('product') && (
-        <div style={{ position: 'absolute', right: 30, top: '50%', transform: 'translateY(-50%)', width: 640, height: 640 }}>
+        <div data-cover-layer="product" style={{ position: 'absolute', right: 30, top: '50%', transform: productTransform, width: 640, height: 640, zIndex: layerZ(layerOrder, 'product') }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)' }}>
             <Img
               src={staticFile(image)}
@@ -49,7 +57,7 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subTag, brand
       )}
 
       {!hidden('title') && (
-        <div data-cover-layer="title" style={{ position: 'absolute', left: 56, top: 150, width: 560, transform: hookStyle.translate || undefined }}>
+        <div data-cover-layer="title" style={{ position: 'absolute', left: 56, top: 150, width: 560, zIndex: layerZ(layerOrder, 'title'), transform: hookStyle.translate || undefined }}>
           {hookLines.map((line, i) => (
             <div
               key={line}
@@ -71,12 +79,27 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subTag, brand
         </div>
       )}
 
+      {!hidden('subtitle') && (
+        <div
+          data-cover-layer="subtitle"
+          style={{
+            position: 'absolute', left: 60, bottom: 112, maxWidth: 620, zIndex: layerZ(layerOrder, 'subtitle'),
+            ...subtitleStyle, fontWeight: 600, letterSpacing: 1,
+            textShadow: '0 2px 12px rgba(2,6,23,0.85)',
+            transform: subtitleStyle.translate || undefined,
+          }}
+        >
+          {subtitle}
+        </div>
+      )}
+
       {!hidden('brand') && (
-        <div style={{ position: 'absolute', left: 56, bottom: 44, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <div style={{ position: 'absolute', left: 56, bottom: 44, display: 'flex', alignItems: 'center', gap: 16, zIndex: layerZ(layerOrder, 'brand') }}>
           <div style={{ padding: '7px 18px', borderRadius: 999, background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.3)', color: '#e2e8f0', fontSize: 20, fontWeight: 700 }}>{brand}</div>
           <div style={{ color: 'rgba(226,232,240,0.5)', fontSize: 18 }}>remotion · renderStill</div>
         </div>
       )}
+      <CustomLayerOverlay layers={customLayers} order={layerOrder} hidden={hidden} />
     </AbsoluteFill>
   )
 }

@@ -92,7 +92,7 @@ export const API_ENDPOINTS = {
   // 首启探测实际依赖 check + llm.models
   health: { check: '/health/check' },
   stats: { workbench: '/stats/workbench' },
-  llm: { chatCompletions: '/llm/chat/completions', adjustCopywriting: '/script/adjust-copywriting', list: '/script/list', models: '/llm/models' },
+  llm: { chatCompletions: '/llm/chat/completions', adjustCopywriting: '/script/adjust-copywriting', list: '/script/list', models: '/v1/models' },
   copywriting: { voiceover: '/copywriting/voiceover' },
   asr: { transcribe: '/whisper/transcribe' },
   tts: { indextts: '/indextts/tts', voicesList: '/voice/samples', voicesSamples: '/voice/samples', qwen3Voices: '/indextts/qwen3/voices' },

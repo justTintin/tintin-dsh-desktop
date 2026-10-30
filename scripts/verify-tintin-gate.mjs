@@ -23,6 +23,7 @@ const TINTIN_WORKSPACE_GLOBS = [
   'dsh-tintin-creation-bundle',
   'dsh-tintin-ops-bundle',
   'dsh-tintin-browser',
+  'dsh-tintin-cover-plugin',
   'dsh-plugin-desktop-tintin',
 ]
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.vue'])
@@ -238,13 +239,15 @@ if (anchors === undefined) throw new Error('verify-tintin-gate: scripts/tintin-a
 if (lineBaseline === undefined) throw new Error('verify-tintin-gate: scripts/tintin-line-baseline.json is missing or invalid')
 
 // 工作树相对 HEAD 的改动(文档同步门禁的输入); 应急豁免 TINTIN_DOC_SYNC=off。
+// 行首状态列 1-2 字符 + 空格(2026-10-28 修复: slice(3) 假定两列状态码, 本机 Git
+// 短格式输出 "M path" 时把路径首字符一起吃掉, doc-sync 永远匹配不上文档)。
 const changedFiles = (() => {
   if (process.env.TINTIN_DOC_SYNC === 'off') return []
   try {
     return run(['status', '--porcelain'])
       .split('\n')
       .filter(Boolean)
-      .map(line => line.slice(3).trim().replace(/^.* -> /u, ''))
+      .map(line => line.replace(/^.{1,2}\s+/u, '').trim().replace(/^.* -> /u, ''))
       .filter(Boolean)
   } catch {
     return []

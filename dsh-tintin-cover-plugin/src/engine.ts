@@ -3,7 +3,7 @@
 // 依赖:@remotion/bundler + @remotion/renderer(renderStill;Chromium 随包已裁决——
 // renderer 会在首次调用时定位/下载 headless shell,打包核验纳入 check 链)。
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -22,9 +22,135 @@ export function resolveWorkspaceDir(): string {
   return process.env.TINTIN_WORKSPACE_DIR || join(homedir(), 'Documents', 'tintin-workspace')
 }
 
-/** 封面产物目录 = <默认工作目录>/cover/(§一 G5 裁决);可用 TINTIN_COVER_DIR 覆盖(测试用) */
+/** 封面项目制(2026-10-30 用户裁决,对齐视频剪辑):一个封面=一个项目=一个目录,
+ *  会话随项目绑定(cwd=项目目录)。目录形态=<工作区>/cover/projects/<项目名>/
+ *  (不用 Cover\Projects 顶层——Windows 大小写不敏感,会与既有 cover\ 目录合并成一处);
+ *  当前项目指针=<cover>/current.json;旧 cover\ 散文件首次访问时整体迁入首个项目。
+ *  TINTIN_COVER_DIR 覆盖(测试用)时保持旧的单目录行为。 */
+const PROJECTS_DIRNAME = 'projects'
+const POINTER_FILENAME = 'current.json'
+
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+const defaultProjectName = (): string => {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
+}
+
+/** 项目名清洗:文件系统非法字符与首尾空白;空则回落日期时间默认名 */
+export function sanitizeProjectName(raw: string): string {
+  const cleaned = String(raw ?? '').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 60)
+  return cleaned || defaultProjectName()
+}
+
+let projectsMigrated = false
+/** 旧散文件一次性迁入首个项目(root 除 projects/current.json 外还有内容时)。
+ *  迁移标记按 root 记忆(多工作区/测试各迁各的),不是进程级一次性。 */
+const migratedRoots = new Set<string>()
+function ensureProjectsMigrated(root: string, projectsDir: string): void {
+  if (process.env.TINTIN_COVER_DIR || migratedRoots.has(root)) return
+  migratedRoots.add(root)
+  try {
+    if (existsSync(projectsDir)) return
+    const legacy = existsSync(root) ? readdirSync(root).filter((n) => n !== PROJECTS_DIRNAME && n !== POINTER_FILENAME) : []
+    if (legacy.length === 0) return
+    const name = defaultProjectName()
+    mkdirSync(projectsDir, { recursive: true })
+    const target = join(projectsDir, name)
+    mkdirSync(target, { recursive: true })
+    for (const entry of legacy) {
+      try { renameSync(join(root, entry), join(target, entry)) } catch { /* 单项失败不阻断(留原处) */ }
+    }
+    writeFileSync(join(root, POINTER_FILENAME), JSON.stringify({ name }, null, 2), 'utf8')
+  } catch (err) {
+    // 迁移失败回落根目录行为,不阻断;失败原因必须可见(静默吞过一次,vitest 里排障半小时)
+    console.warn('[cover] 旧目录迁移失败:', err instanceof Error ? err.message : err)
+  }
+}
+
+function projectsDirOf(root: string): string {
+  return join(root, PROJECTS_DIRNAME)
+}
+
+function readCurrentProject(root: string, projectsDir: string): string | null {
+  try {
+    const doc = JSON.parse(readFileSync(join(root, POINTER_FILENAME), 'utf8'))
+    const name = typeof doc?.name === 'string' ? doc.name : ''
+    if (name && existsSync(join(projectsDir, name))) return name
+  } catch { /* 无指针/坏指针: 回落 */ }
+  return null
+}
+
+/** 当前封面项目目录 = projects/<current.json 指向>;无指针/首访时建默认项目(日期时间名)。
+ *  迁移失败或 projects 不可用时回落旧的单目录行为(=root 本身)。 */
 export function resolveCoverDir(): string {
-  return process.env.TINTIN_COVER_DIR || join(resolveWorkspaceDir(), 'cover')
+  if (process.env.TINTIN_COVER_DIR) return process.env.TINTIN_COVER_DIR
+  const root = join(resolveWorkspaceDir(), 'cover')
+  const projectsDir = projectsDirOf(root)
+  ensureProjectsMigrated(root, projectsDir)
+  const current = readCurrentProject(root, projectsDir)
+  if (current) return join(projectsDir, current)
+  try {
+    const name = defaultProjectName()
+    mkdirSync(join(projectsDir, name), { recursive: true })
+    writeFileSync(join(root, POINTER_FILENAME), JSON.stringify({ name }, null, 2), 'utf8')
+    return join(projectsDir, name)
+  } catch { return root }
+}
+
+/** 项目清单(目录名+修改时间,近期在前) */
+export function listCoverProjects(): Array<{ name: string; mtimeMs: number }> {
+  const root = join(resolveWorkspaceDir(), 'cover')
+  const projectsDir = projectsDirOf(root)
+  ensureProjectsMigrated(root, projectsDir)
+  if (!existsSync(projectsDir)) return []
+  return readdirSync(projectsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => ({ name: e.name, mtimeMs: statSync(join(projectsDir, e.name)).mtimeMs }))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+/** 新建项目(缺省名=日期时间;重名自动加 -2/-3 尾号)并设为当前 */
+export function createCoverProject(rawName?: string): { name: string } {
+  const root = join(resolveWorkspaceDir(), 'cover')
+  const projectsDir = projectsDirOf(root)
+  mkdirSync(projectsDir, { recursive: true })
+  let name = sanitizeProjectName(rawName || defaultProjectName())
+  let unique = name
+  for (let i = 2; existsSync(join(projectsDir, unique)); i++) unique = `${name}-${i}`
+  mkdirSync(join(projectsDir, unique), { recursive: true })
+  writeFileSync(join(root, POINTER_FILENAME), JSON.stringify({ name: unique }, null, 2), 'utf8')
+  return { name: unique }
+}
+
+/** 切换当前项目(目录必须存在) */
+export function switchCoverProject(rawName: string): { name: string } {
+  const root = join(resolveWorkspaceDir(), 'cover')
+  const name = sanitizeProjectName(rawName)
+  const target = join(projectsDirOf(root), name)
+  if (!existsSync(target)) throw new Error(`项目不存在: ${name}`)
+  writeFileSync(join(root, POINTER_FILENAME), JSON.stringify({ name }, null, 2), 'utf8')
+  return { name }
+}
+
+/** 重命名项目(目录改名;当前指针同步跟随)。
+ *  注意顺序:必须**先**取当前指针再改名——改名后旧名不存在,readCurrentProject 的
+ *  existsSync 守卫会返回 null,指针跟随就被跳过(实撞:改名当前项目后解析回落建新项目)。 */
+export function renameCoverProject(from: string, to: string): { name: string } {
+  const root = join(resolveWorkspaceDir(), 'cover')
+  const projectsDir = projectsDirOf(root)
+  const cleanFrom = sanitizeProjectName(from)
+  const cleanTo = sanitizeProjectName(to)
+  if (cleanFrom === cleanTo) return { name: cleanTo }
+  const source = join(projectsDir, cleanFrom)
+  const target = join(projectsDir, cleanTo)
+  if (!existsSync(source)) throw new Error(`项目不存在: ${cleanFrom}`)
+  if (existsSync(target)) throw new Error(`项目名已存在: ${cleanTo}`)
+  const wasCurrent = readCurrentProject(root, projectsDir)
+  renameSync(source, target)
+  if (wasCurrent === cleanFrom) {
+    writeFileSync(join(root, POINTER_FILENAME), JSON.stringify({ name: cleanTo }, null, 2), 'utf8')
+  }
+  return { name: cleanTo }
 }
 
 export interface RenderCoverInput {
@@ -51,6 +177,32 @@ function bundleKey(): string {
   } catch {
     return `${entryPoint}:missing`
   }
+}
+
+/** 渲染总超时兜底(1029 事故:ensureBrowser 静默下载无超时→/api/render 永不应答→UI「渲染中」永挂):
+ *  超时后路由必回错误,UI 必有反馈。可用 TINTIN_COVER_RENDER_TIMEOUT_MS 覆盖(测试用)。 */
+const RENDER_TIMEOUT_MS = Number(process.env.TINTIN_COVER_RENDER_TIMEOUT_MS) || 90_000
+
+/** 给渲染工作套总超时;超时返回可读错误(底层 Chrome 进程由 Remotion 自理,不强制杀) */
+export function withRenderTimeout<T>(work: Promise<T>, ms: number = RENDER_TIMEOUT_MS): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`渲染超时(${Math.round(ms / 1000)}s)——已停止等待,请重试;反复出现请反馈`)), ms)
+    }),
+  ])
+}
+
+/** 包内 headless 浏览器(打包随插件 node_modules 分发;与 cwd 无关——Remotion 默认按
+ *  process.cwd() 向上找缓存,应用内 cwd 解析到不存在路径→明明带着却触发 120MB 下载,1029 事故根因)。
+ *  命中返回 exe 绝对路径(传 browserExecutable 即跳过下载判定);缺失返回 null(回退 ensureBrowser)。 */
+export function resolveBundledBrowser(): string | null {
+  for (const platform of ['win64', 'mac-arm64', 'mac-x64', 'linux64', 'linux-arm64']) {
+    const exe = join(pluginRoot, 'node_modules', '.remotion', 'chrome-headless-shell', platform, `chrome-headless-shell-${platform}`,
+      platform === 'win64' ? 'chrome-headless-shell.exe' : 'chrome-headless-shell')
+    if (existsSync(exe)) return exe
+  }
+  return null
 }
 
 export async function renderCover(input: RenderCoverInput): Promise<RenderCoverResult> {
@@ -87,22 +239,30 @@ export async function renderCover(input: RenderCoverInput): Promise<RenderCoverR
       }
       serveUrl = cachedBundle.serveUrl
     }
-    await ensureBrowser()
+    // 浏览器钉死(2026-10-29 裁决):优先包内缓存(cwd 无关,传 browserExecutable 即跳过下载判定);
+    // 缺失才回退 ensureBrowser 的 cwd 口径(老行为,开发态)。
+    const bundled = resolveBundledBrowser()
+    if (!bundled) await ensureBrowser()
 
     // 文档流:selectComposition({serveUrl, id, inputProps}) → renderStill({composition, ...})
     // (selectComposition 的入参字段是 id;实测 4.0.539 对象形态 composition 会丢 props)
-    const composition = await selectComposition({
-      serveUrl,
-      id: tpl.id,
-      inputProps,
-    })
-    await renderStill({
-      composition,
-      serveUrl,
-      inputProps,
-      frame: 0,
-      output: outFile,
-    })
+    // 全程套总超时:任何环节(下载/启动/渲染)卡死都转为可读错误响应,不再永挂。
+    await withRenderTimeout((async () => {
+      const composition = await selectComposition({
+        serveUrl,
+        id: tpl.id,
+        inputProps,
+        browserExecutable: bundled ?? undefined,
+      })
+      await renderStill({
+        composition,
+        serveUrl,
+        inputProps,
+        frame: 0,
+        output: outFile,
+        browserExecutable: bundled ?? undefined,
+      })
+    })())
     // 导出侧车:<产物>.json = props 快照(可复现)+ 素材来源(§七 provenance;
     // bundle 侧 cover-assets.json 由上传/AI 生成通道写入,此处只读摘取)
     try {

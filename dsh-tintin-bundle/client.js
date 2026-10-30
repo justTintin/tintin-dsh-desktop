@@ -31,27 +31,9 @@ const tintinClient = (() => {
         register(id, provider) { this.providers.set(id, provider); try { window.__tintinChrome?.onProvider?.(id) } catch { /* 未就绪 */ } },
         unregister(id) { this.providers.delete(id) },
       }
-      // 封面制作视图(2026-10-27):dsh-tintin-cover-plugin 的三栏编辑器,经 bundle
-      // webServer /tintin/cover/editor 提供(同源 loopback);iframe 承载,KeepAlive
-      // 由 chrome 的常驻子元素语义保证(切走不销毁,图层/会话状态驻留)。
-      // 高度用 100vh(视口单位)而非 height:100%——覆盖层容器链是 min-height 百分比,
-      // 对 iframe 的百分比高度不解析,会塌成默认 150px(2026-10-27 兼容模式实测白条)。
-      let coverFrame = null
-      registry.register('cover', {
-        mount(el) {
-          if (coverFrame) return
-          el.style.position = 'relative'
-          coverFrame = document.createElement('iframe')
-          coverFrame.src = '/tintin/cover/editor'
-          coverFrame.title = '封面制作'
-          coverFrame.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100vh;border:0;display:block;background:#141416'
-          el.appendChild(coverFrame)
-        },
-        unmount() {
-          coverFrame?.remove()
-          coverFrame = null
-        },
-      })
+      // 封面视图提供方已迁入 dsh-tintin-cover-plugin 的 client 入口自注册(2026-10-30
+      // 插件化裁决,同 creation/ops/media 模式);侧栏行仍集中列在本 chrome 的 VIEWS
+      // (行=宿主展示面,提供方=包边界)。
 
       // ── 左侧「插件」区入口（2026-09-28 用户裁决：撤顶部 Tab 栏；入口行克隆插件面板行同层注入）──
       let entryButtons = []
@@ -461,7 +443,7 @@ const tintinClient = (() => {
         jyAudioSetEnabled: (enabled) => call('jyaudio:setEnabled', { args: [enabled] }),
         // ── HTTP 封装 ──
         llmChat: (payload) => call('server:post', { path: '/llm/chat/completions', body: payload }),
-        llmModels: () => call('server:get', { path: '/llm/models' }),
+        llmModels: () => call('server:get', { path: '/v1/models' }),
         copywritingVoiceover: (payload) => call('server:post', { path: '/copywriting/voiceover', body: payload }),
         // 声音样本域（2026-09-24 补链：ttsVoicesSamples 未映射→样本试听复盘）。
         ttsVoicesSamples: (params) => call('server:get', { path: '/voice/samples', params: params ?? {} }),

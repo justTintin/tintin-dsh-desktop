@@ -1,6 +1,6 @@
 # 封面生成方案需求文档
 
-状态:**需求评审中(PoC 已验证,产品化未启动)** · 创建:2026-10-26 · 追加:§九 封面编辑器(2026-10-26) · 负责人:TinTin 桌面端
+状态:**需求评审中(PoC 已验证) · 产品化:编辑器/会话/在线素材已实现(2026-10-29,见 §12 实现对账;待重打包实测)** · 创建:2026-10-26 · 追加:§九 封面编辑器(2026-10-26) · §十一 ACP 会话(2026-10-27) · §十二 实现对账(2026-10-29) · 负责人:TinTin 桌面端
 证据依据(铁律 12):① 用户裁决(2026-10-26 确认技术路线并要求成文)② PoC 实测(`D:\Project\cover-demo` 三模板全链路渲染成功)③ 第三方契约(Remotion 4.0.539 源码可用许可,见 §7)
 
 ---
@@ -303,7 +303,7 @@ dsh-plugin-desktop-tintin/src/tintin/film-acp.ts  ← ACP 会话桥(694 行)
 
 #### CA-1: cover-acp.ts(ACP 会话桥)
 
-**文件**: `dsh-plugin-desktop-tintin/src/tintin/cover-acp.ts` **已创建**(2026-10-27)
+**文件**: `dsh-tintin-bundle/lib/cover-acp-bridge.js`(**2026-10-28 实装**;原 TS 稿废弃删除——桥与路由同在 bundle webServer 进程,无需经过插件主进程 IPC)
 
 复用 FilmAgentManager 模式,cwd 指向 cover 工作目录:
 
@@ -320,28 +320,36 @@ CoverAgentManager
 模型路由:与 film 同源(TinTin 服务端 openai-completions),补丁写 `cover-agent.patch.yml`。
 权限:`danger-full-access` 全放行(与 film 同裁决)。
 
-**状态**:✅ 核心已创建,需注册到 main-hook.ts 并加 IPC 通道。
+**状态**:✅ 完成(2026-10-28)。单会话 `dsh --profile acp`,服务端 MCP+技能注入+权限/表单提问路由给聊天卡;事件环 2000 条供 SSE 重放。
+
+> **构建形态终裁(2026-10-28 用户裁决:源码共享,构建隔离)**:同款会话框 = 相同界面 + 相同架构
+> (ACP 会话 + preload 桥 + mount),对接不同业务(CoverAppBridge/CoverAgentManager 接封面图层、
+> comfygen、PhotoCraft)。双入口实验(封面聊天塞进视频剪辑 shell 的 vite 构建)已回退——rollup
+> 共享 chunk 重排影片页模块时序,导致视频剪辑自己的会话框挂载崩溃。终态:封面会话页由
+> **封面插件自己的 `chat-shell` 构建**(独立 npm 工位,照 openfilm-shell 先例),产物
+> `chat-shell/dist` 经 stage.mjs 进 extraResources,bundle 路由 `/tintin/cover/chat` 伺服
+> (vite base 必须为完整前缀 `/tintin/cover/chat/`,否则资源 404)。视频剪辑的构建不再碰。
 
 #### CA-2: IPC 通道注册
 
-**文件**: `main-hook.ts`(追加)或 `cover-acp-routes.ts`(新建)
+**文件**: `dsh-tintin-bundle/lib/cover-acp-routes.js`(新建,2026-10-28 实装)
 
 在 channel main 进程注册 CoverAgentManager 并暴露 IPC/webServer 通道:
 
 ```
-POST /tintin/cover/api/acp/start     → manager.start(key, cwd)
-POST /tintin/cover/api/acp/prompt    → manager.prompt(key, text) → 语义事件
-GET  /tintin/cover/api/acp/events    → SSE/轮询 语义事件流
-POST /tintin/cover/api/acp/stop      → manager.stop(key)
+/tintin/cover/api/acp/start|prompt|steer|cancel|close|set-option|permission|question|running|ack
+GET  /tintin/cover/api/acp/events    → SSE(Last-Event-ID 断线重放)
+GET  /tintin/cover/api/acp/chat-record|skills|files|props  → 聊天记录/技能/图层文件/props 对流
+POST /tintin/cover/api/acp/chat-sessions|chat-turn|chat-attachment|chat-ref-image|describe-paths|skills-texts|props
 ```
 
-**状态**:⏳ 待实施。依赖 CA-1。
+**状态**:✅ 完成(2026-10-28)。信任双轨:浏览器=loopback+Origin;agent 子进程=会话令牌头 `x-tintin-cover-agent`。
 
 #### CA-3: 编辑器 ChatPanel 对接 ACP
 
-**文件**: `dsh-tintin-cover-plugin/src/editor/App.tsx`(改 ChatPanel)
+**文件**: `dsh-tintin-cover-plugin/src/editor/App.tsx` + `dsh-tintin-bundle/openfilm-shell/cover-chat-{bridge,main}.ts`(2026-10-28 实装)
 
-ChatPanel 的 send() 切换到 ACP 路由:
+右栏整体换成 **OpenFilm 官方聊天组件**(shell 构建第二入口 `cover-chat.html`,伺服 `/tintin/cover/chat`,编辑器 iframe 承载):页面桥实现 `window.openfilmDesktop` 的聊天子集,后端即上述 acp/* 路由族。自造 JSON 协议(cover-chat.js)随批删除。
 
 ```
 用户输入 → POST /api/acp/prompt → ACP agent 处理
@@ -349,9 +357,9 @@ ChatPanel 的 send() 切换到 ACP 路由:
   ← 动作卡片回显(set_text / generate_environment / export 等)
 ```
 
-与当前自造 JSON 协议的区别:agent 是真正的 DSH Harness 智能体——有自己的工具回路,可自主决定调 comfygen 生图还是 PhotoCraft 操作,而非按固定协议回复。
+与自造 JSON 协议的区别:agent 是真正的 DSH Harness 智能体——有自己的工具回路(fs 改 cover.props.json / curl 编辑器 API 生图导出 / 服务端 MCP),而非按固定协议回复。图层状态双向同步:编辑器 600ms 防抖写 props(origin=editor),2s 轮询读(origin=agent 才套用)。
 
-**状态**:⏳ 待实施。依赖 CA-2。
+**状态**:✅ 完成(2026-10-28,待重打包实测)。
 
 #### CA-4: @ 图层引用
 
@@ -359,7 +367,7 @@ ChatPanel 的 send() 切换到 ACP 路由:
 
 在 ACP 系统提示中注入当前模板的图层清单(id/label/类型/当前值),使 agent 能理解 `@产品图` `@主标题` 等引用。编辑器输入 `@` 时弹出图层列表自动补全。
 
-**状态**:⏳ 待实施。依赖 CA-3。
+**状态**:✅ 完成(2026-10-28):@ 引用=聊天输入区 @ 菜单新增「图层」组(vendored chat 树最小改动:app-bridge 可选 `coverLayers()` + App.tsx mentionProviders 图层组,影片场景不受影响),pill 走 StudioRef layer 形状随 `<studio_references>`/`<cover_context>` 供给 agent;编辑器图层行有「@」按钮直插引用。
 
 #### CA-5: / 封面技能
 
@@ -370,9 +378,9 @@ ChatPanel 的 send() 切换到 ACP 路由:
 - 模板族与图层约定
 - 导出流程
 
-技能经 `ensureCoverSkill()` 注入 agent home,agent 自动可调。
+技能经 `ensureCoverSkill()` 注入 agent home(文末动态附录:服务端地址/编辑器 API 基址/会话令牌),聊天 / 命令菜单与 Skills 按钮同源(`/acp/skills` 读插件 skills/ 目录)。
 
-**状态**:⏳ 待实施。
+**状态**:✅ 完成(2026-10-28)。
 
 #### CA-6: PhotoCraft 控制通道深度集成
 
@@ -400,14 +408,77 @@ ChatPanel 的 send() 切换到 ACP 路由:
 | 编辑器 iframe 与主进程通信延迟 | 事件流用轮询兜底(2s 间隔) |
 | 封面技能内容质量 | 需与业务确认操作清单 |
 
-### 11.6 已有基础
+### 11.6 实施存根(2026-10-28 P1-P3 收口)
 
-- ✅ `cover-acp.ts` 已创建(CA-1 核心)
-- ✅ 编辑器 ChatPanel 已有消息流/动作卡片 UI
-- ✅ comfygen 生图端点已在(cover-background.js)
-- ✅ PhotoCraft CLI 已 vendored 且无头验证通过
-- ✅ FilmAgentManager 模式已验证(openfilm 实测可用)
+- ✅ CA-1 桥 = bundle `lib/cover-acp-bridge.js`(原 `dsh-plugin-desktop-tintin/src/tintin/cover-acp.ts` 废弃删除)
+- ✅ CA-2 路由族 = bundle `lib/cover-acp-routes.js`(35 条封面路由全注册;TDZ 回归有 vitest 固化)
+- ✅ CA-3 官方聊天 = shell 双入口 `cover-chat.html`(bundle `openfilm-shell/`)+ 编辑器 iframe
+- ✅ CA-4 @ 图层引用 = vendored chat 树两处最小改动(app-bridge.ts/App.tsx)
+- ✅ CA-5 技能 = `dsh-tintin-cover-plugin/skills/cover/SKILL.md`
+- ⏳ CA-6 PhotoCraft 深度桥接 = 远期不变;comfygen 生图当前走编辑器 API(令牌旁路)
+- 附带修复:上一提交 `cover-plugin-route.js` 的 pcRoute TDZ(运行时全炸)已修并有回归测试;素材写入统一三写(源/编辑器预览/导出根,`lib/cover-asset.js`)
 
 ---
+
+## 十二、实现对账(2026-10-29:逐条需求 ⇋ 实现)
+
+> 对照 §五/§九/§十一 与本轮(2026-10-28/29)实现。**实证方式**:无头浏览器 E2E(双页菜单转储/注入文本截获/拖动坐标断言/抽屉交互)+ 真实 dsh 会话实验 + 插件 20 测试 + 门禁 84 锚点。
+
+### 12.1 已实现(逐条 ⇋ 实现)
+
+| 需求 | 实现 | 实证 |
+|---|---|---|
+| §9.2/9.3 三栏 + 图层=props 投影 | 三栏编辑器 + 图层树/画布双向联动(点选/拖拽/↑↓ z 序) | E2E:图层树行序=layerOrder、拖动 x/y 持久化断言 |
+| §9.3 图层 z 序可调(用户 10-28 追加) | `props.layerOrder`(固定层+自定义层同一张序表,模板顶层块 zIndex)+ 图层行 ↑↓ | E2E:↑ 按钮写回 layerOrder、命中栈 IMG 序=layerOrder |
+| §9.3+ 用户 10-28:拖入图片=新图层 | `props.customLayers`(x/y/width/opacity)+ CustomLayerOverlay(六模板)+ 素材面板拖入/「＋作为新图层」 | E2E:建层(asset-sync 三写)→画布渲染 |
+| §9.4 会话工具面(原自造 JSON 协议) | **ACP 会话替代**(CA-1..CA-5):`dsh --profile acp` + 服务端 MCP + cover SKILL.md + fs 改 cover.props.json + 令牌旁路 curl 编辑器 API | 真 dsh 实验:INIT/SESSION OK、prompt 到达模型;黄金 E2E:注入文本=引用编号+SKILL.md 全文 |
+| §11.2 @ 图层引用 | @ 菜单「图层」组(编辑器 postMessage 实时取值)→ pill → `[n: 名]` + `<studio_references>` layer 行(含 propsKey/取值) | E2E:菜单项+发送文本截获 |
+| §11.2 / 封面技能 | / 菜单 Skills 组(cover 技能,SKILL.md 全文附加);技能清单路由 `/acp/skills`(staging skills 同步+内置兜底) | E2E:/ 菜单弹出 cover;安装版根因=staging 漏同步 skills/(已修) |
+| 用户 10-29:封面 @ 无技能组、无时刻组 | 桥 `hideSkillsInMentions`/`timelineDisabled` 直读(window 直读,不经 app 代理——代理读曾致主线程死循环) | E2E:封面 @=图层+素材、无 Skills 无时刻;影片 @ 不受影响 |
+| 用户 10-29:在线素材像视频剪辑(列表布局/搜索/分页/下载,下载与引用分开) | 抽屉列表版:行=缩略图+名称+「下载到素材」;行/按钮点击=只领养进素材库(三写+台账);搜索框(server search)+分页(24/页,滚动触底+加载更多按钮) | E2E:页 1=24、滚动=30、搜索=5、下载落盘、抽屉保持、composer 无污染 |
+| §9.7-2 文字样式(用户 10-29:PhotoCraft 式,真字体) | 文字层=DOM 真字体(非位图);面板=字体/大小(**px 绝对**,基准字号×倍率换算)/位置(X·Y 数值+滑条)/颜色(色板+取色器);registry LayerDef.fontSize 基准登记 | E2E 截图:面板六行齐;契约测试按新夹取(0.3..3/±1200)更新 |
+| 用户 10-29:对齐/参考线/预览开关 | 画布选中图层→对齐工具条(六向相对画布)+拖动吸附参考线(青色);中栏「预览显示」开关(参考线/网格;编辑器视觉辅助不进导出) | E2E:对齐后图层中心=画布正中;开关在设置区 |
+| §九 导出 | ExportModal(横竖屏勾选)+ props 快照侧车 + provenance 台账 |既有 |
+| WP-4 OpenFilm 配套 | film_render 钩子(film-tools)|既有 |
+| 用户 10-29:封面会话底部加视频剪辑同款「选择产品」(按钮/弹窗/资料注入) | 三件套移植:①bundle 路由 `GET /acp/products?q&limit` + `/acp/products-detail?id` 代理服务端 `/api/product-library/*`(与 film 的 openfilm:products 主进程代理同源同形状);②封面页外挂 `cover-chat-products.ts`(1:1 移植影片 tintin-products.ts:📦 按钮挂官方 composer 工具条 + 面板(搜索/列表/状态)+ 点选拉详情 →【产品】品牌·型号·品类·货号+性能参数+卖点等结构化文本经 Lexical 粘贴注入输入框),数据改走同源路由(封面页无 openfilmNative);③构建标记 2026-10-29-d | E2E(新构建+真路由+真实服务端):📦 挂载 1、面板开、50 真实产品、点选注入 `【产品】华为（HUAWEI）· HUAWEI Mate 80 …性能参数：…`;零 pageerror |
+| 用户 10-29:编辑器布局两改(①中栏去「图层/素材」页签,素材常驻上半区+图层下半区同屏;②「设置」块移到预览区顶部横条) | ①中栏 = AssetsPanel(42% 高,内部滚动)+ LayersPanel(剩余,内部滚动),面板根加 flex 填充;②新增 `CanvasSettingsStrip` 顶条(横竖屏切换+拖动对齐参考线+画布网格+模板快出提示,同行排布)包住 CanvasPanel;移除 midTab 状态与页签/设置 JSX | typecheck 0 错、插件 20 测试全过、vite 构建新 hash `editor-Bj_R5nKe.js`、staging+win-unpacked 已同步(重启生效) |
+
+### 12.2 未实现/待办
+
+| 项 | 状态 | 依 据 |
+|---|---|---|
+| WP-4 自动上架批量配图 | ⏳ 待裁决集成点(上架子系统 1:1 移植,铁律 1 只搬不写) | §五 WP-4 |
+| CA-6 PhotoCraft 深度桥接(MCP 500+ 命令) | ⏳ 远期;控制通道基本命令(launch/inspect/screenshot/execute/export)已接 | §11.3 CA-6 |
+| Remotion 商用许可法务结论 | ⏳ 开放(源码可用许可,个人/小团队免费) | §7 |
+| 用户自定义模板 | ⏳ MVP 不开放(模板沙箱安全) | §9.7-5 |
+| 重打包后实测 | ⏳ 全部修复已在仓库/staging,待重打包安装验证 | 本节 |
+| 封面 @ 技能组隐藏的实现机制 | ✅ 已解(window 直读桥标志);首轮经 app 代理读曾致菜单挂死——**@ 菜单 providers 表达式禁走 app 代理读新标志** | §12.1 |
+
+### 12.3 端到端连接核查(2026-10-29:会话框消息 ⇋ 服务端 MCP/LLM)
+
+> **实证方式**:真实服务端(`http://192.168.111.31:8000`,本地渠道配置 `server.url`)HTTP 探针 + 仓库封面桥真起 dsh 会话发消息(探针脚本 `.tmp-cover-acp-probe.mjs` 可复用)。
+
+| 环节 | 结论 | 证据 |
+|---|---|---|
+| 会话链(聊天 iframe → 页面桥 → `/tintin/cover/api/acp/*` → `cover-acp-bridge.js` → `dsh --profile acp`) | ✅ 与 film 参照实现同构(MCP 声明/模型路由补丁/占位键/session 参数逐项一致;`sessionInfo.mcp:false` 两侧同为占位旗标) | 代码对照 `cover-acp-bridge.js` ⇋ `film-acp.ts`(mcpServers 同形状同地址) |
+| 服务端 MCP(`${server}/mcp`,session/new 声明 `tintin-server`) | ✅ 端点活:initialize 握手 200(`tintin-agent-server` v1.1),tools/list **42 工具在册**,封面强相关 `generate_image`/`generate_cover`/`product_image_generate`/`product_three_view`/`comfyui_workflow`/`task_status_unified` 全在;免鉴权 | curl initialize/tools/list 实测(2026-10-29) |
+| session/new 接受 MCP 声明 | ✅ 真实 dsh 会话建立成功(sessionId 签发) | 探针 startSession ok |
+| 模型路由(`${server}/llm`,deepseek-v4-flash/-pro) | ❌ **当前断**:服务端 /llm 转发上游 DeepSeek 时 401——**服务端自己的上游 API key(尾号 548b)无效**;流式表现为 200+`text/event-stream` 空 SSE(0 字节)→agent 报 `Stream ended without finish_reason`。**视频剪辑会话同命中**(同一调用形状),属服务端侧故障(换上游键),非移植缺陷 | 非 stream 401 原文 `Authentication Fails … ****548b is invalid`;stream body 0 字节;桥内探针 prompt 19s 失败同错误 |
+| 客户端密钥 | 两无嫌:客户端恒用占位键 `sk-tintin-local`(film/cover 一致);`/llm/chat/completions` 实测不校验客户端 Bearer(无鉴权头同结果) | curl 对照 |
+
+**结论**:移植对账成立,服务端 **MCP 连接前提全部成立**(端点活/工具在册/会话接受声明);当前消息整轮失败卡在**服务端 /llm 上游 DeepSeek 键失效**——服务端侧换键后自然恢复,客户端零改动。
+
+### 12.4 修复实录(本轮回归根因,防复发)
+
+| 症状 | 根因 | 修复 |
+|---|---|---|
+| `/` 菜单只有 cover 一个技能(2026-10-29 用户实报:技能管理已装的生成图/封面/视频族技能全部缺席) | 封面技能清单只读**插件自带** `skills/` 目录;技能管理装位(`<渠道主目录>/skills`,rank400)与 agent home 均未接入 | 三处打通:①`/acp/skills` 合并插件目录+用户级装位(source=project/user,重名插件自带优先);②`/acp/skills-texts` 双目录解析;③`startSession` 把用户级技能整目录复制进 `cover-agent-home/skills/`(智能体可实际调用;每次启动刷新)。实证:清单 8 条(cover+openfilm+tintin-cover-gen+tintin-image-gen+tintin-music-gen+tintin-text-to-video+tintin-video-replicate+tintin-video-role-swap)、skills-texts 解析 978B、fixture 技能注入后 agent home=cover+tintin-image-gen |
+| 发起请求红字 `controller is not defined`(2026-10-29 晚,重启后必现) | 并行会话 13:58 给 agent stdout 加协议行过滤(防 dsh 横幅被 SDK 当 undefined 通知)时**混淆两套流 API**:①web `TransformStream.transform` 只有 `(chunk, controller)` 两个参数、完成=同步返回,没有 done 回调(`done` 是 node:stream `stream.Transform` 的签名)→裸引用 `controller` 与 `done()` 均炸,首个协议行即抛=**每次会话启动必死**;②过滤流夹在 TextDecoderStream/TextEncoderStream 之间,入出皆字符串,`enqueue(TextEncoder().encode(...))` 塞字节会被二次编码成垃圾 | `transform(chunk, controller)` 同步返回 + enqueue 字符串;过滤器单测(横幅丢弃/协议行原样/跨 chunk 缓冲)+真桥探针(startSession OK、prompt 到达模型)双验证;已热同步安装 node_modules,**重启即生效** |
+| 输入 @ 菜单整个不出现/恒空(2026-10-29,隐藏技能组后) | **@ 菜单引导死锁**:`MentionMenuPlugin.triggerFn` 在 providers 拼不出任何选项时抑制菜单(line 96)→不打开→`onOpen` 不触发→`loadMentionFiles`(图层+素材唯一加载点)永不执行。影片页靠常驻**时刻组**引导;封面页删时刻组后靠**技能组**引导——隐藏技能组后 providers 初始为零=死锁。E2E 复刻实证:菜单空、`/acp/files` 请求零次、直调桥正常(files=17/layers=3) | ChatPane 挂载即 `loadMentionFiles()`(数据先于首开就位;onOpen 保留做每次刷新);构建标记 `2026-10-29-c (mention bootstrap)`;E2E 终验 @=图层+素材(19 项)无技能无时刻,staging+win-unpacked 已同步 |
+| 发消息无处理 + 红字 Unknown ACP notification method 'undefined' | 桥通知注册键抄错:`methods.agent.session.update` 不存在(SDK 树里通知挂 `client.session.update`)→ startSession 注册即抛 | 键改为 client.session.update;真 dsh+假 /llm 实验复现+修复实证;**用户实例聊天记录里该红字=10-28 18:47 失败轮次回放(record.json 诚实保留),今日新轮已实证会话可建** |
+| (承上)修复后仍报错 | 用户实例进程未重启,bundle 冷(启动时加载);页面/抽屉热(按请求读盘)——混合态 | 整应用重启即愈;探针监别法:page fetch 日志 |
+| 自定义层拖动永不持久 | setCustomLayer 合并顺序:{...l, ...patch, x: round(l.x)} 把 patch 后 x/y 又用旧值盖回 | x/y 取 patch 后值再取整 |
+| 自定义层图片 404、命中打穿 | 编辑器 staticFile 产出根绝对路径 /name(root 无人伺服);agent 自下载图只落 cover 目录 | 编辑器入口设 `window.remotion_staticBase='/tintin/cover/editor'`;agent 回流先 await asset-sync 再套用 |
+| 安装版 / 菜单空 | staging 漏同步 skills/(stage.mjs 从未拷贝) | stage.mjs 同步 skills/;路由兜底内置 cover 技能条目 |
 
 附:PoC 产物 `D:\Project\cover-demo\out\{cover,mouse-cover,video-cover}.png`;渲染命令样例见 `cover-demo/README`(待补)。

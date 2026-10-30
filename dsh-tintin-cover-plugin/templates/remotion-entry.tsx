@@ -60,7 +60,7 @@ export const RemotionRoot: React.FC = () => (
       height={720}
       fps={30}
       durationInFrames={1}
-      defaultProps={{ hookLines: ['钩子一', '钩子二'], subTag: '栏目', brand: '品牌', image: 'mouse.jpg' }}
+      defaultProps={{ hookLines: ['钩子一', '钩子二'], subtitle: '副标题', subTag: '栏目', brand: '品牌', image: 'mouse.jpg' }}
     />
     <Composition
       id="video-portrait"
@@ -69,7 +69,7 @@ export const RemotionRoot: React.FC = () => (
       height={1440}
       fps={30}
       durationInFrames={1}
-      defaultProps={{ hookLines: ['钩子一', '钩子二'], subTag: '栏目', brand: '品牌', image: 'mouse.jpg' }}
+      defaultProps={{ hookLines: ['钩子一', '钩子二'], subtitle: '副标题', subTag: '栏目', brand: '品牌', image: 'mouse.jpg' }}
     />
   </>
 )

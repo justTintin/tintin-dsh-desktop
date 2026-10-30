@@ -51,6 +51,7 @@ if (JSON.stringify(workspace.workspaces) !== JSON.stringify([
   'dsh-tintin-creation-bundle',
   'dsh-tintin-ops-bundle',
   'dsh-tintin-browser',
+  'dsh-tintin-cover-plugin',
   'dsh-plugin-desktop-tintin',
 ])) {
   fail('the root Yarn workspace must contain the desktop, community-fabric, community-market, and tintin packages')

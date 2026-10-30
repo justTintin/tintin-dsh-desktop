@@ -26,6 +26,10 @@ export interface ServerSkill {
   version: string
   /** 服务端注册时的标记（2026-10-21 起：生成素材类技能以此进入创作模式清单） */
   tags: string[]
+  /** 注册元信息（2026-10-30 详情弹窗「全部信息」裁决补带；老注册表缺省=空串） */
+  registeredBy?: string
+  createdAt?: string
+  machineId?: string
 }
 
 /** 创作技能 id 前缀——安装来源标记（卸载/判已装按它定位） */
@@ -58,6 +62,9 @@ export function parseSkillsResponse(res: unknown): ServerSkill[] {
       executor: String(it.executor ?? '').trim(),
       version: String(it.version ?? '').trim(),
       tags: Array.isArray(it.tags) ? it.tags.map((tag) => String(tag ?? '').trim().toLowerCase()).filter(Boolean) : [],
+      registeredBy: String(it.registered_by ?? '').trim() || undefined,
+      createdAt: String(it.created_at ?? '').trim() || undefined,
+      machineId: String(it.machine_id ?? '').trim() || undefined,
     })
   }
   return out

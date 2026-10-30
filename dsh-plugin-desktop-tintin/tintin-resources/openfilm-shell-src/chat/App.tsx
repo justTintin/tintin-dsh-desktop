@@ -297,12 +297,29 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
 
   /* ── the @ menu: this moment in Studio, and the project's files (asked for when the menu opens) ── */
   const [mentionFiles, setMentionFiles] = React.useState<Array<{ path: string; kind: string; size: number }>>([]);
+  /* TinTin cover (2026-10-28 会话移植): the canvas's layers as @ items (the bridge serves them; absent elsewhere) */
+  const [coverLayerItems, setCoverLayerItems] = React.useState<Array<{ id: string; label: string; type: string; propsKey?: string; value?: unknown }>>([]);
+  /* TinTin cover: the host's own composer placeholders (null in the film chat → built-in film wording stands) */
+  const [hostPlaceholders, setHostPlaceholders] = React.useState<{ blank: string; followUp: string } | null>(null);
+  React.useEffect(() => {
+    void Promise.resolve(app.composerPlaceholder?.() ?? null).then((p) => {
+      if (p && typeof p.blank === 'string' && typeof p.followUp === 'string') setHostPlaceholders(p);
+    }).catch(() => {});
+  }, []);
   const loadMentionFiles = React.useCallback(() => {
     void app.projectFiles().then((listing) => setMentionFiles([
       ...(listing.files ?? []).filter((f) => ['image', 'video', 'audio'].includes(f.kind)),
       ...(listing.pages ?? []).map((p) => ({ ...p, kind: 'mg' })),
     ])).catch(() => {});
+    /* coverLayers 只在封面编辑器的桥上有:影片场景 undefined,必须兜成空数组再 .then */
+    void Promise.resolve(app.coverLayers?.() ?? []).then((layers) => setCoverLayerItems(layers)).catch(() => {});
   }, []);
+  /* TinTin cover (2026-10-29): the @ menu only opens when some provider already has items
+     (MentionMenuPlugin.triggerFn suppresses an empty menu), and this load is what fills the
+     providers — but it only runs on the menu's onOpen. The film page bootstraps on its always-present
+     moment group; the cover page (timeline and skills hidden) had zero providers at first open, so the
+     menu never opened and the data never loaded — a deadlock. Load once at mount instead. */
+  React.useEffect(() => { loadMentionFiles(); }, [loadMentionFiles]);
   /** Studio's things become this message's pills (what each points at is kept by its pill's id) */
   const takeStudioRefs = React.useCallback((refs: StudioRef[]): PromptReference[] => {
     const pills = refs.map((ref) => refPill(undefined, ref));
@@ -414,8 +431,32 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     const picked = selection?.refs ?? [];
     const range = selection ? selectionRange(selection) : null;
     const pickedDetail = picked.length ? `${refPill(undefined, picked[0]!).label}${picked.length > 1 ? ` +${picked.length - 1}` : ''}` : '';
+    /* TinTin cover (2026-10-28): the canvas's layers, above the files. A layer becomes a layer pill
+       (its current value rides along as `text`), so the sent block names it like a Studio layer. */
+    const cut = (value: unknown) => {
+      const text = Array.isArray(value) ? value.map((v) => String(v)).join(' / ') : typeof value === 'string' ? value : '';
+      return text.length > 42 ? `${text.slice(0, 41).trimEnd()}…` : text;
+    };
+    const coverLayerGroup: MentionProvider[] = coverLayerItems.length ? [{
+      id: 'cover-layer',
+      groupLabel: locale.startsWith('zh') ? '图层' : 'Layers',
+      items: coverLayerItems.map((layer) => ({
+        id: `cover-layer:${layer.id}`,
+        kind: 'element' as const,
+        label: layer.label,
+        ...(cut(layer.value) ? { detail: cut(layer.value) } : {}),
+        keywords: [layer.id, layer.label, layer.propsKey ?? ''],
+        select: () => takeStudioRefs([{
+          kind: 'layer', clipId: 'cover', loc: null, label: layer.label,
+          text: cut(layer.value) || null, tag: layer.propsKey ?? layer.id, source: null,
+        } as StudioRef]),
+      })),
+    }] : [];
     return [
-      {
+      ...coverLayerGroup,
+      /* TinTin cover: no film timeline — the host sets `timelineDisabled`, so no moment/range/selection group
+         (nothing on a cover to point a time at). The film chat keeps it unchanged. */
+      ...(app.timelineDisabled ? [] : [{
         id: 'moment',
         groupLabel: t('mention.groupMoment'),
         items: [{
@@ -443,8 +484,9 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
           /* everything selected, each its own pill: the clips picked on the timeline, then the layer picked in one */
           select: () => takeStudioRefs(picked),
         }],
-      },
+      }]),
       {
+        id: 'asset',
         id: 'asset',
         groupLabel: t('mention.groupAssets'),
         items: mentionFiles.map((file) => {
@@ -457,8 +499,9 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
         }),
       },
       /* TinTin(2026-10-24 §9.2 用户裁决): 技能也能从 @ 菜单引用 —— 原生 + 服务端全部技能,
-         与 `/` 命令菜单同源(nameableSkills), 选中即插入技能 pill(正文注入走 app.skills.texts)。 */
-      ...(nameableSkills.length ? [{
+         与 `/` 命令菜单同源(nameableSkills), 选中即插入技能 pill(正文注入走 app.skills.texts)。
+         TinTin cover(2026-10-29 用户裁决): 封面的 @ 只做引用(图层/素材), 技能归 `/` —— 桥置 hideSkillsInMentions 时隐藏。 */
+      ...(!(window.openfilmDesktop as unknown as { hideSkillsInMentions?: boolean } | undefined)?.hideSkillsInMentions && nameableSkills.length ? [{
         id: 'skills',
         groupLabel: t('skills.button'),
         items: nameableSkills.slice(0, 32).map((skill) => ({
@@ -472,7 +515,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
         })),
       }] : []),
     ];
-  }, [selection, mentionFiles, nameableSkills, skillPill, skillWords, t, takeStudioRefs]);
+  }, [selection, mentionFiles, coverLayerItems, locale, nameableSkills, skillPill, skillWords, t, takeStudioRefs]);
   const onComposerChange = React.useCallback((state: PromptEditorState) => {
     setFollowUp(state.text);
     setFollowUpRefs(state.references);
@@ -895,7 +938,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
               onTransferReferences={onTransferReferences}
               revealLabel={t('library.revealReference')}
               removeLabel={t('library.removeReference')}
-              placeholder={t(blank ? 'project.composerPlaceholderBlank' : 'project.composerPlaceholder')}
+              placeholder={hostPlaceholders ? (blank ? hostPlaceholders.blank : hostPlaceholders.followUp) : t(blank ? 'project.composerPlaceholderBlank' : 'project.composerPlaceholder')}
               minHeight={22}
               maxHeight={158}
               contentClassName="text-[14px] leading-[22px] text-[var(--chat-text)]"

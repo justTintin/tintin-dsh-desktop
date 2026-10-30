@@ -83,6 +83,8 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 
 - **重绘推进(2026-10-24 报障, 二修)**: 1px 微调不足以触发合成器; 改为在页面加载完成与接管确认后**把子视图摘挂一次**(removeChildView/addChildView, 等价于用户切换视图/还原窗口) + 16px 边界往返; 三个时机: showStudio 后 / did-finish-load 后 / has-shell 命中后 200ms;
 
+- **show 门旗(2026-10-28 报障根修, 方案 2)**: 挂载期 `syncBounds` 先于 `open()` 发出的 show 被主进程**静默忽略却照答 ok**(视图未创建), 客户端把 bounds 记入去重缓存 → open 之后同 bounds 的 show 全被吞、**视图永不挂载**; 未挂载页不跑 rAF, 双 rAF 就绪探针永挂, 启动卡「正在启动视频剪辑工作台…」直到窗口 resize 击穿去重(实机: 仅最大化/还原能救活)。修复 = `syncBounds` 加 `nativeOpened` 门旗(对齐浏览器视图的 opened 模式), `open()` 返回后放行并立即补发一次真实 show(先挂载、后轮询);
+
 - 原生视图覆盖舞台;250ms 快轮询 `has-shell`(openfilmDesktop + #of-chat 双判定),命中即接管;
 - **视图边界 = 舞台矩形, 不向上扩张**(2026-10-24 报障的机制): 曾经的 TOP_FILL=40 让原生视图侵入窗口 chrome 条, 抽屉头部压在标题栏拖拽区边界 → 双击触发窗口最大化、× 点击落到 chrome; 现在视图从舞台顶开始, 底部仍让出 40px 日志条;
 - **陈旧判定只在确认旧页时触发**(2026-10-24 报障修复):探测诊断须连续 3 次「readyState=complete 且无桌面桥」才请求清理 run.json;页面加载慢时**绝不重启**(否则会起第二个服务、视图闪切到别的界面);未命中兜底恢复过渡版;
@@ -320,6 +322,22 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 - **pi-ai 版本排除(2026-10-25 隔离探针)**: 打包树 pi-ai 降至 1.1.0(与工作区一致)仍复现挂起 —— pi-ai 版本不是根因; 最终定位: **打包副本 dsh 的 session/prompt 在发出任何模型请求前挂起**(原始 ACP 探针 + 捕获服务器零请求, 隔离 home 下稳定复现), 而工作区构建 4 秒完成同流程。**修复: 影片智能体的 dsh 改用工作区构建(apps/cli/lib), 打包时随包分发**; 附带补齐失败子进程回收。
 - **实施清单(2026-10-25 定稿, 下会话第一项)**: ①把已验证的工作区 dsh 构建提交为 `tintin-resources/dsh-cli/lib/`(源: deepseek-harness/apps/cli/lib, 实测 4 秒完整轮次); ②TinTin 打包脚本在 app 树组装后用该副本覆盖 `resources/app/node_modules/@deepseek-ai/dsh/lib`(其依赖即 app 树自带的 @deepseek-ai/*, 解析无虞); ③film-acp 不改(解析逻辑不变); ④验证: 原始 ACP 探针对新建包跑 initialize→session/new(含 mcpServers)→prompt, 4 秒内回复即闭环; ⑤回归: e2e(TINTIN_E2E=1)+ 打包标记检查。
 - **A/B/C 对照结果(2026-10-26 可靠仪器=官方 SDK e2e)**: 工作区 dsh ✓ 4s、打包版 dsh ✓ 3.4s、真实条件(真实 cwd/home/打包版 dsh) ✓ 3.9s —— **智能体链路全部功能正常**; 手写原始探针为坏仪器(任何配置从未成功), 其结论全部作废。剩余疑点仅在聊天 UI 层到管理器的路径(用户会话卡在 UI 层)。诊断覆盖: TINTIN_DSH_BIN 可指定被测 dsh。
+
+## 16.5 封面会话复用(2026-10-28, 需求文档 docs/cover-generation-requirements.md §十一)
+
+openfilm-shell 构建新增**第二入口** `cover-chat.html`(vite rollupOptions.input 双入口): 官方聊天组件(App.tsx 树)不带 Studio 单独成页, 伺服于 bundle 路由 `/tintin/cover/chat`, 由封面编辑器(dsh-tintin-cover-plugin)右栏 iframe 承载(KeepAlive)。构建产物随既有 overlay 进入 vendored openfilm 包 editor dist(打包链 prepare:openfilm-shell 不变)。
+
+- 页面桥 `cover-chat-bridge.ts`: 实现 `window.openfilmDesktop` 的聊天子集(agents 名册单行 deepseek / localAgents 会话协议 / chat 记录 / skills / hello), 后端是 bundle `/tintin/cover/api/acp/*` 路由族(cover-acp-bridge.js: dsh --profile acp 子进程, 与 FilmAgentManager 同构; 权限/表单提问路由给聊天卡; SSE 事件流带 Last-Event-ID 重放);
+- 编辑器 ↔ 会话: postMessage 推实时上下文(tintin-cover:context, 模板+图层取值), prompt 注入 `<cover_context>`; 图层 @ 引用 = App.tsx mentionProviders 新增图层组(app-bridge 新可选 `coverLayers()`, 影片场景恒 undefined 不受影响), pill 走 StudioRef layer 形状序列化;
+- 图层状态对流: `cover.props.json`(cover 工作目录), 编辑器 600ms 防抖写(origin=editor)/2s 轮询读(origin=agent 才套用), agent 经 fs 工具改字即画布刷新;
+- 信任: 浏览器请求走 isTrustedRequest(loopback+Origin); agent 子进程凭会话令牌头 `x-tintin-cover-agent`(令牌只进 agent 环境)调用编辑器 API(生图/导出);
+- chat.css 作用域根 `.of-chat` 由 cover-chat.html 两块宿主(#root/#of-chat-layer)承担, 主题恒深色。
+
+**双入口回退(2026-10-28 用户裁决:源码共享,构建隔离)**: 惰性 Proxy 等修复虽让双入口构建双页探针全绿, 但构建层耦合这一类问题(chunk 重排/产物互相覆盖/依赖漂移)只有物理隔离能根除, 且封面专属页面桥按铁律应住封面插件自己的包。终态: 影片 shell 恢复**单入口**(官方架构, Studio+聊天同页, 从此不碰); 封面会话页迁往 `dsh-tintin-cover-plugin/chat-shell/`(独立 npm 工位, 同 chat 源树别名/scoped css 复刻, vite `base:'/tintin/cover/chat/'`), 产物经 stage.mjs 进 extraResources, 由 bundle 路由 `/tintin/cover/chat` 伺服。本节其余修复(lazy app-bridge/图层 provider 展开/coverLayers 兜底)为源码级, 两构建共用仍有效。
+
+**双入口回归与修复(2026-10-28 无头浏览器实证, 存档)**: 分块后聊天树成为两入口的共享 chunk, `app-bridge.ts` 的 `export const app = window.openfilmDesktop` 在**模块求值时捕获**, 而共享 chunk 先于 shell bridge(在主 chunk 体内)执行 → `app` 恒 undefined → **影片会话框消失**(mountChat 崩)。修复: `app` 改惰性 Proxy(每次属性访问读 window, 函数绑定 this)——官方 preload 先行场景同样成立。同批修复: App.tsx 图层 provider 需展开进 providers 数组(整组数组会成为无 `items` 的 provider, 渲染即崩); App.tsx `coverLayers` 调用兜 `?? []`(影片桥无此方法)。验证: Playwright(headless shell) 同 dist 双页探针——影片页会话栏/输入框/starters 全挂载零 pageerror, 封面页 @ 菜单出「图层」组(编辑器 postMessage 实时图层), 编辑器图层行 @ 按钮 → 聊天输入框引用 pill。
+
+**加载卡死排障(2026-10-28 下午, 用户实报会话列空转)**: 修复版构建后页面零错误(统一日志 studio-renderer 管道全天仅 13:42 旧构建的 `app undefined` 两条), 会话列停在 Loader——排障发现 **`window.tintinFilmDir` 从未有任何赋值点**(bridge.ts/tintin-library.ts 只读不写, preload 只暴露在 openfilmNative 下) → bridge 的 follow() 永远提前返回, 项目解析只剩 Studio 事件流一条路。修复: studio-preload `contextBridge.exposeInMainWorld('tintinFilmDir', …)` 直挂同名键, follow() 按目录匹配 Studio 项目复活(独立于 Studio 内部事件的第二条项目解析路)。has-shell 探测同步加深(chatChildren/chatTextHead/helloProject/bootError, 日志条直接可见), shell 就绪但聊天列空(加载卡死)沿变化打 `chat-column-stuck` warn 进统一日志。
 
 ## 17. 已知缺口/非目标
 

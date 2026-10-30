@@ -43,6 +43,9 @@ describe('parseSkillsResponse（GET /skills 容错解析）', () => {
     const wrapped = parseSkillsResponse({ ok: true, skills: [ENTRY, { id: '', name: '坏' }, { name: '缺id' }, 42] })
     expect(wrapped).toHaveLength(1)
     expect(wrapped[0]).toMatchObject({ id: 'tintin-video-gen', name: 'TinTin 视频生成', executor: 'client_tool', version: '1.1.0' })
+    // 注册元信息透传（2026-10-30 详情弹窗「全部信息」）——缺省字段收敛为 undefined
+    expect(wrapped[0]).toMatchObject({ registeredBy: undefined, createdAt: '1792137613.1', machineId: 'x' })
+    expect(parseSkillsResponse({ ok: true, skills: [{ id: 'a', name: 'b' }] })[0]).toMatchObject({ registeredBy: undefined, createdAt: undefined, machineId: undefined })
     expect(parseSkillsResponse([ENTRY])).toHaveLength(1)
   })
 

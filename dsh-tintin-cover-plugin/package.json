@@ -1,9 +1,21 @@
 {
   "name": "dsh-tintin-cover-plugin",
-  "version": "0.1.0",
+  "version": "0.1.0-dev.0",
   "private": true,
-  "description": "TinTin 封面制作插件(需求文档 docs/cover-generation-requirements.md;WP-1 引擎 + WP-6 编辑器 MVP)。独立 workspace,暂以自带 package-lock 独立安装,入根 workspaces 与通道打包链为 WP-1 收尾项。",
+  "description": "TinTin 封面制作插件(需求文档 docs/cover-generation-requirements.md)。2026-10-30 用户裁决:第三层独立插件——声明 dsh.client 经 cordis.patch.yml 挂载,宿主入口(index.js)承载会话桥/路由/工具组,web 入口(client.js)自注册封面视图;Remotion 引擎与编辑器载荷仍走通道 tintin-resources/cover-plugin staging,与本入口解耦(WP-1 收尾项就此清偿)。",
   "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./lib/*": "./lib/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -25,6 +37,7 @@
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "@vitejs/plugin-react": "4.3.4",
+    "esbuild": "0.28.1",
     "typescript": "5.6.3",
     "vite": "5.4.11",
     "vitest": "2.1.8",

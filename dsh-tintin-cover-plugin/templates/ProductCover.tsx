@@ -2,6 +2,7 @@
 import React from 'react'
 import { AbsoluteFill, Img, staticFile } from 'remotion'
 import { layerStyle, type StyleProps } from './text-style'
+import { CustomLayerOverlay, layerZ, type CustomLayer, type LayerOrder } from './CustomLayers'
 
 export type ProductCoverProps = {
   brand: string
@@ -11,13 +12,18 @@ export type ProductCoverProps = {
   features: string[]
   image: string
   hiddenLayers?: string[]
+  customLayers?: CustomLayer[]
+  layerOrder?: LayerOrder
 } & StyleProps
 
-export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtitle, badge, features, image, hiddenLayers = [], styles }) => {
+export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtitle, badge, features, image, hiddenLayers = [], customLayers, layerOrder, styles }) => {
   const hidden = (id: string): boolean => hiddenLayers.includes(id)
   const titleStyle = layerStyle({ styles }, 'title', { fontSize: 76, color: '#0f172a' })
   const subStyle = layerStyle({ styles }, 'subtitle', { fontSize: 28, color: '#475569' })
   const featStyle = layerStyle({ styles }, 'features', { fontSize: 24, color: '#1e293b' })
+  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;styles.product dx/dy/rotate)
+  const productOverride = styles?.product
+  const productTransform = `translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) rotate(${productOverride?.rotate ?? 0}deg)`
   return (
     <AbsoluteFill style={{ background: '#eef1f7' }}>
       {!hidden('environment') && (
@@ -31,7 +37,7 @@ export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtit
         }}
       />
 
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', padding: '64px 76px', gap: 56 }}>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', padding: '64px 76px', gap: 56, zIndex: layerZ(layerOrder, 'title') }}>
         <div style={{ flex: '0 0 46%', display: 'flex', flexDirection: 'column' }}>
           {!hidden('brand') && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 30 }}>
@@ -65,7 +71,7 @@ export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtit
 
         {!hidden('product') && (
           <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div style={{ width: 560, height: 560, borderRadius: 32, background: '#ffffff', boxShadow: '0 30px 80px rgba(15,23,42,0.16), 0 4px 16px rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(15,23,42,0.06)' }}>
+            <div data-cover-layer="product" style={{ width: 560, height: 560, borderRadius: 32, background: '#ffffff', boxShadow: '0 30px 80px rgba(15,23,42,0.16), 0 4px 16px rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(15,23,42,0.06)', transform: productTransform }}>
               <Img src={staticFile(image)} style={{ width: '92%', height: '92%', objectFit: 'contain' }} />
             </div>
           </div>
@@ -73,6 +79,7 @@ export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtit
       </div>
 
       <div style={{ position: 'absolute', left: 76, bottom: 42, width: 260, height: 5, borderRadius: 3, background: 'linear-gradient(90deg,#4f7cff,#22d3ee)' }} />
+      <CustomLayerOverlay layers={customLayers} order={layerOrder} hidden={hidden} />
     </AbsoluteFill>
   )
 }

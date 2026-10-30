@@ -35,8 +35,9 @@ import { createOpenfilmFilmTools } from './lib/film-tools.js'
 import { createOpenfilmMediaTools } from './lib/openfilm-tools.js'
 import { createContextTaskApi, defaultWorkspaceDir } from './lib/context-task.js'
 import { registerWorkspaceEnsureRoute } from './lib/workspace-ensure-route.js'
-import { registerCoverPluginRoute, loadCoverEngine, resolvePluginDir as resolveCoverPluginDir } from './lib/cover-plugin-route.js'
-import { createCoverTools } from './lib/cover-tools.js'
+// 封面插件化(2026-10-30 用户裁决):路由/会话桥/工具组迁入 dsh-tintin-cover-plugin
+// 独立挂载;宿主桥只保留跨域消费——视频剪辑工具组的 renderCover 仍吃封面引擎单例。
+import { loadCoverEngine } from 'dsh-tintin-cover-plugin/lib/cover-plugin-route.js'
 import { createYtdlpApi } from './lib/ytdlp.js'
 import { loadPresetDefinitions } from './lib/preset-definitions.js'
 import { createOpenfilmChannels, createOpenfilmSync } from './lib/openfilm/plugin.js'
@@ -620,6 +621,7 @@ export async function apply(ctx, config) {
     }
     // A 轴（2026-10-21 用户裁决）：编导只产出时间线 JSON，film_compile 确定性编译成
     // 项目、film_render 本地渲染成片——一次调用取代过去近百次 shell 往返。
+    // renderCover 跨包吃封面引擎单例(封面插件化后引擎住在 dsh-tintin-cover-plugin)。
     for (const def of createOpenfilmFilmTools({
       httpRequest,
       getServerUrl,
@@ -629,16 +631,7 @@ export async function apply(ctx, config) {
     })) {
       registerTool(def)
     }
-    // 封面工具组(WP-7/WP-4,2026-10-27):会话内出封面;与编辑器/路由共用引擎单例;
-    // cover_background 走服务端文生图(2026-10-27 WP-3 AI 底图)
-    for (const def of createCoverTools({
-      loadEngine: loadCoverEngine,
-      generateBackground: (input) => import('./lib/cover-background.js').then((m) => m.generateCoverBackground(input, { httpRequest, getServerUrl, resolveDir: resolveCoverPluginDir })),
-      log: (...a) => ctx.logger.info('tintin-bundle:', ...a),
-      warn: (...a) => ctx.logger.warn('tintin-bundle:', ...a),
-    })) {
-      registerTool(def)
-    }
+    // 封面工具组已随封面插件化迁入 dsh-tintin-cover-plugin 的 tools 注入面(2026-10-30)。
   })
 
   ctx.inject(['webServer'], (webCtx) => webCtx.effect(() => {
@@ -951,7 +944,7 @@ export async function apply(ctx, config) {
 
     // Workspace directory ensure for client-side first-boot provisioning.
     const disposeWorkspaceEnsure = registerWorkspaceEnsureRoute({ webServer: webCtx.webServer, isTrustedRequest, sendJson, mkdirSync, defaultWorkspaceDir })
-    const disposeCoverPlugin = registerCoverPluginRoute({ webServer: webCtx.webServer, isTrustedRequest, sendJson, httpRequest, getServerUrl })
+    // 封面路由族已迁入 dsh-tintin-cover-plugin 宿主入口(2026-10-30 插件化),此处不再挂载。
 
     // First-boot setup wizard probe: the browser cannot reach an arbitrary LAN
     // address directly (cross-origin), so the host probes the candidate server
@@ -977,12 +970,14 @@ export async function apply(ctx, config) {
         try {
           const health = await fetch(`${base}/health`, { signal: AbortSignal.timeout(8000) })
           if (!health.ok) throw new Error(`/health 返回 ${String(health.status)}`)
-          const modelsRes = await fetch(`${base}/llm/models`, { signal: AbortSignal.timeout(8000) })
-          if (!modelsRes.ok) throw new Error(`/llm/models 返回 ${String(modelsRes.status)}`)
+          // 模型列表唯一接口=服务端标准 /v1/models(2026-10-29 用户裁决;/llm/models 遗留接口退役)
+          const modelsRes = await fetch(`${base}/v1/models`, { signal: AbortSignal.timeout(8000) })
+          if (!modelsRes.ok) throw new Error(`/v1/models 返回 ${String(modelsRes.status)}`)
           const data = await modelsRes.json()
-          const models = Array.isArray(data?.models) && data.models.length
-            ? data.models.map((m) => ({ id: String(m?.id ?? ''), name: String(m?.name ?? m?.id ?? ''), isDefault: m?.default === true }))
-            : []
+          const rows = Array.isArray(data?.data) ? data.data : []
+          const models = rows
+            .filter((m) => typeof m?.id === 'string' && m.id)
+            .map((m, i) => ({ id: String(m.id), name: String(m?.name ?? m.id), isDefault: i === 0 }))
           if (!models.length) throw new Error('服务端未返回模型列表')
           const preferred = models.find((m) => m.isDefault) ?? models[0]
           sendJson(res, 200, { result: { ok: true, base, models, preferred } })
@@ -1004,7 +999,6 @@ export async function apply(ctx, config) {
       disposeMedia()
       disposeSse()
       disposeWorkspaceEnsure()
-      disposeCoverPlugin()
       disposeSetupProbe()
     }
   }, 'tintin-bundle: probe routes'))

@@ -62,8 +62,8 @@ let browserAttached = false
 // 60s 内只重启一次防循环,超窗后允许再次对账)。
 const FILM_SHELL_RESTART_WINDOW_MS = 60_000
 let filmShellRestartedAt = 0
-/** 官方聊天「从未就绪 → 就绪」的转变标记: 重绘推进只在转变时执行一次(不再反复摘挂)。 */
-let filmShellWasReady = false
+/** 会话框加载卡死打点的状态沿(只在转变时记一条, 防轮询刷屏) */
+let filmChatEmptyLogged = false
 
 /** TinTin 通道 home(影片智能体的 run.json/补丁/偏好都挂在它下面)。 */
 const channelHome = (): string =>
@@ -100,8 +100,6 @@ let studioView: WebContentsView | null = null
 let studioWindow: BrowserWindow | null = null
 let studioShown = false
 let studioBounds = ''
-/** 最近一次设置的视图边界(重绘推进用; 页面加载完成后再推一次). */
-let studioLastRect: { x: number; y: number; width: number; height: number } | null = null
 // 视图自愈(2026-10-23 报障:探测窗口内服务重启,首开吃 did-fail-load 后视图停在错误
 // 页,后续 open 全部命中复用分支 → 探测永远失败):记住已加载 URL 与失败态,目标变了
 // 或上次失败时强制重载,而不是复用死页面。
@@ -190,32 +188,8 @@ function showStudio(bounds: OpenFilmBounds): void {
     height: Math.max(0, Math.round(bounds.height)),
   }
   studioView.setBounds(rect)
-  studioLastRect = rect
-  /* 重绘推进只在「从未就绪 → 就绪」转变时做一次(见 has-shell); show 本身不再反复
-     摘挂/微调 —— 那会让画面在每次边界同步时抖动(2026-10-24 报障)。 */
-}
-
-/** 边界往返 + 视图重挂载: 触发 WebContentsView 的合成器重绘(黑屏的确定性修复).
-    窗口还原/切换视图之所以有效, 是因为它们改变了窗口的视图树; 这里摘挂一次子视图
-    等价于那次变化, 且比 1px 微调更可靠。 */
-function nudgeRepaint(rect: { x: number; y: number; width: number; height: number }): void {
-  const view = studioView
-  if (view === null || view.webContents.isDestroyed()) return
-  const bump = { ...rect, width: Math.max(1, rect.width + 16) }
-  setTimeout(() => {
-    if (studioView !== view || view.webContents.isDestroyed() || !studioShown || studioWindow === null || studioWindow.isDestroyed()) return
-    /* ① 视图树变化(摘挂) — 等价于用户切换视图/还原窗口 */
-    try {
-      studioWindow.contentView.removeChildView(view)
-      studioWindow.contentView.addChildView(view)
-    } catch { /* 窗口已销毁: 无需重绘 */ }
-    /* ② 边界微调再还原 */
-    view.setBounds(bump)
-    setTimeout(() => {
-      if (studioView !== view || view.webContents.isDestroyed() || !studioShown) return
-      view.setBounds(rect)
-    }, 60)
-  }, 60)
+  /* 黑屏的修复=显示前的绘制屏障(双 rAF,见 has-shell 探测),不靠显示后重绘推进 ——
+     摘挂/边界微调的 nudge 方案会画面抖动,2026-10-29 用户裁决移除。 */
 }
 
 function hideStudio(): void {
@@ -320,19 +294,43 @@ export function installTinTinMainHook(): void {
       // editor, 结束它(客户端下一轮 open 会以当前资源重启); 时间窗内不重复, 防循环。
       if (studioView === null || studioView.webContents.isDestroyed()) return { ok: false, error: 'Studio 视图未开启' }
       const restartIfStale = (request as { restartIfStale?: unknown }).restartIfStale === true
-      return studioView.webContents.executeJavaScript(`(() => {
+      return studioView.webContents.executeJavaScript(`(async () => {
         try {
+          const chat = document.getElementById('of-chat')
+          let helloProject = null
+          let helloError = ''
+          try {
+            const h = await window.openfilmDesktop?.hello?.()
+            helloProject = h && h.project ? String(h.project.name) : null
+          } catch (e) { helloError = String(e && e.message ? e.message : e) }
           return {
             readyState: document.readyState,
             hasDesktop: Boolean(window.openfilmDesktop),
             hasHost: Boolean(window.openfilmHost),
-            hasChatColumn: Boolean(document.getElementById('of-chat')),
+            hasChatColumn: Boolean(chat),
             hasRoot: Boolean(document.getElementById('root')),
+            /* 2026-10-28 会话框排障: 加载态可见化(聊天列子元素数/首段文本/hello 项目/启动错误浮层) */
+            chatChildren: chat ? chat.children.length : -1,
+            chatTextHead: (chat ? chat.textContent : '').replace(/\\s+/g, ' ').slice(0, 60),
+            bootError: (document.getElementById('tintin-boot-error') ? document.getElementById('tintin-boot-error').textContent : '').slice(0, 200),
+            helloProject,
+            ...(helloError ? { helloError } : {}),
           }
         } catch (error) { return { error: String(error) } }
       })()`, true).then(async (raw) => {
-        const d = (raw ?? {}) as { readyState?: string; hasDesktop?: boolean; hasHost?: boolean; hasChatColumn?: boolean; hasRoot?: boolean; error?: string }
+        const d = (raw ?? {}) as { readyState?: string; hasDesktop?: boolean; hasHost?: boolean; hasChatColumn?: boolean; hasRoot?: boolean; chatChildren?: number; chatTextHead?: string; bootError?: string; helloProject?: string | null; helloError?: string; error?: string }
         const has = d.hasDesktop === true && d.hasChatColumn === true
+        /* 会话框加载态转变打点(2026-10-28): shell 就绪但聊天列空=加载卡死, 只在转变时记一条 */
+        const chatEmpty = has && d.chatChildren === 0
+        if (chatEmpty !== filmChatEmptyLogged) {
+          filmChatEmptyLogged = chatEmpty
+          if (chatEmpty) {
+            diagnosticLog({
+              source: 'studio-renderer', event: 'chat-column-stuck', level: 'warn', developer: false,
+              fields: { diag: JSON.stringify(d).slice(0, 600) },
+            })
+          }
+        }
         /* 绘制屏障(2026-10-24 用户裁决的加载架构): 视图是独立表面, 页面里的遮罩盖不住它;
            必须在**显示视图之前**证明页面已经画出过一帧 —— 在页面内跑双 rAF, 帧排进页面
            合成器后返回; 客户端据此才 show 视图(遮罩保持到 show 之后), 避免遮罩撤了而首帧
@@ -347,12 +345,6 @@ export function installTinTinMainHook(): void {
             )) === true
           } catch { painted = false }
         }
-        /* 接管确认(从未就绪 → 就绪的转变, 一次性)后延迟推一次重绘;
-           常驻探测(日志条 4s 轮询)命中时**不再**摘挂/微调 —— 那会让画面持续抖动
-           (2026-10-24 报障: 已加载完成还反复抖)。 */
-        const shellBecameReady = has && painted && !filmShellWasReady
-        filmShellWasReady = has && painted
-        if (shellBecameReady && studioLastRect !== null) setTimeout(() => { if (studioLastRect !== null) nudgeRepaint(studioLastRect) }, 200)
         const restartWindowOpen = Date.now() - filmShellRestartedAt < FILM_SHELL_RESTART_WINDOW_MS
         if (has || !restartIfStale || restartWindowOpen) return { ok: true, has, painted, diag: d, restarted: false }
         filmShellRestartedAt = Date.now()

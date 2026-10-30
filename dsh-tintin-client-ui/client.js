@@ -11,7 +11,8 @@ window.__ModuleLoader__.load({
       const PROBES = [
         { name: 'LLM · 模型列表', ok: null, message: '未测试', run: async () => {
           const r = await window.tintin.server.llmModels()
-          if (r && !('error' in r) && Array.isArray(r.models)) return r.models.length ? { ok: true, message: `正常（${r.models.length} 个模型）` } : { ok: false, message: '服务端未提供' }
+          const rows = Array.isArray(r?.data) ? r.data : [] // 标准 /v1/models 形(2026-10-29 裁决:唯一模型列表接口)
+          if (r && !('error' in r) && Array.isArray(r.data)) return rows.length ? { ok: true, message: `正常（${rows.length} 个模型）` } : { ok: false, message: '服务端未提供' }
           return { ok: false, message: '服务端离线' }
         } },
         // 空请求必触发服务端参数校验 → 4xx 恰好证明端点存在且网络可达
@@ -749,8 +750,15 @@ ${event.data.error.reason}` : result
         })
         let nativeShown = false
         let lastBounds = ''
+        /* show 门旗(2026-10-28 幻影 show 根修): 主进程对未创建视图的 show 静默忽略却照答
+           ok——挂载期先到的 show 被记进 lastBounds 后, 后续同 bounds 的 show 全被去重吞掉,
+           open 之后永无真实挂载; 未挂载页不跑 rAF, 就绪探针(双 rAF 屏障)永挂, 启动卡在
+           「正在启动视频剪辑工作台…」直到窗口 resize 击穿去重(实机取证: 仅最大化/还原能救活)。
+           对齐 mountBrowserView 的 opened 门旗; open 返回后在 syncProject 放行并强制补发。 */
+        let nativeOpened = false
         async function syncBounds() {
           if (!nativeView?.show) return
+          if (!nativeOpened) return
           const rect = stage.getBoundingClientRect()
           if (rect.width < 8 || rect.height < 8 || nativeOverlayOpen()) {
             if (nativeShown) { nativeShown = false; lastBounds = ''; await nativeView.hide() }
@@ -1936,6 +1944,10 @@ ${event.data.error.reason}` : result
             if (nativeView?.open) {
               const opened = await nativeView.open(info.url)
               if (!opened?.ok) throw new Error(opened?.error || 'Studio 视图打开失败')
+              /* open 落地 = 视图已在主进程创建: 放行 show 并立即补发一次真实挂载(不等
+                 800ms 轮询/resize)——就绪轮询的双 rAF 探针只有视图挂载(页面可见)后才会回调。 */
+              nativeOpened = true
+              await syncBounds()
               frame.style.display = 'none'
               /* 官方聊天接管: shell 页就绪即刻命中(250ms 快轮询);
                  仅在「页面已加载完成(readyState=complete)且没有桌面桥」连续出现时,

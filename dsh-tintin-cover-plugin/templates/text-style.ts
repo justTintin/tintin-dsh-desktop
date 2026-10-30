@@ -4,19 +4,21 @@
 export interface TextStyleOverride {
   scale?: number
   color?: string
-  /** 水平位移(画面像素;正值向右,夹取 ±360) */
+  /** 水平位移(画面像素;正值向右,夹取 ±1200) */
   dx?: number
-  /** 垂直位移(正值向下,夹取 ±360) */
+  /** 垂直位移(正值向下,夹取 ±1200) */
   dy?: number
   /** 字体族(系统字体名;缺省 = 模板默认黑体系) */
   font?: string
+  /** 旋转角度(度;2026-10-29 用户裁决:图片层可旋转;文字层暂不用) */
+  rotate?: number
 }
 
 export type StyleProps = { styles?: Record<string, TextStyleOverride> }
 
 const clampOffset = (v: unknown): number | undefined => {
   if (typeof v !== 'number' || !Number.isFinite(v)) return undefined
-  return Math.min(360, Math.max(-360, Math.round(v)))
+  return Math.min(1200, Math.max(-1200, Math.round(v)))
 }
 
 /** 单图层样式合成:基准字号/颜色 × 覆盖(scale 夹取 0.4..2.2;font 白名单外回退默认) */
@@ -26,7 +28,7 @@ export function layerStyle(
   base: { fontSize: number; color: string },
 ): { fontSize: number; color: string; translate: string; fontFamily?: string } {
   const s = props?.styles?.[layerId]
-  const scale = typeof s?.scale === 'number' && Number.isFinite(s.scale) ? Math.min(2.2, Math.max(0.4, s.scale)) : 1
+  const scale = typeof s?.scale === 'number' && Number.isFinite(s.scale) ? Math.min(3, Math.max(0.3, s.scale)) : 1
   const dx = clampOffset(s?.dx)
   const dy = clampOffset(s?.dy)
   const translate = dx === undefined && dy === undefined ? '' : `translate(${dx ?? 0}px, ${dy ?? 0}px)`

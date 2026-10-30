@@ -3,6 +3,7 @@
 import React from 'react'
 import { AbsoluteFill, Img, staticFile } from 'remotion'
 import { layerStyle, type StyleProps } from './text-style'
+import { CustomLayerOverlay, layerZ, type CustomLayer, type LayerOrder } from './CustomLayers'
 
 export type ProductCoverProps = {
   brand: string
@@ -12,13 +13,18 @@ export type ProductCoverProps = {
   features: string[]
   image: string
   hiddenLayers?: string[]
+  customLayers?: CustomLayer[]
+  layerOrder?: LayerOrder
 } & StyleProps
 
-export const ProductCoverPortrait: React.FC<ProductCoverProps> = ({ brand, title, subtitle, badge, features, image, hiddenLayers = [], styles }) => {
+export const ProductCoverPortrait: React.FC<ProductCoverProps> = ({ brand, title, subtitle, badge, features, image, hiddenLayers = [], customLayers, layerOrder, styles }) => {
   const hidden = (id: string): boolean => hiddenLayers.includes(id)
   const titleStyle = layerStyle({ styles }, 'title', { fontSize: 84, color: '#0f172a' })
   const subStyle = layerStyle({ styles }, 'subtitle', { fontSize: 32, color: '#475569' })
   const featStyle = layerStyle({ styles }, 'features', { fontSize: 27, color: '#1e293b' })
+  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;styles.product dx/dy/rotate)
+  const productOverride = styles?.product
+  const productTransform = `translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) rotate(${productOverride?.rotate ?? 0}deg)`
   return (
     <AbsoluteFill style={{ background: '#eef1f7' }}>
       {!hidden('environment') && (
@@ -32,7 +38,7 @@ export const ProductCoverPortrait: React.FC<ProductCoverProps> = ({ brand, title
           </div>
         )}
         {!hidden('product') && (
-          <div style={{ width: '100%', height: 780, borderRadius: 32, background: '#ffffff', boxShadow: '0 30px 80px rgba(15,23,42,0.16), 0 4px 16px rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(15,23,42,0.06)', flexShrink: 0 }}>
+          <div data-cover-layer="product" style={{ width: '100%', height: 780, borderRadius: 32, background: '#ffffff', boxShadow: '0 30px 80px rgba(15,23,42,0.16), 0 4px 16px rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(15,23,42,0.06)', flexShrink: 0, transform: productTransform }}>
             <Img src={staticFile(image)} style={{ width: '92%', height: '92%', objectFit: 'contain' }} />
           </div>
         )}
@@ -60,6 +66,7 @@ export const ProductCoverPortrait: React.FC<ProductCoverProps> = ({ brand, title
           )}
         </div>
       </div>
+      <CustomLayerOverlay layers={customLayers} order={layerOrder} hidden={hidden} />
     </AbsoluteFill>
   )
 }

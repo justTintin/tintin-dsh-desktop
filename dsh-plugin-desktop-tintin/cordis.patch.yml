@@ -32,6 +32,10 @@
       name: dsh-tintin-creation-bundle
     - id: tintin-ops
       name: dsh-tintin-ops-bundle
+    # 封面制作独立插件(2026-10-30 用户裁决):宿主入口挂封面路由族/会话桥/工具组,
+    # web 入口自注册 'cover' 视图;Remotion 引擎与编辑器载荷仍走通道 staging 资源。
+    - id: tintin-cover
+      name: dsh-tintin-cover-plugin
 
 # A desktop launch has no terminal operator waiting for the Web readiness line.
 - id: web-runtime

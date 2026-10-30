@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.4",
+    "dsh-tintin-cover-plugin": "0.1.0-dev.0",
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {

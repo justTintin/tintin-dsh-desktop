@@ -17,6 +17,8 @@ export interface LayerDef {
   type: 'environment' | 'product' | 'text' | 'graphic'
   /** 对应 props 键;缺省=与图层 id 同名 */
   propsKey?: string
+  /** 文字层基准字号 px(scale=1 时;PhotoCraft 式面板按此换算绝对字号) */
+  fontSize?: number
 }
 
 export interface TemplateDef<P = Record<string, unknown>> {
@@ -34,8 +36,8 @@ export interface TemplateDef<P = Record<string, unknown>> {
 }
 
 const TEXT_LAYERS_COVER: LayerDef[] = [
-  { id: 'title', label: '主标题', type: 'text' },
-  { id: 'subtitle', label: '副标题', type: 'text' },
+  { id: 'title', label: '主标题', type: 'text', fontSize: 88 },
+  { id: 'subtitle', label: '副标题', type: 'text', fontSize: 34 },
 ]
 const GRAPHIC_LAYERS_COVER: LayerDef[] = [
   { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
@@ -77,9 +79,9 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
-      { id: 'title', label: '主标题', type: 'text' },
-      { id: 'subtitle', label: '副标题', type: 'text' },
-      { id: 'features', label: '卖点清单', type: 'text' },
+      { id: 'title', label: '主标题', type: 'text', fontSize: 76 },
+      { id: 'subtitle', label: '副标题', type: 'text', fontSize: 28 },
+      { id: 'features', label: '卖点清单', type: 'text', fontSize: 24 },
       { id: 'badge', label: '角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
     ],
@@ -95,9 +97,9 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
-      { id: 'title', label: '主标题', type: 'text' },
-      { id: 'subtitle', label: '副标题', type: 'text' },
-      { id: 'features', label: '卖点清单', type: 'text' },
+      { id: 'title', label: '主标题', type: 'text', fontSize: 84 },
+      { id: 'subtitle', label: '副标题', type: 'text', fontSize: 32 },
+      { id: 'features', label: '卖点清单', type: 'text', fontSize: 27 },
       { id: 'badge', label: '角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
     ],
@@ -107,12 +109,13 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     width: 1280, height: 720,
     component: VideoCover as ComponentType<VideoCoverProps>,
     defaultProps: {
-      hookLines: ['0.2ms', '光轴鼠标', '能有多快?'], subTag: '开箱实测',
+      hookLines: ['0.2ms', '光轴鼠标', '能有多快?'], subtitle: '混合光轴 · LIGHTSPEED 2K Hz 无线', subTag: '开箱实测',
       brand: 'LOGITECH G · PRO X2 SUPERSTRIKE', image: 'mouse.jpg',
     },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
-      { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines' },
+      { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 110 },
+      { id: 'subtitle', label: '副标题', type: 'text', fontSize: 34 },
       { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
       { id: 'subTag', label: '栏目角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
@@ -123,12 +126,13 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     width: 1080, height: 1440,
     component: VideoCoverPortrait as ComponentType<VideoCoverProps>,
     defaultProps: {
-      hookLines: ['0.2ms', '光轴鼠标', '能有多快?'], subTag: '开箱实测',
+      hookLines: ['0.2ms', '光轴鼠标', '能有多快?'], subtitle: '混合光轴 · LIGHTSPEED 2K Hz 无线', subTag: '开箱实测',
       brand: 'LOGITECH G · PRO X2 SUPERSTRIKE', image: 'mouse.jpg',
     },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
-      { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines' },
+      { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 104 },
+      { id: 'subtitle', label: '副标题', type: 'text', fontSize: 38 },
       { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
       { id: 'subTag', label: '栏目角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },

@@ -8,7 +8,7 @@
      服务端 id 从创作技能表移除（只动安装来源 skill-srv-*，用户自建/内置芯片
      不碰）。不做服务端 DELETE——注册表共享，客户端只读服务端。 -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useHostDark } from '../composables/hostTheme'
 import {
   type ServerSkill,
@@ -19,6 +19,7 @@ import {
   removeServerSkill,
   SERVER_SKILL_ID_PREFIX,
   serverSkillHasUpdate,
+  serverSkillId,
   skillMatchesQuery,
 } from '../composables/skillManagerLogic'
 import { loadSkills, saveSkills, type CreationSkill } from '../composables/creationStudioLogic'
@@ -130,9 +131,31 @@ const installedCount = computed(() => skills.value.filter((s) => installed(s.id)
 /** 客户端技能（2026-10-16 用户裁决：两类分组）=创作技能表里非服务端派生的条目（内置+自定义） */
 const clientSkills = computed(() => creationSkills.value.filter((s) => !s.id.startsWith(SERVER_SKILL_ID_PREFIX)))
 
+/* ── 详情弹窗（2026-10-30 用户裁决：每卡「详情」按钮，展示该技能全部信息） ── */
+type SkillDetail = { kind: 'server'; skill: ServerSkill } | { kind: 'mine'; skill: CreationSkill }
+const detail = ref<SkillDetail | null>(null)
+function closeDetail(): void { detail.value = null }
+function onDetailKey(e: KeyboardEvent): void { if (e.key === 'Escape') closeDetail() }
+/** 已安装条目（取本地版本号展示） */
+function installedEntry(id: string): CreationSkill | undefined {
+  return creationSkills.value.find((s) => s.id === serverSkillId(id))
+}
+/** 注册时间展示：epoch 秒数→本地时间；其余（ISO/缺省）原样或未记录 */
+function formatTime(v: string | undefined): string {
+  const text = String(v ?? '').trim()
+  const n = Number(text)
+  if (text && Number.isFinite(n) && n > 0) return new Date(n * 1000).toLocaleString('zh-CN')
+  return text || '（未记录）'
+}
+function backendLabel(c: CreationSkill): string {
+  return c.backend === 'voiceover' ? '口播' : c.backend === 'copy' ? '复制' : 'LLM'
+}
+
 onMounted(() => {
   void refresh()
+  window.addEventListener('keydown', onDetailKey)
 })
+onUnmounted(() => window.removeEventListener('keydown', onDetailKey))
 </script>
 
 <template>
@@ -187,6 +210,7 @@ onMounted(() => {
               <div class="card-desc" :title="s.description">{{ s.description || '（无描述）' }}</div>
             </div>
             <div class="card-foot">
+              <button type="button" class="btn ghost" title="查看此技能的全部信息" @click="detail = { kind: 'server', skill: s }">详情</button>
               <button v-if="hasUpdate(s)" type="button" class="btn primary" :disabled="busyId === s.id" @click="install(s)">
                 {{ busyId === s.id ? '更新中…' : '更新' }}
               </button>
@@ -219,9 +243,53 @@ onMounted(() => {
               </div>
               <div class="card-desc" :title="c.template">{{ c.template }}</div>
             </div>
+            <div class="card-foot">
+              <button type="button" class="btn ghost" title="查看此技能的全部信息" @click="detail = { kind: 'mine', skill: c }">详情</button>
+            </div>
           </div>
         </div>
       </template>
+
+      <!-- 技能详情弹窗：注册表/本地技能表可见的全部字段（Esc/遮罩/✕ 关闭） -->
+      <div v-if="detail" class="modal-mask" @click.self="closeDetail">
+        <div class="modal" role="dialog" aria-modal="true">
+          <div class="modal-head">
+            <div class="modal-title">{{ detail.kind === 'server' ? detail.skill.name : `/${detail.skill.name}` }}</div>
+            <button type="button" class="modal-close" title="关闭" @click="closeDetail">✕</button>
+          </div>
+          <div class="modal-body">
+            <template v-if="detail.kind === 'server'">
+              <div class="row"><span class="row-key">名称</span><span class="row-val">{{ detail.skill.name }}</span></div>
+              <div class="row"><span class="row-key">ID</span><span class="row-val mono">{{ detail.skill.id }}</span></div>
+              <div class="row"><span class="row-key">版本</span><span class="row-val">{{ detail.skill.version ? `v${detail.skill.version}` : '（未标注）' }}</span></div>
+              <div class="row"><span class="row-key">执行方</span><span class="row-val">{{ detail.skill.executor || 'client_tool' }}</span></div>
+              <div class="row"><span class="row-key">标签</span><span class="row-val"><span v-for="t in detail.skill.tags" :key="t" class="chip">{{ t }}</span><span v-if="!detail.skill.tags.length">（无）</span></span></div>
+              <div class="row"><span class="row-key">注册者</span><span class="row-val">{{ detail.skill.registeredBy || '（未记录）' }}</span></div>
+              <div class="row"><span class="row-key">注册时间</span><span class="row-val">{{ formatTime(detail.skill.createdAt) }}</span></div>
+              <div class="row"><span class="row-key">安装状态</span>
+                <span class="row-val">
+                  <template v-if="hasUpdate(detail.skill)">已安装 v{{ installedEntry(detail.skill.id)?.version || '?' }}——服务端有新版本 v{{ detail.skill.version }}，点卡片「更新」升级</template>
+                  <template v-else-if="installed(detail.skill.id)">已安装{{ installedEntry(detail.skill.id)?.version ? ` v${installedEntry(detail.skill.id)?.version}` : '' }}</template>
+                  <template v-else>未安装</template>
+                </span>
+              </div>
+              <div class="row"><span class="row-key">调用方式</span><span class="row-val">「创作模式」输入 <b>/{{ detail.skill.name }}</b> 调用（安装后）</span></div>
+              <div class="row"><span class="row-key">安装位置</span><span class="row-val mono">{{ installed(detail.skill.id) ? `技能主目录 /skills/${detail.skill.id}/` : '—（未安装）' }}</span></div>
+              <div class="row"><span class="row-key">描述</span><span class="row-val">{{ detail.skill.description || '（无描述）' }}</span></div>
+              <div class="row"><span class="row-key">指令正文</span><pre class="row-pre">{{ detail.skill.instruction || '（注册表无指令正文）' }}</pre></div>
+            </template>
+            <template v-else>
+              <div class="row"><span class="row-key">名称</span><span class="row-val">/{{ detail.skill.name }}</span></div>
+              <div class="row"><span class="row-key">类型</span><span class="row-val">{{ detail.skill.builtin ? '内置' : '自定义' }}</span></div>
+              <div class="row"><span class="row-key">执行后端</span><span class="row-val">{{ backendLabel(detail.skill) }}</span></div>
+              <div v-if="detail.skill.tool" class="row"><span class="row-key">直达工具</span><span class="row-val">{{ detail.skill.tool }}</span></div>
+              <div v-if="detail.skill.version" class="row"><span class="row-key">版本</span><span class="row-val">v{{ detail.skill.version }}</span></div>
+              <div class="row"><span class="row-key">调用方式</span><span class="row-val">「创作模式」输入 <b>/{{ detail.skill.name }}</b> 调用</span></div>
+              <div class="row"><span class="row-key">模板全文</span><pre class="row-pre">{{ detail.skill.template }}</pre></div>
+            </template>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -303,4 +371,33 @@ onMounted(() => {
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn.primary { background: var(--primary); color: var(--primary-foreground); }
 .btn.danger { background: transparent; color: var(--danger, #e74c3c); border-color: var(--danger, #e74c3c); }
+.btn.ghost { background: transparent; color: var(--foreground); border-color: var(--border); }
+.btn.ghost:hover { border-color: var(--primary); color: var(--primary); }
+
+/* 详情弹窗（2026-10-30 用户裁决）：遮罩+居中面板，键值行+指令正文/模板全文块 */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.modal {
+  width: min(680px, calc(100vw - 48px)); max-height: 82vh; display: flex; flex-direction: column;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.modal-title { font-size: var(--font-size-h4); font-weight: 700; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal-close { border: none; background: transparent; color: var(--muted-foreground); font: inherit; font-size: 14px; cursor: pointer; padding: 4px 8px; border-radius: var(--radius-md); }
+.modal-close:hover { color: var(--foreground); }
+.modal-body { overflow: auto; padding: 12px 16px 16px; display: flex; flex-direction: column; gap: 8px; }
+.row { display: grid; grid-template-columns: 76px 1fr; gap: 10px; align-items: baseline; }
+.row-key { font-size: 12px; color: var(--muted-foreground); }
+.row-val { font-size: var(--font-size-body); color: var(--foreground); min-width: 0; overflow-wrap: anywhere; }
+.row-val.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.row-val b { color: var(--primary); }
+.row-val .chip { margin-right: 4px; }
+.row-pre {
+  margin: 0; padding: 8px 10px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); font-size: 12px; line-height: 1.6; color: var(--foreground);
+  white-space: pre-wrap; word-break: break-word; max-height: 240px; overflow: auto;
+}
 </style>

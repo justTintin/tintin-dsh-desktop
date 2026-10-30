@@ -4,6 +4,7 @@
 import React from 'react'
 import { AbsoluteFill, Img, staticFile } from 'remotion'
 import { layerStyle, type StyleProps } from './text-style'
+import { CustomLayerOverlay, layerZ, type CustomLayer, type LayerOrder } from './CustomLayers'
 
 export type CoverProps = {
   title: string
@@ -11,9 +12,11 @@ export type CoverProps = {
   badge: string
   bgImage?: string
   hiddenLayers?: string[]
+  customLayers?: CustomLayer[]
+  layerOrder?: LayerOrder
 } & StyleProps
 
-export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, hiddenLayers = [], styles }) => {
+export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, hiddenLayers = [], customLayers, layerOrder, styles }) => {
   const hidden = (id: string): boolean => hiddenLayers.includes(id)
   const titleStyle = layerStyle({ styles }, 'title', { fontSize: 88, color: '#ffffff' })
   const subStyle = layerStyle({ styles }, 'subtitle', { fontSize: 34, color: '#93c5fd' })
@@ -42,7 +45,7 @@ export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, h
       <div style={{ position: 'absolute', right: -120, top: -140, width: 420, height: 420, borderRadius: '50%', background: 'radial-gradient(circle, rgba(96,165,250,0.5), rgba(96,165,250,0) 70%)' }} />
       <div style={{ position: 'absolute', left: -80, bottom: -160, width: 380, height: 380, borderRadius: '50%', background: 'radial-gradient(circle, rgba(14,165,233,0.35), rgba(14,165,233,0) 70%)' }} />
 
-      <div style={{ position: 'absolute', inset: 0, padding: '72px 84px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ position: 'absolute', inset: 0, padding: '72px 84px', display: 'flex', flexDirection: 'column', justifyContent: 'center', zIndex: layerZ(layerOrder, 'title') }}>
         {!hidden('brand') && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 34 }}>
             <div style={{ width: 46, height: 46, borderRadius: 12, background: 'linear-gradient(135deg,#4f7cff,#22d3ee)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 800, color: '#fff', boxShadow: '0 8px 30px rgba(79,124,255,0.55)' }}>T</div>
@@ -69,6 +72,7 @@ export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, h
           </>
         )}
       </div>
+      <CustomLayerOverlay layers={customLayers} order={layerOrder} hidden={hidden} />
     </AbsoluteFill>
   )
 }

@@ -439,37 +439,37 @@
   },
   {
     "comment": "bundle route serving cover editor + render API stays",
-    "path": "dsh-tintin-bundle/lib/cover-plugin-route.js",
+    "path": "dsh-tintin-cover-plugin/lib/cover-plugin-route.js",
     "pattern": "/tintin/cover/api/render",
     "minCount": 1
   },
   {
     "comment": "cover image upload endpoint stays (product/bg image swap in editor)",
-    "path": "dsh-tintin-bundle/lib/cover-plugin-route.js",
+    "path": "dsh-tintin-cover-plugin/lib/cover-plugin-route.js",
     "pattern": "/tintin/cover/api/upload-image",
     "minCount": 1
   },
   {
     "comment": "cover agent tool group stays (session-driven cover generation, WP-7/WP-4)",
-    "path": "dsh-tintin-bundle/lib/cover-tools.js",
+    "path": "dsh-tintin-cover-plugin/lib/cover-tools.js",
     "pattern": "cover_generate",
     "minCount": 2
   },
   {
     "comment": "cover AI background generation stays (WP-3 hybrid pipeline: server text2image → plugin public/; wired in index.js/route)",
-    "path": "dsh-tintin-bundle/lib/cover-background.js",
+    "path": "dsh-tintin-cover-plugin/lib/cover-background.js",
     "pattern": "generateCoverBackground",
     "minCount": 1
   },
   {
     "comment": "cover asset provenance ledger stays (§7 copyright trace: upload/ai records + export sidecar)",
-    "path": "dsh-tintin-bundle/lib/cover-provenance.js",
+    "path": "dsh-tintin-cover-plugin/lib/cover-provenance.js",
     "pattern": "appendAssetProvenance",
     "minCount": 1
   },
   {
     "comment": "cover output dir reveal endpoint stays (explorer open, cover dir only)",
-    "path": "dsh-tintin-bundle/lib/cover-plugin-route.js",
+    "path": "dsh-tintin-cover-plugin/lib/cover-plugin-route.js",
     "pattern": "/tintin/cover/api/reveal",
     "minCount": 1
   },
@@ -480,20 +480,8 @@
     "minCount": 1
   },
   {
-    "comment": "cover editor conversation loop stays (2026-10-27 batch B: LLM + layer action protocol; route wired)",
-    "path": "dsh-tintin-bundle/lib/cover-chat.js",
-    "pattern": "coverChatTurn",
-    "minCount": 1
-  },
-  {
-    "comment": "cover chat route stays (editor right panel conversation)",
-    "path": "dsh-tintin-bundle/lib/cover-plugin-route.js",
-    "pattern": "/tintin/cover/api/chat",
-    "minCount": 1
-  },
-  {
     "comment": "cover product img2img stays (jimeng image2image, current product image as reference)",
-    "path": "dsh-tintin-bundle/lib/cover-background.js",
+    "path": "dsh-tintin-cover-plugin/lib/cover-background.js",
     "pattern": "generateCoverProductImage",
     "minCount": 1
   },
@@ -502,5 +490,17 @@
     "path": "dsh-tintin-bundle/client.js",
     "pattern": "封面制作",
     "minCount": 2
+  },
+  {
+    "comment": "cover ACP session bridge stays (2026-10-28 session port: real agent loop, permission/question routed to chat cards)",
+    "path": "dsh-tintin-cover-plugin/lib/cover-acp-bridge.js",
+    "pattern": "startSession",
+    "minCount": 1
+  },
+  {
+    "comment": "cover session route family stays (editor right panel conversation over ACP; SSE + chat record + props sync)",
+    "path": "dsh-tintin-cover-plugin/lib/cover-acp-routes.js",
+    "pattern": "/tintin/cover/api/acp/",
+    "minCount": 1
   }
 ]

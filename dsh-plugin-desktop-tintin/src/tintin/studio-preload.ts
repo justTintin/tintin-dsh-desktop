@@ -113,6 +113,16 @@ const skills = {
 
 const noopStop = (): (() => void) => () => {}
 
+/* shell 桥 follow() 的影片目录桥(2026-10-28 修复死链): bridge.ts/tintin-library.ts 读
+   `window.tintinFilmDir`, 但此前从未有任何地方赋值 —— follow() 永远提前返回, 项目解析
+   只剩 Studio 事件流一条活路。contextBridge 直挂同名键即接通(嵌入页 contextIsolation)。 */
+contextBridge.exposeInMainWorld('tintinFilmDir', async (): Promise<string> => {
+  try {
+    const r = await ipcRenderer.invoke('openfilm:currentProject', {})
+    return typeof (r as { project?: unknown } | null)?.project === 'string' ? (r as { project: string }).project : ''
+  } catch { return '' }
+})
+
 contextBridge.exposeInMainWorld('openfilmNative', {
   platform: 'win32',
   /* 影片目录: shell 桥的 follow() 按目录匹配 Studio 项目(嵌入页不走 /projects 路由) */
