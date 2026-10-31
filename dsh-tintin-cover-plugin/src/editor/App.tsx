@@ -28,13 +28,17 @@ function CanvasPanel(): React.ReactElement {
   const hostRef = React.useRef<HTMLDivElement>(null)
   const playerWrapRef = React.useRef<HTMLDivElement>(null)
   /* 预览-提交分离(2026-10-31 方案 B,对照 PhotoCraft MovePreview):拖动中只改被拖元素的 CSS
-     translate(纯视觉,Remotion 树零重渲染),pointerup 一次性提交 props;死区 3 屏幕px 内=点击。 */
+     translate(纯视觉,Remotion 树零重渲染),pointerup 一次性提交 props;死区 3 屏幕px 内=点击。
+     2026-10-31 抖动加固: rAF 合帧(120Hz 指针流→每帧一次 DOM 写)/吸附滞回(防参考线边界反复跳)/
+     拖动中禁原生文本选择/被拖元素提升合成层/智能体 props 轮询在拖动中冻结(见 useAgentPropsSync)。 */
   const dragRef = React.useRef<
     | {
         kind: 'custom' | 'fixed'; layerId: string; pointerId: number;
         startX: number; startY: number; baseX: number; baseY: number; scale: number;
         baseLeft: number; baseTop: number; boxW: number; boxH: number;
         el: HTMLElement | null; active: boolean; curX: number; curY: number;
+        snapX: { at: number; guide: number } | null; snapY: { at: number; guide: number } | null;
+        raf: number; curCX: number; curCY: number;
       }
     | null
   >(null)
@@ -199,6 +203,7 @@ function CanvasPanel(): React.ReactElement {
     if (pcRunning === false) return
     let stop = false
     const tick = async (): Promise<void> => {
+      if (isBusy()) return // 拖动中冻结:props 回流会触发整树重渲(抖动源),拖完下个轮询自然追上
       try {
         const r = await fetch('/tintin/cover/api/pc/screenshot').then((resp) => resp.json())
         if (!stop && r.ok && r.data) { setPcRunning(true); setShot(`data:image/png;base64,${r.data}`) }
@@ -239,10 +244,6 @@ function CanvasPanel(): React.ReactElement {
     const el = readoutRef.current
     if (el) el.style.display = 'none'
   }
-  /** 清掉拖动预览的行内样式(轮廓+translate) */
-  const clearDragPreview = (drag: { el: HTMLElement | null } | null): void => {
-    if (drag?.el) { drag.el.style.outline = ''; drag.el.style.translate = '' }
-  }
 
   const onPointerDown = (e: React.PointerEvent): void => {
     if (pcRunning) return // PhotoCraft 为主:画布交互在原生窗口,网页仅镜像
@@ -275,6 +276,7 @@ function CanvasPanel(): React.ReactElement {
       startX: e.clientX, startY: e.clientY, baseX, baseY, scale,
       baseLeft: baseBox ? baseBox.left - baseX : 0, baseTop: baseBox ? baseBox.top - baseY : 0, boxW: baseBox?.w ?? 200, boxH: baseBox?.h ?? 200,
       el: dragEl as HTMLElement | null, active: false, curX: baseX, curY: baseY,
+      snapX: null, snapY: null, raf: 0, curCX: e.clientX, curCY: e.clientY,
     }
   }
   const onPointerMove = (e: React.PointerEvent): void => {
@@ -286,17 +288,21 @@ function CanvasPanel(): React.ReactElement {
       return
     }
     if (e.pointerId !== drag.pointerId) return
+    e.preventDefault() // 拖动中禁原生行为(文本选择/图片拖拽)——选区重绘是抖动源之一
     const dxs = e.clientX - drag.startX
     const dys = e.clientY - drag.startY
     if (!drag.active) {
       if (Math.hypot(dxs, dys) < 3) return // 死区:手抖不算拖
       drag.active = true
-      if (drag.el) drag.el.style.outline = '2px solid rgba(79,124,255,0.9)'
+      if (drag.el) { drag.el.style.outline = '2px solid rgba(79,124,255,0.9)'; drag.el.style.willChange = 'translate' } // 提升合成层,预览不重绘整栈
+      const host = hostRef.current
+      if (host) host.style.userSelect = 'none'
     }
     const scale = Math.max(drag.scale, 0.05)
     const rawX = drag.baseX + dxs / scale
     const rawY = drag.baseY + dys / scale
-    /* 吸附:图层盒的 左/水平中/右 与画布参照对齐;阈值按屏幕像素(8/scale),缩放恒定手感 */
+    /* 吸附:阈值按屏幕像素(8/scale)恒定手感;滞回=已吸附的轴保持到离开 guide 点 12 屏幕px,
+       消灭参考线边界反复跳入跳出的抖动 */
     let x = rawX
     let y = rawY
     let gv: number | null = null
@@ -305,23 +311,45 @@ function CanvasPanel(): React.ReactElement {
       const left = drag.baseLeft + rawX
       const top = drag.baseTop + rawY
       const T = 8 / scale
+      const stick = 12 / scale
       const candsX = [
         { at: 0, guide: 0 }, { at: (tpl.width - drag.boxW) / 2, guide: tpl.width / 2 }, { at: tpl.width - drag.boxW, guide: tpl.width },
       ]
       const candsY = [
         { at: 0, guide: 0 }, { at: (tpl.height - drag.boxH) / 2, guide: tpl.height / 2 }, { at: tpl.height - drag.boxH, guide: tpl.height },
       ]
-      for (const c of candsX) if (Math.abs(left - c.at) <= T) { x = c.at; gv = c.guide; break }
-      for (const c of candsY) if (Math.abs(top - c.at) <= T) { y = c.at; gh = c.guide; break }
+      if (drag.snapX) {
+        if (Math.abs(left - drag.snapX.at) <= stick) { x = drag.snapX.at; gv = drag.snapX.guide }
+        else drag.snapX = null
+      }
+      if (!drag.snapX) for (const c of candsX) if (Math.abs(left - c.at) <= T) { x = c.at; gv = c.guide; drag.snapX = c; break }
+      if (drag.snapY) {
+        if (Math.abs(top - drag.snapY.at) <= stick) { y = drag.snapY.at; gh = drag.snapY.guide }
+        else drag.snapY = null
+      }
+      if (!drag.snapY) for (const c of candsY) if (Math.abs(top - c.at) <= T) { y = c.at; gh = c.guide; drag.snapY = c; break }
     }
     drag.curX = x
     drag.curY = y
-    updateGuides(gv, gh)
-    /* 预览-提交分离:只动被拖元素的 CSS translate(与模板的 translate/rotate 基变换可叠加),
-       不写 props——Remotion 树拖动全程零重渲染;元素被换届时按 data 属性重取 */
-    if (!drag.el?.isConnected) drag.el = (hostRef.current?.querySelector(`[data-cover-layer="${drag.layerId}"]`) as HTMLElement | null) ?? null
-    if (drag.el) drag.el.style.translate = `${x - drag.baseX}px ${y - drag.baseY}px`
-    showReadout(e.clientX, e.clientY, x - drag.baseX, y - drag.baseY)
+    drag.curCX = e.clientX
+    drag.curCY = e.clientY
+    /* rAF 合帧:120Hz+ 指针流→每帧一次 DOM 写(参考线/translate/读数),与显示器刷新对齐 */
+    if (!drag.raf) drag.raf = requestAnimationFrame(() => {
+      drag.raf = 0
+      if (dragRef.current !== drag || !drag.active) return
+      updateGuides(gv, gh)
+      if (!drag.el?.isConnected) drag.el = (hostRef.current?.querySelector(`[data-cover-layer="${drag.layerId}"]`) as HTMLElement | null) ?? null
+      if (drag.el) drag.el.style.translate = `${x - drag.baseX}px ${y - drag.baseY}px` // 与模板 translate/rotate 基变换可叠加;props 零写入
+      showReadout(drag.curCX, drag.curCY, x - drag.baseX, y - drag.baseY)
+    })
+  }
+  const endDragVisual = (drag: NonNullable<NonNullable<typeof dragRef.current>>): void => {
+    if (drag.raf) cancelAnimationFrame(drag.raf)
+    updateGuides(null, null)
+    hideReadout()
+    if (drag.el) { drag.el.style.outline = ''; drag.el.style.translate = ''; drag.el.style.willChange = '' }
+    const host = hostRef.current
+    if (host) host.style.userSelect = ''
   }
   const commitDrag = (drag: NonNullable<NonNullable<typeof dragRef.current>>): void => {
     if (!drag.active) return // 死区内松手=点击,不动
@@ -334,19 +362,16 @@ function CanvasPanel(): React.ReactElement {
   const onPointerUp = (e: React.PointerEvent): void => {
     const drag = dragRef.current
     dragRef.current = null
-    updateGuides(null, null)
-    hideReadout()
     if (!drag) return
-    clearDragPreview(drag)
+    endDragVisual(drag)
     commitDrag(drag) // 离散事件内同步提交:清预览与写 props 同帧,无回跳
     try { hostRef.current?.releasePointerCapture?.(e.pointerId) } catch { /* 已隐式释放 */ }
   }
   const onPointerCancel = (): void => {
     const drag = dragRef.current
     dragRef.current = null
-    updateGuides(null, null)
-    hideReadout()
-    clearDragPreview(drag) // 丢弃预览:props 未动,元素回原位
+    if (!drag) return
+    endDragVisual(drag) // 丢弃预览:props 未动,元素回原位
   }
   /** 方向键微调(对照 PhotoCraft nudge):1 画布px/步,Shift=10px */
   const onCanvasKeyDown = (e: React.KeyboardEvent): void => {
@@ -610,7 +635,7 @@ function useChatContextPush(): void {
 
 /** agent 改字回流:轮询 /acp/props(2s;origin=agent 才套用),编辑器自己的修改
     防抖 600ms 反向推送(origin=editor,agent 的 cover.props.json 即新值)。 */
-function useAgentPropsSync(): void {
+function useAgentPropsSync(isBusy: () => boolean): void {
   React.useEffect(() => {
     let stop = false
     let lastAgentTs = 0
@@ -767,7 +792,7 @@ export const EditorApp: React.FC = () => {
   }
   ensurePjStyle()
   useChatContextPush()
-  useAgentPropsSync()
+  useAgentPropsSync(() => dragRef.current?.active === true)
   /* 技能管理大弹窗(2026-10-30 用户裁决:形态=视频剪辑 Skill 弹窗;聊天 ▦ 经 postMessage 请求打开) */
   const [showSkills, setShowSkills] = React.useState(false)
   React.useEffect(() => {
