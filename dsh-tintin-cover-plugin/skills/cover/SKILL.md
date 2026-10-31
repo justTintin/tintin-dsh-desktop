@@ -32,6 +32,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 2. 文字键取值见 `<cover_context>`(每条消息自动附带当前模板与全部图层取值)。数组键(如 `hookLines`)是逐行钩子,用字符串数组;改完保持数组形态。
 3. 字体白名单:`Microsoft YaHei, SimHei, KaiTi, SimSun, DengXian, FangSong, Segoe UI`;`scale` 0.5–1.8;`color` 十六进制。
 4. 图层显隐:把图层 id 加入 `hiddenLayers` 数组。固定图层 id 词汇 = `<cover_context>` 的清单(environment/product/title/subtitle/brand/footer/grid/features/badge/subTag);**拖入图片是动态图层**,id 形如 `img-xxx`,数据在 `props.customLayers`(x/y/width/opacity,画布 px),z 序由 `layerOrder`(自底向上全表)决定——**调整层级=重排 layerOrder;新增图片层前先把图放进插件素材位**(领养过的在线素材已在,或让用户上传)。
+5. **图层组(2026-10-31 阶段2,叠放语义)**:固定名称是**图层组**(如 产品图/环境图),每组模板自带一个**默认图层**;`customLayers` 每项可带 `group`(可选)=归属的**图片组**槽位 id(`product`/`environment`,仅这两组可挂,其余组剥除)——组内图层与默认图层**叠放渲染**,前后仍由 `layerOrder` 决定。用户说「放进产品图组/归到环境图组」时给对应项补 `group`;说「不归组/移出组」时删掉该字段。
 5. 横竖屏:`templateId` 同族互换——`cover↔cover-portrait`、`product↔product-portrait`、`video↔video-portrait`。内容键(含 customLayers/layerOrder)尽量原样保留。
 6. 校验失败(编辑器报「文本图层不能为空」等)= 你写坏了某键,读回文件修好再写。
 

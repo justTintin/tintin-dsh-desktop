@@ -531,7 +531,7 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                 onDragStart={(e) => { setDragId(id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', id) }}
                 onDragOver={(e) => {
                   if (dragId && dragId !== id) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOverId(id); return }
-                  /* 素材拖入组行:图片组高亮,松手=设为该组图(组候选语义落地面板,2026-10-31) */
+                  /* 素材拖入组行:图片组高亮,松手=加入本组(阶段2 叠放成员层) */
                   if (!dragId && e.dataTransfer.types.includes('application/x-tintin-cover-layer')) {
                     e.preventDefault(); e.dataTransfer.dropEffect = row.imageGroup ? 'copy' : 'none'; setAssetOverId(id)
                   }
@@ -540,12 +540,16 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                   e.preventDefault()
                   const assetName = e.dataTransfer.getData('application/x-tintin-cover-layer')
                   if (assetName && row.imageGroup) {
+                    /* 阶段2 叠放:素材拖到图片组=加入本组(成员层,几何=画布中上,可再拖动微调);
+                       「设为该组图(替换默认层)」在编辑卡按钮。 */
                     void (async () => {
                       try {
                         if (!assetName.startsWith('public/')) {
                           await fetch('/tintin/cover/api/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: assetName }) })
                         }
-                        setProp(defOf(id)?.propsKey ?? id, assetName.replace(/^public\//, ''))
+                        const newId = useEditor.getState().addCustomLayer(assetName.replace(/^public\//, ''), Math.round(tpl.width / 2 - 180), Math.round(tpl.height / 3), 360, id)
+                        reorderLayer(newId, id)
+                        useEditor.getState().selectLayer(newId)
                       } catch { /* 同步失败静默(同画布口径) */ }
                     })()
                     endDrag(); return
@@ -576,7 +580,8 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                 >{row.hidden ? '🚫' : '👁'}</button>
                 <span style={{ fontSize: 12, flexShrink: 0 }}>{icon(row.type)}</span>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: row.hidden ? '#8b8b88' : '#e8e8e6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
-                <span title="图层组:素材拖到组上=设为该组图(图片组)" style={{ fontSize: 9.5, color: '#8b8b88', border: '1px solid #3a3a3e', borderRadius: 4, padding: '0 4px', flexShrink: 0 }}>组</span>
+                {row.members > 0 ? <span style={{ fontSize: 10, color: '#4f7cff', flexShrink: 0 }}>{row.members} 层</span> : null}
+                <span title="图层组:素材拖到组上=加入本组(图片组,叠放)" style={{ fontSize: 9.5, color: '#8b8b88', border: '1px solid #3a3a3e', borderRadius: 4, padding: '0 4px', flexShrink: 0 }}>组</span>
                 {/* 拖动柄放行尾(2026-10-30 用户裁决) */}
                 <span title="拖动调层级" style={{ color: '#6b6b69', fontSize: 11, flexShrink: 0, cursor: 'grab' }}>⠿</span>
               </div>
@@ -626,7 +631,10 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                 style={{ ...iconBtn, opacity: row.hidden ? 0.35 : 1, width: 24, height: 24, fontSize: 13 }}
               >{row.hidden ? '🚫' : '👁'}</button>
               <span style={{ fontSize: 12, flexShrink: 0 }}>🖼</span>
-              <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: row.hidden ? '#8b8b88' : '#e8e8e6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: row.hidden ? '#8b8b88' : '#e8e8e6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: row.group ? 10 : 0 }}>
+                {row.group && defOf(row.group) ? <span style={{ fontSize: 9.5, color: '#4f7cff', border: '1px solid rgba(79,124,255,0.5)', borderRadius: 4, padding: '0 4px', marginRight: 5 }}>{defOf(row.group)?.label}</span> : null}
+                {row.label}
+              </span>
               <button title="删除图层" onClick={(e) => { e.stopPropagation(); removeCustomLayer(id) }} style={{ ...iconBtn, color: '#f87171', width: 24, height: 24, fontSize: 12 }}>✕</button>
               {/* 拖动柄放行尾(2026-10-30 用户裁决) */}
               <span title="拖动调层级" style={{ color: '#6b6b69', fontSize: 11, flexShrink: 0, cursor: 'grab' }}>⠿</span>

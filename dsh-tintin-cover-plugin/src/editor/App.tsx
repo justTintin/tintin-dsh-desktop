@@ -4,7 +4,7 @@
 import { Player } from '@remotion/player'
 import React from 'react'
 import { getTemplate } from '../registry'
-import { undo, useEditor } from './store'
+import { sanitizeCustomLayers, undo, useEditor } from './store'
 import { chatFrameRef, iconBtn, referableValue } from './ui'
 import { AssetsPanel, ExportModal, LayersPanel } from './panels'
 import { ServerSettingsModal } from './server-settings'
@@ -415,9 +415,13 @@ function CanvasPanel(): React.ReactElement {
             {/* 拖动吸附参考线(青色十字;ref 直写,拖动全程零重渲染) */}
             <div ref={guideVRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, background: '#22d3ee', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
             <div ref={guideHRef} style={{ position: 'absolute', left: 0, right: 0, height: 1, background: '#22d3ee', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
-            {/* 对齐工具条(选中图层时出现;相对画布六向) */}
+            {/* 对齐工具条(选中图层时出现;相对画布六向)。阻断冒泡:否则宿主 onPointerDown 按
+                坐标命中落空 → selectLayer(null) → 工具条随选中态卸载,点击永远无效(实测) */}
             {selectedLayer && !pcRunning ? (
-              <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, background: 'rgba(30,30,32,0.92)', border: '1px solid #3a3a3e', borderRadius: 8, padding: '3px 5px', zIndex: 80 }}>
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, background: 'rgba(30,30,32,0.92)', border: '1px solid #3a3a3e', borderRadius: 8, padding: '3px 5px', zIndex: 80 }}>
                 {([
                   ['left', '⇤', '左对齐画布'],
                   ['centerX', '⇔', '水平居中'],
@@ -637,7 +641,10 @@ function useAgentPropsSync(): void {
                 fetch('/tintin/cover/api/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: image }) }).catch(() => {}),
               ))
               const defaults = getTemplate(useEditor.getState().templateId).defaultProps
-              useEditor.setState({ props: { ...defaults, ...record.props } })
+              const merged = { ...defaults, ...record.props }
+              // 组归属净化(2026-10-31 阶段2):智能体写的 customLayers[].group 只认图片组槽位
+              merged.customLayers = sanitizeCustomLayers(useEditor.getState().templateId, merged.customLayers)
+              useEditor.setState({ props: merged })
             }
             if (Array.isArray(record.hiddenLayers)) useEditor.setState({ hiddenLayers: [...record.hiddenLayers] })
           } finally {

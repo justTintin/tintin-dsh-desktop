@@ -16,12 +16,19 @@ describe('buildLayerRows(图层组阶段 1 行模型)', () => {
       layerDefs: defs,
       topToBottom: ['img-a', 'title', 'product', 'environment', 'brand', 'grid', 'img-b'],
       props: { bgImage: 'bg-1.png', image: 'matting-1.png', hookLines: ['第一钩', '第二钩'], brand: 'TinTin' },
-      customLayers: [{ id: 'img-a', image: 'assets/matting-1.png' }, { id: 'img-b', image: 'assets/x.png' }],
+      customLayers: [{ id: 'img-a', image: 'assets/matting-1.png', group: 'product' }, { id: 'img-b', image: 'assets/x.png' }],
       hiddenLayers: ['brand'],
     })
     expect(rows.map((r) => (r.rowType === 'default' ? `default:${r.groupId}` : r.rowType === 'group' ? `group:${r.id}` : `free:${r.id}`))).toEqual([
       'free:img-a', 'group:title', 'default:title', 'group:product', 'default:product', 'group:environment', 'default:environment', 'group:brand', 'default:brand', 'group:grid', 'default:grid', 'free:img-b',
     ])
+    /* 阶段2 叠放:成员行携带组归属,组行累计成员数 */
+    const member = rows[0]
+    expect(member?.rowType === 'free' && member.group).toBe('product')
+    const productGroup = rows.find((r) => r.rowType === 'group' && r.id === 'product')
+    expect(productGroup?.rowType === 'group' && productGroup.members).toBe(1)
+    const freeB = rows[rows.length - 1]
+    expect(freeB?.rowType === 'free' && freeB.group).toBeUndefined()
   })
 
   it('图片组识别(product 类型或 bgImage 键)并携带当前图文件名', () => {
@@ -60,8 +67,8 @@ describe('buildLayerRows(图层组阶段 1 行模型)', () => {
       customLayers: [{ id: 'img-a', image: 'lib/m1.png' }],
       hiddenLayers: ['brand'],
     })
-    expect(rows[0].hidden).toBe(true)
-    expect(rows[1].hidden).toBe(true)
-    expect(rows[2].rowType === 'free' && rows[2].label).toBe('m1.png')
+    expect(rows[0]?.hidden).toBe(true)
+    expect(rows[1]?.hidden).toBe(true)
+    expect(rows[2]?.rowType === 'free' && rows[2].label).toBe('m1.png')
   })
 })

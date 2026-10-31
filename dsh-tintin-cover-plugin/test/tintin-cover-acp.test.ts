@@ -3,12 +3,12 @@
 // 2. cover-asset 三写(源/编辑器预览/导出根)与 cover 目录收纳
 // 3. props 记录(编辑器↔agent 对流点)读写形状
 // 4. cover-acp-bridge 纯面(令牌/未启动语义/事件序号)
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, realpathSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, describe, expect, it, vi } from 'vitest'
 import { adoptCoverAsset, coverAssetTargets, ensureCoverAssets, writeCoverAsset } from '../lib/cover-asset.js'
-import { readCoverPropsRecord, writeCoverPropsRecord } from '../lib/cover-acp-routes.js'
+import { readCoverPropsRecord, registerCoverAcpRoutes, writeCoverPropsRecord } from '../lib/cover-acp-routes.js'
 import { agentToken, lastEventSeq, prompt, subscribe } from '../lib/cover-acp-bridge.js'
 
 const roots: string[] = []
@@ -89,5 +89,147 @@ describe('cover acp bridge surface', () => {
     await expect(bridge.steer('x')).resolves.toEqual({ ok: false, outcome: 'not-supported' })
     expect(seen).toEqual([])
     expect(lastEventSeq()).toBeGreaterThanOrEqual(0)
+  })
+})
+
+/* 2026-10-31 用户报障回归:素材导入路径多一层 projects(cover\projects\projects\<项目>)。
+   根因=路由按项目制前旧口径 join(coverDir,'..','projects') 拼项目根,而 resolveCoverDir
+   恒为 projects/<项目>。写(files/upload)读(files)两边一致错,素材条看不出,只在资源
+   管理器露馅——用例把旧错误根也造出来,断言不再命中。 */
+describe('cover project asset root (2026-10-31 doubled-projects regression)', () => {
+  const mountAcp = (resolveCoverDir: () => Promise<string>) => {
+    const handlers = new Map<string, (req: never, res: never) => Promise<void>>()
+    const responses: Array<{ status: number; body: { files?: Array<{ path: string }> } }> = []
+    const dispose = registerCoverAcpRoutes({
+      webServer: {
+        register: (spec: { path: string; handler: (req: never, res: never) => Promise<void> }) => {
+          handlers.set(spec.path, spec.handler)
+          return () => {}
+        },
+      },
+      isTrustedRequest: () => true,
+      sendJson: (_res: unknown, status: number, body: { files?: Array<{ path: string }> }) => { responses.push({ status, body }) },
+      httpRequest: async () => ({}),
+      getServerUrl: () => '',
+      resolveCoverDir,
+      resolvePluginDir: () => null,
+    })
+    return { handlers, responses, dispose }
+  }
+
+  it('files lists projects/<project>, not a doubled projects/projects root', async () => {
+    const root = tempRoot()
+    const coverDir = join(root, 'cover', 'projects', 'proj-a')
+    mkdirSync(join(root, 'cover', 'projects', 'proj-b'), { recursive: true })
+    writeFileSync(join(root, 'cover', 'projects', 'proj-b', 'imported.png'), Buffer.from('x'))
+    mkdirSync(join(root, 'cover', 'projects', 'projects', 'proj-b'), { recursive: true })
+    writeFileSync(join(root, 'cover', 'projects', 'projects', 'proj-b', 'wrong.png'), Buffer.from('x'))
+    const { handlers, responses, dispose } = mountAcp(async () => coverDir)
+    const handler = handlers.get('/tintin/cover/api/acp/files')
+    expect(handler).toBeDefined()
+    await handler?.({ method: 'GET', url: '/tintin/cover/api/acp/files?project=proj-b', headers: {} } as never, {} as never)
+    const paths = responses.at(-1)?.body.files?.map((f) => f.path) ?? []
+    expect(paths).toContain('imported.png')
+    expect(paths).not.toContain('wrong.png')
+    dispose()
+  })
+
+  it('upload-image lands in projects/<project> (single projects level)', async () => {
+    const root = realpathSync(tempRoot())
+    const pluginDir = realpathSync(tempRoot())
+    const coverDir = join(root, 'cover', 'projects', 'proj-a')
+    mkdirSync(coverDir, { recursive: true })
+    mkdirSync(join(pluginDir, 'dist'), { recursive: true })
+    writeFileSync(join(pluginDir, 'dist', 'engine.mjs'), `export const resolveCoverDir = async () => ${JSON.stringify(coverDir)}\n`)
+    const handlers = new Map<string, (req: never, res: never) => Promise<void>>()
+    const responses: Array<{ status: number; body?: { error?: string } }> = []
+    /* realpath:Vite 加载器对 temp 8.3 短名(ADMINI~1)的 file URL 解析失败;
+       resetModules:loadCoverEngine 模块级单例缓存首个 stub,跨用例会串目录 */
+    vi.resetModules()
+    const { registerCoverPluginRoute } = await import('../lib/cover-plugin-route.js')
+    const prevPluginEnv = process.env.TINTIN_COVER_PLUGIN_DIR
+    process.env.TINTIN_COVER_PLUGIN_DIR = pluginDir
+    try {
+      const dispose = registerCoverPluginRoute({
+        webServer: {
+          register: (spec: { path: string; handler: (req: never, res: never) => Promise<void> }) => {
+            handlers.set(spec.path, spec.handler)
+            return () => {}
+          },
+        },
+        isTrustedRequest: () => true,
+        sendJson: (_res: unknown, status: number, body?: { error?: string }) => { responses.push({ status, body }) },
+        httpRequest: async () => ({}),
+        getServerUrl: () => '',
+      })
+      const handler = handlers.get('/tintin/cover/api/upload-image')
+      expect(handler).toBeDefined()
+      const req = {
+        method: 'POST',
+        url: '/tintin/cover/api/upload-image?name=up.png&project=proj-a',
+        headers: {},
+        on: (ev: string, cb: (c?: Buffer) => void) => {
+          if (ev === 'data') cb(Buffer.from('png-bytes'))
+          if (ev === 'end') setTimeout(cb as () => void, 0)
+        },
+      }
+      await handler?.(req as never, {} as never)
+      for (let i = 0; responses.length === 0 && i < 200; i++) await new Promise((r) => setTimeout(r, 10))
+      expect(responses.at(-1), JSON.stringify(responses)).toMatchObject({ status: 200 })
+      expect(existsSync(join(root, 'cover', 'projects', 'proj-a', 'up.png'))).toBe(true)
+      expect(existsSync(join(root, 'cover', 'projects', 'projects', 'proj-a', 'up.png'))).toBe(false)
+      dispose()
+    } finally {
+      if (prevPluginEnv === undefined) delete process.env.TINTIN_COVER_PLUGIN_DIR
+      else process.env.TINTIN_COVER_PLUGIN_DIR = prevPluginEnv
+    }
+  })
+
+  it('non-projects cover dir (TINTIN_COVER_DIR single-dir form) ignores the project param', async () => {
+    const root = realpathSync(tempRoot())
+    const pluginDir = realpathSync(tempRoot())
+    const coverDir = join(root, 'cover-flat')
+    mkdirSync(coverDir, { recursive: true })
+    mkdirSync(join(pluginDir, 'dist'), { recursive: true })
+    writeFileSync(join(pluginDir, 'dist', 'engine.mjs'), `export const resolveCoverDir = async () => ${JSON.stringify(coverDir)}\n`)
+    const handlers = new Map<string, (req: never, res: never) => Promise<void>>()
+    const responses: Array<{ status: number; body?: { error?: string } }> = []
+    vi.resetModules()
+    const { registerCoverPluginRoute } = await import('../lib/cover-plugin-route.js')
+    const prevPluginEnv = process.env.TINTIN_COVER_PLUGIN_DIR
+    process.env.TINTIN_COVER_PLUGIN_DIR = pluginDir
+    try {
+      const dispose = registerCoverPluginRoute({
+        webServer: {
+          register: (spec: { path: string; handler: (req: never, res: never) => Promise<void> }) => {
+            handlers.set(spec.path, spec.handler)
+            return () => {}
+          },
+        },
+        isTrustedRequest: () => true,
+        sendJson: (_res: unknown, status: number) => { responses.push({ status }) },
+        httpRequest: async () => ({}),
+        getServerUrl: () => '',
+      })
+      const handler = handlers.get('/tintin/cover/api/upload-image')
+      const req = {
+        method: 'POST',
+        url: '/tintin/cover/api/upload-image?name=flat.png&project=proj-a',
+        headers: {},
+        on: (ev: string, cb: (c?: Buffer) => void) => {
+          if (ev === 'data') cb(Buffer.from('x'))
+          if (ev === 'end') setTimeout(cb as () => void, 0)
+        },
+      }
+      await handler?.(req as never, {} as never)
+      for (let i = 0; responses.length === 0 && i < 200; i++) await new Promise((r) => setTimeout(r, 10))
+      expect(responses.at(-1)?.status).toBe(200)
+      expect(existsSync(join(coverDir, 'flat.png'))).toBe(true)
+      expect(existsSync(join(coverDir, 'proj-a'))).toBe(false)
+      dispose()
+    } finally {
+      if (prevPluginEnv === undefined) delete process.env.TINTIN_COVER_PLUGIN_DIR
+      else process.env.TINTIN_COVER_PLUGIN_DIR = prevPluginEnv
+    }
   })
 })

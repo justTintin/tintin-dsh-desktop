@@ -5,6 +5,21 @@ import { create } from 'zustand'
 import { getTemplate, templateOfOrientation, validateProps, type LayerDef } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
 
+/** 图层组归属净化(2026-10-31 阶段2):只认模板存在的图片组槽位(product/bgImage),
+    其余(未知槽位/文字组/装饰组)剥除——组里只能放对应类型的图层。 */
+function sanitizeGroup(templateId: string, group: unknown): string | undefined {
+  if (typeof group !== 'string' || !group) return undefined
+  const def = getTemplate(templateId).layerDefs.find((l) => l.id === group)
+  if (!def) return undefined
+  return def.type === 'product' || (def.propsKey ?? def.id) === 'bgImage' ? group : undefined
+}
+
+/** 智能体 props 回流的 customLayers 净化(逐层剥除非法组归属)。 */
+export function sanitizeCustomLayers(templateId: string, layers: unknown): CustomLayer[] {
+  if (!Array.isArray(layers)) return []
+  return (layers as CustomLayer[]).map((l) => ({ ...(l && typeof l === 'object' ? l : ({} as CustomLayer)), group: sanitizeGroup(templateId, (l as CustomLayer | null)?.group) }))
+}
+
 export interface EditorState {
   templateId: string
   props: Record<string, unknown>
@@ -25,8 +40,9 @@ export interface EditorState {
   /** 生图引擎(2026-10-27 裁决:server=TinTin 服务端默认 | jimeng=即梦) */
   genEngine: 'server' | 'jimeng'
   setGenEngine: (engine: 'server' | 'jimeng') => void
-  /** 自定义图片图层(2026-10-28):新增(置顶)/删除/局部改(x/y/width/opacity/rotate) */
-  addCustomLayer: (image: string, x: number, y: number, width?: number) => string
+  /** 自定义图片图层(2026-10-28):新增(置顶)/删除/局部改(x/y/width/opacity/rotate);
+   *  2026-10-31 阶段2:新增可携带组归属(仅图片组,非法剥除) */
+  addCustomLayer: (image: string, x: number, y: number, width?: number, group?: string) => string
   removeCustomLayer: (id: string) => void
   setCustomLayer: (id: string, patch: Partial<CustomLayer>) => void
   /** 全图层 z 序上移/下移(固定层+自定义层同一张序表) */
@@ -99,10 +115,10 @@ export const useEditor = create<EditorState>()(
       selectLayer: (id) => set({ selectedLayer: id }),
       setSelectedAsset: (name) => set({ selectedAsset: name }),
       setLastExport: (r) => set({ lastExport: r }),
-      addCustomLayer: (image, x, y, width = 360) => {
+      addCustomLayer: (image, x, y, width = 360, group?: string) => {
         const id = `img-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
         set((s) => {
-          const layers = [...(Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []), { id, image, x: Math.round(x), y: Math.round(y), width }]
+          const layers = [...(Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []), { id, image, x: Math.round(x), y: Math.round(y), width, group: sanitizeGroup(s.templateId, group) }]
           const order = [...effectiveOrder(s).filter((v) => v !== id), id] // 置顶
           const next: Partial<EditorState> = { props: { ...s.props, customLayers: layers, layerOrder: order }, selectedLayer: id }
           return next
@@ -118,7 +134,12 @@ export const useEditor = create<EditorState>()(
       setCustomLayer: (id, patch) =>
         set((s) => {
           // x/y 取 patch 后值再取整(2026-10-28 修复:原先 Math.round(l.x) 在 patch 之后又盖回去,拖动永不生效)
-          const layers = (Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []).map((l) => (l.id === id ? { ...l, ...patch, x: Math.round(patch.x ?? l.x), y: Math.round(patch.y ?? l.y) } : l))
+          const layers = (Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []).map((l) => {
+            if (l.id !== id) return l
+            const next = { ...l, ...patch, x: Math.round(patch.x ?? l.x), y: Math.round(patch.y ?? l.y) }
+            if ('group' in patch) next.group = sanitizeGroup(s.templateId, patch.group) // 未提供则保留原归属
+            return next
+          })
           return { props: { ...s.props, customLayers: layers } }
         }),
       guides: true,
