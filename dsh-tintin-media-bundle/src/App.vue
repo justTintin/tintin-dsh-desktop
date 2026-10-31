@@ -245,7 +245,7 @@ const isDark = useHostDark()
 }
 
 /* 全宽自适应列（宽屏两卡铺开，窄屏自动单列） */
-.grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); } /* 卡片 2/3（2026-10-14 列宽 300→200）；2026-10-18 用户裁决：卡片高宽 +1/5，列宽 200→240 */
+.grid { display: grid; gap: var(--space-4); grid-template-columns: repeat(auto-fill, 240px); } /* 卡片 2/3（2026-10-14 列宽 300→200）；2026-10-18 用户裁决：卡片高宽 +1/5，列宽 200→240；2026-10-30 用户裁决：列宽钉死——原 minmax(240px,1fr) 会把剩余宽度摊给列，还原窗列少卡片反而比最大化大 */
 
 /* 卡片视觉对照源 MediaTools.vue（accent 光晕 + hover 毛玻璃），压缩到面板尺寸 */
 /* 入场 stagger + 光晕旋转（2026-09-25 用户报障「缺原客户端动画」补齐，
