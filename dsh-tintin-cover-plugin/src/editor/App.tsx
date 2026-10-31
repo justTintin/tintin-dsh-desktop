@@ -11,7 +11,7 @@ import { AssetsPanel, ExportModal, LayersPanel } from './panels'
 import { ServerSettingsModal } from './server-settings'
 import { SkillsModal } from './skills-modal'
 
-function CanvasPanel(): React.ReactElement {
+function CanvasPanel({ project }: { project: string }): React.ReactElement {
   const { templateId, props, hiddenLayers } = useEditor()
   const tpl = getTemplate(templateId)
   const selectLayer = useEditor((s) => s.selectLayer)
@@ -144,7 +144,7 @@ function CanvasPanel(): React.ReactElement {
     void (async () => {
       try {
         const buf = await file.arrayBuffer()
-        const r = await fetch(`/tintin/cover/api/upload-image?name=${encodeURIComponent(file.name)}`, {
+        const r = await fetch(`/tintin/cover/api/upload-image?name=${encodeURIComponent(file.name)}&project=${encodeURIComponent(project)}`, {
           method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: buf,
         }).then((resp) => resp.json())
         if (r.ok && r.name) dropAsLayer(String(r.name), clientX, clientY)
@@ -275,15 +275,17 @@ function CanvasPanel(): React.ReactElement {
         { at: 0, guide: 0 }, { at: (tpl.height - drag.boxH) / 2, guide: tpl.height / 2 }, { at: tpl.height - drag.boxH, guide: tpl.height },
       ]
       if (drag.snapX) {
-        if (Math.abs(left - drag.snapX.at) <= stick) { x = drag.snapX.at; gv = drag.snapX.guide }
+        /* 吸附值换算回基准空间(2026-11-01 修复跳变):固定层 dx=相对槽位原位的偏移,自定义层 x=画布绝对——
+           两者统一为 base+x=视觉位,故吸附目标 at(画布绝对)必须减 baseLeft,否则固定层把绝对位当偏移写=跳到槽位原位+at */
+        if (Math.abs(left - drag.snapX.at) <= stick) { x = drag.snapX.at - drag.baseLeft; gv = drag.snapX.guide }
         else drag.snapX = null
       }
-      if (!drag.snapX) for (const c of candsX) if (Math.abs(left - c.at) <= T) { x = c.at; gv = c.guide; drag.snapX = c; break }
+      if (!drag.snapX) for (const c of candsX) if (Math.abs(left - c.at) <= T) { x = c.at - drag.baseLeft; gv = c.guide; drag.snapX = c; break }
       if (drag.snapY) {
-        if (Math.abs(top - drag.snapY.at) <= stick) { y = drag.snapY.at; gh = drag.snapY.guide }
+        if (Math.abs(top - drag.snapY.at) <= stick) { y = drag.snapY.at - drag.baseTop; gh = drag.snapY.guide }
         else drag.snapY = null
       }
-      if (!drag.snapY) for (const c of candsY) if (Math.abs(top - c.at) <= T) { y = c.at; gh = c.guide; drag.snapY = c; break }
+      if (!drag.snapY) for (const c of candsY) if (Math.abs(top - c.at) <= T) { y = c.at - drag.baseTop; gh = c.guide; drag.snapY = c; break }
     }
     drag.curX = x
     drag.curY = y
@@ -906,7 +908,7 @@ export const EditorApp: React.FC = () => {
             {/* 预览列 = 设置顶条(横竖屏+预览显示) + 画布 */}
             <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               <CanvasSettingsStrip />
-              <CanvasPanel />
+              <CanvasPanel project={currentProject} />
             </div>
             {/* 中栏 = 图层+编辑整栏(素材移出后整栏让给图层;高度随素材底带让位) */}
             <div style={{ width: 260, flexShrink: 0, background: '#1a1a1c', borderLeft: '1px solid #333', borderRight: '1px solid #333', padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'hidden', gap: 10 }}>

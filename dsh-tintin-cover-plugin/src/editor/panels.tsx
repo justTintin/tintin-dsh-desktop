@@ -142,7 +142,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
     void (async () => {
       try {
         const r = await (await fetch('/tintin/cover/api/upload-url', {
-          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url }),
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, project }),
         })).json() as { ok?: boolean; name?: string; error?: string }
         if (!r.ok || !r.name) throw new Error(r.error || 'URL 导入失败')
         reloadNow()

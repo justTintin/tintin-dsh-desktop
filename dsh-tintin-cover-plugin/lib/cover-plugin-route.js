@@ -18,6 +18,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, normalize, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { projectsRootOf } from './cover-asset.js'
 import { connectControl, launchApp } from './photocraft.js'
 import { registerCoverAcpRoutes } from './cover-acp-routes.js'
 // 配置仓/技能落盘管线=宿主公共设施(dsh-tintin-shared 叶子包,2026-10-31 抽共享包
@@ -440,9 +441,9 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
           // 项目落盘(素材条列表的来源;失败=如实报错)
           const engine = await loadEngine()
           const coverDir = await engine.resolveCoverDir()
-          const projectsRoot = join(coverDir, '..', 'projects')
-          const finalDir = project ? join(projectsRoot, project) : coverDir
-          if (!finalDir.startsWith(projectsRoot)) throw new Error('非法项目名')
+          const projectsRoot = projectsRootOf(coverDir)
+          const finalDir = project && projectsRoot ? join(projectsRoot, project) : coverDir
+          if (projectsRoot && !finalDir.startsWith(projectsRoot)) throw new Error('非法项目名')
           mkdirSync(finalDir, { recursive: true })
           writeFileSync(join(finalDir, name), bytes)
           // 来源记录(§七 provenance:上传素材留痕)
@@ -472,8 +473,13 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
       req.on('data', (c) => { body += c; if (body.length > 16_000) req.destroy() })
       req.on('end', async () => {
         try {
-          const url = String(JSON.parse(body || '{}').url ?? '').trim()
+          const parsed = JSON.parse(body || '{}')
+          const url = String(parsed.url ?? '').trim()
           if (!/^https?:\/\//i.test(url)) throw new Error('仅支持 http(s) 图片地址')
+          /* 项目对齐(2026-11-01 用户报障「拖入素材不显示/没进项目目录」):URL 导入与 upload-image
+             同口径,显式 project 落进项目目录(素材条列表来源),缺省回退 coverDir */
+          const project = String(parsed.project ?? '').trim()
+          if (project && (/[\\/]/.test(project) || project === '.' || project === '..')) throw new Error('非法项目名')
           const dir = resolvePluginDir()
           if (!dir) throw new Error('封面插件目录不存在')
           const response = await fetch(url, { signal: AbortSignal.timeout(60_000) })
@@ -488,12 +494,15 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
           const name = `url-${Date.now()}.${ext}`
           const { writeCoverAsset } = await import('./cover-asset.js')
           writeCoverAsset(dir, name, bytes)
-          // 项目对齐(2026-10-30 用户裁决:素材跟项目)
+          // 项目对齐(2026-10-30 用户裁决:素材跟项目;2026-11-01 补 URL 导入的项目落盘)
           try {
             const engine = await loadEngine()
             const coverDir = await engine.resolveCoverDir()
-            mkdirSync(coverDir, { recursive: true })
-            writeFileSync(join(coverDir, name), bytes)
+            const projectsRoot = join(coverDir, '..', 'projects')
+            const finalDir = project ? join(projectsRoot, project) : coverDir
+            if (!finalDir.startsWith(projectsRoot)) throw new Error('非法项目名')
+            mkdirSync(finalDir, { recursive: true })
+            writeFileSync(join(finalDir, name), bytes)
           } catch { /* 落项目失败不阻断(三写位已有) */ }
           try {
             const { appendAssetProvenance } = await import('./cover-provenance.js')
@@ -530,9 +539,9 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
           if (!dir) throw new Error('封面插件目录不存在')
           const engine = await loadEngine()
           const coverDir = await engine.resolveCoverDir()
-          const projectsRoot = join(coverDir, '..', 'projects')
-          const finalDir = project ? join(projectsRoot, project) : coverDir
-          if (!finalDir.startsWith(projectsRoot)) throw new Error('非法项目名')
+          const projectsRoot = projectsRootOf(coverDir)
+          const finalDir = project && projectsRoot ? join(projectsRoot, project) : coverDir
+          if (projectsRoot && !finalDir.startsWith(projectsRoot)) throw new Error('非法项目名')
           let srcPath = join(finalDir, name)
           if (!existsSync(srcPath)) srcPath = join(dir, 'public', name)
           if (!existsSync(srcPath)) throw new Error(`素材不存在:${name}`)
