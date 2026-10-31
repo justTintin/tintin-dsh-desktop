@@ -39,7 +39,7 @@ export const ProductCoverPortrait: React.FC<ProductCoverProps> = ({ brand, title
         )}
         {!hidden('product') && (
           <div data-cover-layer="product" style={{ width: '100%', height: 780, borderRadius: 32, background: '#ffffff', boxShadow: '0 30px 80px rgba(15,23,42,0.16), 0 4px 16px rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(15,23,42,0.06)', flexShrink: 0, transform: productTransform }}>
-            <Img src={staticFile(image)} style={{ width: '92%', height: '92%', objectFit: 'contain' }} />
+            <Img draggable={false} src={staticFile(image)} style={{ width: '92%', height: '92%', objectFit: 'contain' }} />
           </div>
         )}
         <div style={{ marginTop: 40, display: 'flex', flexDirection: 'column' }}>

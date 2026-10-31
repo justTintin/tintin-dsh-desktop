@@ -27,18 +27,19 @@ describe('产物目录解析(G5 + 2026-10-30 项目制:cover/projects/<当前项
     expect(existsSync(first)).toBe(true)
     expect(resolveCoverDir()).toBe(first) // 指针稳定:重复解析同一项目
   })
-  it('旧 cover 散文件首访整体迁入首个项目(项目名=日期时间)', () => {
-    const ws = mkdtempSync(join(testRoot, 'ws-migrate-')) // 唯一工作区:防上次运行的 projects 残留让迁移短路
+  it('旧 cover 根目录散文件不做迁移:原地保留,项目制从空白项目开始(2026-10-30 二次裁决)', () => {
+    const ws = mkdtempSync(join(testRoot, 'ws-nomigrate-'))
     process.env.TINTIN_WORKSPACE_DIR = ws
     const legacy = join(ws, 'cover')
     mkdirSync(join(legacy, '.cover-chat'), { recursive: true })
     writeFileSync(join(legacy, 'cover.props.json'), '{}', 'utf8')
     delete process.env.TINTIN_COVER_DIR
     const dir = resolveCoverDir()
+    // 新项目=projects/<日期时间> 空目录,旧文件原地不动(不删不藏,不进任何项目)
     expect(dir).toContain(join('cover', 'projects'))
-    expect(existsSync(join(dir, 'cover.props.json'))).toBe(true)
-    expect(existsSync(join(dir, '.cover-chat'))).toBe(true)
-    expect(existsSync(join(legacy, 'cover.props.json'))).toBe(false)
+    expect(existsSync(join(dir, 'cover.props.json'))).toBe(false)
+    expect(existsSync(join(legacy, 'cover.props.json'))).toBe(true)
+    expect(existsSync(join(legacy, 'current.json'))).toBe(true) // 指针已建
   })
   it('新建/切换/重命名项目语义(create/switch/rename)', () => {
     const ws = mkdtempSync(join(testRoot, 'ws-ops-'))

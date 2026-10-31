@@ -10,6 +10,8 @@ export interface EditorState {
   props: Record<string, unknown>
   hiddenLayers: string[]
   selectedLayer: string | null
+  /** 素材区当前选中项(2026-10-31 §2.5 P1:编辑卡「从素材替换/设为产品图」的数据源) */
+  selectedAsset: string | null
   lastExport: { ok: boolean; file?: string; error?: string } | null
   setTemplate: (id: string) => void
   /** 横竖屏切换(2026-10-27 裁决):同族变体切换,内容 props 尽量保留 */
@@ -18,6 +20,7 @@ export interface EditorState {
   setLayerStyle: (layerId: string, patch: { scale?: number; color?: string; dx?: number; dy?: number; font?: string; rotate?: number } | null) => void
   toggleLayer: (id: string) => void
   selectLayer: (id: string | null) => void
+  setSelectedAsset: (name: string | null) => void
   setLastExport: (r: EditorState['lastExport']) => void
   /** 生图引擎(2026-10-27 裁决:server=TinTin 服务端默认 | jimeng=即梦) */
   genEngine: 'server' | 'jimeng'
@@ -61,6 +64,7 @@ export const useEditor = create<EditorState>()(
       props: { ...getTemplate('video').defaultProps },
       hiddenLayers: [] as string[],
       selectedLayer: null as string | null,
+      selectedAsset: null as string | null,
       lastExport: null as EditorState['lastExport'],
       genEngine: 'server',
       setGenEngine: (engine) => set({ genEngine: engine }),
@@ -93,6 +97,7 @@ export const useEditor = create<EditorState>()(
           hiddenLayers: s.hiddenLayers.includes(id) ? s.hiddenLayers.filter((l) => l !== id) : [...s.hiddenLayers, id],
         })),
       selectLayer: (id) => set({ selectedLayer: id }),
+      setSelectedAsset: (name) => set({ selectedAsset: name }),
       setLastExport: (r) => set({ lastExport: r }),
       addCustomLayer: (image, x, y, width = 360) => {
         const id = `img-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`

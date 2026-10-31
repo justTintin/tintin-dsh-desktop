@@ -1,0 +1,6 @@
+/* 封面会话页的 Tailwind 管线(照影片 shell 的 shell.css 同法):聊天 TSX 全用
+   Tailwind 工具类,没有这段 globals + @source 扫描,页面只剩 chat.css 的结构样式——
+   会话栏散架、starters 裸列表、间距全乱(2026-10-28 截图实测)。 */
+@import '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/globals.css';
+@source '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src';
+@source '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat';

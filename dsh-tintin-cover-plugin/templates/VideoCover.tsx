@@ -44,6 +44,7 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, sub
         <div data-cover-layer="product" style={{ position: 'absolute', right: 30, top: '50%', transform: productTransform, width: 640, height: 640, zIndex: layerZ(layerOrder, 'product') }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)' }}>
             <Img
+              draggable={false}
               src={staticFile(image)}
               style={{
                 width: 560, height: 560, objectFit: 'contain',

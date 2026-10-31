@@ -15,6 +15,13 @@ import { fileURLToPath } from 'node:url'
 const pluginRoot = resolve(fileURLToPath(import.meta.url), '..', '..')
 const staging = join(pluginRoot, '..', 'dsh-plugin-desktop-tintin', 'tintin-resources', 'cover-plugin')
 const chatShell = join(pluginRoot, 'chat-shell')
+/* 本环境的系统 TEMP 偶发拒绝 esbuild 清理其临时目录(权限/AV 竞争,2026-10-30 打包门禁实测
+   build:editor 撞上)——三件套构建统一改用工作区本地 TEMP;先例=openfilm-shell 与 chat-shell
+   两个 build.mjs 的同款护栏。 */
+const buildTemp = join(pluginRoot, '.tmp')
+mkdirSync(buildTemp, { recursive: true })
+process.env.TEMP = buildTemp
+process.env.TMP = buildTemp
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const run = (args, opts = {}) => {
   const r = spawnSync(npm, args, { cwd: pluginRoot, stdio: 'inherit', shell: true, ...opts })
@@ -46,6 +53,20 @@ cpSync(join(chatShell, 'dist'), join(staging, 'chat-shell', 'dist'), { recursive
 // skills 同步(/acp/skills 技能清单的数据源;漏同步 = 打包版 / 菜单空)
 if (existsSync(join(pluginRoot, 'skills'))) cpSync(join(pluginRoot, 'skills'), join(staging, 'skills'), { recursive: true })
 cpSync(join(pluginRoot, 'package.json'), join(staging, 'package.json'))
+// staging npm install 只能装 npm registry 上的包——workspace 专属依赖(dsh-tintin-*)
+// 在 staging 不可解析,剥离后再装(staged 载荷=引擎/编辑器/chat-shell 均不 import 它;
+// 插件宿主 lib 运行时按 app node_modules 同级解析,见 cover-plugin index.js 头注)。
+{
+  const staged = JSON.parse(readFileSync(join(staging, 'package.json'), 'utf8'))
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']) {
+    const deps = staged[field]
+    if (!deps || typeof deps !== 'object') continue
+    for (const name of Object.keys(deps)) {
+      if (name.startsWith('dsh-tintin-')) delete deps[name]
+    }
+  }
+  writeFileSync(join(staging, 'package.json'), `${JSON.stringify(staged, null, 2)}\n`)
+}
 
 console.log('[stage] 3/3 staging 生产依赖…')
 const inst = spawnSync(npm, ['install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: staging, stdio: 'inherit', shell: true })

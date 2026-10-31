@@ -1,0 +1,28 @@
+/* 封面会话页(cover-chat.html)的页面级样式:官方 chat.css 已由 vite 管线作用域化
+   (.of-chat 根),这里只铺布局——会话列铺满编辑器右栏 iframe,浮层不占位。 */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--dock-shell, #1a1a1c);
+}
+
+#root {
+  position: fixed;
+  inset: 0;
+}
+
+#of-chat-layer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  z-index: 60;
+  background: transparent;
+}
+
+#root:focus,
+#of-chat-layer:focus {
+  outline: none;
+}

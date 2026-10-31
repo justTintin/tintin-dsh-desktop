@@ -299,12 +299,13 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
     }
     return null
   }
-  /** 用户级技能装位(技能管理安装目录=<渠道主目录>/skills,rank400;与视频剪辑技能同源)。 */
+  /** 用户级技能装位(技能管理安装目录=<渠道主目录>/cover-skills;2026-10-31 收紧裁决:
+   *  封面专属目录,旧通用装位 skills 由 migrateCoverSkillsHome 幂等迁移)。 */
   const channelSkillsDir = () => {
     const channelHome = process.env.TINTIN_COVER_AGENT_HOME
       || process.env.DSH_HOME
       || join(process.env.USERPROFILE || process.env.HOME || '.', 'Documents', 'tintin-workspace', '.tintin')
-    const dir = join(channelHome, 'skills')
+    const dir = join(channelHome, 'cover-skills')
     return existsSync(dir) ? dir : null
   }
   /** 解析技能名 → SKILL.md 路径(插件自带优先,其次用户级装位)。
@@ -394,9 +395,17 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
   })
 
   // ── 图层文件清单(@ 菜单/素材面板数据源:cover 目录 + 插件 public/,图片优先) ──
+  // project 参数(2026-10-31 用户报障「导入成功却不显示」):素材条跟激活 tab 走 ——
+  // 显式列 projects/<project>(裸目录名防穿越);缺省仍=指针项目。
   register('files', async (req, res) => {
     if (req.method !== 'GET' || !guard(req, res, false)) return
     const dir = await coverDir()
+    const qProject = String(new URL(req.url, 'http://localhost').searchParams.get('project') || '').trim()
+    let listDir = dir
+    if (qProject && !/[\\/]/.test(qProject) && qProject !== '.' && qProject !== '..') {
+      const candidate = join(dir, '..', 'projects', qProject)
+      if (existsSync(candidate)) listDir = candidate
+    }
     const files = []
     const push = (root, prefix, rel, size) => {
       const ext = rel.split('.').pop()?.toLowerCase() ?? ''
@@ -417,7 +426,7 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
         push(root, '', rel, size)
       }
     }
-    walk(dir, '', 2)
+    walk(listDir, '', 2)
     // 插件 public/(模板自带/上传/领养素材;与 cover 目录同名时 cover 目录优先)
     const pluginDir = resolvePluginDir()
     if (pluginDir) {

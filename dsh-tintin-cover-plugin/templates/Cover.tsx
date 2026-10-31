@@ -24,7 +24,7 @@ export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, h
     <AbsoluteFill style={{ background: '#0b1026' }}>
       {!hidden('environment') && (
         bgImage ? (
-          <Img src={staticFile(bgImage)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.85 }} />
+          <Img draggable={false} src={staticFile(bgImage)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.85 }} />
         ) : (
           <AbsoluteFill
             style={{

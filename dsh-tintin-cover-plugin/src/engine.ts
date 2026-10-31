@@ -22,10 +22,11 @@ export function resolveWorkspaceDir(): string {
   return process.env.TINTIN_WORKSPACE_DIR || join(homedir(), 'Documents', 'tintin-workspace')
 }
 
-/** 封面项目制(2026-10-30 用户裁决,对齐视频剪辑):一个封面=一个项目=一个目录,
- *  会话随项目绑定(cwd=项目目录)。目录形态=<工作区>/cover/projects/<项目名>/
- *  (不用 Cover\Projects 顶层——Windows 大小写不敏感,会与既有 cover\ 目录合并成一处);
- *  当前项目指针=<cover>/current.json;旧 cover\ 散文件首次访问时整体迁入首个项目。
+/** 封面项目制(2026-10-30 用户裁决):一个封面=一个项目=一个目录,
+ *  会话随项目绑定(cwd=项目目录)。目录形态=<工作区>/cover/projects/<项目名>/;
+ *  当前项目指针=<cover>/current.json;无指针时首访建日期时间空项目。
+ *  2026-10-30 二次裁决:**不做旧文件迁移**——旧 cover\ 根目录散文件原地保留
+ *  (不删不藏,不进任何项目),素材与项目严格对齐:项目目录里只有本项目自己的文件。
  *  TINTIN_COVER_DIR 覆盖(测试用)时保持旧的单目录行为。 */
 const PROJECTS_DIRNAME = 'projects'
 const POINTER_FILENAME = 'current.json'
@@ -42,31 +43,6 @@ export function sanitizeProjectName(raw: string): string {
   return cleaned || defaultProjectName()
 }
 
-let projectsMigrated = false
-/** 旧散文件一次性迁入首个项目(root 除 projects/current.json 外还有内容时)。
- *  迁移标记按 root 记忆(多工作区/测试各迁各的),不是进程级一次性。 */
-const migratedRoots = new Set<string>()
-function ensureProjectsMigrated(root: string, projectsDir: string): void {
-  if (process.env.TINTIN_COVER_DIR || migratedRoots.has(root)) return
-  migratedRoots.add(root)
-  try {
-    if (existsSync(projectsDir)) return
-    const legacy = existsSync(root) ? readdirSync(root).filter((n) => n !== PROJECTS_DIRNAME && n !== POINTER_FILENAME) : []
-    if (legacy.length === 0) return
-    const name = defaultProjectName()
-    mkdirSync(projectsDir, { recursive: true })
-    const target = join(projectsDir, name)
-    mkdirSync(target, { recursive: true })
-    for (const entry of legacy) {
-      try { renameSync(join(root, entry), join(target, entry)) } catch { /* 单项失败不阻断(留原处) */ }
-    }
-    writeFileSync(join(root, POINTER_FILENAME), JSON.stringify({ name }, null, 2), 'utf8')
-  } catch (err) {
-    // 迁移失败回落根目录行为,不阻断;失败原因必须可见(静默吞过一次,vitest 里排障半小时)
-    console.warn('[cover] 旧目录迁移失败:', err instanceof Error ? err.message : err)
-  }
-}
-
 function projectsDirOf(root: string): string {
   return join(root, PROJECTS_DIRNAME)
 }
@@ -80,13 +56,12 @@ function readCurrentProject(root: string, projectsDir: string): string | null {
   return null
 }
 
-/** 当前封面项目目录 = projects/<current.json 指向>;无指针/首访时建默认项目(日期时间名)。
- *  迁移失败或 projects 不可用时回落旧的单目录行为(=root 本身)。 */
+/** 当前封面项目目录 = projects/<current.json 指向>;无指针/首访时建日期时间空项目。
+ *  不做旧文件迁移(2026-10-30 二次裁决):旧 cover\ 根目录散文件原地保留。 */
 export function resolveCoverDir(): string {
   if (process.env.TINTIN_COVER_DIR) return process.env.TINTIN_COVER_DIR
   const root = join(resolveWorkspaceDir(), 'cover')
   const projectsDir = projectsDirOf(root)
-  ensureProjectsMigrated(root, projectsDir)
   const current = readCurrentProject(root, projectsDir)
   if (current) return join(projectsDir, current)
   try {
@@ -101,7 +76,6 @@ export function resolveCoverDir(): string {
 export function listCoverProjects(): Array<{ name: string; mtimeMs: number }> {
   const root = join(resolveWorkspaceDir(), 'cover')
   const projectsDir = projectsDirOf(root)
-  ensureProjectsMigrated(root, projectsDir)
   if (!existsSync(projectsDir)) return []
   return readdirSync(projectsDir, { withFileTypes: true })
     .filter((e) => e.isDirectory())
@@ -132,9 +106,7 @@ export function switchCoverProject(rawName: string): { name: string } {
   return { name }
 }
 
-/** 重命名项目(目录改名;当前指针同步跟随)。
- *  注意顺序:必须**先**取当前指针再改名——改名后旧名不存在,readCurrentProject 的
- *  existsSync 守卫会返回 null,指针跟随就被跳过(实撞:改名当前项目后解析回落建新项目)。 */
+/** 重命名项目(目录改名;当前指针同步跟随) */
 export function renameCoverProject(from: string, to: string): { name: string } {
   const root = join(resolveWorkspaceDir(), 'cover')
   const projectsDir = projectsDirOf(root)
@@ -377,8 +349,14 @@ export async function buildLayeredDraft(
     const base = (typeof input.fileName === 'string' && input.fileName.trim()) || `${tpl.id}-draft-${Date.now()}`
     const file = join(outDir, `${base.replace(/[\\/:*?"<>|]/g, '_')}.pcraft`)
 
-    const bgAbs = typeof input.bgImage === 'string' && input.bgImage ? join(pluginRoot, 'public', input.bgImage) : undefined
-    const cmds = draftCommands(tpl.family, p, bgAbs && existsSync(bgAbs) ? bgAbs : undefined)
+    /* 底图解析(2026-10-31 修):素材跟项目后 bgImage 在项目目录,public/ 仅旧素材兜底 */
+    let bgAbs: string | undefined
+    if (typeof input.bgImage === 'string' && input.bgImage) {
+      for (const candidate of [join(outDir, input.bgImage), join(publicDir, input.bgImage)]) {
+        if (existsSync(candidate)) { bgAbs = candidate; break }
+      }
+    }
+    const cmds = draftCommands(tpl.family, p, bgAbs)
 
     const args = ['run', '--new', JSON.stringify({ width: tpl.width, height: tpl.height })]
     for (const c of cmds) args.push('--cmd', c.command, '--params', JSON.stringify(c.params))

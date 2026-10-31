@@ -60,6 +60,7 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
           <div style={{ position: 'absolute', inset: 40, borderRadius: '50%', background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 42%, rgba(203,213,225,0) 72%)' }} />
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)' }}>
             <Img
+              draggable={false}
               src={staticFile(image)}
               style={{
                 width: 540, height: 540, objectFit: 'contain',

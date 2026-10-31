@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinTin 封面会话</title>
+<script>
+  /* 主题先于首绘:封面编辑器恒深色(其画布区 #141416) */
+  document.documentElement.dataset.theme = 'dark';
+</script>
+</head>
+<body>
+<!-- 官方聊天组件的两块宿主(与影片 shell 页 index.html 同构):#root 是会话列,
+     #of-chat-layer 是浮层(菜单/预览;chatLayer() 按 id 找它)。`.of-chat` 类
+     是 chat.css 作用域根(scopeChat 插件把 body/html 规则映射到它)。 -->
+<div id="root" class="of-chat" tabindex="-1"></div>
+<div id="of-chat-layer" class="of-chat" tabindex="-1"></div>
+<script type="module" src="./cover-chat-main.ts"></script>
+</body>
+</html>
