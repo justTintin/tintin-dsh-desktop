@@ -52,9 +52,12 @@ export interface EditorState {
   /** 预览显示开关(2026-10-28:仅编辑器视觉辅助,不进 props、不影响导出) */
   guides: boolean
   canvasGrid: boolean
-  /** 画布缩放(2026-10-31 §2.6 对照 PhotoCraft):1=适合窗口,0.25..4;Ctrl+滚轮/工具条按钮 */
+  /** 画布缩放(2026-10-31 §2.6 对照 PhotoCraft):zoom 相对「适合窗口」倍率(0.25..4);
+   *  fitScale=实测的基础适配比例(视口/画布),总缩放=fitScale×zoom——zoom=1 恒为适合窗口 */
   zoom: number
   setZoom: (z: number) => void
+  fitScale: number
+  setFitScale: (v: number) => void
   setGuides: (v: boolean) => void
   setCanvasGrid: (v: boolean) => void
 }
@@ -149,6 +152,8 @@ export const useEditor = create<EditorState>()(
       canvasGrid: false,
       zoom: 1,
       setZoom: (z) => set({ zoom: Math.min(4, Math.max(0.25, Number.isFinite(z) ? z : 1)) }),
+      fitScale: 1,
+      setFitScale: (v) => set({ fitScale: Number.isFinite(v) && v > 0 ? v : 1 }),
       setGuides: (v) => set({ guides: v }),
       setCanvasGrid: (v) => set({ canvasGrid: v }),
       moveLayer: (id, dir) =>
