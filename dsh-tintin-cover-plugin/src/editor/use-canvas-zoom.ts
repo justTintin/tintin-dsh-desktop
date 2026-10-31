@@ -6,6 +6,9 @@ import React from 'react'
 import { useEditor } from './store'
 import type { TemplateDef } from '../registry'
 
+/** 拖动冻结旗标(跨组件共享:CanvasPanel 拖动中冻结 props 回流与截图轮询;模块级对象,不走 React 状态) */
+export const canvasDragFreeze = { active: false }
+
 export function useCanvasZoom(tpl: TemplateDef, playerWrapRef: React.RefObject<HTMLDivElement>, scrollRef: React.RefObject<HTMLDivElement>): void {
   React.useEffect(() => {
     const el = scrollRef.current

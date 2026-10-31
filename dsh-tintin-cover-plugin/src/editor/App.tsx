@@ -5,9 +5,9 @@ import { Player } from '@remotion/player'
 import React from 'react'
 import { getTemplate } from '../registry'
 import { redo, sanitizeCustomLayers, undo, useEditor } from './store'
-import { useAgentPropsSync, pushChatContextNow, reloadProjectState } from './agent-sync'
-import { useCanvasZoom } from './use-canvas-zoom'
-import { chatFrameRef, iconBtn } from './ui'
+import { canvasDragFreeze, useCanvasZoom } from './use-canvas-zoom'
+import { chatFrameRef, iconBtn, referableValue } from './ui'
+import { CoverChatPanel, pushChatContextNow, reloadProjectState, useAgentPropsSync, useChatContextPush } from './agent-sync'
 import { AssetsPanel, ExportModal, LayersPanel } from './panels'
 import { ServerSettingsModal } from './server-settings'
 import { SkillsModal } from './skills-modal'
@@ -23,7 +23,76 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   const showGuides = useEditor((s) => s.guides)
   const showGrid = useEditor((s) => s.canvasGrid)
   const zoom = useEditor((s) => s.zoom)
+  const fitScale = useEditor((s) => s.fitScale)
+  const scrollRef = React.useRef<HTMLDivElement>(null)
   const setZoom = useEditor((s) => s.setZoom)
+  const selectedLayer = useEditor((s) => s.selectedLayer)
+  /* 拖动吸附参考线:直接 DOM 更新(ref),不走 React 状态——拖动全程零重渲染(2026-10-31 方案 B) */
+  const guideVRef = React.useRef<HTMLDivElement>(null)
+  const guideHRef = React.useRef<HTMLDivElement>(null)
+  const readoutRef = React.useRef<HTMLDivElement>(null)
+  const hostRef = React.useRef<HTMLDivElement>(null)
+  const playerWrapRef = React.useRef<HTMLDivElement>(null)
+  /* 预览-提交分离(2026-10-31 方案 B,对照 PhotoCraft MovePreview):拖动中只改被拖元素的 CSS
+     translate(纯视觉,Remotion 树零重渲染),pointerup 一次性提交 props;死区 3 屏幕px 内=点击。
+     2026-10-31 抖动加固: rAF 合帧(120Hz 指针流→每帧一次 DOM 写)/吸附滞回(防参考线边界反复跳)/
+     拖动中禁原生文本选择/被拖元素提升合成层/智能体 props 轮询在拖动中冻结(见 useAgentPropsSync)。 */
+  const dragRef = React.useRef<
+    | {
+        kind: 'custom' | 'fixed'; layerId: string; pointerId: number;
+        startX: number; startY: number; baseX: number; baseY: number; scale: number;
+        baseLeft: number; baseTop: number; boxW: number; boxH: number;
+        el: HTMLElement | null; active: boolean; curX: number; curY: number;
+        snapX: { at: number; guide: number } | null; snapY: { at: number; guide: number } | null;
+        candsX: { at: number; guide: number }[]; candsY: { at: number; guide: number }[];
+        raf: number; curCX: number; curCY: number;
+      }
+    | null
+  >(null)
+  useCanvasZoom(tpl, playerWrapRef, scrollRef)
+  /** 旋转手柄(2026-10-29 用户裁决:选中的图片层可旋转;自定义层存 layer.rotate,产品图存 styles.rotate)。
+   *  拖动=绕图层中心转,接近 0/±90/180 吸附;旋转中冻结手柄位置(旋转改包围盒,免得手柄跟着漂)。 */
+  const isImageLayer = selectedLayer !== null && (selectedLayer.startsWith('img-') || selectedLayer === 'product')
+  /* 选中轮廓+旋转手柄盒(2026-10-31:常驻边缘框=任何选中图层都有;旋转手柄仅图片层;
+     PhotoCraft 对齐:选中即见边缘,旋转时边缘框保持显示) */
+  const [handleBox, setHandleBox] = React.useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  /* 旋转预览-提交分离(2026-10-31 方案 B,同拖动):拖动中改写被拖层内联 transform 里的 rotate 值
+     (纯视觉),pointerup 一次性提交 props;取消/未变化=还原基 transform。 */
+  const rotRef = React.useRef<{ cx: number; cy: number; a0: number; base: number; id: string; custom: boolean; el: HTMLElement | null; baseTransform: string; curDeg: number } | null>(null)
+  const outlineRef = React.useRef<HTMLDivElement>(null)
+  /** 选中边缘框/旋转手柄盒测量(边缘框=任何选中图层常驻;旋转中冻结;滚动后由 onScroll 重算) */
+  const measureSelBox = (): void => {
+    if (rotRef.current) return // 旋转中冻结:旋转改包围盒,免得边缘框跟着漂
+    if (!selectedLayer || pcRunning) {
+      setHandleBox((prev) => (prev === null ? prev : null))
+      return
+    }
+    const el = hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`)
+    const pr = playerWrapRef.current?.getBoundingClientRect()
+    if (!el || !pr) {
+      setHandleBox((prev) => (prev === null ? prev : null))
+      return
+    }
+    const r = el.getBoundingClientRect()
+    const next = { x: r.left - pr.left, y: r.top - pr.top, w: r.width, h: r.height }
+    // 值不变时回传同一引用,否则每次渲染都 set 新对象 → 无限重渲(React #185,冒烟实测)
+    setHandleBox((prev) => (prev && Math.abs(prev.x - next.x) < 0.5 && Math.abs(prev.y - next.y) < 0.5
+      && Math.abs(prev.w - next.w) < 0.5 && Math.abs(prev.h - next.h) < 0.5 ? prev : next))
+  }
+  React.useLayoutEffect(() => { measureSelBox() })
+  /* 画布缩放(2026-10-31 §2.6 对照 PhotoCraft):Ctrl+滚轮缩放,普通滚轮=滚动看放大细节 */
+  React.useEffect(() => {
+    const wrap = playerWrapRef.current
+    if (!wrap) return
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      const st = useEditor.getState()
+      st.setZoom(st.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1))
+    }
+    wrap.addEventListener('wheel', onWheel, { passive: false })
+    return () => wrap.removeEventListener('wheel', onWheel)
+  }, [])
   const onRotateDown = (e: React.PointerEvent): void => {
     if (!handleBox || !selectedLayer) return
     e.stopPropagation()
@@ -57,7 +126,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (deg < -180) deg += 360
     rot.curDeg = deg
     if (rot.el) rot.el.style.transform = withRotate(rot.baseTransform, deg) // 纯视觉预览,props 零写入
-    showReadoutText(e.clientX + 14, e.clientY + 14, `${deg}°`) // 旋转角度读数(§2.6 P1,对照 Free Transform)
+    showReadoutText(e.clientX + 14, e.clientY + 14, deg + "°") // 旋转角度读数(§2.6 P1,对照 Free Transform)
   }
   const onRotateUp = (e: React.PointerEvent): void => {
     const rot = rotRef.current
@@ -192,13 +261,14 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     })()
   }
   // PhotoCraft 为主(2026-10-27 15:09 裁决):画布 = PhotoCraft 截图轮询
+  const isBusy = (): boolean => dragRef.current?.active === true
   const [pcRunning, setPcRunning] = React.useState<boolean | null>(null) // null=未探测
   const [shot, setShot] = React.useState<string | null>(null)
   React.useEffect(() => {
     if (pcRunning === false) return
     let stop = false
     const tick = async (): Promise<void> => {
-      if (isBusy()) return // 拖动中冻结:props 回流会触发整树重渲(抖动源),拖完下个轮询自然追上
+      if (canvasDragFreeze.active) return // 拖动中冻结:props 回流会触发整树重渲(抖动源),拖完下个轮询自然追上
       try {
         const r = await fetch('/tintin/cover/api/pc/screenshot').then((resp) => resp.json())
         if (!stop && r.ok && r.data) { setPcRunning(true); setShot(`data:image/png;base64,${r.data}`) }
@@ -230,7 +300,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   const showReadout = (clientX: number, clientY: number, dx: number, dy: number): void => {
     showReadoutText(clientX, clientY, `${Math.round(dx)} px, ${Math.round(dy)} px`)
   }
-  /** 通用读数(2026-10-31 §2.6 P1:旋转时显示角度,Δ读数同源) */
+  /** 通用读数(2026-10-31 §2.6 P1:旋转角度读数同源) */
   const showReadoutText = (clientX: number, clientY: number, text: string): void => {
     const el = readoutRef.current
     if (!el) return
@@ -283,7 +353,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       startX: e.clientX, startY: e.clientY, baseX, baseY, scale,
       baseLeft: baseBox ? baseBox.left - baseX : 0, baseTop: baseBox ? baseBox.top - baseY : 0, boxW: baseBox?.w ?? 200, boxH: baseBox?.h ?? 200,
       el: dragEl as HTMLElement | null, active: false, curX: baseX, curY: baseY,
-      snapX: null, snapY: null, raf: 0, curCX: e.clientX, curCY: e.clientY,
+      snapX: null, snapY: null, candsX: [], candsY: [], raf: 0, curCX: e.clientX, curCY: e.clientY,
     }
   }
   const onPointerMove = (e: React.PointerEvent): void => {
@@ -302,6 +372,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       if (Math.hypot(dxs, dys) < 3) return // 死区:手抖不算拖
       drag.active = true
       if (drag.el) { drag.el.style.outline = '2px solid rgba(79,124,255,0.9)'; drag.el.style.willChange = 'translate' } // 提升合成层,预览不重绘整栈
+      canvasDragFreeze.active = true
       // 层间智能吸附候选(激活时一次实测;拖动中其它层静止):其它图层的 左/中/右、上/中/下 线
       { const xs: { at: number; guide: number }[] = []; const ys: { at: number; guide: number }[] = []
         const push = (arr: { at: number; guide: number }[], at: number, guide: number) => { if (!arr.some((c) => Math.abs(c.at - at) < 0.5)) arr.push({ at, guide }) }
@@ -332,8 +403,6 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       const top = drag.baseTop + rawY
       const T = 8 / scale
       const stick = 12 / scale
-      /* 层间智能吸附(2026-10-31 §2.6 P1):候选=画布三线+其它可见图层的 左/中/右(上/中/下) 三线
-         (拖动盒的 左缘/中心/右缘 任一对齐到对方任一线;激活时一次实测,拖动中对方不动故静态) */
       const candsX = [
         { at: 0, guide: 0 }, { at: (tpl.width - drag.boxW) / 2, guide: tpl.width / 2 }, { at: tpl.width - drag.boxW, guide: tpl.width },
         ...(drag.candsX ?? []),
@@ -374,6 +443,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     updateGuides(null, null)
     hideReadout()
     if (drag.el) { drag.el.style.outline = ''; drag.el.style.translate = ''; drag.el.style.willChange = '' }
+    canvasDragFreeze.active = false
     const host = hostRef.current
     if (host) host.style.userSelect = ''
   }
@@ -399,7 +469,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (!drag) return
     endDragVisual(drag) // 丢弃预览:props 未动,元素回原位
   }
-  /** 方向键微调(对照 PhotoCraft nudge):1 画布px/步,Shift=10px;快捷键(§2.6 P1):Ctrl+Z/Shift+Z 撤销重做,Ctrl+0 适合,Ctrl+± 缩放 */
+  /** 方向键微调(对照 PhotoCraft nudge):1 画布px/步,Shift=10px */
   const onCanvasKeyDown = (e: React.KeyboardEvent): void => {
     if (pcRunning) return
     const mod = e.ctrlKey || e.metaKey
@@ -458,8 +528,8 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       ) : (
         <>
           <div ref={playerWrapRef} style={{ position: 'relative', width: '100%', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
-            {/* 滚动层(2026-10-31 画布缩放 §2.6):内容=画布×fitScale×zoom,超出即滚动;对齐工具条/边缘框/旋转柄
-                在 playerWrap 层不随滚动(按实时 rect 定位)。Ctrl+滚轮缩放(锚点=光标,App 级 wheel 监听) */}
+            {/* 滚动层(2026-10-31 画布缩放 §2.6):内容按 zoom 放大,超出即滚动;对齐工具条/边缘框/旋转柄
+                在 playerWrap 层不随滚动(按实时 rect 定位)。Ctrl+滚轮缩放(App 级 wheel 监听) */}
             <div ref={scrollRef} style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', alignItems: zoom > 1 ? 'flex-start' : 'center', justifyContent: zoom > 1 ? 'flex-start' : 'center' }} onScroll={measureSelBox}>
               <div style={{ position: 'relative', width: Math.round(tpl.width * fitScale * zoom), height: Math.round(tpl.height * fitScale * zoom), flexShrink: 0, margin: 'auto' }}>
                 <Player
@@ -521,7 +591,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                 />
               </>
             ) : null}
-            {/* 缩放手柄(2026-10-31 §2.6 P1:选中自定义图片层右下角柄,等比拖拽改宽度) */}
+            {/* 缩放手柄(2026-10-31 §2.6 P1:选中自定义图片层右下角柄,等比拖拽改宽度;预览-提交分离) */}
             {selectedLayer?.startsWith('img-') && handleBox && !pcRunning ? (
               <div
                 onPointerDown={onResizeDown}
@@ -548,8 +618,8 @@ function CanvasSettingsStrip(): React.ReactElement {
   const setGuides = useEditor((s) => s.setGuides)
   const setCanvasGrid = useEditor((s) => s.setCanvasGrid)
   const zoom = useEditor((s) => s.zoom)
-  const fitScale = useEditor((s) => s.fitScale)
   const setZoom = useEditor((s) => s.setZoom)
+  const fitScale = useEditor((s) => s.fitScale)
   const zoomBtn = (label: string, factor: number, titleText: string): React.ReactElement => (
     <button
       onClick={() => setZoom(zoom * factor)}
@@ -619,12 +689,6 @@ function OrientationToggle(): React.ReactElement {
 }
 
 
-/** 会话框(2026-10-28 会话移植,需求文档 §十一):右栏换成 OpenFilm 官方聊天组件
-    (/tintin/cover/chat iframe;真实 ACP agent 会话,令牌旁路驱动 comfygen/编辑器 API)。
-    编辑器侧只剩三件事:挂 iframe(KeepAlive)、推实时上下文(模板+图层取值)、
-    「引用到会话」。agent 改字回流走 props 轮询(useAgentPropsSync)。 */
-
-/** 立即推送当前上下文(模块级取 store 快照,供 iframe load 时机与防抖 effect 共用) */
 /* 项目 tab/打开项目弹层样式(2026-10-30 用户裁决):× 悬停/激活显隐用 :hover 必须
    走样式表(inline 无法表达),一次性注入 */
 let pjStyleInjected = false
@@ -719,7 +783,7 @@ export const EditorApp: React.FC = () => {
   }
   ensurePjStyle()
   useChatContextPush()
-  useAgentPropsSync(() => dragRef.current?.active === true)
+  useAgentPropsSync(() => canvasDragFreeze.active)
   /* 技能管理大弹窗(2026-10-30 用户裁决:形态=视频剪辑 Skill 弹窗;聊天 ▦ 经 postMessage 请求打开) */
   const [showSkills, setShowSkills] = React.useState(false)
   React.useEffect(() => {

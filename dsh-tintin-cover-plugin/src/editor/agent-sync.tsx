@@ -1,10 +1,13 @@
-// agent-sync — 封面编辑器↔会话集成(2026-10-31 方案 B,自 App.tsx 提取付账:千行门禁)。
-// pushChatContextNow=会话上下文推送;reloadProjectState=项目切换状态回读;
-// useAgentPropsSync=agent 改字回流(2s 轮询,origin=agent 才套用;拖动中冻结)。
+// agent-sync — 封面编辑器↔会话集成(2026-10-31 方案 B;2026-11-01 自 App.tsx 提取付账:千行门禁)。
+// pushChatContextNow=会话上下文推送;CoverChatPanel=右栏聊天 iframe 宿主;
+// useChatContextPush=编辑器改动推会话(300ms 防抖);useAgentPropsSync=agent 改字回流(2s 轮询,拖动中冻结)。
 import React from 'react'
 import { getTemplate } from '../registry'
 import { useEditor, sanitizeCustomLayers } from './store'
 import { chatFrameRef, referableValue } from './ui'
+
+
+/** 立即推送当前上下文(模块级取 store 快照,供 iframe load 时机与防抖 effect 共用) */
 function pushChatContextNow(): void {
   const s = useEditor.getState()
   const tpl = getTemplate(s.templateId)
@@ -158,4 +161,4 @@ function useAgentPropsSync(isBusy: () => boolean): void {
   }, [])
 }
 
-export { pushChatContextNow, reloadProjectState, CoverChatPanel, useAgentPropsSync }
+export { pushChatContextNow, reloadProjectState, CoverChatPanel, useAgentPropsSync, useChatContextPush }

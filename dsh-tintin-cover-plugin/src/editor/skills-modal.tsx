@@ -137,25 +137,18 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: 'min(880px, 92vw)', height: '78vh', background: '#1e1e20', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        /* 尺寸=影片 Skill 弹窗同款(2026-10-31 用户裁决: 参考视频剪辑一样大)——
+           min(1200px, 100vw-64px) × min(800px, 100vh-80px), 居中, 圆角, 投影 */
+        style={{ width: 'min(1200px, calc(100vw - 64px))', height: 'min(800px, calc(100vh - 80px))', background: '#1e1e20', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       >
-        {/* 头部:标题 + tab + ＋添加 skill + 搜索(形态=视频剪辑 Skill 弹窗) */}
+        {/* 头部: 标题行(右上角关闭钮=影片同款) + tab 行(右侧=＋添加 skill + 搜索, 影片同排版) */}
         <div style={{ padding: '14px 18px 0', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 16, fontWeight: 800 }}>技能管理</span>
             <span style={{ flex: 1 }} />
-            {addOpen ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <input autoFocus value={addId} placeholder="输入服务端技能 id，如 tintin-image-gen" onChange={(e) => setAddId(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void addById(); if (e.key === 'Escape') setAddOpen(false) }} style={{ ...input, width: 260 }} />
-                <button onClick={() => void addById()} disabled={busy !== '' || !addId.trim()} style={{ ...btn('primary'), flexShrink: 0 }}>安装</button>
-                <button onClick={() => setAddOpen(false)} style={{ ...btn('ghost'), flexShrink: 0 }}>取消</button>
-              </div>
-            ) : (
-              <button onClick={() => { setAddOpen(true); setTab('discover') }} style={{ ...btn('ghost'), flexShrink: 0 }}>＋ 添加 skill</button>
-            )}
-            <input value={query} placeholder="搜索 skill" onChange={(e) => setQuery(e.target.value)} style={{ ...input, width: 200, borderRadius: 999 }} />
+            <button onClick={onClose} title="关闭" style={{ width: 28, height: 28, borderRadius: 8, fontSize: 14, lineHeight: 1, color: '#9a9ba1', background: 'transparent', border: 0, cursor: 'pointer' }}>✕</button>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 10, borderBottom: '1px solid #2c2c30' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 8, borderBottom: '1px solid #2c2c30' }}>
             {([
               ['installed', `已安装（${installed.length}）`],
               ['discover', `发现（${registry.length}）`],
@@ -166,6 +159,17 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                 style={{ padding: '7px 14px', fontSize: 12.5, cursor: 'pointer', background: tab === key ? '#18191d' : 'transparent', color: tab === key ? '#e2e2e6' : '#8a8a90', fontWeight: tab === key ? 700 : 400, border: `1px solid ${tab === key ? '#26272b' : 'transparent'}`, borderBottom: tab === key ? '1px solid #18191d' : '1px solid #2c2c30', borderRadius: '8px 8px 0 0' }}
               >{label}</button>
             ))}
+            <span style={{ flex: 1 }} />
+            {addOpen ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 6 }}>
+                <input autoFocus value={addId} placeholder="输入服务端技能 id，如 tintin-image-gen" onChange={(e) => setAddId(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void addById(); if (e.key === 'Escape') setAddOpen(false) }} style={{ ...input, width: 260 }} />
+                <button onClick={() => void addById()} disabled={busy !== '' || !addId.trim()} style={{ ...btn('primary'), flexShrink: 0 }}>安装</button>
+                <button onClick={() => setAddOpen(false)} style={{ ...btn('ghost'), flexShrink: 0 }}>取消</button>
+              </div>
+            ) : (
+              <button onClick={() => { setAddOpen(true); setTab('discover') }} style={{ ...btn('ghost'), flexShrink: 0, marginBottom: 6 }}>＋ 添加 skill</button>
+            )}
+            <input value={query} placeholder="搜索 skill" onChange={(e) => setQuery(e.target.value)} style={{ ...input, width: 200, borderRadius: 999, marginBottom: 6 }} />
           </div>
         </div>
         {/* 主体滚动区 */}
