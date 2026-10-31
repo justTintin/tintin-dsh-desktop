@@ -20,6 +20,7 @@ function CanvasPanel(): React.ReactElement {
   const setLayerStyleTop = useEditor((s) => s.setLayerStyle)
   const showGuides = useEditor((s) => s.guides)
   const showGrid = useEditor((s) => s.canvasGrid)
+  const zoom = useEditor((s) => s.zoom)
   const selectedLayer = useEditor((s) => s.selectedLayer)
   /* 拖动吸附参考线:直接 DOM 更新(ref),不走 React 状态——拖动全程零重渲染(2026-10-31 方案 B) */
   const guideVRef = React.useRef<HTMLDivElement>(null)
@@ -45,13 +46,17 @@ function CanvasPanel(): React.ReactElement {
   /** 旋转手柄(2026-10-29 用户裁决:选中的图片层可旋转;自定义层存 layer.rotate,产品图存 styles.rotate)。
    *  拖动=绕图层中心转,接近 0/±90/180 吸附;旋转中冻结手柄位置(旋转改包围盒,免得手柄跟着漂)。 */
   const isImageLayer = selectedLayer !== null && (selectedLayer.startsWith('img-') || selectedLayer === 'product')
+  /* 选中轮廓+旋转手柄盒(2026-10-31:常驻边缘框=任何选中图层都有;旋转手柄仅图片层;
+     PhotoCraft 对齐:选中即见边缘,旋转时边缘框保持显示) */
   const [handleBox, setHandleBox] = React.useState<{ x: number; y: number; w: number; h: number } | null>(null)
   /* 旋转预览-提交分离(2026-10-31 方案 B,同拖动):拖动中改写被拖层内联 transform 里的 rotate 值
      (纯视觉),pointerup 一次性提交 props;取消/未变化=还原基 transform。 */
   const rotRef = React.useRef<{ cx: number; cy: number; a0: number; base: number; id: string; custom: boolean; el: HTMLElement | null; baseTransform: string; curDeg: number } | null>(null)
-  React.useLayoutEffect(() => {
-    if (rotRef.current) return
-    if (!selectedLayer || pcRunning || !isImageLayer) {
+  const outlineRef = React.useRef<HTMLDivElement>(null)
+  /** 选中边缘框/旋转手柄盒测量(边缘框=任何选中图层常驻;旋转中冻结;滚动后由 onScroll 重算) */
+  const measureSelBox = (): void => {
+    if (rotRef.current) return // 旋转中冻结:旋转改包围盒,免得边缘框跟着漂
+    if (!selectedLayer || pcRunning) {
       setHandleBox((prev) => (prev === null ? prev : null))
       return
     }
@@ -66,7 +71,21 @@ function CanvasPanel(): React.ReactElement {
     // 值不变时回传同一引用,否则每次渲染都 set 新对象 → 无限重渲(React #185,冒烟实测)
     setHandleBox((prev) => (prev && Math.abs(prev.x - next.x) < 0.5 && Math.abs(prev.y - next.y) < 0.5
       && Math.abs(prev.w - next.w) < 0.5 && Math.abs(prev.h - next.h) < 0.5 ? prev : next))
-  })
+  }
+  React.useLayoutEffect(() => { measureSelBox() })
+  /* 画布缩放(2026-10-31 §2.6 对照 PhotoCraft):Ctrl+滚轮缩放,普通滚轮=滚动看放大细节 */
+  React.useEffect(() => {
+    const wrap = playerWrapRef.current
+    if (!wrap) return
+    const onWheel = (e: WheelEvent): void => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      const st = useEditor.getState()
+      st.setZoom(st.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1))
+    }
+    wrap.addEventListener('wheel', onWheel, { passive: false })
+    return () => wrap.removeEventListener('wheel', onWheel)
+  }, [])
   const onRotateDown = (e: React.PointerEvent): void => {
     if (!handleBox || !selectedLayer) return
     e.stopPropagation()
@@ -295,6 +314,7 @@ function CanvasPanel(): React.ReactElement {
       if (Math.hypot(dxs, dys) < 3) return // 死区:手抖不算拖
       drag.active = true
       if (drag.el) { drag.el.style.outline = '2px solid rgba(79,124,255,0.9)'; drag.el.style.willChange = 'translate' } // 提升合成层,预览不重绘整栈
+      if (outlineRef.current) outlineRef.current.style.display = 'none' // 常驻边缘框让位给拖动轮廓
       const host = hostRef.current
       if (host) host.style.userSelect = 'none'
     }
@@ -421,25 +441,33 @@ function CanvasPanel(): React.ReactElement {
         </>
       ) : (
         <>
-          <div ref={playerWrapRef} style={{ position: 'relative', width: '100%', flex: '1 1 auto', minHeight: 0, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <Player
-              component={tpl.component}
-              inputProps={{ ...props, hiddenLayers }}
-              durationInFrames={1}
-              compositionWidth={tpl.width}
-              compositionHeight={tpl.height}
-              fps={30}
-              style={tpl.height > tpl.width
-                ? { height: '100%', width: 'auto', aspectRatio: `${tpl.width}/${tpl.height}`, borderRadius: 10, overflow: 'hidden', boxShadow: '0 18px 60px rgba(0,0,0,0.5)' }
-                : { width: '100%', maxWidth: 920, maxHeight: '100%', borderRadius: 10, overflow: 'hidden', boxShadow: '0 18px 60px rgba(0,0,0,0.5)' }}
-            />
-            {/* 画布网格(显示开关;编辑器视觉辅助,不进导出) */}
-            {showGrid && !pcRunning ? (
-              <div data-preview-grid style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 40, backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px)' }} />
+          <div ref={playerWrapRef} style={{ position: 'relative', width: '100%', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
+            {/* 滚动层(2026-10-31 画布缩放 §2.6):内容按 zoom 放大,超出即滚动;对齐工具条/边缘框/旋转柄
+                在 playerWrap 层不随滚动(按实时 rect 定位)。Ctrl+滚轮缩放(App 级 wheel 监听) */}
+            <div style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', alignItems: zoom > 1 ? 'flex-start' : 'center', justifyContent: zoom > 1 ? 'flex-start' : 'center' }} onScroll={measureSelBox}>
+              <div style={{ position: 'relative', width: Math.round(tpl.width * zoom), height: Math.round(tpl.height * zoom), flexShrink: 0, margin: 'auto' }}>
+                <Player
+                  component={tpl.component}
+                  inputProps={{ ...props, hiddenLayers }}
+                  durationInFrames={1}
+                  compositionWidth={tpl.width}
+                  compositionHeight={tpl.height}
+                  fps={30}
+                  style={{ width: '100%', height: '100%', borderRadius: 10, overflow: 'hidden', boxShadow: '0 18px 60px rgba(0,0,0,0.5)' }}
+                />
+                {/* 画布网格(显示开关;编辑器视觉辅助,不进导出) */}
+                {showGrid && !pcRunning ? (
+                  <div data-preview-grid style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 40, backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px)' }} />
+                ) : null}
+                {/* 拖动吸附参考线(青色十字;ref 直写,拖动全程零重渲染)——在缩放内容层内,随缩放对齐画布 */}
+                <div ref={guideVRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, background: '#22d3ee', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
+                <div ref={guideHRef} style={{ position: 'absolute', left: 0, right: 0, height: 1, background: '#22d3ee', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
+              </div>
+            </div>
+            {/* 选中边缘框(2026-10-31 §2.6:常驻=任何选中图层都有,旋转时保持;拖动中由拖动轮廓接管) */}
+            {handleBox && !pcRunning ? (
+              <div ref={outlineRef} style={{ position: 'absolute', left: handleBox.x - 2, top: handleBox.y - 2, width: handleBox.w + 4, height: handleBox.h + 4, border: '1.5px solid rgba(79,124,255,0.85)', borderRadius: 4, pointerEvents: 'none', zIndex: 86 }} />
             ) : null}
-            {/* 拖动吸附参考线(青色十字;ref 直写,拖动全程零重渲染) */}
-            <div ref={guideVRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, background: '#22d3ee', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
-            <div ref={guideHRef} style={{ position: 'absolute', left: 0, right: 0, height: 1, background: '#22d3ee', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
             {/* 对齐工具条(选中图层时出现;相对画布六向)。阻断冒泡:否则宿主 onPointerDown 按
                 坐标命中落空 → selectLayer(null) → 工具条随选中态卸载,点击永远无效(实测) */}
             {selectedLayer && !pcRunning ? (
@@ -493,6 +521,15 @@ function CanvasSettingsStrip(): React.ReactElement {
   const showGrid = useEditor((s) => s.canvasGrid)
   const setGuides = useEditor((s) => s.setGuides)
   const setCanvasGrid = useEditor((s) => s.setCanvasGrid)
+  const zoom = useEditor((s) => s.zoom)
+  const setZoom = useEditor((s) => s.setZoom)
+  const zoomBtn = (label: string, factor: number, titleText: string): React.ReactElement => (
+    <button
+      onClick={() => setZoom(zoom * factor)}
+      title={titleText}
+      style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', fontSize: 13, lineHeight: 1, cursor: 'pointer' }}
+    >{label}</button>
+  )
   return (
     <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 14, padding: '8px 14px', background: '#141416', borderBottom: '1px solid #2c2c30' }}>
       <OrientationToggle />
@@ -505,6 +542,16 @@ function CanvasSettingsStrip(): React.ReactElement {
         <input type="checkbox" checked={showGrid} onChange={(e) => setCanvasGrid(e.target.checked)} style={{ accentColor: '#4f7cff' }} />
         画布网格
       </label>
+      {/* 画布缩放(2026-10-31 §2.6 对照 PhotoCraft):Ctrl+滚轮同款,按钮=无滚轮入口;点百分比=复位适合窗口 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        {zoomBtn('−', 1 / 1.25, '缩小画布')}
+        <button
+          onClick={() => setZoom(1)}
+          title="复位为适合窗口"
+          style={{ minWidth: 46, height: 24, borderRadius: 6, border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', fontSize: 11, cursor: 'pointer' }}
+        >{Math.round(zoom * 100)}%</button>
+        {zoomBtn('＋', 1.25, '放大画布')}
+      </div>
       <span style={{ flex: 1 }} />
       {/* 撤销移到顶条右端(2026-10-29 用户裁决),原右栏底部入口撤销;提示文字删除 */}
       <button
