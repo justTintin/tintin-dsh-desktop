@@ -24,6 +24,7 @@ const TINTIN_WORKSPACE_GLOBS = [
   'dsh-tintin-ops-bundle',
   'dsh-tintin-browser',
   'dsh-tintin-cover-plugin',
+  'dsh-tintin-shared',
   'dsh-plugin-desktop-tintin',
 ]
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.vue'])

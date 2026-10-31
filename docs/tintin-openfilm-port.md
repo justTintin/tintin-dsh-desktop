@@ -178,9 +178,15 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | 注入 | 产品资料结构化文本(品牌·型号·品类·货号 + 性能参数 + 核心卖点逐条)以粘贴事件写入官方 composer 输入框(Lexical 原生接住), 即 @ 引用形态 |
 | 数据 | 主进程代理 GET /api/product-library/search?q&limit 与 /items/{id}(实测顶层 items/item) |
 
-## 11. 角色智能体名册(2026-10-24 实现; **2026-10-25 退役**, 见下)
+## 11. 角色智能体名册(2026-10-24 实现; **2026-10-25 退役**, 见下; **2026-10-30 以「TinTin智能体」形态部分恢复**)
 
 > **退役(2026-10-25 用户裁决)**: 角色是**服务端定义的智能体资产**, 客户端不使用服务端定义的智能体 —— 移除 composer 的角色选择器、本地预设装配与 `system-prompt` 人设补丁; 智能体以 acp bundle 默认人设运行, 专业分工由服务端能力(MCP 工具)承载。`film-agent.patch.yml` 单文件(模型路由+MCP 会话声明)。
+
+> **部分恢复(2026-10-30 用户裁决, 当日两改: 先「视频生成」后定稿「TinTin智能体」)**: 官方 agent 菜单名册(ModelPopover, 非注入式角色选择器)新增 `tintin-agent`「**TinTin智能体**」行并**置首** —— 名册首个 ready 行即默认, 默认角色=TinTin智能体; deepseek(编导)行保留可手选。与 10-25 退役的区别: 角色归**桌面端所有**(非服务端智能体资产), 证据类=用户裁决。实现:
+> - `film-tintin-agent.patch.yml`(按角色分文件): 模型路由同编导 —— 底层仍 deepseek-v4-flash, 但**显示名=「TinTin智能体」**, 选择器按钮与模型行因此显示角色名; 叠 `system-prompt` personaPrefix 人设: **调度服务端子智能体** —— 视频生成(create_video)/图片生成(create_image, t2i+cover)/音乐生成(create_music)/音频生成(create_audio kind=sfx)/口播生成(create_audio kind=tts, sample_id 音色)/数字人(create_digital_human, image+lipsync), 异步经 task_status_unified 轮询, 产物 curl 下载进项目 `assets/tintin/`(vid-/img-/bgm-/sfx-/vo- 命名)并在回复里报告路径; 生成无关请求引导切编导;
+> - `FilmAgentManager` 按 `角色:项目` 分键会话, 项目记最近角色; 角色切换=人设不同=重建会话; home 分目录(`film-agent-home`/`film-tintin-agent-home`); `probe` 按角色起临时会话取选项;
+> - 聊天端: `tintin-resources/src/agent-definitions.mjs` 登记 `tintin-agent`(持久化选择合法); 选择器持久键升 `openfilm.local-agents.v3`(一次性重置旧默认, 用户可再选并记住); `optionLabel`/`agentModelSummary`/`rowChoices` 拍平 ACP 会话上报的 **provider 分组嵌套**模型选项(修根因: 显示名在嵌套层, 此前永远落空 → 按钮显示裸模型 id `deepseek-v4-flash`); `tintin-agent` 图标=lucide Bot, Studio 设置页未知 id 走字母方块兜底(原生已有);
+> - 服务端工具箱实证(2026-10-30 /mcp tools/list, **现为 7 工具**): create_video(comfygen t2v, 1~10s, 1080p 单卡独占)/create_image(t2i+cover)/create_music(MusicGen 同步)/create_audio(sfx|tts 同步)/create_digital_human(image|lipsync, base64)/task_status_unified/server_health; 影片会话经 mcpServers 声明已挂(2026-10-25 起)。
 
 - 角色 = TinTin 角色预设(`dsh-tintin-bundle/presets/`:tintin-assistant 总助手、tintin-director 编导、tintin-producer 制作、tintin-qc 质检、tintin-librarian 素材库),与主应用同源(每角色的 `preset.yml` 元数据 + `agent.cordis.yml` 组合,persona 前缀即角色人设);
 - 影片智能体按角色生成**分角色补丁**(`<channelHome>/tintin/film-agent-<role>.patch.yml`):模型路由 + **persona 前缀替换**(读取角色预设的 persona 块,原样进补丁,与主应用文本一致);无角色时用默认补丁;

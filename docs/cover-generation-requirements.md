@@ -482,3 +482,25 @@ POST /tintin/cover/api/acp/chat-sessions|chat-turn|chat-attachment|chat-ref-imag
 | 安装版 / 菜单空 | staging 漏同步 skills/(stage.mjs 从未拷贝) | stage.mjs 同步 skills/;路由兜底内置 cover 技能条目 |
 
 附:PoC 产物 `D:\Project\cover-demo\out\{cover,mouse-cover,video-cover}.png`;渲染命令样例见 `cover-demo/README`(待补)。
+
+## 十三、会话与面板修订(2026-10-30 用户裁决)
+
+1. **默认智能体=TinTin智能体**:封面会话对外身份统一「TinTin智能体」——补丁首个模型的显示名即角色名(选择器按钮/模型行显示角色名而非裸模型 id,同影片侧做法;路由与其余模型行不动);名册/状态显示名同步去空格。composer 的 🖼/🤖 模式切换按钮(mode toggle button)保留为「直连生图」可选开关,但**默认态改为 TinTin智能体 Agent 会话**(同日早先「默认图片生成」的裁决被本条推翻)。
+2. **素材/图层标题栏字体对齐项目 tab**:fontSize 11→11.5、色 #8b8b88→#e8e8e6(图层标题并去字距),与顶部 tab 项目名同字体观感。
+3. **装饰层文案可编辑**:品牌条/栏目角标/角标等 graphic 层,凡其 props 键取值为字符串(brand/subTag/badge),图层面板选中即出现单行文案编辑器(改字即改画布);纯装饰无 prop 的层(网格纹理等)仍只有 隐藏/层级 两项。
+4. **切项目素材即刷新(方案 1)**:素材横带挂项目纪元 key(`<AssetsPanel key={projectEpoch} />`),切换/新建/改名项目即重挂重拉——此前仅靠 3 秒轮询,切完最慢 3 秒才出新项目素材;轮询保留为兜底。
+5. **选择器图标=TinTin智能体(机器人标)**:封面名册/状态 id 从 `deepseek` 切到 `tintin-agent`(聊天壳已登记,ChatAgentIcon 映射 lucide Bot)——按钮呈「🤖 TinTin智能体」,不再出现 deepseek 鲸鱼标;会话协议与 id 无关,驱动不变。
+6. **封面会话 MCP 挂载同步修复(2026-10-30)**:rc.2 的 acp 路径无视 session/new 的 mcpServers 参数(实证零连接)——cover 补丁同样补 `- insert:` 的 dsh-mcp-client 行(进程级挂载, 工具名 mcp__tintin-server__*), session 参数留空数组(schema 必需)。
+7. **素材条「打开目录」图标放大(2026-10-30)**:📁 按钮 13px/22px → 18px/30×30 居中(与 40px 头行匹配),色提亮。
+8. **导入按钮图标改上传(2026-10-30)**:素材条「导入」按钮 ⎘ → feather upload SVG(托盘+上箭头, 12px currentColor);空态占位与提示文案同步去 ⎘。
+9. **模式切换按钮删除(2026-10-30)**:composer「直连生图/Agent」切换钮(产品图标左侧机器人)整组移除 —— 会话固定走 TinTin智能体,prompt 直连旁路(直出底图)随该按钮一并删除;生成需求统一由智能体经服务端工具箱处理。
+10. **直连旁路服务端实现同步删除(2026-10-30)**:`/bg-apply`、`/ref-save` 路由下线(唯一消费方=已删旁路);`/generate-background` 保留(编辑器 AI 生成底图),`/generate-product` 保留(智能体技能的产品图重绘);顺带修正 tintin-cover-acp.test 的既有断言漂移(自动重启错误文案,前缀匹配)。
+11. **握手退出竞速(2026-10-31)**:统一日志实证封面 agent 子进程在 10:43-11:01 反复秒退(18+ 条 exit、wasReady=false、stderr 空、原生码被脱敏)——崩溃窗口内发送,轮次在已置空的连接上抛 TypeError。加固=initialize/session.resume/session.new 三个握手请求与 exitWaiter 竞速,进程死亡立刻报明确错误而非永挂;窗口已自愈(同命令+真实 cwd/home/补丁复现全存活,符合新包安装后 AV 拦截窗口前科)。
+12. **素材条行高固定(2026-10-31)**:切项目抖动根因=行高内容驱动(空态幽灵格 128 / 有内容格 ≈148 来回跳)。修=行容器定高 150(三态同高),幽灵格随齐 148,提示文案只在确认加载完成且确为空时出现(加载中不闪文案)。
+13. **顶栏按钮序(2026-10-31)**:编辑器右上按钮组改为 设置(⚙) → PhotoCraft → 导出。
+14. **素材条接受网页图拖入(2026-10-31)**:原守卫只认 File 载荷,从浏览器/网页拖图(载荷只有 text/uri-list)显示禁用光标。修=dragover/drop 同时接受 Files 与 text/uri-list;新增 `/tintin/cover/api/upload-url`(主进程侧拉取免页面 CORS,三写+项目对齐+留痕与 upload-image 同口径),命名 url-<时间戳>.<扩展>。
+15. **PhotoCraft 打开空文档修复(2026-10-31)**:根因=pc/launch 只裸启动不装内容。修=编辑器送当前 templateId+props → 主进程先构建图层底稿(.pcraft, buildLayeredDraft;底图解析修为项目目录优先/public 兜底) → GUI 随文档路径启动(实测 GUI 接受文档参数,document.inspect 见全部图层);构建失败如实报错不开空窗。launchApp 增 docPath 参数。
+16. **素材右键菜单(2026-10-31)**:与视频剪辑素材右键同款——添加为图层(替换原「移动到」位)/在对话中引用/在文件资源管理器中显示(explorer /select 定位文件)/复制路径(绝对路径)/收藏(按项目 localStorage,置顶+★角标)/删除(仅删项目目录内文件;public/ 三写位跨项目共享不动)。原格子悬停「＋图层/@引用」按钮删除,功能并入菜单。新路由 `/delete-asset`(裸文件名防穿越);reveal 扩展 `file` 参数。收藏排序置顶。
+17. **滚动条与光标(2026-10-31)**:编辑器页全域注入会话框同款细滚动条(9px/透明轨道/圆角 thumb,取自 chat.css Thin scrollbars,变量带回退);素材格光标 grab→default(箭头)。
+18. **满条拖入修复(2026-10-31)**:格子铺满后光标落点=素材格,接受逻辑只在容器=部分路径被拒。修=拖放接受(dragover/drop)抽为共享处理并同挂到每个素材格(文件/URI 载荷照收,内部素材拖拽照旧忽略,格上 stopPropagation 防双导)。
+19. **导入跟激活 tab(2026-10-31)**:素材条列表与导入落盘此前跟随服务端指针项目(active tab 切换后两者可能脱节=导入「成功却不显示」)。修=acp/files 与 upload-image 增加 project 显式参数(素材条传激活 tab 项目名,裸名防穿越),列表/落盘跟 tab 走;上传的项目落盘失败不再静默吞(原三写位成功即假成功)——如实返回错误。

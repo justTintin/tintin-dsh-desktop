@@ -20,10 +20,11 @@
     "dsh-tintin-ops-bundle",
     "dsh-tintin-browser",
     "dsh-tintin-cover-plugin",
+    "dsh-tintin-shared",
     "dsh-plugin-desktop-tintin"
   ],
   "resolutions": {
-    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.1.0-desktop.c64c3f67ee3b2.r2e406d2a.tgz",
+    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.1.0-desktop.c46f5479651eb.r2e406d2a.tgz",
     "open@npm:11.0.1": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
     "open@npm:^11.0.0": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
     "open@npm:^11.0.2": "patch:open@npm%3A11.0.4#./patches/open@11.0.4.patch",
@@ -723,7 +724,7 @@
     "@deepseek-ai/schemastery": "3.18.5",
     "@deepseek-ai/cosmokit": "1.8.6",
     "@deepseek-ai/cordis": "4.0.5",
-    "dshmarket@npm:1.73.5": "patch:dshmarket@npm%3A1.73.5#./.yarn/patches/dshmarket-desktop.patch"
+    "dshmarket@npm:1.73.6": "patch:dshmarket@npm%3A1.73.6#./.yarn/patches/dshmarket-desktop.patch"
   },
   "dependenciesMeta": {
     "@deepseek-ai/dsh-subprocess-local": {
@@ -757,7 +758,7 @@
   "scripts": {
     "build": "yarn market:prepare && yarn workspace dsh-community-market build && yarn workspace dsh-plugin-desktop build && yarn workspace dsh-plugin-desktop-beta build && yarn workspace dsh-desktop-next build",
     "typecheck": "yarn workspace dsh-plugin-desktop typecheck && yarn workspace dsh-plugin-desktop-beta typecheck && yarn workspace dsh-community-market typecheck && yarn workspace dsh-desktop-next typecheck",
-    "test": "yarn workspace dsh-tintin-bundle test && yarn workspace dsh-tintin-browser test && yarn workspace dsh-tintin-media-bundle test && yarn workspace dsh-tintin-creation-bundle test && yarn workspace dsh-tintin-ops-bundle test && yarn workspace dsh-plugin-desktop test && yarn workspace dsh-plugin-desktop-beta test && yarn workspace dsh-community-market test && yarn workspace dsh-desktop-next test",
+    "test": "yarn workspace dsh-tintin-bundle test && yarn workspace dsh-tintin-browser test && yarn workspace dsh-tintin-media-bundle test && yarn workspace dsh-tintin-creation-bundle test && yarn workspace dsh-tintin-ops-bundle test && yarn workspace dsh-tintin-shared test && yarn workspace dsh-plugin-desktop test && yarn workspace dsh-plugin-desktop-beta test && yarn workspace dsh-community-market test && yarn workspace dsh-desktop-next test",
     "test:bilingual-docs": "node --test scripts/bilingual-docs.test.mjs",
     "check:bilingual-docs": "yarn test:bilingual-docs && node scripts/verify-bilingual-docs.mjs",
     "test:architecture-gates": "node --test scripts/market-dependency-direction.test.mjs",
