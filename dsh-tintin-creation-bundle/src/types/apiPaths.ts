@@ -77,6 +77,14 @@ export const API_PATHS = {
     // 返回约 10 种文案写法（2026-10-03 用户裁决），platforms=平台字典（下拉数据源）
     voiceover: '/copywriting/voiceover',
     platforms: '/copywriting/platforms',
+    // 写法字典（2026-10-30 创作模式口播选项行：痛点式/开箱实测式…，name 入 form 字段）
+    formulas: '/copywriting/formulas',
+  },
+  generate: {
+    // 真生成语义端点（2026-10-30 整改对齐：创作模式图片/视频类型直出——
+    // prompt≤2000+aspect 可选 → {task_id, poll}；参考图字段服务端暂不消费）
+    image: '/generate/image',
+    video: '/generate/video',
   },
   // TTS 统一入口（/indextts/tts，IndexTTSRequest：text 必填，engine/sample_id 可选——
   // 客户端默认 voxcpm=2026-09-28 用户裁决，整段直发不拆句）：仿视频口播配音
@@ -131,6 +139,8 @@ export const API_PATHS = {
   tasks: {
     unifiedList:            '/tasks/unified',
     unifiedItem:            (id: string) => `/tasks/unified/${id}`,
+    // 生成任务取消（2026-10-30 创作模式真生成任务卡；POST {task_ids:[…]}）
+    batchCancel:            '/tasks/batch_cancel',
     item:                   (id: string) => `/tasks/${id}`,
     itemResult:             (id: string) => `/tasks/${id}/result`,
   },

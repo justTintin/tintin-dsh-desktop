@@ -5,8 +5,9 @@
      设备码登录引导（loginHeadless 取材料 → 用户网页授权 → loginCheck 收尾，
      2026-10-25 实测流程）。池状态归父层：只 emit change/notice，不持偏好。 -->
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getTintin } from '../composables/creationServer'
+import { TinIcon } from './tinIcons'
 import {
   CREATION_BACKENDS,
   backendLabel,
@@ -23,13 +24,20 @@ const emit = defineEmits<{
   notice: [text: string, ok: boolean]
 }>()
 
-/* ── 下拉菜单（点一次开、再点关，同 2026-10-17 菜单裁决口径） ── */
+/* ── 下拉菜单（点一次开、再点关 + 点击外部收起，同 2026-10-30 菜单口径） ── */
 const menuOpen = ref(false)
 function toggleMenu(): void {
   if (props.disabled) return
   menuOpen.value = !menuOpen.value
   if (menuOpen.value) void refreshStatus()
 }
+function onDocPointerDown(e: PointerEvent): void {
+  const t = e.target as HTMLElement | null
+  if (t?.closest('.backend-root')) return
+  menuOpen.value = false
+}
+onMounted(() => document.addEventListener('pointerdown', onDocPointerDown))
+onUnmounted(() => document.removeEventListener('pointerdown', onDocPointerDown))
 
 /* ── CLI 状态（菜单打开/操作后拉取；不阻塞菜单渲染） ── */
 interface DreaminaStatus {
@@ -123,8 +131,9 @@ async function logout(): Promise<void> {
 
 <template>
   <span class="backend-root">
-    <button type="button" class="toolbar-item is-select" :class="{ 'is-open': menuOpen }" :disabled="disabled" @click="toggleMenu">
-      <i class="ti">✦</i>{{ backendLabel(backend) }}<i class="caret">▾</i>
+    <button type="button" class="toolbar-item" :class="{ 'is-open': menuOpen }" :disabled="disabled" @click="toggleMenu">
+      <TinIcon icon="backend" />
+      <span>{{ backendLabel(backend) }}</span><span class="spark">✦</span>
     </button>
     <div v-if="menuOpen" class="menu menu-backend">
       <div class="menu-title">发送后端</div>
@@ -169,13 +178,13 @@ async function logout(): Promise<void> {
 
 <style scoped>
 .backend-root { position: relative; display: inline-flex; }
-/* pill/菜单与宿主 composer 工具行同语言（tokens 作用域由根视图提供） */
-.toolbar-item { display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent; color: var(--primary); font: inherit; font-size: 13px; font-weight: 600; padding: 4px 7px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
-.toolbar-item:hover { background: var(--surface); }
-.toolbar-item.is-open { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent); }
+/* 即梦非 Agent pill 口径（同 CreationGenParams）：中性灰白+细线图标+蓝 ✦ 角标 */
+.toolbar-item { display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent; color: var(--muted-foreground); font: inherit; font-size: 13px; font-weight: 500; padding: 4px 7px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.toolbar-item:hover { color: var(--foreground); background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+.toolbar-item.is-open { color: var(--foreground); background: color-mix(in srgb, var(--primary) 10%, transparent); }
 .toolbar-item:disabled { opacity: 0.55; cursor: not-allowed; }
-.toolbar-item .ti { font-style: normal; font-size: 13px; }
-.toolbar-item .caret { font-style: normal; font-size: 10px; opacity: 0.8; }
+.toolbar-item .ti { width: 14px; height: 14px; display: block; opacity: 0.9; }
+.spark { color: var(--primary); font-size: 10px; line-height: 1; margin-left: 1px; }
 .menu { position: absolute; left: 0; top: calc(100% + 8px); z-index: 40; width: 300px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-3); overflow: hidden; text-align: left; }
 .menu-title { padding: 10px 14px 2px; font-size: 12px; color: var(--muted-foreground); }
 .menu-list { padding: 6px; }

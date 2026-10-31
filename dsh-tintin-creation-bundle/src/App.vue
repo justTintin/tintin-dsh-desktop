@@ -1,14 +1,16 @@
 <!-- CreationStudio.vue — 创作模式（2026-10-16，按即梦真身逆向重建）
      逆向依据：即梦桌面端 1.0.53 运行态 CDP 提取（composer DOM/技能市场字典/
-     创作类型下拉「Agent 模式/图片生成/视频生成/音乐生成/音频生成/数字人/动作
-     模仿」），视觉基准 D:/tmp/jimeng-entry-reference.png；字典条目=即梦技能
-     市场真实数据（creationStudioLogic.CREATION_CATALOG）。
-     功能后端=本服务端（用户裁决）：Agent 模式→/llm/chat/completions（已接）、
-     口播技能→/copywriting/voiceover（已接）；图片/视频等类型输出该类型的
-     创作提示词方案（媒体生成服务端对接见需求文档 P4）。 -->
+     创作类型下拉），字典条目=即梦技能市场真实数据（creationStudioLogic）。
+     功能后端=本服务端（2026-10-30 服务端整改对齐）：Agent 模式→
+     /llm/chat/completions；口播技能→/copywriting/voiceover 全契约
+     （skill_id/formula/duration_s/platform，字典端点 /copywriting/*）；
+     图片/视频生成→真生成 POST /generate/image|video + /tasks/unified 轮询，
+     双后端切换（TinTin 服务 ⇄ 即梦 CLI，CreationBackend/CreationCliTask）；
+     其余类型维持该类型的创作提示词方案。技能市场弹窗在 CreationMarket 组件。 -->
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useHostDark } from './composables/hostTheme'
+import { TinIcon } from './components/tinIcons'
 // 服务端桥与产品库访问：创作包独立域（creationServer），URL 拼装只在本层
 import {
   fetchProducts,
@@ -16,13 +18,11 @@ import {
   fetchVoiceoverCandidates,
   getTintin,
   searchErrorText,
+  submitGenerate,
   type PickerItem,
   type VoiceoverCandidate,
 } from './composables/creationServer'
 import {
-  BUILTIN_CREATION_SKILLS,
-  CREATION_CATALOG,
-  CREATION_CATALOG_CATEGORIES,
   CREATION_TYPES,
   type CreationCatalogEntry,
   type CreationSkill,
@@ -42,20 +42,31 @@ import {
   llmTextFromResponse,
   loadSkills,
   loadCreationPrefs,
-  newSkillId,
   resetSkills,
   saveSkills,
   saveCreationPrefs,
-  TOOL_OPTIONS,
   toolLabel,
   CREATION_RATIOS,
   type CreationPrefs,
 } from './composables/creationStudioLogic'
+// 真生成（2026-10-30 整改对齐）：双后端字典/CLI 组包 + 服务端路由/请求体纯函数
+import {
+  buildDreaminaPayload,
+  type CreationBackendId,
+} from './composables/creationDreaminaLogic'
+import {
+  buildGenerateBody,
+  buildGenerationPrompt,
+  resolveSendRoute,
+  truncateServerError,
+  type GenerateKind,
+} from './composables/creationGenerateLogic'
 // 上传引用池：独立域（缩略图行 + 可能@的菜单 + 对话框），逻辑见 creationReferenceLogic
 import CreationReferences from './components/CreationReferences.vue'
 import {
   type CreationReference,
   atQueryFrom,
+  isImageRef,
   mergeReferencePaths,
   referencesBlock,
 } from './composables/creationReferenceLogic'
@@ -70,12 +81,34 @@ import {
   saveCreationHistory,
 } from './composables/creationHistoryLogic'
 import { SERVER_SKILL_ID_PREFIX } from './composables/skillManagerLogic'
+// 自包含子组件（独立域不与宿主交织）：双后端切换/服务端生成任务卡/口播选项/
+// 即梦 CLI 任务条/技能市场弹窗（2026-10-30 自本文件原样提取，行为不变）
+import CreationBackend from './components/CreationBackend.vue'
+import CreationGenerateTask from './components/CreationGenerateTask.vue'
+import CreationVoiceoverOptions from './components/CreationVoiceoverOptions.vue'
+import CreationCliTask from './components/CreationCliTask.vue'
+import CreationMarket from './components/CreationMarket.vue'
+import CreationPrefsMenu from './components/CreationPrefsMenu.vue'
+import CreationGenParams from './components/CreationGenParams.vue'
+import CreationSubjectCard from './components/CreationSubjectCard.vue'
 
 /* 主题跟随宿主（2026-10-18 报障修正）：原生有效暗色=body[data-ds-dark-theme]
    （应用内偏好可≠系统偏好），旧 html.dark 链原生从不打——useHostDark 判定
    +监听。缺了 .tintin-media-scope 令牌作用域，--card/--border 等全部未定义，
    输入会话卡片会整体透明——2026-10-16 用户报障「没有输入框」的根因之一。 */
 const isDark = useHostDark()
+/** 即梦同款交互（2026-10-30 用户纠偏）：点击下拉外部/ESC 一律收起。
+ *  排除域=菜单本体与各触发容器（工具行/后端 pill/参数 pill/口播选项/市场） */
+function onDocPointerDown(e: PointerEvent): void {
+  const t = e.target as HTMLElement | null
+  if (t?.closest('.menu, .toolbar, .backend-root, .gp-root, .vo-row, .market-mask')) return
+  closeComposerMenus()
+}
+function onDocKeyDown(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return
+  closeComposerMenus()
+  marketOpen.value = false
+}
 onMounted(() => {
   skills.value = loadSkills()
   // 会话历史恢复（2026-10-18 用户裁决）：重载后最近一轮结果自动回浮层
@@ -84,16 +117,19 @@ onMounted(() => {
   if (last?.resultText) { previewText.value = last.resultText; previewOpen.value = true }
   // 技能管理「＋ 添加 skill」跨视图跳转（2026-10-18 改版）：打开技能市场
   window.__tintinBus?.on('tintin:open-market', () => openMarket())
+  document.addEventListener('pointerdown', onDocPointerDown)
+  document.addEventListener('keydown', onDocKeyDown)
+})
+onUnmounted(() => {
+  document.removeEventListener('pointerdown', onDocPointerDown)
+  document.removeEventListener('keydown', onDocKeyDown)
 })
 
-/* ── 技能预设（芯片行=用户已添加；字典=内置市场目录） ── */
+/* ── 技能预设（芯片行=用户已添加；字典=内置市场目录；市场弹窗在 CreationMarket） ── */
 const skills = ref<CreationSkill[]>([])
 function persist(): void { saveSkills(skills.value) }
-function isAdded(entry: CreationCatalogEntry): boolean {
-  return skills.value.some((s) => s.name === entry.name)
-}
 function toggleCatalogSkill(entry: CreationCatalogEntry): void {
-  if (isAdded(entry)) {
+  if (skills.value.some((s) => s.name === entry.name)) {
     skills.value = skills.value.filter((s) => s.name !== entry.name)
     if (selectedSkillId.value === `skill-${entry.id}`) selectedSkillId.value = null
   } else {
@@ -108,6 +144,12 @@ const selectedSkillId = ref<string | null>(null)
 const subjects = ref<CreationSubject[]>([])
 const creationTypeId = ref('agent')
 const creationTypeLabel = computed(() => CREATION_TYPES.find((t) => t.id === creationTypeId.value)?.label ?? 'Agent 模式')
+/* ── 即梦双形态（2026-10-30 纠偏）：技能体系仅 Agent 形态；非 Agent=生成参数工具行 ── */
+const isAgentMode = computed(() => creationTypeId.value === 'agent')
+const generationMode = computed<'image' | 'video' | null>(() =>
+  creationTypeId.value === 'image' ? 'image' : creationTypeId.value === 'video' ? 'video' : null)
+const genResolution = ref('')
+const genDuration = ref(0)
 const selectedSkill = computed<CreationSkill | null>(
   () => skills.value.find((s) => s.id === selectedSkillId.value) ?? null,
 )
@@ -124,26 +166,48 @@ const filteredClientSkills = computed(() => filteredSkills.value.filter((s) => !
 //    状态持久化，P4 媒体生成对接后作为生成参数消费）──
 const autoMenuOpen = ref(false)
 const prefs = ref<CreationPrefs>(loadCreationPrefs())
-/** 菜单开关统一 toggle（2026-10-17 用户裁决：点一次开、再点关、再点开） */
-function openAutoMenu(): void {
-  if (autoMenuOpen.value) { autoMenuOpen.value = false; return }
+/** 五菜单互斥收口（工具行触发/输入触发/外部点击共用，2026-10-30 收敛） */
+function closeComposerMenus(): void {
+  autoMenuOpen.value = false
   typeMenuOpen.value = false
   skillMenuOpen.value = false
   subjectMenuOpen.value = false
   atMenuOpen.value = false
+}
+/** 菜单开关统一 toggle（2026-10-17 用户裁决：点一次开、再点关、再点开） */
+function openAutoMenu(): void {
+  if (autoMenuOpen.value) { autoMenuOpen.value = false; return }
+  closeComposerMenus()
   autoMenuOpen.value = true
 }
 function setPrefs(patch: Partial<CreationPrefs>): void {
   prefs.value = { ...prefs.value, ...patch }
   saveCreationPrefs(prefs.value)
 }
+
+/* ── 真生成双后端 + 口播选项 + 生成任务态（2026-10-30 服务端整改对齐）── */
+function onBackendChange(id: CreationBackendId): void {
+  setPrefs({ backend: id })
+  noticeOk.value = true
+  notice.value = id === 'jimeng-cli'
+    ? '已切到即梦 CLI：图片/视频生成本机直出（消耗即梦积分）。'
+    : '已切回 TinTin 服务后端。'
+}
+function onChildNotice(text: string, ok: boolean): void {
+  if (ok) { noticeOk.value = true; notice.value = text } else failNotice(text)
+}
+/** 口播上下文选项（字典在子组件拉服务端；'' =自动档不携带） */
+const voiceoverPlatform = ref('')
+const voiceoverFormula = ref('')
+const voiceoverDuration = ref(30)
+const showVoiceoverOptions = computed(() => effectiveBackend(selectedSkill.value) === 'voiceover')
+/** 同一时刻至多一个在途生成任务（服务端/即梦 CLI 共用 generating 闸） */
+const generateTask = ref<{ taskId: string; kind: GenerateKind } | null>(null)
+const cliTask = ref<{ submitId: string; command: string; kind: GenerateKind } | null>(null)
 function openSkillMenu(): void {
   if (skillMenuOpen.value) { skillMenuOpen.value = false; return } // toggle（2026-10-17 用户裁决）
+  closeComposerMenus()
   skillQuery.value = ''
-  autoMenuOpen.value = false
-  atMenuOpen.value = false
-  typeMenuOpen.value = false
-  subjectMenuOpen.value = false
   skillMenuOpen.value = true
 }
 function onInputChange(e?: Event): void {
@@ -152,11 +216,9 @@ function onInputChange(e?: Event): void {
   // 菜单随按键反复唤起；@ 菜单=上传引用+产品库混合（产品侧同步搜产品库）。
   const el = e?.target as HTMLTextAreaElement | null
   const caret = el && typeof el.selectionStart === 'number' ? el.selectionStart : input.value.length
-  autoMenuOpen.value = false
-  typeMenuOpen.value = false
-  subjectMenuOpen.value = false
+  closeComposerMenus()
   const token = activeTokenAt(input.value, caret)
-  if (token.startsWith('/')) {
+  if (token.startsWith('/') && isAgentMode.value) {
     atMenuOpen.value = false
     skillQuery.value = token.slice(1)
     skillMenuOpen.value = true
@@ -182,18 +244,32 @@ function toggleSkillByName(name: string): void {
   if (hit) chooseSkill(hit)
 }
 
+/* ── 中文输入法组词回车不发送（isComposing/229 双判定）；搜索框回车同理（2026-10-30） */
+function onEditorEnter(e: KeyboardEvent): void {
+  if (e.isComposing || e.keyCode === 229) return
+  void send()
+}
+function chooseFirstFilteredSkill(): void {
+  const hit = filteredSkills.value[0]
+  if (hit) chooseSkill(hit)
+}
+function onSubjectSearchEnter(e: KeyboardEvent): void {
+  if (e.isComposing || e.keyCode === 229) return
+  addSubjectFromQuery()
+}
+
 /* ── 创作类型下拉（即梦「Agent 模式」select 同款字典） ── */
 const typeMenuOpen = ref(false)
 function openTypeMenu(): void {
-  autoMenuOpen.value = false
-  atMenuOpen.value = false
-  skillMenuOpen.value = false
-  subjectMenuOpen.value = false
-  typeMenuOpen.value = !typeMenuOpen.value
+  const next = !typeMenuOpen.value
+  closeComposerMenus()
+  typeMenuOpen.value = next
 }
 function chooseType(id: string): void {
   creationTypeId.value = id
   typeMenuOpen.value = false
+  // 非 Agent 不使用技能（即梦双形态）：切走即取消已选技能（口播选项行随之消失）
+  if (id !== 'agent' && selectedSkillId.value) selectedSkillId.value = null
 }
 
 /* ── 输入 @ = 从上传引用选择（2026-10-17 用户裁决，即梦「可能@的内容」同款）：
@@ -253,10 +329,7 @@ async function searchSubjects(): Promise<void> {
 }
 function openSubjectMenu(): void {
   if (subjectMenuOpen.value) { subjectMenuOpen.value = false; return } // toggle（2026-10-17 用户裁决）
-  autoMenuOpen.value = false
-  atMenuOpen.value = false
-  typeMenuOpen.value = false
-  skillMenuOpen.value = false
+  closeComposerMenus()
   subjectQuery.value = ''
   subjectHits.value = []
   subjectError.value = ''
@@ -356,7 +429,18 @@ const voiceoverCandidates = ref<VoiceoverCandidate[]>([])
 const voiceoverPickedIdx = ref(0)
 
 async function generateViaVoiceover(): Promise<string> {
-  const req = buildVoiceoverRequest({ skill: selectedSkill.value!, input: input.value, subjects: subjects.value })
+  const skill = selectedSkill.value!
+  // 2026-10-30 契约对齐：服务端技能带 skill_id（服务端织入 instruction）；
+  // 平台/写法/时长来自口播选项行（'' =自动档不携带）
+  const req = buildVoiceoverRequest({
+    skill,
+    input: input.value,
+    subjects: subjects.value,
+    platform: voiceoverPlatform.value,
+    formula: voiceoverFormula.value,
+    durationS: voiceoverDuration.value,
+    serverSkillId: skill.id.startsWith(SERVER_SKILL_ID_PREFIX) ? skill.id.slice(SERVER_SKILL_ID_PREFIX.length) : '',
+  })
   const { candidates, failedFormulas } = await fetchVoiceoverCandidates(req)
   if (candidates.length === 0) {
     const failed = failedFormulas.length > 0 ? `（失败写法：${failedFormulas.join('、')}）` : ''
@@ -407,11 +491,64 @@ function clearHistory(): void {
 const references = ref<CreationReference[]>([])
 /** 引用池缩略图/上下文附注由 CreationReferences 子组件 + 本层四接线承担；
  *  预览 URL/类型判定/@ 解析/组包在 creationReferenceLogic（独立域） */
-/** 上传参考（2026-10-16 用户报障：+ 按钮不起作用）——多选图片/视频入参考列表；
- *  发送时作为上下文附注进提示词，媒体生成对接（P4）后直接作为生成输入 */
+/** 真生成提交：服务端 /generate/*（纯文生）或即梦 CLI（参考图 image2image） */
+async function startGeneration(route: 'generate' | 'cli'): Promise<void> {
+  const kind: GenerateKind = creationTypeId.value === 'video' ? 'video' : 'image'
+  const prompt = buildGenerationPrompt({ skill: selectedSkill.value, input: input.value, subjects: subjects.value })
+  if (route === 'generate') {
+    const sub = await submitGenerate(kind, buildGenerateBody({
+      kind,
+      prompt,
+      ratio: prefs.value.ratio,
+      resolution: genResolution.value,
+      durationS: genDuration.value,
+    }))
+    generateTask.value = { taskId: sub.taskId, kind }
+    noticeOk.value = true
+    notice.value = `已提交服务端${kind === 'video' ? '视频' : '图片'}生成任务，可随时取消。`
+    return
+  }
+  const imagePaths = references.value.filter((r) => isImageRef(r.path)).map((r) => r.path)
+  const payload = buildDreaminaPayload({ typeId: kind, prompt, imagePaths, ratio: prefs.value.ratio })
+  const t = getTintin()
+  if (!t?.server?.dreaminaGenerate) throw new Error('即梦 CLI 桥未就绪，请重启应用后重试。')
+  const res = await t.server.dreaminaGenerate(payload)
+  if (!res || res.error || !res.submitId) {
+    throw new Error(`即梦 CLI 提交失败：${truncateServerError(res?.error ?? res?.stderr ?? '未取到 submit_id')}`)
+  }
+  cliTask.value = { submitId: String(res.submitId), command: String(payload.command), kind }
+  if (payload.note) { noticeOk.value = true; notice.value = payload.note }
+}
+
+/** 生成任务终态收链（服务端/CLI 共用）：done 记史+放闸并保留任务卡（下次发送替换）；失败/取消收卡 */
+function finishGenerationTask(kind: 'done' | 'failed' | 'cancelled', summary?: string): void {
+  generating.value = false
+  if (kind === 'done' && summary) {
+    recordHistory('generate', summary)
+    noticeOk.value = true
+    notice.value = '生成完成：结果在任务卡与历史里（可保存到本地）。'
+    return
+  }
+  generateTask.value = null
+  cliTask.value = null
+  if (kind === 'failed') {
+    failNotice(summary || '生成失败')
+  } else {
+    noticeOk.value = true
+    notice.value = '已取消生成任务。'
+  }
+}
+
+/** 发送路由（即梦双形态）：非 Agent 类型优先（图片/视频=真生成，CLI 不支持
+ *  类型显式阻断）；Agent 模式才走技能自带后端 copy/voiceover，其余=LLM 方案 */
 async function send(): Promise<void> {
   if (generating.value) return
   const backend = effectiveBackend(selectedSkill.value)
+  const route = resolveSendRoute({ backend: prefs.value.backend, typeId: creationTypeId.value, skill: selectedSkill.value })
+  if (route === 'cli-unsupported') {
+    failNotice('即梦 CLI 后端只支持图片/视频生成——把创作类型切到「图片生成/视频生成」，或切回「TinTin 服务」后端。')
+    return
+  }
   const prompt = composeCreationPrompt({ skill: selectedSkill.value, input: input.value, subjects: subjects.value })
     + referencesBlock(references.value.map((r) => r.name))
   if (!prompt.trim() && backend !== 'voiceover') {
@@ -425,6 +562,19 @@ async function send(): Promise<void> {
     previewText.value = prompt
     previewOpen.value = true
     recordHistory('copy', prompt)
+    return
+  }
+  if (route === 'generate' || route === 'cli') {
+    generating.value = true
+    noticeOk.value = true
+    notice.value = '正在提交生成任务…'
+    previewOpen.value = false
+    try {
+      await startGeneration(route)
+    } catch (error) {
+      failNotice(error instanceof Error ? error.message : String(error))
+      generating.value = false
+    }
     return
   }
   generating.value = true
@@ -482,51 +632,30 @@ function openBoundTool(): void {
   window.__tintinBus?.emit('tintin:media-tool', tool)
 }
 
-/* ── 技能市场（更多技能：分类字典页，对照即梦技能市场） ── */
+/* ── 技能市场（弹窗本体在 CreationMarket 组件；本层只持开关与技能表事件） ── */
 const marketOpen = ref(false)
-const marketCategory = ref<CreationCatalogEntry['category'] | '全部'>('全部')
-const marketEntries = computed(() => {
-  if (marketCategory.value === '全部') return CREATION_CATALOG
-  return CREATION_CATALOG.filter((e) => e.category === marketCategory.value)
-})
 function openMarket(): void {
   marketOpen.value = true
   skillMenuOpen.value = false
   typeMenuOpen.value = false
 }
 
-/* ── 技能管理（编辑/删除内置与自定义）── 工具卡字典 TOOL_OPTIONS/toolLabel
- *  在 creationStudioLogic（技能域字典与编辑器下拉共用） */
-const editorOpen = ref(false)
-const editing = ref<CreationSkill | null>(null)
-const editingTool = ref<string>('')
-const editingBackend = ref<'llm' | 'voiceover' | 'copy'>('llm')
-function startEdit(skill: CreationSkill): void {
-  editing.value = { ...skill }
-  editingTool.value = skill.tool ?? ''
-  editingBackend.value = skill.backend ?? 'llm'
-}
-function saveEditing(): void {
-  const draft = editing.value
-  if (!draft) return
-  if (!draft.name.trim() || !draft.template.trim()) return
-  const next = {
-    ...draft,
-    name: draft.name.trim(),
-    template: draft.template,
-    backend: (editingBackend.value === 'llm' ? undefined : editingBackend.value) as CreationSkill['backend'],
-    ...(editingTool.value ? { tool: editingTool.value as CreationSkill['tool'] } : {}),
-  }
+/* ── 技能表事件（编辑器保存/移除/恢复默认；状态单一真源在本层） ── */
+function upsertSkill(next: CreationSkill): void {
   const index = skills.value.findIndex((s) => s.id === next.id)
   if (index >= 0) skills.value.splice(index, 1, next)
   else skills.value.push(next)
   persist()
-  editing.value = null
 }
 function removeSkill(skill: CreationSkill): void {
   if (skill.builtin) return
   skills.value = skills.value.filter((s) => s.id !== skill.id)
   if (selectedSkillId.value === skill.id) selectedSkillId.value = null
+  persist()
+}
+function resetAllSkills(): void {
+  skills.value = resetSkills()
+  selectedSkillId.value = null
   persist()
 }
 </script>
@@ -558,15 +687,7 @@ function removeSkill(skill: CreationSkill): void {
             <span v-for="s in subjects" :key="s.id" class="subject-chip">
               @{{ s.name }}
               <button type="button" class="chip-x" @click="subjects = subjects.filter((x) => x.id !== s.id)">×</button>
-              <span v-if="s.product" class="subject-card">
-                <span class="sc-line sc-head">🧾 {{ s.product.model || s.name }}<template v-if="s.product.brand"> · {{ s.product.brand }}</template></span>
-                <span v-if="s.product.sixViews?.length" class="sc-views">
-                  <img v-for="v in s.product.sixViews.slice(0, 6)" :key="v.view" :src="v.url" :title="v.view" class="sc-thumb" loading="lazy">
-                </span>
-                <span v-if="s.product.sellingPoints?.length" class="sc-line">卖点：{{ s.product.sellingPoints.join('；') }}</span>
-                <span v-if="s.product.features?.length" class="sc-line">参数：{{ s.product.features.join('；') }}</span>
-                <span class="sc-foot">产品档案已注入创作上下文（六视图：{{ s.product.sixViews?.length ?? 0 }} 张）</span>
-              </span>
+              <CreationSubjectCard v-if="s.product" :name="s.name" :product="s.product" />
             </span>
           </div>
           <!-- 上传引用池：缩略图行 + 可能@的菜单（自包含子组件，独立域）；
@@ -587,7 +708,7 @@ function removeSkill(skill: CreationSkill): void {
             @remove-product="onRefProductRemove"
           />
           <div class="editor-box">
-            <textarea v-model="input" class="input" rows="3" @input="onInputChange" @keydown.enter.exact.prevent="send" />
+            <textarea v-model="input" class="input" rows="3" @input="onInputChange" @keydown.enter.exact.prevent="onEditorEnter" />
             <div v-if="!input" class="placeholder" aria-hidden="true">
               输入想法、剧本或上传参考，支持 <i class="ph">/</i> 使用技能，<i class="ph at">@</i> 添加主体，和 Agent 一起创作
             </div>
@@ -597,10 +718,23 @@ function removeSkill(skill: CreationSkill): void {
       <div class="toolbar">
         <!-- 创作类型（即梦「Agent 模式」select 同款字典） -->
         <span class="toolbar-item is-select" role="button" tabindex="0" :class="{ 'is-open': typeMenuOpen }" @click="openTypeMenu" @keydown.enter.prevent="openTypeMenu">
-          <i class="ti">⚡</i>{{ creationTypeLabel }}<i class="caret">▾</i>
+          <TinIcon icon="creation" />{{ creationTypeLabel }}<i class="caret">▾</i>
         </span>
-        <button type="button" class="toolbar-item" :class="{ 'is-open': autoMenuOpen }" title="生成偏好" @click="openAutoMenu"><i class="ti">⚙</i>{{ autoChipLabel(prefs) }}</button>
-        <button type="button" class="toolbar-item" :class="{ 'is-open': skillMenuOpen }" @click="openSkillMenu"><i class="ti">✂</i>技能</button>
+        <!-- 非 Agent（图片/视频生成）工具行：双后端 + 生成参数 pill（即梦双形态：技能不参与） -->
+        <CreationBackend v-if="generationMode" :backend="prefs.backend" :disabled="generating" @change="onBackendChange" @notice="onChildNotice" />
+        <CreationGenParams
+          v-if="generationMode"
+          :kind="generationMode"
+          :ratio="prefs.ratio"
+          :resolution="genResolution"
+          :duration="genDuration"
+          @patch-ratio="setPrefs({ ratio: $event })"
+          @patch-resolution="genResolution = $event"
+          @patch-duration="genDuration = $event"
+        />
+        <!-- Agent 模式工具行：生成偏好 + 技能（技能体系仅 Agent 形态） -->
+        <button v-if="isAgentMode" type="button" class="toolbar-item" :class="{ 'is-open': autoMenuOpen }" title="生成偏好" @click="openAutoMenu"><TinIcon icon="gear" />{{ autoChipLabel(prefs) }}</button>
+        <button v-if="isAgentMode" type="button" class="toolbar-item" :class="{ 'is-open': skillMenuOpen }" @click="openSkillMenu"><TinIcon icon="skills" />技能</button>
         <button type="button" class="toolbar-item" :class="{ 'is-open': subjectMenuOpen }" @click="openSubjectMenu"><i class="ti at">@</i>⁺</button>
         <span class="spacer" />
         <!-- 语音输入暂时隐藏（2026-10-16 用户裁决；解禁时删掉 v-if 即可恢复）
@@ -615,8 +749,16 @@ function removeSkill(skill: CreationSkill): void {
         </button>
       </div>
 
-      <!-- 创作类型下拉 -->
-      <div v-if="typeMenuOpen" class="menu">
+      <!-- 口播上下文选项（选中口播后端技能时出现；字典=服务端 /copywriting/*） -->
+      <CreationVoiceoverOptions
+        v-if="showVoiceoverOptions"
+        v-model:platform="voiceoverPlatform"
+        v-model:formula="voiceoverFormula"
+        v-model:duration="voiceoverDuration"
+      />
+
+      <!-- 创作类型下拉（紧凑宽度，锚定左侧——即梦口径；全宽是此前 UI 事故） -->
+      <div v-if="typeMenuOpen" class="menu menu-type">
         <div class="menu-title">创作类型</div>
         <div class="menu-list">
           <button v-for="t in CREATION_TYPES" :key="t.id" type="button" class="menu-item" :class="{ 'is-picked': t.id === creationTypeId }" @click="chooseType(t.id)">
@@ -626,33 +768,13 @@ function removeSkill(skill: CreationSkill): void {
         </div>
       </div>
 
-      <!-- 生成偏好（即梦「自动」面板同款：自动开关+图片/视频+选择比例；2026-10-16 用户裁决） -->
-      <div v-if="autoMenuOpen" class="menu menu-auto">
-        <div class="menu-head">
-          <span class="menu-head-title">生成偏好</span>
-          <label class="auto-switch" title="跟随默认自动偏好">
-            <input type="checkbox" :checked="prefs.auto" @change="setPrefs({ auto: ($event.target as HTMLInputElement).checked })"><i></i><span>自动</span>
-          </label>
-          <button type="button" class="menu-close" @click="autoMenuOpen = false">×</button>
-        </div>
-        <div class="seg-tabs">
-          <button type="button" :class="{ on: prefs.modality === 'image' }" @click="setPrefs({ modality: 'image' })">图片</button>
-          <button type="button" :class="{ on: prefs.modality === 'video' }" @click="setPrefs({ modality: 'video' })">视频</button>
-        </div>
-        <div class="ratio-title">选择比例</div>
-        <div class="ratio-grid">
-          <button v-for="r in CREATION_RATIOS" :key="r" type="button" class="ratio-tile" :class="{ on: prefs.ratio === r }" @click="setPrefs({ ratio: r })">
-            <i v-if="r === '智能'" class="ratio-glyph ratio-auto">✦</i>
-            <i v-else class="ratio-frame" :style="{ aspectRatio: r.replace(':', '/') }"></i>
-            <span>{{ r }}</span>
-          </button>
-        </div>
-      </div>
+      <!-- 生成偏好（即梦「自动」面板同款；2026-10-30 提取至 CreationPrefsMenu，行为不变） -->
+      <CreationPrefsMenu v-if="autoMenuOpen" :prefs="prefs" @patch="setPrefs" @close="autoMenuOpen = false" />
 
       <!-- / 技能下拉 -->
       <div v-if="skillMenuOpen" class="menu">
         <div class="menu-head">
-          <input v-model="skillQuery" class="menu-search" placeholder="搜索已添加的技能…" @keydown.enter.prevent="() => { const hit = filteredSkills[0]; if (hit) chooseSkill(hit) }">
+          <input v-model="skillQuery" class="menu-search" placeholder="搜索已添加的技能…" @keydown.enter.prevent="chooseFirstFilteredSkill">
           <button type="button" class="menu-close" @click="skillMenuOpen = false">×</button>
         </div>
         <div class="menu-list">
@@ -677,7 +799,7 @@ function removeSkill(skill: CreationSkill): void {
       <!-- @ 主体下拉 -->
       <div v-if="subjectMenuOpen" class="menu">
         <div class="menu-head">
-          <input v-model="subjectQuery" class="menu-search" placeholder="搜索产品库或输入名称…" @keydown.enter.prevent="addSubjectFromQuery" @input="searchSubjects">
+          <input v-model="subjectQuery" class="menu-search" placeholder="搜索产品库或输入名称…" @keydown.enter.prevent="onSubjectSearchEnter" @input="searchSubjects">
           <button type="button" class="menu-close" @click="subjectMenuOpen = false">×</button>
         </div>
         <div class="menu-list">
@@ -727,11 +849,30 @@ function removeSkill(skill: CreationSkill): void {
       <textarea v-model="previewText" class="preview-body" rows="6" />
     </div>
 
+    <!-- 真生成任务卡（2026-10-30 整改对齐：服务端 /generate/* 轮询 + 即梦 CLI 查询） -->
+    <CreationGenerateTask
+      v-if="generateTask"
+      :task-id="generateTask.taskId"
+      :kind="generateTask.kind"
+      @done="(r) => finishGenerationTask('done', r.summary)"
+      @failed="(m) => finishGenerationTask('failed', m)"
+      @cancelled="() => finishGenerationTask('cancelled')"
+    />
+    <CreationCliTask
+      v-if="cliTask"
+      :submit-id="cliTask.submitId"
+      :command="cliTask.command"
+      :kind="cliTask.kind"
+      @done="(r) => finishGenerationTask('done', r.summary)"
+      @failed="(m) => finishGenerationTask('failed', m)"
+      @notice="onChildNotice"
+    />
+
     <!-- 会话历史（2026-10-18 用户裁决：结果本地保存——回看/重开/清空；重载恢复最近一轮） -->
     <CreationHistory :entries="history" @reopen="reopenHistory" @clear="clearHistory" />
 
-    <!-- 技能芯片行（即梦同款：/名称 + New/Hot 徽标 + 更多技能） -->
-    <div class="chips">
+    <!-- 技能芯片行（即梦双形态：仅 Agent 模式；/名称 + New/Hot 徽标 + 更多技能） -->
+    <div v-if="isAgentMode" class="chips">
       <button v-for="s in skills.slice(0, 7)" :key="s.id" type="button" class="chip" :class="{ 'is-picked': s.id === selectedSkillId }" @click="toggleSkillByName(s.name)">
         <span class="chip-slash">/</span> {{ s.name }}
         <span v-if="s.badge" class="menu-badge" :class="`badge-${s.badge.toLowerCase()}`">{{ s.badge }}</span>
@@ -739,69 +880,16 @@ function removeSkill(skill: CreationSkill): void {
       <button type="button" class="chip chip-more" @click="openMarket">更多技能 ›</button>
     </div>
 
-    <!-- 技能市场（分类字典，对照即梦技能市场页） -->
-    <div v-if="marketOpen" class="market-mask" @click.self="marketOpen = false">
-      <div class="market">
-        <div class="market-head">
-          <span class="market-title">技能市场</span>
-          <span class="market-actions">
-            <button type="button" class="mini" @click="startEdit({ id: newSkillId(), name: '', emoji: '🧩', template: '请围绕下面的想法进行创作：{{输入}}{{主体}}', backend: 'llm' })">＋ 自定义</button>
-            <button type="button" class="mini" @click="skills = resetSkills(); selectedSkillId = null; persist()">恢复默认</button>
-            <button type="button" class="mini" @click="marketOpen = false">×</button>
-          </span>
-        </div>
-        <div class="market-cats">
-          <button type="button" class="cat" :class="{ 'is-active': marketCategory === '全部' }" @click="marketCategory = '全部'">全部</button>
-          <button v-for="c in CREATION_CATALOG_CATEGORIES" :key="c" type="button" class="cat" :class="{ 'is-active': marketCategory === c }" @click="marketCategory = c">{{ c }}</button>
-        </div>
-        <!-- 编辑器（自定义/编辑既有技能） -->
-        <div v-if="editing" class="editor">
-          <label class="field"><span>名称</span><input v-model="editing.name" class="field-input" placeholder="如：口播带货脚本"></label>
-          <label class="field"><span>图标</span><input v-model="editing.emoji" class="field-input field-emoji" maxlength="4"></label>
-          <label class="field field-wide"><span>发送后端</span>
-            <select v-model="editingBackend" class="field-input">
-              <option value="llm">AI 生成（LLM）</option>
-              <option value="voiceover">口播文案（服务端十稿）</option>
-              <option value="copy">仅组合提示词（复制/跳转）</option>
-            </select>
-          </label>
-          <label class="field field-wide"><span>绑定工具（发送后可直达）</span>
-            <select v-model="editingTool" class="field-input">
-              <option v-for="o in TOOL_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
-          </label>
-          <label class="field field-wide"><span>提示词模板（占位符：双大括号包住「输入」=用户输入、「主体」=@主体列表）</span>
-            <textarea v-model="editing.template" class="field-input" rows="6" />
-          </label>
-          <div class="editor-ops">
-            <button type="button" class="mini is-primary" :disabled="!editing.name.trim() || !editing.template.trim()" @click="saveEditing">保存</button>
-            <button type="button" class="mini" @click="editing = null">取消</button>
-          </div>
-        </div>
-        <!-- 字典卡片网格（对照即梦：封面/名称/添加/作者/赞/使用量/描述） -->
-        <div v-else class="market-grid">
-          <div v-for="e in marketEntries" :key="e.id" class="mcard">
-            <div class="mcard-cover" :class="`cat-${e.category}`">
-              <span class="mcard-name">{{ e.name }}</span>
-              <button type="button" class="mcard-add" :class="{ 'is-added': isAdded(e) }" @click="toggleCatalogSkill(e)">{{ isAdded(e) ? '已添加' : '添加' }}</button>
-            </div>
-            <div class="mcard-meta">@{{ e.author }} · {{ e.likes }} 赞 {{ e.usage }}</div>
-            <div class="mcard-desc">{{ e.description }}</div>
-          </div>
-        </div>
-        <!-- 已添加技能管理行 -->
-        <div class="market-mine">
-          <div class="market-mine-title">我的技能芯片（{{ skills.length }}）</div>
-          <div class="mine-rows">
-            <span v-for="s in skills" :key="s.id" class="mine-row">
-              {{ s.emoji }} /{{ s.name }}
-              <button type="button" class="mini" @click="startEdit(s)">编辑</button>
-              <button v-if="!s.builtin" type="button" class="mini is-danger" @click="removeSkill(s)">移除</button>
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
+    <!-- 技能市场（2026-10-30 原样提取至 CreationMarket 组件，行为不变） -->
+    <CreationMarket
+      v-if="marketOpen"
+      :skills="skills"
+      @toggle-catalog="toggleCatalogSkill"
+      @upsert="upsertSkill"
+      @remove="removeSkill"
+      @reset="resetAllSkills"
+      @close="marketOpen = false"
+    />
   </div>
 </template>
 
@@ -825,20 +913,14 @@ function removeSkill(skill: CreationSkill): void {
 .picked-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .picked-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: #fff; background: linear-gradient(135deg,#F97316 0%,#EC4899 100%); border-radius: 999px; padding: 3px 10px; }
 .subject-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, transparent); border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent); border-radius: 999px; padding: 3px 10px; position: relative; }
-/* 产品档案悬停卡（2026-10-16 用户裁决：@ 芯片悬停看六视图+卖点摘要） */
-.subject-card { display: none; position: absolute; top: calc(100% + 8px); left: 0; z-index: 45; width: 264px; flex-direction: column; gap: 6px; text-align: left; background: var(--card); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-3); padding: 10px 12px; cursor: default; white-space: normal; }
+/* 产品档案悬停卡本体在 CreationSubjectCard（根节点吃父级 hover 触发） */
 .subject-chip:hover .subject-card { display: flex; }
-.sc-line { font-size: 12px; line-height: 1.55; color: var(--foreground); word-break: break-word; }
-.sc-head { font-weight: 700; }
-.sc-views { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }
-.sc-thumb { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 6px; background: #101010; border: 1px solid var(--border); }
-.sc-foot { font-size: 11px; color: var(--muted-foreground); border-top: 1px solid var(--border); padding-top: 6px; }
 .chip-x { border: none; background: transparent; color: inherit; font-size: 13px; cursor: pointer; padding: 0 0 0 2px; line-height: 1; }
 .editor-box { position: relative; }
 .input { width: 100%; border: none; background: transparent; color: var(--foreground); font: inherit; font-size: 15px; line-height: 1.65; resize: vertical; min-height: 66px; outline: none; }
 .placeholder { position: absolute; inset: 0; pointer-events: none; color: var(--muted-foreground); font-size: 15px; line-height: 1.65; }
 .placeholder .ph { font-style: normal; font-weight: 700; color: color-mix(in srgb, var(--primary) 70%, var(--muted-foreground)); padding: 0 1px; }
-.toolbar { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.toolbar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .toolbar-item { display: inline-flex; align-items: center; gap: 5px; border: none; background: transparent; color: var(--muted-foreground); font: inherit; font-size: 13px; padding: 4px 7px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .toolbar-item:hover { color: var(--foreground); background: var(--surface); }
 .toolbar-item.is-select { color: var(--primary); font-weight: 600; cursor: pointer; }
@@ -848,7 +930,7 @@ function removeSkill(skill: CreationSkill): void {
  * 1px 主色细环（同 .subject-chip/.chip.is-picked 选中语言；inset 环不挤布局），
  * 与 hover（纯 surface 底）明确可辨。 */
 .toolbar-item.is-open { color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent); }
-.toolbar-item .ti { font-style: normal; font-size: 13px; }
+.toolbar-item .ti { font-style: normal; font-size: 13px; width: 14px; height: 14px; display: block; opacity: 0.9; }
 .toolbar-item .caret { font-style: normal; font-size: 10px; opacity: 0.8; }
 .toolbar-item .at { font-weight: 700; }
 .spacer { flex: 1 1 auto; }
@@ -863,26 +945,9 @@ function removeSkill(skill: CreationSkill): void {
 .send:disabled { background: var(--surface); color: var(--muted-foreground); cursor: not-allowed; }
 
 .menu { position: absolute; left: 16px; right: 16px; top: calc(100% + 8px); z-index: 30; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-3); overflow: hidden; }
+/* 类型菜单=紧凑宽度锚左侧（2026-10-30 用户纠偏：全宽菜单是 UI 事故） */
+.menu-type { right: auto; width: 240px; }
 .menu-group-title { padding: 8px 14px 2px; font-size: 11px; font-weight: 700; color: var(--muted-foreground); }
-/* 生成偏好面板（即梦「自动」面板同款：自动开关+图片/视频+选择比例） */
-.menu-auto { left: 16px; right: auto; width: 430px; padding: 10px 12px 12px; }
-.menu-head-title { font-size: 13px; font-weight: 700; color: var(--foreground); flex: 1 1 auto; }
-.auto-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); cursor: pointer; user-select: none; }
-.auto-switch input { display: none; }
-.auto-switch i { width: 30px; height: 17px; border-radius: 999px; background: rgba(127, 127, 127, 0.35); position: relative; transition: background var(--duration-fast); }
-.auto-switch i::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 999px; background: #fff; transition: left var(--duration-fast); }
-.auto-switch input:checked + i { background: var(--primary); }
-.auto-switch input:checked + i::after { left: 15px; }
-.seg-tabs { display: grid; grid-template-columns: 1fr 1fr; background: color-mix(in srgb, var(--muted-foreground) 14%, transparent); border-radius: 10px; padding: 3px; margin: 10px 0 12px; }
-.seg-tabs button { border: none; background: transparent; color: var(--muted-foreground); font: inherit; font-size: 13px; padding: 7px 0; border-radius: 8px; cursor: pointer; }
-.seg-tabs button.on { background: var(--card); color: var(--foreground); font-weight: 600; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); }
-.ratio-title { font-size: 12px; color: var(--muted-foreground); margin-bottom: 6px; }
-.ratio-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; }
-.ratio-tile { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1px solid var(--border); background: transparent; color: var(--muted-foreground); font: inherit; font-size: 10.5px; padding: 7px 0 5px; border-radius: 9px; cursor: pointer; }
-.ratio-tile:hover { border-color: var(--primary); color: var(--foreground); }
-.ratio-tile.on { border-color: var(--primary); color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, transparent); font-weight: 600; }
-.ratio-frame { display: block; width: 15px; max-height: 17px; border: 1.4px solid currentColor; border-radius: 3px; }
-.ratio-auto { font-style: normal; font-size: 14px; line-height: 17px; }
 .menu-title { padding: 10px 14px 4px; font-size: 12px; color: var(--muted-foreground); }
 .menu-head { display: flex; align-items: center; gap: var(--space-2); padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .menu-search { flex: 1 1 auto; border: none; background: transparent; color: var(--foreground); font: inherit; font-size: 14px; outline: none; }
@@ -926,40 +991,7 @@ function removeSkill(skill: CreationSkill): void {
 .chip-slash { opacity: 0.65; margin-right: -2px; }
 .chip-more { color: var(--muted-foreground); }
 
-.market-mask { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.5); display: flex; align-items: flex-start; justify-content: center; overflow: auto; padding: 40px 16px; }
-.market { width: min(980px, 96vw); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-3); padding: var(--space-4); }
-.market-head { display: flex; align-items: center; justify-content: space-between; font-size: 16px; font-weight: 700; color: var(--foreground); margin-bottom: var(--space-3); }
-.market-actions { display: inline-flex; gap: 8px; }
-.market-cats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--space-3); }
-.cat { border: 1px solid var(--border); background: transparent; color: var(--muted-foreground); font: inherit; font-size: 13px; padding: 5px 14px; border-radius: 999px; cursor: pointer; }
-.cat.is-active { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); font-weight: 600; }
 .mini { border: 1px solid var(--border); background: transparent; color: var(--foreground); font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 999px; cursor: pointer; white-space: nowrap; }
 .mini:hover { border-color: var(--primary); color: var(--primary); }
 .mini:disabled { opacity: 0.45; cursor: not-allowed; }
-.mini.is-danger { color: #ef4444; border-color: color-mix(in srgb, #ef4444 40%, transparent); }
-.mini.is-primary { background: var(--primary); border-color: var(--primary); color: var(--primary-foreground); }
-.market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
-.mcard { border: 1px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); display: flex; flex-direction: column; }
-.mcard-cover { position: relative; aspect-ratio: 16 / 9; display: flex; align-items: flex-end; padding: 10px; }
-.mcard-cover.cat-广告营销 { background: linear-gradient(135deg, #7C3AED33 0%, #EC489933 100%); }
-.mcard-cover.cat-影视作品 { background: linear-gradient(135deg, #0EA5E933 0%, #6366F133 100%); }
-.mcard-cover.cat-平面设计 { background: linear-gradient(135deg, #14B8A633 0%, #0EA5E933 100%); }
-.mcard-cover.cat-电商 { background: linear-gradient(135deg, #F59E0B33 0%, #EF444433 100%); }
-.mcard-cover.cat-动画动漫 { background: linear-gradient(135deg, #EC489933 0%, #8B5CF633 100%); }
-.mcard-cover.cat-其他 { background: linear-gradient(135deg, #64748B33 0%, #94A3B833 100%); }
-.mcard-name { font-size: 15px; font-weight: 700; color: var(--foreground); text-shadow: 0 1px 6px rgba(0,0,0,0.25); padding-right: 56px; }
-.mcard-add { position: absolute; top: 8px; right: 8px; border: none; border-radius: 8px; background: color-mix(in srgb, var(--card) 85%, transparent); color: var(--foreground); font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer; }
-.mcard-add:hover, .mcard-add.is-added { background: var(--primary); color: var(--primary-foreground); }
-.mcard-meta { font-size: 11px; color: var(--muted-foreground); padding: 8px 10px 0; }
-.mcard-desc { font-size: 12px; line-height: 1.55; color: var(--muted-foreground); padding: 4px 10px 10px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; flex: 1 1 auto; }
-.editor { display: grid; grid-template-columns: 1fr 90px; gap: 10px; padding: var(--space-3) 0; }
-.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted-foreground); }
-.field-wide { grid-column: 1 / -1; }
-.field-input { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--foreground); font: inherit; font-size: 13px; padding: 8px 10px; outline: none; }
-.field-emoji { text-align: center; font-size: 16px; }
-.editor-ops { grid-column: 1 / -1; display: flex; gap: 8px; justify-content: flex-end; }
-.market-mine { margin-top: var(--space-4); border-top: 1px solid var(--border); padding-top: var(--space-3); }
-.market-mine-title { font-size: 13px; font-weight: 700; color: var(--foreground); margin-bottom: 8px; }
-.mine-rows { display: flex; flex-wrap: wrap; gap: 8px; }
-.mine-row { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--foreground); }
 </style>

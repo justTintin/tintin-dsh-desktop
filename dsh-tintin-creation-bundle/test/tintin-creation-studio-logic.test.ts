@@ -29,6 +29,7 @@ import {
   sanitizeSkills,
   saveCreationPrefs,
   subjectsBlock,
+  voiceoverGuideFromTemplate,
 } from '../src/composables/creationStudioLogic'
 
 describe('默认技能种子（即梦首页芯片行，2026-10-16 运行态提取）', () => {
@@ -216,9 +217,12 @@ describe('发送后端路由（P1/P2 对接，2026-10-16）', () => {
     expect(llmTextFromResponse({ choices: [] })).toBe('')
   })
 
-  it('buildVoiceoverRequest：product_desc=主体+输入；hint 仅在有主体时携带；platform 仅显式时携带；不猜 skill_id', () => {
+  it('buildVoiceoverRequest：product_desc=主体+输入；hint=模板指引（+主体）；platform 仅显式时携带；不猜 skill_id', () => {
     const skill: CreationSkill = { id: 's', name: '口播', emoji: '🎙️', template: 't' }
-    expect(buildVoiceoverRequest({ skill, input: '降噪耳机' })).toEqual({ product_desc: '降噪耳机' })
+    expect(buildVoiceoverRequest({ skill, input: '降噪耳机' })).toEqual({
+      product_desc: '降噪耳机',
+      hint: '按「口播」的写法指引创作：t',
+    })
     expect(buildVoiceoverRequest({
       skill,
       input: '新品上市',
@@ -226,7 +230,7 @@ describe('发送后端路由（P1/P2 对接，2026-10-16）', () => {
       platform: '抖音',
     })).toEqual({
       product_desc: '燕麦奶，手冲壶，新品上市',
-      hint: '需围绕主体：燕麦奶、手冲壶',
+      hint: '按「口播」的写法指引创作：t\n需围绕主体：燕麦奶、手冲壶',
       platform: '抖音',
     })
     // 空输入+无主体 → product_desc 空串（调用方校验报错，不造默认值）
@@ -237,12 +241,14 @@ describe('发送后端路由（P1/P2 对接，2026-10-16）', () => {
 
 // ── 生成偏好（2026-10-16 用户裁决：「自动」可点选——即梦生成偏好面板同款）──
 describe('生成偏好 sanitize 容错', () => {
-  it('缺字段/非法枚举回默认档（auto 开、图片、智能）', () => {
-    expect(sanitizeCreationPrefs(undefined)).toEqual({ auto: true, modality: 'image', ratio: '智能' })
-    expect(sanitizeCreationPrefs({ auto: 'yes', modality: 'audio', ratio: '5:4' })).toEqual({ auto: true, modality: 'image', ratio: '智能' })
+  it('缺字段/非法枚举回默认档（auto 开、图片、智能、tintin 后端）', () => {
+    expect(sanitizeCreationPrefs(undefined)).toEqual({ auto: true, modality: 'image', ratio: '智能', backend: 'tintin' })
+    expect(sanitizeCreationPrefs({ auto: 'yes', modality: 'audio', ratio: '5:4' })).toEqual({ auto: true, modality: 'image', ratio: '智能', backend: 'tintin' })
   })
-  it('合法值原样保留（video + 9:16 + auto 关）', () => {
-    expect(sanitizeCreationPrefs({ auto: false, modality: 'video', ratio: '9:16' })).toEqual({ auto: false, modality: 'video', ratio: '9:16' })
+  it('合法值原样保留（video + 9:16 + auto 关）；backend 仅认 jimeng-cli，其余归 tintin', () => {
+    expect(sanitizeCreationPrefs({ auto: false, modality: 'video', ratio: '9:16' })).toEqual({ auto: false, modality: 'video', ratio: '9:16', backend: 'tintin' })
+    expect(sanitizeCreationPrefs({ backend: 'jimeng-cli' }).backend).toBe('jimeng-cli')
+    expect(sanitizeCreationPrefs({ backend: 'dreamina' }).backend).toBe('tintin')
   })
   it('九档比例字典齐全且智能在首', () => {
     expect(CREATION_RATIOS).toEqual(['智能', '1:1', '3:4', '16:9', '4:3', '9:16', '2:3', '3:2', '21:9'])
@@ -253,21 +259,21 @@ describe('生成偏好 save/load（注入 storage）', () => {
   it('round-trip：保存后读回一致；无存储=默认档', () => {
     const mem = new Map<string, string>()
     const store = { getItem: (k: string) => mem.get(k) ?? null, setItem: (k: string, v: string) => void mem.set(k, v) }
-    saveCreationPrefs({ auto: false, modality: 'video', ratio: '16:9' }, store)
-    expect(loadCreationPrefs(store)).toEqual({ auto: false, modality: 'video', ratio: '16:9' })
-    expect(loadCreationPrefs({ getItem: () => null })).toEqual({ auto: true, modality: 'image', ratio: '智能' })
+    saveCreationPrefs({ auto: false, modality: 'video', ratio: '16:9', backend: 'jimeng-cli' }, store)
+    expect(loadCreationPrefs(store)).toEqual({ auto: false, modality: 'video', ratio: '16:9', backend: 'jimeng-cli' })
+    expect(loadCreationPrefs({ getItem: () => null })).toEqual({ auto: true, modality: 'image', ratio: '智能', backend: 'tintin' })
   })
   it('坏 JSON 回默认档不抛', () => {
     const store = { getItem: () => '{oops', setItem: () => {} }
-    expect(loadCreationPrefs(store)).toEqual({ auto: true, modality: 'image', ratio: '智能' })
+    expect(loadCreationPrefs(store)).toEqual({ auto: true, modality: 'image', ratio: '智能', backend: 'tintin' })
   })
 })
 
 describe('偏好芯片文字随状态（2026-10-17 用户裁决：自动/自定义二态）', () => {
   it('auto 开=「自动」，auto 关=「自定义」（无论具体选档）', () => {
-    expect(autoChipLabel({ auto: true, modality: 'image', ratio: '智能' })).toBe('自动')
-    expect(autoChipLabel({ auto: false, modality: 'video', ratio: '9:16' })).toBe('自定义')
-    expect(autoChipLabel({ auto: false, modality: 'image', ratio: '智能' })).toBe('自定义')
+    expect(autoChipLabel({ auto: true, modality: 'image', ratio: '智能', backend: 'tintin' })).toBe('自动')
+    expect(autoChipLabel({ auto: false, modality: 'video', ratio: '9:16', backend: 'tintin' })).toBe('自定义')
+    expect(autoChipLabel({ auto: false, modality: 'image', ratio: '智能', backend: 'tintin' })).toBe('自定义')
   })
 })
 
@@ -326,9 +332,38 @@ describe('buildVoiceoverRequest 产品档案契约', () => {
     expect(r.hint).toContain('G304黑（型号 910-002586）')
     expect(r.hint).toContain('普通主体')
   })
-  it('无产品档案时与旧行为逐字节一致', () => {
+  it('无产品档案时 product_desc 逐字节一致；hint=模板写法指引+主体（2026-10-30 织入）', () => {
     const r = buildVoiceoverRequest({ skill: BUILTIN_CREATION_SKILLS[0]!, input: 'x', subjects: [{ id: 'a', name: 'A' }] })
     expect(r.product_desc).toBe('A，x')
-    expect(r.hint).toBe('需围绕主体：A')
+    expect(r.hint).toContain('按「电影级长镜头运镜」的写法指引创作')
+    expect(r.hint).toContain('需围绕主体：A')
+  })
+  it('2026-10-30 契约对齐：serverSkillId → skill_id 携带且不再织模板；formula/duration_s/platform 仅非空携带', () => {
+    const skill: CreationSkill = { id: 'skill-srv-abc', name: '带货口播', emoji: '🎙️', template: '忽略我' }
+    const r = buildVoiceoverRequest({
+      skill,
+      input: '新品',
+      serverSkillId: 'abc',
+      formula: '痛点式',
+      durationS: 45.4,
+      platform: '小红书',
+    })
+    expect(r.skill_id).toBe('abc')
+    expect(r.hint).toBeUndefined()
+    expect(r.formula).toBe('痛点式')
+    expect(r.duration_s).toBe(45)
+    expect(r.platform).toBe('小红书')
+    const quiet = buildVoiceoverRequest({ skill, input: 'y' })
+    expect(quiet.formula).toBeUndefined()
+    expect(quiet.duration_s).toBeUndefined()
+    expect(quiet.platform).toBeUndefined()
+    expect(quiet.skill_id).toBeUndefined()
+  })
+  it('voiceoverGuideFromTemplate：剥 {{占位}} 压单行截 400；空模板出空串', () => {
+    expect(voiceoverGuideFromTemplate({ id: 's', name: 'N', emoji: 'x', template: 'a {{输入}} b' })).toBe('按「N」的写法指引创作：a b')
+    expect(voiceoverGuideFromTemplate({ id: 's', name: 'N', emoji: 'x', template: '' })).toBe('')
+    const long = voiceoverGuideFromTemplate({ id: 's', name: 'N', emoji: 'x', template: '字'.repeat(500) })
+    expect(long.length).toBeLessThanOrEqual(401)
+    expect(long.endsWith('…')).toBe(true)
   })
 })

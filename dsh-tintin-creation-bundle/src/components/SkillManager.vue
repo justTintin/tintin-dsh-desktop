@@ -93,7 +93,8 @@ async function install(skill: ServerSkill): Promise<void> {
   const wasInstalled = installed(skill.id)
   try {
     // 安装升级（2026-10-16 用户裁决）=真技能包落盘+真实指令注册一体：宿主拉
-    // GET /skills/{id}/download 解压到 <DSH_HOME>/skills/<id>/（重装覆盖），
+    // GET /skills/{id}/download 解压到 <DSH_HOME>/creation-skills/<id>/（2026-10-31 收紧裁决:
+    // 创作专属装位,重装覆盖），
     // 并带回 SKILL.md 正文——/技能名 发送即按完整说明书执行（当晚二次裁决）
     const r = await (globalThis as unknown as {
       tintin?: { server?: { skillsInstall?: (id: string) => Promise<{ error?: string; dir?: string; skillMd?: boolean; skillMdContent?: string }> } }

@@ -385,13 +385,31 @@ export function llmTextFromResponse(res: unknown): string {
   return String(r?.choices?.[0]?.message?.content ?? '').trim()
 }
 
-/** voiceover 请求组包（铁律 6：可选字段仅非空携带，不猜 skill_id） */
+/** 自定义技能模板 → 口播写法指引（剥 {{占位}} 后压成单行截 400 字；空出空串）。
+ *  服务端技能不走这里——其 instruction 由服务端按 skill_id 自行织入。 */
+export function voiceoverGuideFromTemplate(skill: CreationSkill): string {
+  const text = String(skill?.template ?? '')
+    .replace(/\{\{[^}]*\}\}/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  if (!text) return ''
+  const head = `按「${skill.name}」的写法指引创作：${text}`
+  return head.length > 400 ? `${head.slice(0, 400)}…` : head
+}
+
+/** voiceover 请求组包（2026-10-30 契约对齐：VoiceoverIn 现支持 skill_id/formula/
+ *  duration_s/platform——skill_id 仅服务端技能携带（服务端按 id 织入技能
+ *  instruction），自定义技能的模板此前被静默忽略，改织入 hint 作写法指引；
+ *  铁律 6：可选字段仅非空携带） */
 export function buildVoiceoverRequest(p: {
   skill: CreationSkill
   input: string
   subjects?: readonly CreationSubject[]
   platform?: string
-}): { product_desc: string; hint?: string; platform?: string } {
+  formula?: string
+  durationS?: number
+  serverSkillId?: string
+}): { product_desc: string; hint?: string; platform?: string; formula?: string; duration_s?: number; skill_id?: string } {
   const input = String(p.input ?? '').trim()
   // 产品档案主体（2026-10-16 用户裁决）：product_desc 带型号+卖点；无档案主体维持裸名字
   const descs: string[] = []
@@ -407,11 +425,21 @@ export function buildVoiceoverRequest(p: {
     }
   }
   const productDesc = [...descs, ...plainNames, input].filter(Boolean).join('，')
-  const out: { product_desc: string; hint?: string; platform?: string } = { product_desc: productDesc || input }
+  const out: { product_desc: string; hint?: string; platform?: string; formula?: string; duration_s?: number; skill_id?: string } = { product_desc: productDesc || input }
   const allNames = [...descs, ...plainNames]
   if (allNames.length > 0) out.hint = `需围绕主体：${allNames.join('、')}`
   const platform = String(p.platform ?? '').trim()
   if (platform) out.platform = platform
+  const formula = String(p.formula ?? '').trim()
+  if (formula) out.formula = formula
+  if (Number.isFinite(p.durationS) && (p.durationS as number) > 0) out.duration_s = Math.round(p.durationS as number)
+  const sid = String(p.serverSkillId ?? '').trim()
+  if (sid) {
+    out.skill_id = sid
+  } else {
+    const guide = voiceoverGuideFromTemplate(p.skill)
+    if (guide) out.hint = out.hint ? `${guide}\n${out.hint}` : guide
+  }
   return out
 }
 
@@ -424,19 +452,22 @@ export interface CreationPrefs {
   auto: boolean
   modality: 'image' | 'video'
   ratio: string
+  /** 真生成后端（2026-10-30）：tintin=服务端语义生成；jimeng-cli=本机即梦 CLI */
+  backend: 'tintin' | 'jimeng-cli'
 }
 
 export const CREATION_RATIOS = ['智能', '1:1', '3:4', '16:9', '4:3', '9:16', '2:3', '3:2', '21:9'] as const
 
-export const CREATION_PREFS_DEFAULT: CreationPrefs = { auto: true, modality: 'image', ratio: '智能' }
+export const CREATION_PREFS_DEFAULT: CreationPrefs = { auto: true, modality: 'image', ratio: '智能', backend: 'tintin' }
 
-/** 原始值 → 合法偏好（容错：缺字段/非法枚举回默认档） */
+/** 原始值 → 合法偏好（容错：缺字段/非法枚举回默认档；旧存储无 backend 缺省 tintin） */
 export function sanitizeCreationPrefs(raw: unknown): CreationPrefs {
   const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   return {
     auto: typeof o.auto === 'boolean' ? o.auto : CREATION_PREFS_DEFAULT.auto,
     modality: o.modality === 'video' ? 'video' : 'image',
     ratio: (CREATION_RATIOS as readonly string[]).includes(String(o.ratio)) ? String(o.ratio) : CREATION_PREFS_DEFAULT.ratio,
+    backend: o.backend === 'jimeng-cli' ? 'jimeng-cli' : 'tintin',
   }
 }
 

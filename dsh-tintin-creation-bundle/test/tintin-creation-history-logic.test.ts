@@ -122,4 +122,11 @@ describe('展示辅助', () => {
     expect(historySourceLabel(entry({ skillName: '风格大师' }))).toBe('风格大师')
     expect(historySourceLabel(entry({}))).toBe('Agent')
   })
+  it('generate 来源（2026-10-30 真生成）：sanitize 保留，标签回落创作类型', () => {
+    const s = sanitizeHistoryEntry(entry({ source: 'generate', typeLabel: '图片生成', resultText: 'http://x/a.png' }))!
+    expect(s.source).toBe('generate')
+    expect(s.resultText).toBe('http://x/a.png')
+    expect(historySourceLabel(entry({ source: 'generate', typeLabel: '图片生成' }))).toBe('图片生成')
+    expect(historySourceLabel(entry({ source: 'generate' }))).toBe('生成')
+  })
 })

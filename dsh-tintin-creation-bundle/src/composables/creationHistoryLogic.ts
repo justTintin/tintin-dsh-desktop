@@ -14,8 +14,8 @@
 // 实现、失败自动退回本地——调用方（App.vue）不改。
 // ═══════════════════════════════════════════════════════════════
 
-/** 结果来源（copy 后端的结果=组包后的提示词本身） */
-export type CreationHistorySource = 'llm' | 'voiceover' | 'copy'
+/** 结果来源（copy 后端的结果=组包后的提示词本身；generate=真生成任务摘要） */
+export type CreationHistorySource = 'llm' | 'voiceover' | 'copy' | 'generate'
 
 /** 一轮创作 = 发送上下文 + 结果文本 */
 export interface CreationHistoryEntry {
@@ -91,7 +91,7 @@ export function sanitizeHistoryEntry(raw: unknown): CreationHistoryEntry | null 
   return {
     id: String(it.id ?? '').trim() || newHistoryId(),
     ts: Number.isFinite(ts) && ts > 0 ? ts : Date.now(),
-    source: it.source === 'voiceover' || it.source === 'copy' ? it.source : 'llm',
+    source: it.source === 'voiceover' || it.source === 'copy' || it.source === 'generate' ? it.source : 'llm',
     input,
     resultText,
     ...(skillName ? { skillName } : {}),
@@ -159,10 +159,12 @@ export function historySnippet(entry: Pick<CreationHistoryEntry, 'input' | 'resu
   return clean.length > max ? `${clean.slice(0, max)}…` : clean
 }
 
-/** 列表行来源标签：口播带写法名；llm 回落创作类型/技能名 */
+/** 列表行来源标签：口播带写法名；真生成回落创作类型（图片生成/视频生成）；
+ *  llm 回落创作类型/技能名 */
 export function historySourceLabel(entry: CreationHistoryEntry): string {
   if (entry.formula) return `口播 · ${entry.formula}`
   if (entry.source === 'copy') return '提示词'
   if (entry.source === 'voiceover') return '口播'
+  if (entry.source === 'generate') return entry.typeLabel || '生成'
   return entry.typeLabel || entry.skillName || 'Agent'
 }
