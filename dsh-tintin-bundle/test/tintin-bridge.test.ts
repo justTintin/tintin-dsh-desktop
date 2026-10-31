@@ -1,13 +1,13 @@
 // Unit tests for the WP-1 pure-logic ports (machine-id, server-proxy).
 import { describe, expect, it } from 'vitest'
-import { deriveMachineId, MACHINE_ID_KEY, resolveMachineIdSync } from '../lib/machine-id.js'
+import { deriveMachineId, MACHINE_ID_KEY, resolveMachineIdSync } from 'dsh-tintin-shared/lib/machine-id.js'
 import {
   createServerUrlResolver,
   createFixOutputUrl,
   makeFixGenUrls,
   resolveEndpoint,
   API_ENDPOINTS,
-} from '../lib/server-proxy.js'
+} from 'dsh-tintin-shared/lib/server-proxy.js'
 
 describe('tintin machine-id', () => {
   it('derives a stable 16-hex id from mac+host+cpu', () => {

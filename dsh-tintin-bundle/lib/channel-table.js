@@ -7,9 +7,9 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, rmSync, existsSync, readdirSync, statSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, normalize } from 'node:path'
-import { installSkillPackage } from './skills-install.js'
-import { mergeConfigDocs, mergeTintinConfigStore, readTintinConfigStore, stripEmptyObjectLeaves } from './tintin-config-store.js'
-import { API_ENDPOINTS } from './server-proxy.js'
+import { installSkillPackage } from 'dsh-tintin-shared/lib/skills-install.js'
+import { mergeConfigDocs, mergeTintinConfigStore, readTintinConfigStore, stripEmptyObjectLeaves } from 'dsh-tintin-shared/lib/tintin-config-store.js'
+import { API_ENDPOINTS } from 'dsh-tintin-shared/lib/server-proxy.js'
 import { createFfmpegGateApi } from './montage/ffmpeg-gate.js'
 import { createMontageVoiceApi } from './montage/voice-ipc.js'
 import { createMontageFinalApi } from './montage/final-ipc.js'
@@ -17,7 +17,7 @@ import { preprocessTtsKeepingPause } from './montage/voice-tts-logic.js'
 import { createRembgApi, createAudioArchiveApi, createVsrApi, createTtsUploadSampleApi } from './media-proxy.js'
 import { createContextTaskApi, defaultWorkspaceDir } from './context-task.js'
 import { createYtdlpApi } from './ytdlp.js'
-import { createDreaminaApi } from './dreamina-cli.js'
+import { createDreaminaApi } from 'dsh-tintin-shared/lib/dreamina.js'
 import { createVersionInfoApi } from './version-info.js'
 import { createOpenfilmChannels } from './openfilm/plugin.js'
 
@@ -80,7 +80,7 @@ export function createChannelTable(deps) {
     }),
     // dreamina:* — 即梦创作 CLI 宿主门（2026-10-25 用户裁决：创作模式加「即梦 CLI」
     // 后端；通道面 status/generate/query/tasks/credit/loginHeadless/loginCheck/
-    // login/logout，策略在 lib/dreamina-logic.js、进程封装在 lib/dreamina-cli.js）。
+    // login/logout，策略与进程封装在 dsh-tintin-shared/lib/{dreamina-logic,dreamina}.js——2026-10-31 随迁共享包）。
     // 二进制不随包分发——本机已装（官方脚本 %USERPROFILE%\bin）时 available=true，
     // 未装呈现「未安装」态（同 yt-dlp 卡口径）。
     ...createDreaminaApi({
@@ -355,11 +355,13 @@ export function createChannelTable(deps) {
       return found.slice(0, limit)
     },
     // montage:split — 智能镜头分割上传（SRC server-proxy.js:845 逐字段移植）。
-    // skills:install — 客户端技能包安装（2026-10-16 用户裁决：安装升级=芯片注册+真技能包落盘一体）
+    // skills:install — 客户端技能包安装（2026-10-16 用户裁决：安装升级=芯片注册+真技能包落盘一体；
+    // 2026-10-31 收紧裁决：创作模式专属装位 <DSH_HOME>/creation-skills——在创作安装的技能只有创作用，
+    // 不再写历史通用 <DSH_HOME>/skills（该目录就此无人写无人读，仅存量遗留））
     'skills:install': async (args) => {
       const id = String(args?.[0] ?? '').trim()
       if (!id) return { error: 'skills:install: requires skill id' }
-      return installSkillPackage(id, getServerUrl(), process.env.DSH_HOME || '')
+      return installSkillPackage(id, getServerUrl(), process.env.DSH_HOME || '', 'creation-skills')
     },
     // montage:split — 2026-09-24 报障「422 Expected UploadFile received str」：渲染层把 {path} 包装对象塞进 multipart 的 file 字段而服务端要真实文件流——宿主读盘组装（file 必填，material_id/clip_url 二选一兼容）。
     'montage:split': async (args) => {

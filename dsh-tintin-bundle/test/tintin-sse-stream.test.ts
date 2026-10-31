@@ -6,7 +6,7 @@
 import { createServer } from 'node:http'
 import type { AddressInfo, Server } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createOpenSseStream } from '../lib/server-proxy.js'
+import { createOpenSseStream } from 'dsh-tintin-shared/lib/server-proxy.js'
 
 const servers: Server[] = []
 

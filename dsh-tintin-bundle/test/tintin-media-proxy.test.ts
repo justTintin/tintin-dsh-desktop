@@ -14,7 +14,7 @@ import {
   createRembgApi,
   mattingOutPath,
 } from '../lib/media-proxy.js'
-import { isExpectedOfflineError } from '../lib/server-proxy.js'
+import { isExpectedOfflineError } from 'dsh-tintin-shared/lib/server-proxy.js'
 
 type Entry = (args: unknown[]) => Promise<unknown> | unknown
 type MultipartPart = { name: string; value?: string; path?: string; contentType?: string }

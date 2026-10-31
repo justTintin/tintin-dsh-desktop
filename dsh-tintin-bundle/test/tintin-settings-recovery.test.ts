@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply } from '../index.js'
-import { readTintinConfigStore } from '../lib/tintin-config-store.js'
+import { readTintinConfigStore } from 'dsh-tintin-shared/lib/tintin-config-store.js'
 
 const IMPORTED_YAML = `tintin-bundle:
   server:
@@ -108,7 +108,7 @@ describe('tintin-bundle settings.yaml.imported recovery wiring', () => {
   it('never overwrites a server.url already in the TinTin store layer', async () => {
     const { ctx, config } = seedEnv(IMPORTED_YAML)
     // 存储层已有用户重设的值 → 恢复必须停手(第二启动起幂等)。
-    const { mergeTintinConfigStore } = await import('../lib/tintin-config-store.js')
+    const { mergeTintinConfigStore } = await import('dsh-tintin-shared/lib/tintin-config-store.js')
     mergeTintinConfigStore(home, { server: { url: 'http://10.0.0.8:8000', provisioned: true }, local: { cacheDir: 'E:\\mine' } })
     await apply(ctx as never, config)
     expect(readTintinConfigStore(home)).toEqual({

@@ -1,0 +1,17 @@
+{
+  "name": "dsh-tintin-shared",
+  "version": "0.1.0-dev.0",
+  "private": true,
+  "type": "module",
+  "description": "TinTin leaf utilities shared across the tintin workspaces (host bridge, cover plugin): zero dependencies beyond node builtins, so every consumer depends on this package one-way and no cycles can form",
+  "exports": {
+    "./lib/*": "./lib/*",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "4.1.8"
+  }
+}

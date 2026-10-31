@@ -7,7 +7,7 @@
 // 返回形状与 output.schema 声明严格一致（多余字段收拢进 plan/result/raw）。
 // 纯函数（extractFirstJson/normalizePlanInputs/visionDataUrl）单测下沉于
 // test/tintin-agent-tools.test.ts。
-import { isExpectedOfflineError } from './server-proxy.js'
+import { isExpectedOfflineError } from 'dsh-tintin-shared/lib/server-proxy.js'
 
 const errText = (e) => (e instanceof Error ? e.message : String(e))
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v)

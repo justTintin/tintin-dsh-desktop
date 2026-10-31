@@ -5,7 +5,7 @@
 // 重装=清目录覆盖）。SKILL.md 剥 YAML frontmatter 取正文（截 32KB 防 IPC 膨胀）。
 // Windows 通道专用（TinTin 发行面即 Windows）。
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const SKILL_MD_MAX = 32 * 1024
@@ -22,13 +22,35 @@ export function readSkillInstruction(skillMdPath) {
   return text.trim().slice(0, SKILL_MD_MAX)
 }
 
-export async function installSkillPackage(id, serverBase, dshHome) {
+/** 一次性迁移（2026-10-31 用户裁决：封面装位收紧为 <home>/cover-skills 专属目录，旧通用装位
+ *  <home>/skills 不再有第二个消费者）——把旧装位里的技能目录搬进新装位（已存在的不动，
+ *  zip 残留不搬），幂等；封面插件路由注册时与会话桥启动注入前各调一次。旧目录保留作备份不删。 */
+export function migrateCoverSkillsHome(dshHome) {
+  const home = String(dshHome || '').trim()
+  if (!home) return 0
+  const from = join(home, 'skills')
+  const to = join(home, 'cover-skills')
+  if (!existsSync(from)) return 0
+  let moved = 0
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const dest = join(to, entry.name)
+    if (existsSync(dest)) continue
+    try { mkdirSync(to, { recursive: true }); cpSync(join(from, entry.name), dest, { recursive: true }); moved += 1 } catch { /* 单技能故障不断链 */ }
+  }
+  return moved
+}
+
+/** skillsDirName（2026-10-31 收紧裁决）：装位子目录名，缺省仍是通用 'skills'（创作等其它调用方不变）；
+ *  封面传 'cover-skills' 独占。 */
+export async function installSkillPackage(id, serverBase, dshHome, skillsDirName = 'skills') {
   if (!/^[A-Za-z0-9._-]+$/.test(id)) return { error: '非法技能 id' }
   const base = String(serverBase || '').replace(/\/$/, '')
   if (!base) return { error: '服务端地址未配置' }
   const home = String(dshHome || '').trim()
   if (!home) return { error: 'DSH_HOME 未设置' }
-  const skillsDir = join(home, 'skills')
+  const dirName = /^[A-Za-z0-9._-]+$/.test(String(skillsDirName || '')) ? skillsDirName : 'skills'
+  const skillsDir = join(home, dirName)
   const zipPath = join(skillsDir, `${id}.zip`)
   const destDir = join(skillsDir, id)
   let buf

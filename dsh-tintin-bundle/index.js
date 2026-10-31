@@ -12,10 +12,10 @@ import { basename, dirname, extname, isAbsolute, join, normalize, sep } from 'no
 import { fileURLToPath } from 'node:url'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import z from '@deepseek-ai/schemastery'
-import { createMachineIdResolver } from './lib/machine-id-store.js'
-import { installSkillPackage } from './lib/skills-install.js'
+import { createMachineIdResolver } from 'dsh-tintin-shared/lib/machine-id-store.js'
+import { installSkillPackage } from 'dsh-tintin-shared/lib/skills-install.js'
 import { findLegacyConfigDir, planImportedSettingsRecovery, planLegacyMigration, readImportedTintinSection } from './lib/legacy-config.js'
-import { mergeConfigDocs, mergeTintinConfigStore, readTintinConfigStore, stripEmptyObjectLeaves } from './lib/tintin-config-store.js'
+import { mergeConfigDocs, mergeTintinConfigStore, readTintinConfigStore, stripEmptyObjectLeaves } from 'dsh-tintin-shared/lib/tintin-config-store.js'
 import {
   createServerUrlResolver,
   createHttpRequest,
@@ -23,7 +23,11 @@ import {
   isExpectedOfflineError,
   resolveEndpoint,
   API_ENDPOINTS,
-} from './lib/server-proxy.js'
+} from 'dsh-tintin-shared/lib/server-proxy.js'
+// 请求信任闸(isLoopback/hasForwardedAddress/isTrustedRequest)是宿主公共设施,
+// 封面插件同用——住在 dsh-tintin-shared(2026-10-31 抽共享包裁决),此处再导出保根面。
+export { isTrustedRequest } from 'dsh-tintin-shared/lib/trusted-request.js'
+import { isTrustedRequest } from 'dsh-tintin-shared/lib/trusted-request.js'
 import { createFfmpegGateApi } from './lib/montage/ffmpeg-gate.js'
 import { createMontageVoiceApi } from './lib/montage/voice-ipc.js'
 import { preprocessTtsKeepingPause } from './lib/montage/voice-tts-logic.js'
@@ -132,39 +136,8 @@ export const name = 'dsh-tintin-bundle'
 // scoped ctx.inject below so the tool half still loads where no web server runs.
 export const inject = ['settings']
 
-function isLoopback(address) {
-  return (
-    address === '127.0.0.1' ||
-    address === '::1' ||
-    address === '::ffff:127.0.0.1'
-  )
-}
-
-function hasForwardedAddress(req) {
-  return Boolean(
-    req.headers.forwarded ||
-      req.headers['x-forwarded-for'] ||
-      req.headers['x-real-ip'] ||
-      req.headers['x-forwarded-host']
-  )
-}
-
-// Same-origin loopback requests only, mirroring dsh-desktop-market-installer's
-// gate so the route stays unreachable from LAN pairing tunnels and proxies.
-export function isTrustedRequest(req, mutation = false) {
-  if (!isLoopback(req.socket.remoteAddress) || hasForwardedAddress(req)) return false
-  if (!mutation) return true
-
-  const origin = req.headers.origin
-  const host = req.headers.host
-  if (typeof origin !== 'string' || typeof host !== 'string') return false
-  try {
-    const parsed = new URL(origin)
-    return parsed.protocol === 'http:' && parsed.host === host && isLoopback(parsed.hostname)
-  } catch {
-    return false
-  }
-}
+// isLoopback/hasForwardedAddress/isTrustedRequest 已迁 dsh-tintin-shared/lib/trusted-request.js
+// (2026-10-31 抽共享包:封面插件同用这组请求信任闸,见顶部再导出)。
 
 // mediaUnlocked — 用户显式选择的任意位置文件预览解锁登记表：media:unlock 写入、
 // /tintin/media GET 放行（宿主进程单例，FIFO 上限）。必须挂在模块顶层——原先藏在

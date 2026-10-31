@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { createFfmpegGateApi, parseFfmpegInfo } from '../lib/montage/ffmpeg-gate.js'
 import { createMontageVoiceApi } from '../lib/montage/voice-ipc.js'
 import { createMontageFinalApi } from '../lib/montage/final-ipc.js'
-import { isExpectedOfflineError } from '../lib/server-proxy.js'
+import { isExpectedOfflineError } from 'dsh-tintin-shared/lib/server-proxy.js'
 
 type Entry = (args: unknown[], ctx?: { emit?: (event: Record<string, unknown>) => void }) => Promise<unknown> | unknown
 type ChannelTable = Record<string, Entry>

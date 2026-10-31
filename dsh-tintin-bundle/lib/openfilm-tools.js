@@ -7,19 +7,14 @@
 // 契约来源：GET /agent/registry（39 能力，method/path/input_schema/sync）。
 import { mkdirSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { dirname, extname, isAbsolute, join } from 'node:path'
+// 产品中立的服务端生成契约纯函数已随迁共享叶子包(2026-10-31 用户裁决:封面与影片互不依赖,
+// 契约归服务端);此处 re-export 保持影片侧引用面不变。
+import { absoluteUrl, taskIdOf, taskStatusOf } from 'dsh-tintin-shared/lib/server-gen.js'
+export { absoluteUrl, taskIdOf, taskStatusOf }
 
 const errText = (e) => (e instanceof Error ? e.message : String(e))
 const asObj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : null)
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-
-/** 服务端相对 URL → 绝对 URL。 */
-export function absoluteUrl(baseUrl, url) {
-  const value = String(url || '').trim()
-  if (!value) return ''
-  if (/^https?:\/\//i.test(value)) return value
-  const base = String(baseUrl || '').replace(/\/+$/, '')
-  return base + (value.startsWith('/') ? value : `/${value}`)
-}
 
 /** URL / content-type → 落盘扩展名。 */
 export function extensionOf(url, contentType = '') {
@@ -76,29 +71,6 @@ export function uniquePath(path) {
     if (!existsSync(candidate)) return candidate
   }
   return path
-}
-
-/** 从任务响应里取任务 id（id/task_id/嵌套 data）。 */
-export function taskIdOf(body) {
-  const obj = asObj(body)
-  if (!obj) return ''
-  for (const key of ['task_id', 'taskId', 'id', 'job_id', 'jobId']) {
-    if (typeof obj[key] === 'string' && obj[key]) return obj[key]
-    if (typeof obj[key] === 'number') return String(obj[key])
-  }
-  const data = asObj(obj.data)
-  return data ? taskIdOf(data) : ''
-}
-
-/** 从任务响应里取状态（小写）。 */
-export function taskStatusOf(body) {
-  const obj = asObj(body)
-  if (!obj) return ''
-  for (const key of ['status', 'state']) {
-    if (typeof obj[key] === 'string') return obj[key].toLowerCase()
-  }
-  const data = asObj(obj.data)
-  return data ? taskStatusOf(data) : ''
 }
 
 const DONE = new Set(['completed', 'complete', 'succeeded', 'success', 'done', 'finished'])
