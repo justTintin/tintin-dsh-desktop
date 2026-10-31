@@ -195,6 +195,12 @@ export function undo(): void {
   t.getState().undo()
 }
 
+/** 重做(2026-10-31 §2.6 P1:zundo 的 redo 栈暴露;Ctrl+Shift+Z/顶条按钮) */
+export function redo(): void {
+  const t = (useEditor as unknown as { temporal: { getState: () => { redo: () => void } } }).temporal
+  t.getState().redo()
+}
+
 export function currentLayers(): LayerDef[] {
   return getTemplate(useEditor.getState().templateId).layerDefs
 }

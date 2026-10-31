@@ -4,9 +4,10 @@
 import { Player } from '@remotion/player'
 import React from 'react'
 import { getTemplate } from '../registry'
-import { sanitizeCustomLayers, undo, useEditor } from './store'
+import { redo, sanitizeCustomLayers, undo, useEditor } from './store'
+import { useAgentPropsSync, pushChatContextNow, reloadProjectState } from './agent-sync'
 import { useCanvasZoom } from './use-canvas-zoom'
-import { chatFrameRef, iconBtn, referableValue } from './ui'
+import { chatFrameRef, iconBtn } from './ui'
 import { AssetsPanel, ExportModal, LayersPanel } from './panels'
 import { ServerSettingsModal } from './server-settings'
 import { SkillsModal } from './skills-modal'
@@ -22,6 +23,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   const showGuides = useEditor((s) => s.guides)
   const showGrid = useEditor((s) => s.canvasGrid)
   const zoom = useEditor((s) => s.zoom)
+  const setZoom = useEditor((s) => s.setZoom)
   const onRotateDown = (e: React.PointerEvent): void => {
     if (!handleBox || !selectedLayer) return
     e.stopPropagation()
@@ -55,16 +57,54 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (deg < -180) deg += 360
     rot.curDeg = deg
     if (rot.el) rot.el.style.transform = withRotate(rot.baseTransform, deg) // 纯视觉预览,props 零写入
+    showReadoutText(e.clientX + 14, e.clientY + 14, `${deg}°`) // 旋转角度读数(§2.6 P1,对照 Free Transform)
   }
   const onRotateUp = (e: React.PointerEvent): void => {
     const rot = rotRef.current
     rotRef.current = null
+    hideReadout()
     if (rot?.el) rot.el.style.transform = '' // React 离散事件内同步重设新值,无回跳
     setHandleBox(null) // 触发重算:旋转后的包围盒已变
     ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
     if (!rot || rot.curDeg === rot.base) return // 未变化:不动
     if (rot.custom) setCustomLayer(rot.id, { rotate: rot.curDeg })
     else setLayerStyle(rot.id, { rotate: rot.curDeg })
+  }
+  /** 缩放手柄(2026-10-31 §2.6 P1:选中自定义图片层右下角柄,等比拖拽改宽度;预览-提交分离) */
+  const resRef = React.useRef<{ id: string; tlX: number; tlY: number; startDist: number; startW: number; el: HTMLElement | null; curW: number } | null>(null)
+  const onResizeDown = (e: React.PointerEvent): void => {
+    if (!handleBox || !selectedLayer?.startsWith('img-')) return
+    e.stopPropagation()
+    const layer = ((props.customLayers as Array<{ id: string; x: number; y: number; width: number }> | undefined) ?? []).find((l) => l.id === selectedLayer)
+    const el = hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`) as HTMLElement | null
+    const rect = compositionRect()
+    if (!layer || !el || !rect) return
+    const box = canvasBoxOf(el)
+    const scale = Math.max(rect.width / tpl.width, 0.05)
+    const px = (e.clientX - rect.left) / scale
+    const py = (e.clientY - rect.top) / scale
+    resRef.current = { id: selectedLayer, tlX: box.left, tlY: box.top, startDist: Math.max(8, Math.hypot(px - box.left, py - box.top)), startW: layer.width, el, curW: layer.width }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }
+  const onResizeMove = (e: React.PointerEvent): void => {
+    const r = resRef.current
+    if (!r) return
+    const rect = compositionRect()
+    if (!rect) return
+    const scale = Math.max(rect.width / tpl.width, 0.05)
+    const px = (e.clientX - rect.left) / scale
+    const py = (e.clientY - rect.top) / scale
+    const dist = Math.hypot(px - r.tlX, py - r.tlY)
+    const w = Math.max(20, Math.min(4000, Math.round(r.startW * (dist / r.startDist))))
+    r.curW = w
+    if (r.el) r.el.style.width = `${w}px` // 预览-提交分离:纯视觉
+  }
+  const onResizeUp = (e: React.PointerEvent): void => {
+    const r = resRef.current
+    resRef.current = null
+    ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
+    if (!r || r.curW === r.startW) return
+    setCustomLayer(r.id, { width: r.curW })
   }
 
   /** 合成盒(Player 内按模板比例缩放的画布容器)= 拖动/对齐/落点的统一坐标系 */
@@ -188,12 +228,16 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (h) { h.style.display = gh !== null && showGuides ? 'block' : 'none'; if (gh !== null) h.style.top = `${(gh / tpl.height) * 100}%` }
   }
   const showReadout = (clientX: number, clientY: number, dx: number, dy: number): void => {
+    showReadoutText(clientX, clientY, `${Math.round(dx)} px, ${Math.round(dy)} px`)
+  }
+  /** 通用读数(2026-10-31 §2.6 P1:旋转时显示角度,Δ读数同源) */
+  const showReadoutText = (clientX: number, clientY: number, text: string): void => {
     const el = readoutRef.current
     if (!el) return
     el.style.display = 'block'
     el.style.left = `${clientX + 14}px`
     el.style.top = `${clientY + 14}px`
-    el.textContent = `${Math.round(dx)} px, ${Math.round(dy)} px`
+    el.textContent = text
   }
   const hideReadout = (): void => {
     const el = readoutRef.current
@@ -203,7 +247,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   const onPointerDown = (e: React.PointerEvent): void => {
     if (pcRunning) return // PhotoCraft 为主:画布交互在原生窗口,网页仅镜像
     if (dragRef.current) return // 已在拖动:忽略第二指
-    const id = layerAt(e.clientX, e.clientY)
+    let id = layerAt(e.clientX, e.clientY)
     selectLayer(id)
     if (!id) return
     const compRect = compositionRect()
@@ -215,8 +259,16 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     let baseY = 0
     let kind: 'custom' | 'fixed' = 'fixed'
     if (id.startsWith('img-')) {
-      const layer = (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; x: number; y: number }>) : []).find((l) => l.id === id)
+      let layer = (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; image: string; x: number; y: number; width: number; opacity?: number; rotate?: number; group?: string }>) : []).find((l) => l.id === id)
       if (!layer) return
+      if (e.altKey) {
+        /* Alt+拖动=复制新层(2026-10-31 §2.6 P1,Photoshop 语义):副本与原件同位同参,拖动即把副本拖离 */
+        const nid = addCustomLayer(layer.image, layer.x, layer.y, layer.width, layer.group)
+        setCustomLayer(nid, { opacity: layer.opacity, rotate: layer.rotate })
+        selectLayer(nid)
+        id = nid
+        layer = { ...layer, id: nid }
+      }
       kind = 'custom'
       baseX = layer.x
       baseY = layer.y
@@ -250,6 +302,18 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       if (Math.hypot(dxs, dys) < 3) return // 死区:手抖不算拖
       drag.active = true
       if (drag.el) { drag.el.style.outline = '2px solid rgba(79,124,255,0.9)'; drag.el.style.willChange = 'translate' } // 提升合成层,预览不重绘整栈
+      // 层间智能吸附候选(激活时一次实测;拖动中其它层静止):其它图层的 左/中/右、上/中/下 线
+      { const xs: { at: number; guide: number }[] = []; const ys: { at: number; guide: number }[] = []
+        const push = (arr: { at: number; guide: number }[], at: number, guide: number) => { if (!arr.some((c) => Math.abs(c.at - at) < 0.5)) arr.push({ at, guide }) }
+        hostRef.current?.querySelectorAll('[data-cover-layer]').forEach((elm) => {
+          const node = elm as HTMLElement
+          if (node.dataset.coverLayer === drag.layerId) return
+          const b = canvasBoxOf(node)
+          for (const L of [b.left, b.left + b.w / 2, b.left + b.w]) { push(xs, L, L); push(xs, L - drag.boxW / 2, L); push(xs, L - drag.boxW, L) }
+          for (const L of [b.top, b.top + b.h / 2, b.top + b.h]) { push(ys, L, L); push(ys, L - drag.boxH / 2, L); push(ys, L - drag.boxH, L) }
+        })
+        drag.candsX = xs
+        drag.candsY = ys }
       if (outlineRef.current) outlineRef.current.style.display = 'none' // 常驻边缘框让位给拖动轮廓
       const host = hostRef.current
       if (host) host.style.userSelect = 'none'
@@ -268,11 +332,15 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       const top = drag.baseTop + rawY
       const T = 8 / scale
       const stick = 12 / scale
+      /* 层间智能吸附(2026-10-31 §2.6 P1):候选=画布三线+其它可见图层的 左/中/右(上/中/下) 三线
+         (拖动盒的 左缘/中心/右缘 任一对齐到对方任一线;激活时一次实测,拖动中对方不动故静态) */
       const candsX = [
         { at: 0, guide: 0 }, { at: (tpl.width - drag.boxW) / 2, guide: tpl.width / 2 }, { at: tpl.width - drag.boxW, guide: tpl.width },
+        ...(drag.candsX ?? []),
       ]
       const candsY = [
         { at: 0, guide: 0 }, { at: (tpl.height - drag.boxH) / 2, guide: tpl.height / 2 }, { at: tpl.height - drag.boxH, guide: tpl.height },
+        ...(drag.candsY ?? []),
       ]
       if (drag.snapX) {
         /* 吸附值换算回基准空间(2026-11-01 修复跳变):固定层 dx=相对槽位原位的偏移,自定义层 x=画布绝对——
@@ -331,9 +399,19 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (!drag) return
     endDragVisual(drag) // 丢弃预览:props 未动,元素回原位
   }
-  /** 方向键微调(对照 PhotoCraft nudge):1 画布px/步,Shift=10px */
+  /** 方向键微调(对照 PhotoCraft nudge):1 画布px/步,Shift=10px;快捷键(§2.6 P1):Ctrl+Z/Shift+Z 撤销重做,Ctrl+0 适合,Ctrl+± 缩放 */
   const onCanvasKeyDown = (e: React.KeyboardEvent): void => {
-    if (pcRunning || !selectedLayer || dragRef.current) return
+    if (pcRunning) return
+    const mod = e.ctrlKey || e.metaKey
+    if (mod) {
+      const k = e.key.toLowerCase()
+      if (k === 'z') { e.preventDefault(); e.stopPropagation(); e.shiftKey ? redo() : undo(); return }
+      if (k === 'y') { e.preventDefault(); e.stopPropagation(); redo(); return }
+      if (k === '0') { e.preventDefault(); e.stopPropagation(); setZoom(1); return }
+      if (k === '=' || k === '+') { e.preventDefault(); e.stopPropagation(); setZoom(zoom * 1.25); return }
+      if (k === '-') { e.preventDefault(); e.stopPropagation(); setZoom(zoom / 1.25); return }
+    }
+    if (!selectedLayer || dragRef.current) return
     const step = e.shiftKey ? 10 : 1
     const d = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, [number, number]>)[e.key]
     if (!d) return
@@ -443,6 +521,16 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                 />
               </>
             ) : null}
+            {/* 缩放手柄(2026-10-31 §2.6 P1:选中自定义图片层右下角柄,等比拖拽改宽度) */}
+            {selectedLayer?.startsWith('img-') && handleBox && !pcRunning ? (
+              <div
+                onPointerDown={onResizeDown}
+                onPointerMove={onResizeMove}
+                onPointerUp={onResizeUp}
+                title="拖动改尺寸(等比)"
+                style={{ position: 'absolute', left: handleBox.x + handleBox.w - 7, top: handleBox.y + handleBox.h - 7, width: 14, height: 14, borderRadius: 3, background: '#4f7cff', border: '2px solid #fff', cursor: 'nwse-resize', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
+              />
+            ) : null}
           </div>
           <div style={{ color: '#8b8b88', fontSize: 11 }}>
             {tpl.width}×{tpl.height} · 模板快出模式 · 点选文字可直接拖动 · 导出走 renderStill
@@ -492,12 +580,17 @@ function CanvasSettingsStrip(): React.ReactElement {
         {zoomBtn('＋', 1.25, '放大画布')}
       </div>
       <span style={{ flex: 1 }} />
-      {/* 撤销移到顶条右端(2026-10-29 用户裁决),原右栏底部入口撤销;提示文字删除 */}
+      {/* 撤销移到顶条右端(2026-10-29 用户裁决),原右栏底部入口撤销;提示文字删除;重做(2026-10-31 §2.6 P1) */}
       <button
         onClick={() => undo()}
         title="撤销上一步(会话与面板操作同栈)"
         style={{ border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', borderRadius: 7, fontSize: 11.5, padding: '4px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
       >↩ 撤销</button>
+      <button
+        onClick={() => redo()}
+        title="重做(Ctrl+Shift+Z)"
+        style={{ border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', borderRadius: 7, fontSize: 11.5, padding: '4px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+      >↪ 重做</button>
     </div>
   )
 }
@@ -532,158 +625,6 @@ function OrientationToggle(): React.ReactElement {
     「引用到会话」。agent 改字回流走 props 轮询(useAgentPropsSync)。 */
 
 /** 立即推送当前上下文(模块级取 store 快照,供 iframe load 时机与防抖 effect 共用) */
-function pushChatContextNow(): void {
-  const s = useEditor.getState()
-  const tpl = getTemplate(s.templateId)
-  const layers = tpl.layerDefs.map((l) => {
-    const key = l.propsKey ?? l.id
-    return { id: l.id, label: l.label, type: l.type, propsKey: key, value: referableValue(s.props[key]) }
-  })
-  chatFrameRef.current?.contentWindow?.postMessage(
-    { type: 'tintin-cover:context', templateId: s.templateId, orientation: tpl.orientation, layers, size: { w: tpl.width, h: tpl.height } },
-    '*',
-  )
-}
-
-/** 项目切换后的编辑器状态回读(2026-10-30 项目制):套用新项目目录的 props 快照。
- *  新项目尚无 props 文件时**必须重置为模板默认**(空白画布)——直接 return 会让
- *  画布/图层停留在旧项目内容(实撞:切到新建项目画布还是上一张的图)。 */
-async function reloadProjectState(): Promise<void> {
-  try {
-    const r = await fetch('/tintin/cover/api/acp/props').then((x) => x.json())
-    const record = r?.record as { templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
-    const tid = useEditor.getState().templateId
-    if (record && typeof record.templateId === 'string' && record.templateId && record.props && typeof record.props === 'object') {
-      if (record.templateId !== tid) useEditor.getState().setTemplate(record.templateId)
-      const defaults = getTemplate(useEditor.getState().templateId).defaultProps
-      useEditor.setState({
-        props: { ...defaults, ...record.props },
-        hiddenLayers: Array.isArray(record.hiddenLayers) ? [...record.hiddenLayers] : [],
-        selectedLayer: null,
-      })
-    } else {
-      // 新建/空白项目(2026-10-30 用户裁决:画布什么也没有)——模板结构保留但内容
-      // 全清空、固定图层全隐藏(图层面板可手动开启),绝不含演示内容
-      const t = getTemplate(tid)
-      const cleared: Record<string, unknown> = { ...t.defaultProps }
-      for (const k of Object.keys(cleared)) {
-        const v = cleared[k]
-        if (typeof v === 'string') cleared[k] = ''
-        else if (Array.isArray(v)) cleared[k] = []
-      }
-      cleared.customLayers = []
-      cleared.layerOrder = t.layerDefs.map((l) => l.id)
-      useEditor.setState({ props: cleared, hiddenLayers: t.layerDefs.map((l) => l.id), selectedLayer: null })
-    }
-  } catch { /* 会话路由未起(旧包) */ }
-}
-
-function CoverChatPanel(): React.ReactElement {
-  const hostRef = React.useRef<HTMLDivElement>(null)
-  React.useEffect(() => {
-    const frame = document.createElement('iframe')
-    frame.src = '/tintin/cover/chat'
-    frame.title = '封面会话'
-    frame.style.cssText = 'width:100%;height:100%;border:0;display:block;background:transparent'
-    chatFrameRef.current = frame
-    /* 会话页每次(重)加载完成即补推上下文——首推 300ms 防抖常早于 iframe 加载完成,
-       消息会丢进未就绪的初始 document(2026-10-28 探针实测:@ 菜单图层组空)。 */
-    frame.addEventListener('load', pushChatContextNow)
-    hostRef.current?.appendChild(frame)
-    return () => {
-      frame.removeEventListener('load', pushChatContextNow)
-      if (chatFrameRef.current === frame) chatFrameRef.current = null
-      frame.remove()
-    }
-  }, [])
-  return <div ref={hostRef} style={{ flex: '1 1 auto', minHeight: 0, width: '100%', display: 'flex' }} />
-}
-
-/** 编辑器 → 会话上下文推送(模板/横竖/图层+当前取值;输入即推,300ms 防抖;
-    另响应会话页的 context-request 拉取——推送丢进未就绪 iframe 时由 @ 菜单打开时补取) */
-function useChatContextPush(): void {
-  const templateId = useEditor((s) => s.templateId)
-  const props = useEditor((s) => s.props)
-  const hiddenLayers = useEditor((s) => s.hiddenLayers)
-  React.useEffect(() => {
-    const timer = setTimeout(pushChatContextNow, 300)
-    const onRequest = (event: MessageEvent): void => {
-      const data = event.data as { type?: string } | null
-      if (data && data.type === 'tintin-cover:context-request') pushChatContextNow()
-    }
-    window.addEventListener('message', onRequest)
-    return () => {
-      clearTimeout(timer)
-      window.removeEventListener('message', onRequest)
-    }
-  }, [templateId, props, hiddenLayers])
-}
-
-/** agent 改字回流:轮询 /acp/props(2s;origin=agent 才套用),编辑器自己的修改
-    防抖 600ms 反向推送(origin=editor,agent 的 cover.props.json 即新值)。 */
-function useAgentPropsSync(isBusy: () => boolean): void {
-  React.useEffect(() => {
-    let stop = false
-    let lastAgentTs = 0
-    let lastOwnWrite = 0
-    let pushing = false
-    const tick = async (): Promise<void> => {
-      try {
-        const r = await fetch('/tintin/cover/api/acp/props').then((x) => x.json())
-        if (stop) return
-        const record = r?.record as { origin?: string; updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
-        if (record && record.origin === 'agent' && typeof record.updatedAt === 'number'
-          && record.updatedAt > lastAgentTs && record.updatedAt > lastOwnWrite) {
-          lastAgentTs = record.updatedAt
-          pushing = true
-          try {
-            if (typeof record.templateId === 'string' && record.templateId && record.templateId !== useEditor.getState().templateId) {
-              useEditor.getState().setTemplate(record.templateId)
-            }
-            // 套用时并入模板默认值:agent 的旧快照缺新图层键(如后加的 subtitle)不致空白(同 setOrientation 合并语义)
-            if (record.props && typeof record.props === 'object') {
-              // agent 自下载的新图片只落 cover 目录,staticFile 解析不到——先补三写完成再套用,
-              // 否则 Img 按 404 渲染且不再重试(2026-10-28 探针实测)
-              const custom = Array.isArray(record.props.customLayers) ? record.props.customLayers : []
-              const unsynced = custom
-                .map((layer) => String(layer?.image ?? ''))
-                .filter((image) => image && !image.startsWith('public/'))
-              await Promise.all(unsynced.map((image) =>
-                fetch('/tintin/cover/api/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: image }) }).catch(() => {}),
-              ))
-              const defaults = getTemplate(useEditor.getState().templateId).defaultProps
-              const merged = { ...defaults, ...record.props }
-              // 组归属净化(2026-10-31 阶段2):智能体写的 customLayers[].group 只认图片组槽位
-              merged.customLayers = sanitizeCustomLayers(useEditor.getState().templateId, merged.customLayers)
-              useEditor.setState({ props: merged })
-            }
-            if (Array.isArray(record.hiddenLayers)) useEditor.setState({ hiddenLayers: [...record.hiddenLayers] })
-          } finally {
-            setTimeout(() => { pushing = false }, 650) // 盖过 600ms 推送防抖,防回流打转
-          }
-        }
-      } catch { /* 会话路由未起(旧包) */ }
-    }
-    const timer = setInterval(() => { void tick() }, 2000)
-    void tick()
-    let pushTimer: ReturnType<typeof setTimeout> | null = null
-    const unsubscribe = useEditor.subscribe(() => {
-      if (pushing) return
-      if (pushTimer) clearTimeout(pushTimer)
-      pushTimer = setTimeout(() => {
-        const s = useEditor.getState()
-        lastOwnWrite = Date.now()
-        pushing = true
-        void fetch('/tintin/cover/api/acp/props', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ templateId: s.templateId, props: s.props, hiddenLayers: s.hiddenLayers }),
-        }).catch(() => {}).finally(() => { pushing = false })
-      }, 600)
-    })
-    return () => { stop = true; clearInterval(timer); unsubscribe(); if (pushTimer) clearTimeout(pushTimer) }
-  }, [])
-}
 /* 项目 tab/打开项目弹层样式(2026-10-30 用户裁决):× 悬停/激活显隐用 :hover 必须
    走样式表(inline 无法表达),一次性注入 */
 let pjStyleInjected = false

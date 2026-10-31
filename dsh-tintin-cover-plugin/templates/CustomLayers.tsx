@@ -14,6 +14,9 @@ export interface CustomLayer {
   width: number
   opacity?: number
   rotate?: number
+  /** 图层组归属(2026-10-31 阶段2,叠放语义):值=模板槽位 id(仅图片组 product/environment 可挂);
+   *  缺省=未分组。组内图层按全局 layerOrder 叠放渲染。 */
+  group?: string
 }
 
 export type LayerOrder = string[] | undefined
