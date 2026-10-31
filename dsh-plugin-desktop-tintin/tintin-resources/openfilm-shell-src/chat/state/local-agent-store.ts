@@ -54,7 +54,9 @@ const probing = new Set<LocalAgentId>();
     agent updated since (Claude Code with new models) has other options, so each is asked once a launch */
 const askedThisLaunch = new Set<LocalAgentId>();
 
-const KEY = 'openfilm.local-agents.v2';
+/* TinTin(2026-10-30): 键升 v3 一次性重置旧的选择 —— 名册新增「TinTin智能体」行并置首
+   (首个 ready 行=默认), 旧 v2 里点过的 deepseek 不再当作默认; 用户可再选并会记住。 */
+const KEY = 'openfilm.local-agents.v3';
 
 function load(): Persisted {
   const empty: Persisted = { picked: 'claude', prefs: {}, options: {} };
@@ -262,10 +264,21 @@ export function optionValue(options: ConfigOptions | undefined, prefs: Record<st
   return options?.find((o) => o.id === id)?.currentValue;
 }
 
-/** Option value → display name. */
+/** Option value → display name.
+ * TinTin(2026-10-30): ACP 的模型选项是 provider 分组嵌套(`options` 里每项自带一层
+ * `options` 选择数组), 此前只在顶层找 → 永远落空, 标签回退成原始值(组合 JSON 串)。
+ * 拍平分组后按值取显示名 —— 模型行的名称与按钮摘要因此显示补丁里的名字(如「视频生成」)。 */
+export function optionChoices(option: { options?: Array<Record<string, unknown>> } | undefined): Array<{ value: unknown; name: string; description?: string }> {
+  const entries = option?.options ?? [];
+  return entries.flatMap((entry) => {
+    const nested = (entry as { options?: unknown })?.options;
+    return Array.isArray(nested) ? (nested as Array<{ value: unknown; name: string; description?: string }>) : [entry as { value: unknown; name: string; description?: string }];
+  });
+}
+
 export function optionLabel(options: ConfigOptions | undefined, id: string, value: unknown): string | null {
   const option = options?.find((o) => o.id === id);
-  const hit = option?.options?.find((o) => o.value === value);
+  const hit = optionChoices(option).find((o) => o.value === value);
   return hit?.name ?? (typeof value === 'string' ? value : null);
 }
 
@@ -286,7 +299,8 @@ export function agentModelSummary(
   let model: string | null = null;
   if (modelOpt) {
     const value = optionValue(options, prefs, modelOpt.id);
-    const choice = modelOpt.options?.find((o) => o.value === value);
+    /* TinTin(2026-10-30): 分组嵌套里找当前选择(见 optionChoices) —— 命中即显示补丁里的模型名 */
+    const choice = optionChoices(modelOpt).find((o) => o.value === value);
     let raw = value === 'default' && choice?.description ? choice.description : optionLabel(options, modelOpt.id, value);
     /* TinTin(2026-10-24): ACP 的组合值是 `["provider","model"]` 形状的 JSON 字符串 ——
        标签解析不到时回退成了原始值, 又长又像报错。解析出模型名折叠显示。 */

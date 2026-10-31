@@ -18,20 +18,87 @@ const require_ = createRequire(import.meta.url)
 /** 影片可用的服务端模型(id=请求用的模型名,name=选择器展示名). */
 export interface FilmAgentModels { id: string; name: string }
 
+/** 影片会话的角色(聊天选择器里的 agent 行; 2026-10-30 用户裁决: 新增「TinTin智能体」并设为默认).
+    deepseek=编导助手(原 DeepSeek Harness); tintin-agent=TinTin智能体(默认), 调度服务端子智能体
+    (视频/图片/音乐/音频/口播/数字人生成, 即服务端 /mcp 的 create_* 工具族)。角色=人设不同,
+    补丁与会话都按角色分文件。 */
+export type FilmAgentPersona = 'deepseek' | 'tintin-agent'
+
 /** 影片可用的服务端模型(补丁与兜底清单;与首启 provisioning 的降级清单同源). */
 export const FILM_AGENT_MODELS: FilmAgentModels[] = [
   { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash' },
   { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
 ]
 
+/** TinTin智能体角色的模型清单(2026-10-30): 路由同一个服务端模型, 显示名即角色名 ——
+    选择器按钮与模型行因此显示「TinTin智能体」而不是底层模型名。 */
+export const FILM_TINTIN_AGENT_MODELS: FilmAgentModels[] = [
+  { id: 'deepseek-v4-flash', name: 'TinTin智能体' },
+]
+
+/** TinTin智能体角色的人设(补丁 system-prompt.personaPrefix, 叠在 acp bundle 层之后覆盖同 id 行):
+    调度服务端子智能体(2026-10-30 /mcp tools/list 实测 7 工具: create_video/create_image/
+    create_music/create_audio(sfx|tts)/create_digital_human/task_status_unified/server_health)。
+    注意: personaPrefix 是严格模板, 文本里不能出现 {{ }}。 */
+export const FILM_TINTIN_AGENT_PERSONA = [
+  '你是 TinTin 视频剪辑工作台的「TinTin智能体」, 负责把用户的需求派给对应的服务端子智能体完成; 不做剪辑编排, 不改时间线。',
+  '可调用的子智能体(全部是服务端 MCP 工具, 按需求选择):',
+  '- 视频生成 → create_video: prompt 写清画面主体+场景+运镜(1..2000 字), duration 1~10 秒, aspect 可选 9:16(缺省)/16:9/1:1, resolution 可选 720p/1080p(缺省 1080p, 单卡独占、排队属正常); 异步, 返回 task_id 后用 task_status_unified 轮询。',
+  '- 图片生成 → create_image: mode=t2i(缺省, 文生图, prompt 直接出图)或 mode=cover(封面图生图: script_id/images/material_ids 三选一 + title ≤20 字 + selling_points ≤5 条); aspect 可选 9:16(缺省)/16:9/1:1/4:3; 异步任务同上轮询。',
+  '- 音乐生成 → create_music: style 九选一(流行/电子/古风/纯音乐/摇滚/嘻哈/爵士/氛围/auto), mood 六选一(欢快/大气/悲伤/温馨/紧张/平静), duration 3~30 秒(缺省 20); 同步直出音频地址。',
+  '- 音频生成(音效) → create_audio 且 kind=sfx: prompt 用英文描述更佳, duration 0.5~10 秒; 同步直出。',
+  '- 口播生成(配音) → create_audio 且 kind=tts: text 必填(整段一次提交), sample_id 选音色(用户没给就先问清), engine 可选 indextts(缺省)/qwen3/voxcpm, lang 默认 ZH; 同步直出。',
+  '- 数字人 → create_digital_human: kind=image(人物图+驱动音频→口播视频, 缺省)或 kind=lipsync(视频+驱动音频→口型同步); 文件字段传 base64; 异步任务同上轮询。',
+  '通用规则:',
+  '1. 异步工具拿到 task_id 后用 task_status_unified 轮询到完成; 失败时把服务端错误原样转告用户, 并给一条修改建议。',
+  '2. 每个产物取结果地址后用 curl 下载保存进当前影片项目目录 assets/tintin/(命名: 视频 vid-短时间戳.mp4 / 图片 img-*.png / 音乐 bgm-*.wav / 音效 sfx-*.wav / 口播 vo-*.wav), 回复里必须给出保存路径, 方便插入时间线。',
+  '3. 用户要多个结果时逐个任务生成; 需求缺关键要素(画面主体/风格/时长/画幅/音色)时先问清再生成。',
+  '4. 与生成无关的请求(剪辑/编排/改时间线)如实说明这不归你, 建议切到 DeepSeek Harness(编导)。',
+  '回复用简短中文, 汇报每次调用的子智能体、参数与结果路径。',
+].join('\n')
+
+/** 未显式传角色时的兜底。 */
+export function filmAgentPersona(value: unknown): FilmAgentPersona {
+  return value === 'tintin-agent' ? 'tintin-agent' : 'deepseek'
+}
+
+/** 一个角色的模型路由补丁文件名(按角色分文件, 角色切换=会话重建). */
+export function filmAgentPatchFile(persona: FilmAgentPersona): string {
+  return persona === 'tintin-agent' ? 'film-tintin-agent.patch.yml' : 'film-agent.patch.yml'
+}
+
+/** 一个角色的智能体 home(按角色分目录: 会话与技能互不串). */
+export function filmAgentHomeDir(persona: FilmAgentPersona): string {
+  return persona === 'tintin-agent' ? 'film-tintin-agent-home' : 'film-agent-home'
+}
+
 /** 生成影片智能体的模型路由补丁(叠在 acp bundle 层之后生效).
     插件 id 必须是 acp 组合实际存在的行(llm-pi-ai/acp, 见 dsh-base cordis.patch.yml 135 行)
-    —— id 写错(如曾经的 llm-pi-ai)整行被静默忽略, 模型回落官方直连。 */
-export function filmAgentPatchText(serverUrl: string, models: FilmAgentModels[] = FILM_AGENT_MODELS): string {
+    —— id 写错(如曾经的 llm-pi-ai)整行被静默忽略, 模型回落官方直连。
+    personaPrefix 非空时叠加 system-prompt 行(覆盖 acp bundle 的部署人设)。
+    2026-10-30:补 dsh-mcp-client 行挂服务端 MCP 工具箱 —— 实证 rc.2 的 acp 路径
+    无视 session/new 的 mcpServers 参数(坏 URL 也不报错、子进程零连接, 当日探针),
+    会话参数挂载失效;补丁行按官方 README 最小配置进程级挂载, 工具名 mcp__tintin-server__*。 */
+export function filmAgentPatchText(serverUrl: string, models: FilmAgentModels[] = FILM_AGENT_MODELS, personaPrefix = ''): string {
   const rows = models.map((m) => `          - id: ${m.id}\n            name: ${m.name}`).join('\n')
+  const personaLines = personaPrefix
+    ? ['- id: system-prompt', '  config:', '    personaPrefix: |-',
+      ...personaPrefix.split('\n').map((line) => `      ${line}`)]
+    : []
   const lines = [
     '# TinTin 影片智能体: 模型路由到 TinTin 服务端(openai-completions, <server>/llm).',
     '# 由桌面端生成; 手改会被下次启动覆盖. key 走 env TINTIN_SERVER_API_KEY(占位值).',
+    ...personaLines,
+    '# 服务端 MCP 工具箱(rc.2 会话参数挂载失效, 补丁行挂载; 工具名 mcp__tintin-server__*):',
+    '# 新行必须 insert: 顶层 - id: 行是"更新已存在条目"语义, 目标不存在=整行静默忽略。',
+    '- insert:',
+    '    - id: mcp-tintin-server',
+    "      name: '@deepseek-ai/dsh-mcp-client'",
+    '      config:',
+    '        serverName: tintin-server',
+    '        transport: streamable-http',
+    `        url: ${serverUrl.replace(/\/+$/, '')}/mcp`,
+    '        failOnStartupError: true',
     '- id: llm-pi-ai',
     '  config:',
     '    providers:',
@@ -52,11 +119,15 @@ export function filmAgentPatchText(serverUrl: string, models: FilmAgentModels[] 
 }
 
 /** 把补丁写到隔离 home 的固定位置(内容变化才写), 返回补丁绝对路径. */
-export function ensureFilmAgentPatch(channelHome: string, serverUrl: string, models?: FilmAgentModels[]): string {
+export function ensureFilmAgentPatch(channelHome: string, serverUrl: string, models?: FilmAgentModels[], persona: FilmAgentPersona = 'deepseek'): string {
   const dir = join(channelHome, 'tintin')
   mkdirSync(dir, { recursive: true })
-  const path = join(dir, 'film-agent.patch.yml')
-  const text = filmAgentPatchText(serverUrl, models)
+  const path = join(dir, filmAgentPatchFile(persona))
+  const text = filmAgentPatchText(
+    serverUrl,
+    models ?? (persona === 'tintin-agent' ? FILM_TINTIN_AGENT_MODELS : FILM_AGENT_MODELS),
+    persona === 'tintin-agent' ? FILM_TINTIN_AGENT_PERSONA : '',
+  )
   if (!existsSync(path) || readFileSync(path, 'utf8') !== text) writeFileSync(path, text, 'utf8')
   return path
 }
@@ -176,6 +247,8 @@ export interface FilmAgentState {
 
 interface Handle {
   project: string
+  /** 本进程服务的角色(选择器里的 agent 行; 人设与补丁按角色分文件). */
+  agentId: FilmAgentPersona
   sessionId: string | null
   child: ReturnType<typeof spawn>
   agent: Promise<{ prompt(text: string, images?: Array<{ data: string; mimeType: string }>): Promise<{ stopReason: string }> }>
@@ -196,7 +269,10 @@ interface Handle {
  */
 export class FilmAgentManager {
   private handles = new Map<string, Handle>()
+  /** 会话 id 按 角色:项目 分键 —— 每个角色在同一影片下续各自的会话. */
   private sessionIds = new Map<string, string>()
+  /** 项目 → 最近一次使用的角色(begin 显式给定; ensure/prompt 无参时沿用). */
+  private personas = new Map<string, FilmAgentPersona>()
   private permissions = new Map<string, { project: string; resolve: (response: unknown) => void }>()
   private questions = new Map<string, { project: string; resolve: (response: unknown) => void; questions: Array<{ id: string; options: Array<{ label: string }>; customId: string | null; multi: boolean }> }>()
   private log: (message: string) => void
@@ -225,9 +301,9 @@ export class FilmAgentManager {
     mkdirSync(logsDir, { recursive: true })
     const logFile = join(logsDir, `${turnId}.jsonl`)
     this.activeLogs.set(project, logFile)
-    this.trackTurn(project, null)
-    const entry = this.turns.get(project)!
     const handle = await this.ensure(project)
+    this.trackTurn(project, null, handle.agentId)
+    const entry = this.turns.get(project)!
     const agent = await handle.agent
     appendFileSync(logFile, `${JSON.stringify({ t: Date.now(), kind: 'prompt', text })}\n`, 'utf8')
     try {
@@ -247,15 +323,14 @@ export class FilmAgentManager {
     }
   }
 
-  /** 显式启动(或续接)一部影片的会话, 返回会话信息(聊天侧 start 的后端). */
-  /** 显式启动(或续接)一部影片的会话, 返回会话信息(聊天侧 start 的后端)。
-      */
-  async begin(project: string): Promise<{
+  /** 显式启动(或续接)一部影片的会话, 返回会话信息(聊天侧 start 的后端).
+      persona 缺省沿用该项目最近的角色(首次为 deepseek)。 */
+  async begin(project: string, persona?: FilmAgentPersona): Promise<{
     sessionId: string; resumed: boolean; agentInfo: { name?: string; title?: string; version?: string } | null; authMethods: never[]; mcp: false;
     models: { availableModels: Array<{ modelId: string; name: string; description?: string }>; currentModelId: string } | null;
     modes: null; configOptions: Array<Record<string, unknown>> | null;
   }> {
-    const handle = await this.ensure(project)
+    const handle = await this.ensure(project, persona)
     const session = (handle.session ?? {}) as {
       models?: { availableModels?: Array<Record<string, unknown>>; currentModelId?: unknown }
       configOptions?: Array<Record<string, unknown>>
@@ -337,7 +412,7 @@ export class FilmAgentManager {
   /** 轮次回执缓存: 页面重载后 running() 恢复显示用; 聊天 ack 后清除. */
   private turns = new Map<string, {
     key: string
-    agent: 'deepseek'
+    agent: FilmAgentPersona
     cwd: string
     meta: unknown
     done: { ok: true; stopReason: string } | { ok: false; error: string } | null
@@ -345,7 +420,7 @@ export class FilmAgentManager {
   }>()
 
   /** 聊天重载时取回仍在进行/刚结束未认领的轮次(官方 localAgents.running 语义). */
-  runningTurns(): Array<{ key: string; agent: 'deepseek'; cwd: string; meta: unknown; done: { ok: true; stopReason: string } | { ok: false; error: string } | null; events: Array<Record<string, unknown> & { kind: string }> }> {
+  runningTurns(): Array<{ key: string; agent: FilmAgentPersona; cwd: string; meta: unknown; done: { ok: true; stopReason: string } | { ok: false; error: string } | null; events: Array<Record<string, unknown> & { kind: string }> }> {
     return [...this.turns.values()].map((turn) => ({ ...turn, events: [...turn.events] }))
   }
 
@@ -354,11 +429,12 @@ export class FilmAgentManager {
     this.turns.delete(key)
   }
 
-  /** 登记一轮( start 时建档, 供重载恢复; 已有则更新 meta ). */
-  trackTurn(project: string, meta: unknown): void {
+  /** 登记一轮( start 时建档, 供重载恢复; 已有则更新 meta 与角色 ). */
+  trackTurn(project: string, meta: unknown, persona?: FilmAgentPersona): void {
+    const wanted = persona ?? this.personas.get(project) ?? 'deepseek'
     const existing = this.turns.get(project)
-    if (existing) { existing.meta = meta ?? existing.meta; return }
-    this.turns.set(project, { key: project, agent: 'deepseek', cwd: project, meta: meta ?? null, done: null, events: [] })
+    if (existing) { existing.meta = meta ?? existing.meta; existing.agent = wanted; return }
+    this.turns.set(project, { key: project, agent: wanted, cwd: project, meta: meta ?? null, done: null, events: [] })
   }
 
   dispose(): void {
@@ -379,21 +455,23 @@ export class FilmAgentManager {
     this.options.onEvent?.({ project, event })
   }
 
-  private ensure(project: string): Promise<Handle> {
+  private ensure(project: string, persona?: FilmAgentPersona): Promise<Handle> {
+    const wanted = persona ?? this.personas.get(project) ?? 'deepseek'
+    if (persona !== undefined) this.personas.set(project, persona)
     const existing = this.handles.get(project)
     /* 角色切换 = 人设不同, 会话必须重建(补丁按角色分文件) */
-    if (existing && existing.child.exitCode === null) return Promise.resolve(existing)
+    if (existing && existing.child.exitCode === null && existing.agentId === wanted) return Promise.resolve(existing)
     if (existing) this.stop(project)
-    const handle = this.start(project)
+    const handle = this.start(project, wanted)
     this.handles.set(project, handle)
     return handle.agent.then(() => handle)
   }
 
-  private start(project: string): Handle {
+  private start(project: string, agentId: FilmAgentPersona): Handle {
     const serverUrl = this.options.serverUrl().replace(/\/+$/, '')
     if (!serverUrl) throw new Error('server.url 未配置: 影片智能体无法启动')
-    const patchPath = ensureFilmAgentPatch(this.options.channelHome, serverUrl)
-    const home = join(this.options.channelHome, 'film-agent-home')
+    const patchPath = ensureFilmAgentPatch(this.options.channelHome, serverUrl, undefined, agentId)
+    const home = join(this.options.channelHome, filmAgentHomeDir(agentId))
     mkdirSync(home, { recursive: true })
     /* 内置 openfilm 技能随包分发(2026-10-24): 同步进影片智能体的 home ——
        智能体才有该技能可执行; 同步失败不阻断启动。 */
@@ -431,8 +509,9 @@ export class FilmAgentManager {
     let settleAgent!: (impl: AgentImpl) => void
     let failAgent!: (error: Error) => void
     const agent = new Promise<AgentImpl>((resolve, reject) => { settleAgent = resolve; failAgent = reject })
+    const sessionKey = `${agentId}:${project}`
     const handle: Handle = {
-      project, sessionId: this.sessionIds.get(project) ?? null, child, agent,
+      project, agentId, sessionId: this.sessionIds.get(sessionKey) ?? null, child, agent,
       conn: null, init: null, session: null, steering: false,
     }
     const forward = (update: unknown) => {
@@ -479,13 +558,10 @@ export class FilmAgentManager {
       }) as { agentInfo?: { name?: string; title?: string; version?: string }; agentCapabilities?: Record<string, unknown>; _meta?: { steering?: { supported?: boolean } } }
       handle.init = init
       handle.steering = init._meta?.steering?.supported === true
-      /* 服务端 MCP(2026-10-25 用户裁决): 会话声明服务端的 MCP server(streamable-http),
-         智能体工具清单即获得注册表全部能力 —— 大模型可自主编排服务端能力。 */
-      const mcpServers: unknown[] = serverUrl
-        ? [{ name: 'tintin-server', type: 'http', url: `${serverUrl.replace(/\/+$/, '')}/mcp` }]
-        : []
-      const params = { cwd: project, mcpServers }
-      let sessionId: string | null = this.sessionIds.get(project) ?? null
+      /* MCP 挂载走补丁行(2026-10-30):rc.2 会话参数挂载死路(实测合法 URL 零连接、坏条目被
+         SDK schema 静默跳过), 补丁行进程级挂载。此键仍是 schema 必需 —— 留空数组防双挂。 */
+      const params = { cwd: project, mcpServers: [] }
+      let sessionId: string | null = this.sessionIds.get(sessionKey) ?? null
       if (sessionId !== null) {
         /* 持久会话: resume 失败(如目录变更)回落新建 */
         const resumed = await conn.agent.request(acp.methods.agent.session.resume, { ...params, sessionId }).then((r) => r as { sessionId: string } & Record<string, unknown>, () => null)
@@ -498,7 +574,7 @@ export class FilmAgentManager {
         handle.session = created
       }
       handle.sessionId = sessionId
-      this.sessionIds.set(project, sessionId)
+      this.sessionIds.set(sessionKey, sessionId)
       const promptFn = async (text: string, images?: Array<{ data: string; mimeType: string }>) => {
         const blocks: Array<Record<string, unknown>> = [{ type: 'text', text }, ...((images ?? []).map((i) => ({ type: 'image', data: i.data, mimeType: i.mimeType })))]
         const response = await conn.agent.request(acp.methods.agent.session.prompt, { sessionId: handle.sessionId, prompt: blocks }) as { stopReason: string }

@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { FilmAgentManager, dshBinExists } from './film-acp.ts'
+import { FilmAgentManager, dshBinExists, filmAgentHomeDir, filmAgentPersona } from './film-acp.ts'
 import { filmChat, keepSnapshot, settleSnapshot } from './film-chat.ts'
 import { resolveDesktopChannelHome } from '../desktop-channel-home.ts'
 import { DESKTOP_PRODUCT_IDENTITY, DESKTOP_PRODUCT_NAME } from '../product-identity.ts'
@@ -553,8 +553,9 @@ export function installTinTinMainHook(): void {
           const cwd = String(p.cwd ?? '')
           if (!cwd) return { ok: false, error: 'cwd 必填' }
           const resume = typeof p.resume === 'string' && p.resume ? p.resume : null
-          manager.trackTurn(cwd, p.meta)
-          const info = await manager.begin(cwd).catch((error: unknown) => {
+          const persona = filmAgentPersona(p.agent)
+          manager.trackTurn(cwd, p.meta, persona)
+          const info = await manager.begin(cwd, persona).catch((error: unknown) => {
             /* 会话建立失败实录(2026-10-25 可观测性): 智能体子进程被终止的真实原因落统一日志 */
             const detail = error instanceof Error ? error.message : String(error)
             try { diagnosticLog({ source: 'film-acp', event: 'begin-error', level: 'error', developer: false, fields: { cwd, message: String(detail).slice(0, 2000) } }) } catch { /* 日志失败不阻断 */ }
@@ -586,9 +587,9 @@ export function installTinTinMainHook(): void {
         case 'close': manager.stop(String(p.key ?? '')); return { ok: true }
         case 'disconnect': manager.dispose(); return { ok: true }
         case 'probe': {
-          const tmp = join(channelHome(), 'film-agent-home', 'probe')
+          const tmp = join(channelHome(), filmAgentHomeDir(filmAgentPersona(p.agent)), 'probe')
           mkdirSync(tmp, { recursive: true })
-          const info = await manager.begin(tmp)
+          const info = await manager.begin(tmp, filmAgentPersona(p.agent))
           manager.stop(tmp)
           return { ok: true, info }
         }
@@ -599,19 +600,19 @@ export function installTinTinMainHook(): void {
     }
   })
 
-  // Settings → Agents(deepseek-only, 阶段 2):注册表来自宿主, dsh CLI 在即 ready。
+  // Settings → Agents(阶段 2; 2026-10-30 用户裁决: 新增「TinTin智能体」行并置首 ——
+  // 选择器的默认=首个 ready 行, 因此默认角色=TinTin智能体(调度服务端子智能体:
+  // 视频/图片/音乐/音频/口播/数字人生成); deepseek(编导)保留可手选)。
+  // 注册表来自宿主, dsh CLI 在即 ready。
   let filmAgentsShown = true
-  const filmAgentRow = () => ({
-    id: 'deepseek',
-    name: 'DeepSeek Harness',
-    shown: filmAgentsShown,
-    status: dshBinExists() ? 'ready' : 'missing',
-    install: 'https://github.com/deepseek-ai/deepseek-harness',
-  })
+  const filmAgentRows = (): Array<Record<string, unknown>> => [
+    { id: 'tintin-agent', name: 'TinTin智能体', shown: filmAgentsShown, status: dshBinExists() ? 'ready' : 'missing', install: null },
+    { id: 'deepseek', name: 'DeepSeek Harness', shown: filmAgentsShown, status: dshBinExists() ? 'ready' : 'missing', install: 'https://github.com/deepseek-ai/deepseek-harness' },
+  ]
   const notifyFilmAgents = (): void => {
-    try { studioView?.webContents.send(OPENFILM_AGENT_CHANGED, [filmAgentRow()]) } catch { /* 视图未开 */ }
+    try { studioView?.webContents.send(OPENFILM_AGENT_CHANGED, filmAgentRows()) } catch { /* 视图未开 */ }
   }
-  ipcMain.handle(OPENFILM_AGENT_LIST, () => [filmAgentRow()])
+  ipcMain.handle(OPENFILM_AGENT_LIST, () => filmAgentRows())
   ipcMain.handle(OPENFILM_AGENT_CONNECT, () => {
     const ok = dshBinExists()
     if (ok) notifyFilmAgents()
@@ -679,7 +680,14 @@ export function installTinTinMainHook(): void {
         for (const s of serverSkills) {
           const name = String(s.name ?? '')
           if (!name || openfilm.some((row) => String(row.name ?? '') === name)) continue
-          openfilm.push({ name, description: String(s.description ?? ''), source: 'server', folder: '', scripts: [] })
+          openfilm.push({
+            name, description: String(s.description ?? ''), source: 'server', folder: '', scripts: [],
+            /* 已装标记(2026-10-30 技能弹窗服务端 tab): 安装落点=install handler 同款路径, 弹窗按它区分 安装/已安装 */
+            installed: existsSync(join(channelHome(), 'film-agent-home', 'skills', name.replace(/[/:*?"<>|]/g, '-'))),
+            /* 详情(2026-10-31 用户裁决: 点卡片看全部信息, 对齐封面技能管理详情弹窗): 服务端原行透传
+               (instruction/tags/version/executor/registered_by/created_at 等), 弹窗本地渲染不再二次请求 */
+            detail: s,
+          })
         }
       }
     } catch { /* 服务端不可达: 只返回本地清单 */ }

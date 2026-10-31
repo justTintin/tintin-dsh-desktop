@@ -435,7 +435,21 @@ function commandFor(ref: StudioRef): StudioCommand {
   setMenuOpen() {},
   /* the chat's record of each project, in its .film/chat and .film/logs */
   chat: native.chat,
-  skills: native.skills,
+  /* TinTin (2026-10-31 用户裁决): 聊天菜单里的技能=已安装的技能 —— 服务端技能只有装进
+     编导 home(film-agent-home/skills)才对智能体可见, 未装的不进 / 与 @ 菜单; 技能弹窗的
+     服务端 tab 直用 openfilmNative 原桥(发现/安装), 不经本包装, 不受影响。 */
+  skills: {
+    ...native.skills,
+    list: async (...args: Parameters<typeof native.skills.list>) => {
+      const listing = await native.skills.list(...args) as {
+        openfilm?: Array<{ source?: unknown; installed?: unknown }>;
+      } | undefined;
+      if (listing && Array.isArray(listing.openfilm)) {
+        listing.openfilm = listing.openfilm.filter((s) => String(s.source ?? '') !== 'server' || s.installed === true);
+      }
+      return listing;
+    },
+  },
   asks: { get: asks.get, onChange: asks.on, answer: (id: string, allow: boolean) => answerAsk(id, allow) },
   developer,
 };

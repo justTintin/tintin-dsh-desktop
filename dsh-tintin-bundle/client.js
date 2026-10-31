@@ -15,9 +15,9 @@ const tintinClient = (() => {
       window.__tintinChrome?.dispose?.()
       // 入口视图（工作台=无覆盖层默认态；浏览器=内嵌视图）
       const VIEWS = [
-        { id: 'creation', label: '创作模式' },
+        { id: 'creation', label: '素材创作' },
         { id: 'ops', label: '运营工具' },
-        { id: 'media', label: '媒体工具' }, { id: 'skills', label: '技能管理', glyph: '<path d="M8 2.2 13.6 4.8 8 7.4 2.4 4.8z"/><path d="M2.4 8 8 10.6 13.6 8"/><path d="M2.4 11.2 8 13.8l5.6-2.6"/>' }, // 技能管理（2026-10-16 裁决）：服务端技能库安装/删除，装后创作模式 /技能名 调用
+        { id: 'media', label: '媒体工具' }, // 技能管理侧栏入口已随 2026-10-30 用户裁决移除(封面插件自带技能管理,各插件自管)
         { id: 'cover', label: '封面制作', glyph: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="5.4" cy="6" r="1.2"/><path d="M4 11.4 7.6 8.2l2.6 2.1 2-1.7 2.8 2.6"/>' }, // 封面制作(2026-10-27 用户裁决:独立菜单置于视频剪辑上方;封面编辑器 dsh-tintin-cover-plugin)
         { id: 'openfilm', label: '视频剪辑', glyph: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2 6.2h12"/><path d="M4.6 4.85h.01M7 4.85h.01M9.4 4.85h.01M11.8 4.85h.01"/><path d="M6.9 8.3v3.1l2.9-1.55z"/>' }, // 视频剪辑（2026-10-19 用户裁决：原「OpenFilm」改名）
       ]
@@ -242,7 +242,11 @@ const tintinClient = (() => {
         if (activeId === 'workbench') { overlay.style.display = 'none'; return }
         overlay.style.display = 'block'; let el = viewEls.get(activeId)
         if (!el) {
-          el = document.createElement('div'); el.className = 'tintin-view-el'
+          el = document.createElement('div')
+          // 封面制作/视频剪辑免入场动画（2026-10-30 用户裁决）：两视图=满屏编辑器 iframe，
+          // 切换是 display:none 切换 → CSS 动画每次重放（tintin-view-in 12px 上滑），
+          // 在密集编辑器上读感是「加载界面抖一次」；卡片列表视图的同一动画保留。
+          if (activeId !== 'cover' && activeId !== 'openfilm') el.className = 'tintin-view-el'
           el.style.cssText = 'width:100%;min-height:100%;box-sizing:border-box;'
           container.appendChild(el); viewEls.set(activeId, el)
           const provider = registry.providers.get(activeId); if (provider) {
