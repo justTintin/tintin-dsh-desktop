@@ -72,15 +72,17 @@ async function fetchStandardModels(serverUrl) {
   } catch { return null }
 }
 
-/** 模型路由补丁(与 film 同源:服务端 openai-completions;权限全放行走聊天卡之外的兜底) */
-function writePatch(state, models) {
+/** 模型路由补丁(与 film 同源:服务端 openai-completions;权限全放行走聊天卡之外的兜底)。
+ *  按智能体分文件(2026-10-31 用户裁决:名册双智能体):tintin-agent=首个模型显示名
+ *  品牌化为「TinTin智能体」;deepseek=原生模型名(不品牌化)。 */
+function writePatch(state, models, agent = 'tintin-agent') {
   const dir = join(state.channelHome, 'tintin')
   mkdirSync(dir, { recursive: true })
-  const path = join(dir, 'cover-agent.patch.yml')
+  const path = join(dir, agent === 'deepseek' ? 'cover-deepseek-agent.patch.yml' : 'cover-agent.patch.yml')
   /* 2026-10-30 用户裁决:默认(首个)模型显示名=TinTin智能体 —— 选择器按钮与模型行
-     显示角色名而不是裸模型 id(同影片侧做法);模型路由与其余模型行不动。 */
+     显示角色名而不是裸模型 id(同影片侧做法);deepseek 角色保持原生名。 */
   const rows = models
-    .map((m, i) => `          - id: ${m.id}\n            name: ${i === 0 ? 'TinTin智能体' : m.name}`)
+    .map((m, i) => `          - id: ${m.id}\n            name: ${agent === 'tintin-agent' && i === 0 ? 'TinTin智能体' : m.name}`)
     .join('\n')
   const text = [
     '# TinTin 封面智能体: 模型路由到 TinTin 服务端(openai-completions)',
@@ -117,11 +119,11 @@ function writePatch(state, models) {
 /** 用户级技能(技能管理装位=<渠道主目录>/cover-skills,2026-10-31 收紧裁决:封面专属目录,
  *  旧通用装位 skills 由 migrateCoverSkillsHome 幂等搬入)整目录复制进 agent home,启动时刷新——
     智能体因此能调用已安装的生成图/封面/视频族技能;与插件自带同名时插件自带在后写入获胜。 */
-function syncUserSkills(state) {
+function syncUserSkills(state, homeName = 'cover-agent-home') {
   try { migrateCoverSkillsHome(state.channelHome) } catch { /* 迁移失败不阻断注入 */ }
   const dir = join(state.channelHome, 'cover-skills')
   if (!existsSync(dir)) return 0
-  const target = join(state.channelHome, 'cover-agent-home', 'skills')
+  const target = join(state.channelHome, homeName, 'skills')
   let count = 0
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !existsSync(join(dir, entry.name, 'SKILL.md'))) continue
@@ -130,13 +132,14 @@ function syncUserSkills(state) {
   return count
 }
 
-/** 技能注入:skills/cover/SKILL.md → agent home;动态附录(服务端/编辑器 API/令牌)拼在文末 */
-function ensureCoverSkill(state) {  const sources = [
+/** 技能注入:skills/cover/SKILL.md → agent home;动态附录(服务端/编辑器 API/令牌)拼在文末。
+ *  仅 TinTin智能体 注入(deepseek=原生编码智能体,无封面技能)。 */
+function ensureCoverSkill(state, homeName = 'cover-agent-home') {  const sources = [
     join(here, '..', '..', 'dsh-tintin-cover-plugin', 'skills', 'cover', 'SKILL.md'),
     join(process.resourcesPath ?? '', 'skills', 'cover', 'SKILL.md'),
   ]
   const src = sources.find((p) => existsSync(p))
-  const target = join(state.channelHome, 'cover-agent-home', 'skills', 'cover')
+  const target = join(state.channelHome, homeName, 'skills', 'cover')
   mkdirSync(target, { recursive: true })
   const base = src ? readFileSync(src, 'utf8') : '# TinTin 封面智能体技能(源文件缺失,仅环境附录)\n'
   const appendix = [
@@ -212,6 +215,8 @@ const state = {
   child: null,
   conn: null,
   sessionId: null,
+  /** 当前会话的智能体(选择器 id;2026-10-31 名册双智能体) */
+  agentId: 'tintin-agent',
   cwd: null,
   serverUrl: '',
   channelHome: '',
@@ -269,29 +274,38 @@ export function lastEventSeq() {
 // ── 会话生命周期 ─────────────────────────────────────────────────────────
 
 /**
- * 启动(或续接)封面会话。
+ * 启动(或续接)封面会话。agent=选择器里的智能体(2026-10-31 用户裁决:
+ * TinTin智能体 默认 + DeepSeek Harness 可选 —— 两个身份,补丁/home/会话各自独立:
+ * deepseek=原生编码智能体(模型名不品牌化、不注入封面技能),tintin-agent=封面助手)。
  * @returns {Promise<{ok:true,key:string,info:object}|{ok:false,error:string}>}
  */
-export async function startSession({ cwd, serverUrl, channelHome }) {
-  if (isRunning() && state.cwd === cwd) return { ok: true, key: 'cover', info: sessionInfo() }
+export async function startSession({ cwd, serverUrl, channelHome, agent = 'tintin-agent' }) {
+  const agentId = agent === 'deepseek' ? 'deepseek' : 'tintin-agent'
+  const homeName = agentId === 'deepseek' ? 'cover-deepseek-agent-home' : 'cover-agent-home'
+  if (isRunning() && state.cwd === cwd && state.agentId === agentId) return { ok: true, key: 'cover', info: sessionInfo() }
+  /* 跨智能体切换=人设不同,不续接对方会话;同智能体按内存会话续接 */
+  const resumeId = state.agentId === agentId ? state.sessionId : null
   stopSession()
   if (!serverUrl) return { ok: false, error: 'server.url 未配置: 封面智能体无法启动' }
   state.serverUrl = String(serverUrl).replace(/\/+$/, '')
   state.channelHome = channelHome
   state.cwd = cwd
+  state.agentId = agentId
+  /* 跨智能体切换不续接对方会话(null=新建);同智能体续接原会话 */
+  state.sessionId = resumeId
   const sdk_ = acpSdk()
   const bin = dshBin()
   const models = (await fetchStandardModels(state.serverUrl)) ?? COVER_AGENT_FALLBACK_MODELS
-  const patch = writePatch(state, models)
-  mkdirSync(join(state.channelHome, 'cover-agent-home'), { recursive: true })
-  syncUserSkills(state)
-  ensureCoverSkill(state)
+  const patch = writePatch(state, models, agentId)
+  mkdirSync(join(state.channelHome, homeName), { recursive: true })
+  syncUserSkills(state, homeName)
+  if (agentId === 'tintin-agent') ensureCoverSkill(state, homeName)
   const env = {
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
     /* 2026-10-29 用户裁决:完全权限——基础补丁按此 env 映射 沙箱 danger-full-access + 审批 never(缺它=每次会话重新要权限,审批卡没接住即永挂) */
     DSH_PERMISSION_MODE: 'danger-full-access',
-    DSH_HOME: join(state.channelHome, 'cover-agent-home'),
+    DSH_HOME: join(state.channelHome, homeName),
     TINTIN_SERVER_API_KEY: 'sk-tintin-local',
     TINTIN_SERVER_URL: state.serverUrl,
     ...(state.apiOrigin ? { TINTIN_COVER_API: `${state.apiOrigin}/tintin/cover/api` } : {}),
@@ -441,6 +455,16 @@ export async function prompt(text, meta, images) {
     console.warn('[cover-agent] prompt 时会话未就绪,自动重启…')
     const restarted = await startSession({ cwd: state.cwd, serverUrl: state.serverUrl, channelHome: state.channelHome })
     if (!restarted.ok) return { ok: false, error: `ACP 会话未启动(自动重启失败):${restarted.error}` }
+    /* 重启后二次校验(2026-11-01 用户报障 Cannot read properties of null):startSession 返回 ok
+       与实际发 prompt 之间存在竞态窗口——agent 进程可能在握手完成后立即退出(exit 看门狗置
+       conn=null),此时不裸抛而是报告有意义错误。 */
+    if (!state.conn || !state.ready) {
+      return { ok: false, error: `封面智能体启动后立即退出(stderr: ${state.stderr.slice(-200) || '空'})——请检查服务端可达性与封面项目目录` }
+    }
+  }
+  /* prompt 发出前再校验一次(拖动/轮询等并发操作可能在 startSession 与 prompt 之间触发 exit) */
+  if (!state.conn || !state.ready) {
+    return { ok: false, error: '封面智能体会话已断开——请重试(系统会自动重启)' }
   }
   const sdk_ = acpSdk()
   const turnId = typeof meta?.turnId === 'string' && meta.turnId ? meta.turnId : randomUUID()
