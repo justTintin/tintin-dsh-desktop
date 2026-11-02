@@ -51,20 +51,6 @@ interface AppBridge {
   onStudioHover(listener: (ref: StudioRef | null) => void): () => void;
   /** the project's files (Studio's listing), for the @ menu */
   projectFiles(): Promise<{ files: Array<{ path: string; kind: string; size: number }>; pages?: Array<{ path: string; size: number }> }>;
-  /** TinTin cover editor (2026-10-28): the canvas's layers, for the @ menu. Absent outside the cover editor. */
-  coverLayers?(): Promise<Array<{ id: string; label: string; type: string; propsKey?: string; value?: unknown }>>;
-  /** TinTin cover (2026-10-28): conversation starters for the cover workflow (image/cover domain, the host's
-      language). Absent in the film chat, which keeps its built-in video starters. */
-  starters?(): Promise<string[]>;
-  /** TinTin cover (2026-10-28): the composer placeholders in the host's domain (the cover editor's are cover/
-      flavoured). Absent in the film chat, which keeps its built-in film wording. */
-  composerPlaceholder?(): Promise<{ blank: string; followUp: string }>;
-  /** TinTin cover (2026-10-28): no film timeline — the @ menu hides its moment/range group (current time etc.).
-      Absent in the film chat. */
-  timelineDisabled?: boolean;
-  /** TinTin cover (2026-10-28): the @ menu is for referencing only (layers/assets) — skills stay under `/`.
-      Absent in the film chat, which keeps skills in the @ menu (2026-10-24 ruling). */
-  hideSkillsInMentions?: boolean;
   onSelection(listener: (selection: StudioSelection) => void): () => void;
   setChatWidth(width: number, done?: boolean): void;
   setChatOpen(open: boolean): void;
@@ -91,9 +77,11 @@ interface AppBridge {
     describePaths(paths: string[]): Promise<Array<{ path: string; folder: boolean; size?: number } | { path: string; error: string }>>;
     /** the turns with a log and no saved record (src/chat-store.mjs unsavedTurns), but those of `except` */
     unsaved?(project: string, except?: string[]): Promise<Array<{ turnId: string; events: TurnLog['events'] }>>;
-    /** the project's files as a turn starts, kept by the app; then what the turn changed in them (src/file-changes.mjs) */
+    /** the project's files as a turn starts, kept by the app; then what the turn changed in them (src/file-changes.mjs).
+        `filmLost`: the turn ended with film.html gone, which `restoreFilm` puts back as the turn found it */
     snapshot(project: string, turnId: string): Promise<unknown>;
-    changes(project: string, turnId: string): Promise<{ files: FileChange[]; cut: boolean } | null>;
+    changes(project: string, turnId: string): Promise<{ files: FileChange[]; cut: boolean; filmLost?: boolean } | null>;
+    restoreFilm?(project: string, turnId: string): Promise<{ ok: true } | { ok: false; code: 'exists' | 'gone' }>;
   };
   /** what an agent's command asks before it spends (a video clip), and what it tells the person (a provider with no
       balance left), worded by Studio: shown above the composer until answered; the command waits for a question */
@@ -165,23 +153,4 @@ export interface TurnLog {
   calls?: unknown[];
 }
 
-/**
- * The chat's bridge accessor. Read lazily through a proxy: the shell page and the cover
- * chat page put `openfilmDesktop` on the window from a module that rollup may evaluate
- * AFTER this one (the chat tree is a shared chunk across the two entries; a const here
- * would capture undefined — 2026-10-28 双入口实测回归,影片会话框因此消失). The official
- * desktop app sets it in preload, before any page module; the proxy reads the same
- * window each time, so both orders work.
- */
-export const app: AppBridge = new Proxy({} as AppBridge, {
-  get(_target, prop) {
-    const bridge = (window as unknown as { openfilmDesktop?: AppBridge }).openfilmDesktop;
-    const value = bridge?.[prop as keyof AppBridge];
-    /* functions bound to the bridge so `app.onX(...)`/`app.asks.onChange(...)` keep their `this` */
-    return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(bridge) : value;
-  },
-  has(_target, prop) {
-    const bridge = (window as unknown as { openfilmDesktop?: AppBridge }).openfilmDesktop;
-    return Boolean(bridge && prop in bridge);
-  },
-});
+export const app = (window as unknown as { openfilmDesktop: AppBridge }).openfilmDesktop;

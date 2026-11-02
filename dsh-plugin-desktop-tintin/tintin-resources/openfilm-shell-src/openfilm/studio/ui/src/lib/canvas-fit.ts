@@ -12,7 +12,7 @@
  */
 import { pictureRect } from '../../../../src/film-doc.mjs';
 import { customFilmFrame, frameRatioOf, type FilmFrameId } from './film-frame.ts';
-import type { FilmBox, FilmSrcKind } from './film.ts';
+import { filmSrcKind, type FilmBox, type FilmSrcKind } from './film.ts';
 
 type Size = { w: number; h: number };
 
@@ -89,6 +89,22 @@ export function fitToCanvas(clips: readonly CanvasClip[], from: Size, to: Size):
 
 /** Whether the stage has this ratio: its width within 2 px of it (a size made from a ratio is rounded to even px). */
 export const shaped = (stage: Size, ratio: number) => Math.abs(stage.w - stage.h * ratio) <= 2;
+
+/**
+ * The film's first picture's own size, which "Original" fits the canvas to: the earliest clip on the film with a
+ * picture whose size the preview knows (`spans`). A page that sets no size of its own is passed over: it is laid out at
+ * the canvas's size, so it has no shape of its own, and a film of such pages would always read as "Original".
+ */
+export function firstPictureSize(
+  clips: readonly { id: string; src: string; at?: number | null; sound?: unknown }[],
+  spans: readonly { id: string; w?: number; h?: number; reflows?: true }[],
+): Size | null {
+  const sized = new Map(spans.filter((span) => span.w && span.h && !span.reflows).map((span) => [span.id, { w: span.w!, h: span.h! }]));
+  const first = clips
+    .filter((clip) => !clip.sound && filmSrcKind(clip.src) !== 'sound' && sized.has(clip.id))
+    .sort((a, b) => (a.at ?? 0) - (b.at ?? 0))[0];
+  return first ? sized.get(first.id) ?? null : null;
+}
 
 /**
  * The canvas's "Original" shape: the first picture's own (`original`), when there is one and it is between 1:4 and

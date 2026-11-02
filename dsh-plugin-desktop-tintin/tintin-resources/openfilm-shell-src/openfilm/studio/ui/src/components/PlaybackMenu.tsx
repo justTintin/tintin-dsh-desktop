@@ -3,10 +3,8 @@ import { createPortal } from 'react-dom';
 import { Gauge, Repeat } from 'lucide-react';
 import { useT } from '@/i18n';
 import { useKeyHint } from '@/lib/keymap-store';
+import { PLAYBACK_SPEEDS, speedStep, speedText } from '@/lib/playback-speed';
 import { Tooltip } from './Tooltip';
-
-/** The speeds the viewer plays at (the player plays forward only, from 0.25× to 2×). */
-export const PLAYBACK_SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 
 export type PlaybackSettings = {
   /** Loop playback (⇧L): of the range marked (`ranged`), else of the whole film. */
@@ -19,8 +17,9 @@ export type PlaybackSettings = {
 
 /**
  * The viewer's playback settings: loop and the speed (subtitles are the timeline's CC button). What is not the default shows on the
- * button itself (the loop icon, "1.5×"), so it is seen without opening the menu. Nothing here takes focus on click:
- * the next Space still plays.
+ * button itself (the loop icon, "1.5×"), so it is seen without opening the menu. Laid out as the layout menu beside
+ * it is (a row each, its icon in a tile); the speed is one segmented control. Nothing here takes focus on click: the next
+ * Space still plays.
  */
 export function PlaybackMenu({ className, disabled, settings }: {
   className?: string;
@@ -58,19 +57,9 @@ export function PlaybackMenu({ className, disabled, settings }: {
 
   const { loop, ranged, onLoop, speed, onSpeed } = settings;
   const loopLabel = t(ranged ? 'viewer.loopRange' : 'viewer.loopFilm');
-  const speedText = (s: number) => `${s}×`;
   const keep = (e: React.MouseEvent) => e.preventDefault();
-  const toggle = (key: string, label: string, checked: boolean, change: () => void, Icon: typeof Repeat, hint?: string) => (
-    <button key={key} type="button" role="switch" aria-checked={checked} onClick={change} onMouseDown={keep}
-      data-playback={key}
-      className="flex w-full items-center gap-2.5 rounded-[7px] px-2 py-1.5 text-[12px] text-[var(--text)] hover:bg-[var(--bg-hover)] focus-visible:outline focus-visible:outline-[var(--border-strong)]">
-      <Icon size={14} aria-hidden className="shrink-0 text-[var(--text-muted)]" />
-      <span className="flex-1 text-left">{label}</span>
-      {hint ? <span className="text-[11px] text-[var(--text-faint)]">{hint}</span> : null}
-      <span aria-hidden className={`relative h-[18px] w-[30px] shrink-0 rounded-full transition-colors ${checked ? 'bg-[var(--text)]' : 'bg-[var(--surface-2)] ring-1 ring-inset ring-[var(--border)]'}`}>
-        <span className={`absolute top-[3px] h-3 w-3 rounded-full transition-all ${checked ? 'left-[15px] bg-[var(--bg)]' : 'left-[3px] bg-[var(--text-faint)]'}`} />
-      </span>
-    </button>
+  const tile = (Icon: typeof Repeat) => (
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--surface-2)] text-[var(--text-muted)]"><Icon size={13} aria-hidden /></span>
   );
 
   return <>
@@ -90,21 +79,60 @@ export function PlaybackMenu({ className, disabled, settings }: {
       </button>
     </Tooltip>
     {anchor && createPortal(<div ref={panel} id={id} role="dialog" aria-label={t('viewer.playback')}
-      style={anchor} className="fixed z-[110] w-56 rounded-[14px] border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-[0_18px_48px_-12px_rgba(0,0,0,0.45),0_2px_8px_rgba(0,0,0,0.12)]">
+      style={anchor} className="fixed z-[110] w-60 rounded-[14px] border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-[0_18px_48px_-12px_rgba(0,0,0,0.45),0_2px_8px_rgba(0,0,0,0.12)]">
       <div className="px-2 pb-1 pt-1 text-[11px] font-medium text-[var(--text-faint)]">{t('viewer.playback')}</div>
-      {toggle('loop', loopLabel, loop, onLoop, Repeat, keyHint('loop'))}
-      <div className="mx-1 my-1 h-px bg-[var(--border)]" />
-      <div className="px-2 pb-1.5 pt-1 text-[11px] font-medium text-[var(--text-faint)]">{t('viewer.speed')}</div>
-      <div role="radiogroup" aria-label={t('viewer.speed')} className="grid grid-cols-4 gap-1 px-1 pb-1">
-        {PLAYBACK_SPEEDS.map((s) => (
-          <button key={s} type="button" role="radio" aria-checked={s === speed} onClick={() => onSpeed(s)} onMouseDown={keep}
-            className={`h-7 rounded-[6px] text-[12px] tabular-nums transition focus-visible:outline focus-visible:outline-[var(--border-strong)] ${
-              s === speed ? 'bg-[var(--text)] font-medium text-[var(--bg)]' : 'text-[var(--text)] hover:bg-[var(--bg-hover)]'
-            }`}>
-            {speedText(s)}
-          </button>
-        ))}
+      <button type="button" role="switch" aria-checked={loop} onClick={onLoop} onMouseDown={keep} data-playback="loop"
+        className="flex w-full items-center gap-2.5 rounded-[7px] px-2 py-1.5 text-[13px] text-[var(--text)] hover:bg-[var(--bg-hover)] focus-visible:outline focus-visible:outline-[var(--border-strong)]">
+        {tile(Repeat)}
+        <span className="flex-1 text-left">{loopLabel}</span>
+        {keyHint('loop') ? <span className="text-[11px] text-[var(--text-faint)]">{keyHint('loop')}</span> : null}
+        {/* a switch, ink-colored, as the layout menu's */}
+        <span aria-hidden className={`relative h-[18px] w-[30px] shrink-0 rounded-full transition-colors ${loop ? 'bg-[var(--text)]' : 'bg-[var(--surface-2)] ring-1 ring-inset ring-[var(--border)]'}`}>
+          <span className={`absolute top-[3px] h-3 w-3 rounded-full transition-all ${loop ? 'left-[15px] bg-[var(--bg)]' : 'left-[3px] bg-[var(--text-faint)]'}`} />
+        </span>
+      </button>
+      <div className="flex items-center gap-2.5 px-2 pb-1.5 pt-1.5 text-[13px] text-[var(--text)]">
+        {tile(Gauge)}
+        <span className="flex-1">{t('viewer.speed')}</span>
       </div>
+      <SpeedRow label={t('viewer.speed')} speed={speed} onSpeed={onSpeed} keep={keep} />
     </div>, document.body)}
   </>;
+}
+
+/** Speeds a row: PLAYBACK_SPEEDS in two rows, the slower ones up to 1×, then the faster. */
+const PER_ROW = 4;
+
+/**
+ * The speed: PLAYBACK_SPEEDS as one segmented control in two rows, as the inspector's choices are, the one playing
+ * raised on a mark that slides to the next one picked. A speed between them (the shuttle's) marks the nearest.
+ */
+function SpeedRow({ label, speed, onSpeed, keep }: {
+  label: string;
+  speed: number;
+  onSpeed: (speed: number) => void;
+  keep: (e: React.MouseEvent) => void;
+}) {
+  const at = speedStep(speed);
+  const rows = Math.ceil(PLAYBACK_SPEEDS.length / PER_ROW);
+  return (
+    <div role="radiogroup" aria-label={label} data-playback="speed"
+      className="relative mx-2 mb-1.5 grid rounded-[8px] bg-[var(--fill-tsp)] p-[2px]"
+      style={{ gridTemplateColumns: `repeat(${PER_ROW}, minmax(0, 1fr))` }}>
+      <span aria-hidden className="absolute left-[2px] top-[2px] rounded-[6px] bg-[var(--bg)] shadow-[0_0_0_0.5px_var(--border-strong),0_1px_2px_rgba(0,0,0,0.12)] transition-transform duration-200 ease-out"
+        style={{
+          width: `calc((100% - 4px) / ${PER_ROW})`,
+          height: `calc((100% - 4px) / ${rows})`,
+          transform: `translate(${(at % PER_ROW) * 100}%, ${Math.floor(at / PER_ROW) * 100}%)`,
+        }} />
+      {PLAYBACK_SPEEDS.map((s, i) => (
+        <button key={s} type="button" role="radio" aria-checked={i === at} onClick={() => onSpeed(s)} onMouseDown={keep}
+          className={`relative h-[28px] rounded-[6px] text-[12px] tabular-nums transition-colors focus-visible:outline focus-visible:outline-[var(--border-strong)] ${
+            i === at ? 'font-medium text-[var(--text)]' : 'text-[var(--text-muted)] hover:text-[var(--text)]'
+          }`}>
+          {speedText(s)}
+        </button>
+      ))}
+    </div>
+  );
 }

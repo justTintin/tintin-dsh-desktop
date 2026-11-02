@@ -1,12 +1,14 @@
 'use client';
 
-/** A stable, contained preview workspace for media and documents. */
+/** A stable, contained preview workspace for video, audio and documents (pictures have their own light viewer). */
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { Tooltip } from './Tooltip';
 import { useT } from '@/i18n';
 import { chatLayer } from '@/lib/chat-layer';
+import { previewTop } from '@/lib/preview-top';
+import { escTaken } from '@/lib/esc-stop';
 
 /** A button in the top bar. The lightbox is black, so these use shades of white rather than the UI tokens. */
 export const PREVIEW_BTN =
@@ -20,20 +22,16 @@ const AREA_STYLE = {
 } as React.CSSProperties;
 
 /**
- * In `fit` mode, the size of an image or video's own box.
+ * In `fit` mode, the size of a video's own box, `w`×`h` its frame (or a guess until its metadata arrives).
  *
- * By default only maximums, no size: the element's box is the picture itself (small images aren't enlarged, large
- * ones shrink to fit), the outer box hugs it, and the picture shows at its own aspect ratio.
- *
- * Given dimensions, the width is set too. A `<video>` reports 300×150 until its metadata arrives, and the box hugs
- * it, so without a width it flashes a small box before jumping to size. The width is computed as contain up front
- * and the height follows from aspect-ratio, so the first frame is final.
+ * A `<video>` reports 300×150 until then, and the box hugs it, so without a width it flashes a small box before
+ * jumping to size. The width is computed as contain up front and the height follows from aspect-ratio, so the first
+ * frame is final.
  */
-export function previewMediaFit(w?: number, h?: number): React.CSSProperties {
-  const cap = { maxWidth: 'var(--preview-w)', maxHeight: 'var(--preview-h)' };
-  if (!(w && h && w > 0 && h > 0)) return cap;
+export function previewMediaFit(w: number, h: number): React.CSSProperties {
   return {
-    ...cap,
+    maxWidth: 'var(--preview-w)',
+    maxHeight: 'var(--preview-h)',
     aspectRatio: `${w} / ${h}`,
     width: `min(var(--preview-w), calc(var(--preview-h) * ${w} / ${h}))`,
   };
@@ -56,7 +54,7 @@ export function PreviewFrame({
   icon?: React.ReactNode;
   /** Buttons at the top right. The close button is added here, no need to pass it. */
   actions?: React.ReactNode;
-  /** The content box's classes: black behind images and video, paper behind text. */
+  /** The content box's classes: black behind video, paper behind text. */
   bodyClassName?: string;
   /** Keep naturally sized content centered; documents and resource players fill the viewport. */
   fit?: boolean;
@@ -74,9 +72,11 @@ export function PreviewFrame({
     box.current?.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (document.fullscreenElement) return;
+        /* it leaves the video's full screen, and is the viewer's all the same */
+        if (document.fullscreenElement) { escTaken(event); return; }
         event.preventDefault();
         event.stopPropagation();
+        escTaken(event);
         closeRef.current();
       }
       if (event.key !== 'Tab') return;
@@ -102,7 +102,7 @@ export function PreviewFrame({
 
   return createPortal(
     <div className="fixed inset-0 z-[10100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm sm:p-8"
-      style={{ paddingTop: 'max(1rem, var(--inset-titlebar-h, 0px))', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      style={{ paddingTop: previewTop(navigator.platform), WebkitAppRegion: 'no-drag' } as React.CSSProperties}
       onClick={onClose}>
       <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={name}
         className="relative isolate flex h-[min(900px,92dvh)] min-h-0 w-full max-w-[1480px] flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#181818] shadow-2xl outline-none"

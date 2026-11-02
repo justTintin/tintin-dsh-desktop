@@ -21,7 +21,8 @@ import {
   type FadeSide, type InnerShadow, type PlacedStroke, type Shadow, type StrokePosition, type StrokeStyle,
 } from '@/lib/clip-look';
 import {
-  MASK_FIELDS, MASK_SHAPES, fadeIn, maskDefault, maskOf, maskOwned, withFade, withMask, type Mask, type MaskBox, type MaskShape,
+  MASK_FIELDS, MASK_SHAPES, MASK_STROKE_POSITIONS, fadeIn, maskCss, maskDefault, maskOf, maskOwned, maskStrokeOf, withFade,
+  type Mask, type MaskBox, type MaskShape, type MaskStroke, type MaskStrokePosition,
 } from '@/lib/clip-mask';
 import type { MaskSession } from '@/lib/stage-mask';
 import { previewSettled, type Look, type LookEdit, type LookRead, type LookSet } from '@/lib/look';
@@ -278,7 +279,7 @@ export function MaskSection({
   /** Whose mask, for the stage's handles. */
   target?: MaskSession['target'] | null;
   onEditMask?: (session: MaskSession | null) => void;
-  /** A shape picked on the picture (the selection bar's Mask): put on, with its handles, once. */
+  /** A shape picked on the picture (its clip menu's Mask): put on, with its handles, once. */
   ask?: { shape: MaskShape | 'none'; n: number } | null;
   onAsked?: () => void;
 }) {
@@ -288,7 +289,8 @@ export function MaskSection({
   const [editing, setEditing] = React.useState(false);
   const canEdit = Boolean(onEditMask && target && look.n === 1);
 
-  const write = (next: Mask | null): LookEdit => (read) => withMask(read('mask-image'), read('mask-composite'), next, mbox) ?? {};
+  /* the shape's stroke (a filter) is drawn again with it */
+  const write = (next: Mask | null): LookEdit => (read) => maskCss(read, next, mbox) ?? {};
   const edit = (fn: (m: Mask) => Mask): LookEdit => (read) => {
     const m = maskOf(read('mask-image'), read('mask-composite'), mbox);
     return m ? write(fn(m))(read) : {};
@@ -318,7 +320,7 @@ export function MaskSection({
   React.useEffect(() => {
     if (!onEditMask) return;
     if (!maskKey || !targetKey) { onEditMask(null); return; }
-    const put = (m: Mask): LookEdit => (read) => withMask(read('mask-image'), read('mask-composite'), m, boxRef.current) ?? {};
+    const put = (m: Mask): LookEdit => (read) => maskCss(read, m, boxRef.current) ?? {};
     onEditMask({
       target: JSON.parse(targetKey) as MaskSession['target'],
       mask: JSON.parse(maskKey) as Mask,
@@ -426,9 +428,77 @@ export function MaskSection({
               onRevert={() => look.revert()}
             />
           ) : null}
+          <MaskStrokeFields look={look} t={t} box={mbox} />
         </>
       ) : null}
     </Section>
+  );
+}
+
+/* a new stroke, px on the stage */
+const MASK_STROKE_PX = 4;
+
+/**
+ * The mask's stroke (lib/clip-mask maskCss): along the shape's edge, inside, across or outside it, in a color. Its
+ * width is in px on the stage, kept as % of the box's shorter side (as the feather), so it scales with the box.
+ */
+function MaskStrokeFields({ look, t, box }: { look: Look; t: T; box: MaskBox | null }) {
+  const short = box ? Math.min(box.w, box.h) : 100;
+  const stroke = look.common((read) => maskStrokeOf(read('filter')));
+  /* a filter written by hand takes no stroke from here */
+  const readable = look.common((read) => filterParts(read('filter')) != null) !== false;
+  const edit = (part: (now: MaskStroke) => Partial<MaskStroke>): LookEdit => (read) => {
+    const m = maskOf(read('mask-image'), read('mask-composite'), box);
+    if (!m) return {};
+    const now = maskStrokeOf(read('filter')) ?? { width: (MASK_STROKE_PX / short) * 100, color: '#ffffff', position: 'center' as const };
+    return maskCss(read, m, box, { ...now, ...part(now) }) ?? {};
+  };
+  const remove: LookEdit = (read) => {
+    const m = maskOf(read('mask-image'), read('mask-composite'), box);
+    return m ? maskCss(read, m, box, null) ?? {} : {};
+  };
+  const pxOfWidth = (w: number) => round((w / 100) * short, 1);
+  const width = (apply: FieldApply): LookEdit => edit((now) => ({ width: (Math.max(0, apply(pxOfWidth(now.width))) / short) * 100 }));
+  if (stroke === null || (!stroke && !readable)) return null;
+  return (
+    <>
+      <SubLabel aside={stroke ? (
+        <SectionAction label={t('inspector.effectRemove')} onClick={() => look.commit(remove)}><Minus size={12} /></SectionAction>
+      ) : (
+        <SectionAction label={t('inspector.strokeAdd')} onClick={() => look.commit(edit(() => ({})))}><Plus size={12} /></SectionAction>
+      )}>
+        {t('inspector.stroke')}
+      </SubLabel>
+      {stroke && stroke !== MIXED ? (
+        <>
+          <ColorField
+            label={t('inspector.strokeColor')}
+            value={look.common((read) => maskStrokeOf(read('filter'))?.color ?? '')}
+            onPreview={(c) => look.preview(edit(() => ({ color: c })))}
+            onCommit={(c) => look.commit(edit(() => ({ color: c })))}
+          />
+          <Row>
+            <SelectField
+              label={t('inspector.strokePosition')}
+              value={look.common((read) => maskStrokeOf(read('filter'))?.position ?? 'center')}
+              options={MASK_STROKE_POSITIONS.map((p) => ({ value: p, label: t(`inspector.strokePositions.${p}`) }))}
+              onCommit={(v) => look.commit(edit(() => ({ position: v as MaskStrokePosition })))}
+            />
+            <NumField
+              label={t('inspector.strokeWidth')}
+              prefix={<span className="block h-[7px] w-[9px] rounded-[1.5px] border-[1.5px]" style={{ borderColor: 'currentColor' }} />}
+              value={look.common((read) => { const w = maskStrokeOf(read('filter'))?.width; return w == null ? undefined : pxOfWidth(w); })}
+              unit="px"
+              min={0}
+              max={1000}
+              onPreview={(_, apply) => look.preview(width(apply))}
+              onCommit={(_, apply) => look.commit(width(apply))}
+              onRevert={() => look.revert()}
+            />
+          </Row>
+        </>
+      ) : null}
+    </>
   );
 }
 

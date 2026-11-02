@@ -233,15 +233,17 @@ function JobLine({ job, cancelling, t }: { job: ExportJob; cancelling: boolean; 
       job.phase ? t(`exportTray.phase.${job.phase}`) : '',
       job.framesTotal ? `${job.framesDone}/${job.framesTotal}` : '',
       job.rate ? `${job.rate.toFixed(job.rate < 10 ? 1 : 0)} fps` : '',
-      job.etaMs != null ? `${t('exportTray.eta')} ${formatDuration(job.etaMs)}` : '',
     ].filter(Boolean);
+    /* how long is left never gives way: a narrow tray cuts the rest first */
+    const left = job.etaMs != null ? `${t('exportTray.eta')} ${formatDuration(job.etaMs)}` : '';
     return (
       <div className="mt-1.5">
         <div className="h-[3px] overflow-hidden rounded-full bg-[var(--surface-2)]">
           <div className="h-full rounded-full bg-[var(--text)] transition-[width] duration-500" style={{ width: `${pct}%` }} />
         </div>
         <p className="mt-1 flex items-center gap-1.5 text-[11px] tabular-nums text-[var(--text-faint)]">
-          <span className="min-w-0 flex-1 truncate">{parts.join(' · ')}</span>
+          <span className="min-w-0 flex-1 truncate">{parts.join(' · ')}{left ? ' ·' : ''}</span>
+          {left ? <span className="shrink-0">{left}</span> : null}
           {job.encoder ? <span className="shrink-0 rounded bg-[var(--surface-2)] px-1 py-px font-mono text-[10px]">{job.encoder}</span> : null}
           <span className="shrink-0">{pct}%</span>
         </p>

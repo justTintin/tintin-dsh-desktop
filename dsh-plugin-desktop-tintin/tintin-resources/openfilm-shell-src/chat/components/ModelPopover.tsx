@@ -14,14 +14,14 @@
  */
 import React from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Check, ChevronRight, KeyRound, Settings } from 'lucide-react';
+import { Check, ChevronRight, KeyRound, Settings } from 'lucide-react';
 import { keepFocus, Popover } from './Popover';
 import { useT } from '@/i18n';
 import { Tooltip } from '@/components/Tooltip';
 import { AgentIcon } from '@/components/AgentIcons';
 import { POPOVER_CHROME } from '@/components/ComposerCard';
 import { desktopBridge, type LocalAgentId, type RosterAgent } from '@/lib/desktop-bridge';
-import { agentModelSummary, agentOptions, currentAgent, effectivePrefs, offeredChoices, offeredOption, optionChoices, optionLabel, optionValue, shownAgents, useLocalAgents } from '@/state/local-agent-store';
+import { agentModelSummary, agentOptions, currentAgent, effectivePrefs, offeredChoices, offeredOption, optionLabel, optionValue, shownAgents, useLocalAgents } from '@/state/local-agent-store';
 import { chatLayer } from '@/lib/chat-layer';
 import { isSpeed, menuOptions, type MenuOption } from '@/lib/agent-menu-rows';
 
@@ -42,10 +42,9 @@ const ROW = `${ROW_BASE} hover:bg-[var(--bg-hover)] focus-visible:bg-[var(--bg-h
 
 type Option = MenuOption;
 
-/** A row's choices: those the agent offers there, or its one value when that is all it has (a "default" too).
- *  TinTin(2026-10-30): ACP 的模型选项按 provider 分组嵌套 —— 拍平后取真选择(此前会把组本身当选项)。 */
+/** A row's choices: those the agent offers there, or its one value when that is all it has (a "default" too). */
 function rowChoices(agent: LocalAgentId, o: Option, chosen: unknown): NonNullable<Option['options']> {
-  if (o.fixed) return optionChoices(o).slice(0, 1);
+  if (o.fixed) return o.options!.slice(0, 1);
   return offeredChoices(agent, o, chosen);
 }
 
@@ -57,17 +56,26 @@ function failureReason(error: { text: string } | undefined): string | null {
 
 export function ChatAgentIcon({ id, size = 14 }: { id: LocalAgentId; size?: number }) {
   if (id === 'byok') return <KeyRound size={size} />;
-  /* TinTin(2026-10-30): TinTin智能体不是品牌 agent, 品牌标表里没有它 —— 用机器人标。 */
-  if (id === 'tintin-agent') return <Bot size={size} />;
   return <AgentIcon id={id} size={size} />;
 }
 
-export function ModelPopover({ placement = 'bottom', align = 'start' }: { placement?: 'top' | 'bottom'; align?: 'start' | 'end' } = {}) {
+/**
+ * The composer's agent menu. In a conversation, `agent` and `prefs` are the ones it goes on with (lib/conversation-agent),
+ * and `onPick` and `onPref` keep a change on it too; without them, the agent and options picked last.
+ */
+export function ModelPopover({ placement = 'bottom', align = 'start', agent: conversationAgent, prefs: conversationPrefs, onPick, onPref }: {
+  placement?: 'top' | 'bottom';
+  align?: 'start' | 'end';
+  agent?: LocalAgentId;
+  prefs?: Partial<Record<LocalAgentId, Record<string, unknown>>>;
+  onPick?: (agent: LocalAgentId) => void;
+  onPref?: (agent: LocalAgentId, configId: string, value: unknown) => void;
+} = {}) {
   const t = useT();
   const [open, setOpen] = React.useState(false);
   /** the option whose side menu is open */
   const [side, setSide] = React.useState<string | null>(null);
-  /** how far the card has slid left to make room for a side menu: it only grows while the menu is open */
+  /** how far the card has slid left to make room for a side menu; kept within the window on resize */
   const [cardShift, setCardShift] = React.useState(0);
   const [sideStyle, setSideStyle] = React.useState<React.CSSProperties | null>(null);
   const cardRef = React.useRef<HTMLDivElement | null>(null);
@@ -93,19 +101,21 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
   const la = useLocalAgents();
   const { hydrate, refresh, ensureOptions } = la;
   React.useEffect(() => { hydrate(); }, [hydrate]);
-  const agent = currentAgent(la);
+  const agent = conversationAgent ?? currentAgent(la);
   const shown = shownAgents(la.roster);
   const ready = (id: LocalAgentId) => shown.find((a) => a.id === id)?.status === 'ready';
-  React.useEffect(() => { if (ready(agent)) void ensureOptions(agent); });
+  const selectedReady = ready(agent);
+  const configurationRevision = la.roster?.find((a) => a.id === agent)?.configurationRevision;
+  React.useEffect(() => { if (selectedReady) void ensureOptions(agent); }, [agent, selectedReady, configurationRevision, ensureOptions]);
   React.useEffect(() => {
     if (!open) return;
-    void refresh().then(() => {
-      for (const a of shownAgents(useLocalAgents.getState().roster)) if (a.status === 'ready' && !a.disabled) void ensureOptions(a.id, { retry: true });
-    });
-  }, [open, refresh, ensureOptions]);
+    void refresh();
+    if (useLocalAgents.getState().roster?.some((a) => a.id === agent && a.shown && a.status === 'ready')) void ensureOptions(agent, { retry: true });
+  }, [open, agent, refresh, ensureOptions]);
 
-  const options = agentOptions(la, agent);
-  const prefs = effectivePrefs(la.prefs, agent, la.roster, options);
+  const picked = conversationPrefs ?? la.prefs;
+  const options = agentOptions({ ...la, prefs: picked }, agent);
+  const prefs = effectivePrefs(picked, agent, la.roster, options);
   const rows = options ? menuOptions(options, t('composer.optionDefault')).filter((o) => offeredOption(agent, la.roster, o)) : [];
   const summary = agentModelSummary(options, prefs);
   const triggerModel = summary.model;
@@ -125,47 +135,71 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
   };
   const chooseAgent = (a: RosterAgent) => {
     setSide(null);
-    if (a.disabled) return; /* TinTin(2026-11-01): 禁用行(服务端智能体观察期)不可选 */
-    if (a.status === 'ready') { la.pick(a.id); return; }
+    if (a.status === 'ready') { la.pick(a.id); onPick?.(a.id); return; }
     if (a.status === 'checking' || a.status === 'waiting') return;
     /* not connected, signed out, not found, no key: set up in Settings → Agents, where connecting and signing in are */
     setOpen(false);
     desktopBridge()?.openSettings?.('agents');
   };
-  /* a disabled row's own note, shown where a status would be (the row stays listed, greyed, not clickable) */
-  const disabledNote = (a: RosterAgent): string | null => (typeof a.disabled === 'string' && a.disabled ? a.disabled : null);
   const openSettings = () => { setOpen(false); desktopBridge()?.openSettings?.('agents'); };
   const current = shown.find((a) => a.id === agent);
   const choosing = side ? rows.find((o) => o.id === side) : undefined;
-  /* TinTin(2026-10-30): 分组嵌套下 `options[0]` 是组不是选择 —— 先读当前值(固定行即会话上报值) */
-  const chosenValue = (o: Option) => (optionValue(options, prefs, o.id) ?? o.options![0]!.value);
+  const chosenValue = (o: Option) => (o.fixed ? o.options![0]!.value : optionValue(options, prefs, o.id));
   /* a fixed row's one value is already the one in use */
-  const pickChoice = (o: Option, value: unknown) => { if (!o.fixed) la.setPref(agent, o.id, value); };
+  const pickChoice = (o: Option, value: unknown) => { if (!o.fixed) { la.setPref(agent, o.id, value); onPref?.(agent, o.id, value); } };
 
-  /* the side menu beside its row: on the right of the card, the card sliding left when the window is too narrow for
-     both, and over the card's right edge only when it cannot slide far enough; measured again once it is drawn */
+  /* Keep the side menu beside its row and inside the window, including when an agent adds choices while it is open
+     or the window's height changes. Measure again after width/height constraints change the rendered menu. */
   const sidePainted = sideStyle !== null;
   React.useLayoutEffect(() => {
     const card = cardRef.current;
     const row = choosing ? rowRefs.current[choosing.id] : null;
-    if (!open || !choosing || !card || !row) { setSideStyle(null); return; }
-    const c = card.getBoundingClientRect();
     const el = sideRef.current;
-    const sideMax = Math.max(0, room - c.width);
-    const w = Math.min(sideMax, Math.max(SIDE_MIN_W, el?.offsetWidth ?? SIDE_MIN_W));
-    const h = el?.offsetHeight ?? 8 + (choosing.options?.length ?? 0) * 28;
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    let left = c.right + SIDE_GAP;
-    const need = left + w - (width - EDGE);
-    if (need > 0) {
-      const slide = Math.min(need, Math.max(0, c.left - EDGE));
-      if (slide > 0) setCardShift((s) => s + slide);
-      left = Math.max(EDGE, Math.min(left - slide, width - EDGE - w));
-    }
-    let top = row.getBoundingClientRect().top - 4;
-    if (top + h > height - EDGE) top = Math.max(EDGE, height - EDGE - h);
-    setSideStyle({ position: 'fixed', left, top, zIndex: 10001, minWidth: Math.min(SIDE_MIN_W, sideMax), width: 'max-content', maxWidth: sideMax, maxHeight: height - 2 * EDGE });
+    if (!open || !choosing || !card || !row || !el) { setSideStyle(null); return; }
+    const update = () => {
+      const c = card.getBoundingClientRect();
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const sideMax = Math.max(0, width - 2 * EDGE - SIDE_GAP - c.width);
+      const minWidth = Math.min(SIDE_MIN_W, sideMax);
+      const maxHeight = Math.max(0, height - 2 * EDGE);
+      const w = Math.min(sideMax, Math.max(minWidth, el.offsetWidth));
+      const h = Math.min(el.offsetHeight, maxHeight);
+      const baseLeft = c.left + cardShift;
+      let shift = Math.min(cardShift, Math.max(0, baseLeft - EDGE));
+      let left = c.right + cardShift - shift + SIDE_GAP;
+      const need = left + w - (width - EDGE);
+      if (need > 0) {
+        const slide = Math.min(need, Math.max(0, baseLeft - shift - EDGE));
+        shift += slide;
+        left -= slide;
+      }
+      if (shift !== cardShift) setCardShift(shift);
+      left = Math.max(EDGE, Math.min(left, width - EDGE - w));
+      const top = Math.max(EDGE, Math.min(row.getBoundingClientRect().top - 4, height - EDGE - h));
+      setSideStyle((previous) => previous?.left === left && previous.top === top && previous.minWidth === minWidth
+        && previous.maxWidth === sideMax && previous.maxHeight === maxHeight ? previous
+        : { position: 'fixed', left, top, zIndex: 10001, minWidth, width: 'max-content', maxWidth: sideMax, maxHeight });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    observer.observe(card);
+    observer.observe(row);
+    // The parent Popover also moves on resize/scroll. Read after its React update has committed.
+    let frame = 0;
+    const schedule = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(update);
+    };
+    window.addEventListener('resize', schedule);
+    window.addEventListener('scroll', schedule, true);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', schedule);
+      window.removeEventListener('scroll', schedule, true);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed by the open row
   }, [open, choosing?.id, cardShift, sidePainted, room]);
 
@@ -233,14 +267,11 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
               <>
                 {shown.map((a) => {
                   const status = statusOf(a);
-                  const note = disabledNote(a);
                   return (
-                    <button key={a.id} type="button" disabled={!!a.disabled} onMouseDown={keepFocus} onMouseEnter={hideSideSoon} onClick={() => chooseAgent(a)}
-                      className={a.disabled ? `${ROW_BASE} cursor-not-allowed opacity-55` : ROW}>
-                      <span className={`flex w-4 shrink-0 justify-center ${status || a.disabled ? 'text-[var(--text-faint)]' : 'text-[var(--text)]'}`}><ChatAgentIcon id={a.id} /></span>
-                      <span className={`min-w-0 flex-1 truncate ${status || a.disabled ? 'text-[var(--text-muted)]' : 'text-[var(--text)]'}`}>{nameOf(a)}</span>
-                      {agent === a.id && !status && !a.disabled ? <Check size={13} className="shrink-0 text-[var(--text)]" />
-                        : note ? <span className="min-w-0 max-w-[55%] truncate text-[11.5px] text-[var(--text-faint)]" title={note}>{note}</span>
+                    <button key={a.id} type="button" onMouseDown={keepFocus} onMouseEnter={hideSideSoon} onClick={() => chooseAgent(a)} className={ROW}>
+                      <span className={`flex w-4 shrink-0 justify-center ${status ? 'text-[var(--text-faint)]' : 'text-[var(--text)]'}`}><ChatAgentIcon id={a.id} /></span>
+                      <span className={`min-w-0 flex-1 truncate ${status ? 'text-[var(--text-muted)]' : 'text-[var(--text)]'}`}>{nameOf(a)}</span>
+                      {agent === a.id && !status ? <Check size={13} className="shrink-0 text-[var(--text)]" />
                         : status ? <span className="min-w-0 max-w-[55%] truncate text-[11.5px] text-[var(--text-faint)]" title={status}>{status}</span> : null}
                     </button>
                   );
@@ -268,7 +299,7 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
             ) : rows.map((o, i) => (
               <React.Fragment key={o.id}>
                 {i > 0 ? <div className="mx-1 my-0.5 h-px bg-[var(--border)]" /> : null}
-                <button type="button" ref={(el) => { rowRefs.current[o.id] = el; }} aria-haspopup="menu" aria-expanded={side === o.id}
+                <button type="button" data-agent-option={o.id} ref={(el) => { rowRefs.current[o.id] = el; }} aria-haspopup="menu" aria-expanded={side === o.id}
                   onMouseDown={keepFocus} onMouseEnter={() => showSide(o.id)} onMouseLeave={hideSideSoon} onFocus={() => showSide(o.id)}
                   onClick={() => showSide(o.id)}
                   className={`${ROW_BASE} ${side === o.id ? 'bg-[var(--bg-hover)]' : 'hover:bg-[var(--bg-hover)]'}`}>

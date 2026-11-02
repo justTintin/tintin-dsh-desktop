@@ -1,5 +1,9 @@
 import type { Words } from './words';
 
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? '回收站'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? '废纸篓' : '回收站';
+
 export const zhCN: Words = {
   /* a turn of the app's own agent stopped: the service its model runs on has no balance left (BalanceNotice) */
   balance: {
@@ -113,20 +117,20 @@ export const zhCN: Words = {
   },
   agent: {
     contextCompacted: '之前的对话已折叠为摘要',
+    modelGone: '这个智能体已不再提供 {model}，请重新选择模型。',
+    settingFailed: '无法将 {setting} 设为 {value}：{error}',
+    settingRejected: '智能体无法应用这项设置。',
     thinking: '正在思考',
   },
   assets: {
     close: '关闭',
     download: '下载',
-    imageActualSize: '原始尺寸',
-    imageFit: '适应窗口',
     noPreview: '此类文件无法在这里预览，请下载后查看',
     previewFailed: '无法读取此文件',
   },
   composer: {
     contextFull: '这段对话已经很长了，开个新对话效果更好。',
     contextFullNew: '新对话',
-    commands: '命令',
     agentLoading: '正在加载…',
     agentNone: '智能体',
     agentNoneShown: '对话中尚未开启任何智能体。',
@@ -139,6 +143,7 @@ export const zhCN: Words = {
     agentSection: '智能体',
     agentSetUp: '设置',
     agentWaiting: '正在登录…',
+    agentWas: '这段对话原来用的是 {name}，现在用不了，下一条消息会发给下面选的智能体。',
     effort: '思考强度',
     filesFailed: '{names} 添加失败：{error} 移除后再发送。',
     filesPending: '文件还在添加中。',
@@ -153,8 +158,12 @@ export const zhCN: Words = {
     copyDiagnostics: '复制诊断信息',
     copyDiagnosticsHint: 'OpenFilm 在这台电脑上找到的情况和最近的问题，可以贴进 issue',
     diagnosticsCopied: '已复制',
-    removeFile: '移除文件',
-    removeImage: '移除图片',
+    switchAccount: '切换账号',
+    signedInAs: '当前登录：{account}。',
+    routeNoKey: '这个模型要用 DeepSeek 的 API key，这台电脑上还没有配置。只登录了 DeepSeek 账号的话，换成账号里的模型就行。',
+    routeNoKeyNoAccount: '这个模型要用 DeepSeek 的 API key，这台电脑上还没有配置。请在 DeepSeek Harness 里登录 DeepSeek 账号，或在它的模型设置里填上 API key。',
+    useAccountModel: '换成 {model}',
+    accountModelPicked: '已换成 {model}，再发一次即可。',
     speed: '速度',
     thumbOnly: '消息中只保留了缩略图。原文件还在原来的位置；粘贴的文件保存在项目里。',
   },
@@ -209,8 +218,8 @@ export const zhCN: Words = {
     assets: '素材',
     addAttachment: '添加文件',
     close: '关闭',
-    composerPlaceholder: '说说要改什么。输入 @ 可指向文件、某个时刻或当前选中的内容',
-    composerPlaceholderBlank: '描述你的影片。输入 @ 可使用此项目中的文件',
+    composerPlaceholder: '说说要改什么。输入 @ 可指向文件、skill、某个时刻或当前选中的内容',
+    composerPlaceholderBlank: '描述你的影片。输入 @ 可加入文件或 skill',
     dismiss: '关闭',
     jumpToLatest: '跳到最新',
     loadingMessages: '正在加载对话…',
@@ -288,7 +297,7 @@ export const zhCN: Words = {
     cardDoes: '用途',
     next: '下一步',
     cancel: '取消',
-    replaceNote: '你已经有 {names}，添加后旧的会移到废纸篓。',
+    replaceNote: `你已经有 {names}，添加后旧的会移到${TRASH}。`,
     replaceAndAdd: '替换并添加',
     scriptsCount: '{n} 个脚本',
     fromLink: '从链接',
@@ -399,5 +408,15 @@ export const zhCN: Words = {
     added: '新增',
     removed: '已删除',
     changed: '已修改',
+  },
+  /** a turn that ended with film.html gone: under its reply, put it back as the turn found it (lib/film-restore) */
+  filmRestore: {
+    lost: '这一轮删除了 film.html，现在它不在了。',
+    restore: '把 film.html 恢复成这一轮之前的样子',
+    restoring: '正在恢复…',
+    restored: 'film.html 已恢复成这一轮之前的样子。',
+    exists: 'film.html 已经回来了，所以保持原样。',
+    gone: '这一轮之前的副本已不再保留。请从“版本历史”恢复 film.html。',
+    failed: '无法恢复 film.html。请重试，或从“版本历史”恢复。',
   },
 };

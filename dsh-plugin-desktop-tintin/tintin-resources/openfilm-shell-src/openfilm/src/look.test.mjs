@@ -80,6 +80,19 @@ test('a transparent WebM keeps its alpha in a media sheet', { timeout: 60_000, s
   for (const cell of cells) assert.deepEqual(cell, { width: 480, height: 480, depth: 8, alpha: true });
 });
 
+test("a film's sheet embeds its frames at cell size: a large stage's full frames would pass what a page can be given", { timeout: 90_000 }, async (t) => {
+  const { writeFileSync } = await import('node:fs');
+  const dir = mkdtempSync(join(tmpdir(), 'of-look-large-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, 'a.html'), '<!doctype html><body style="margin:0;background:#123"><script>window.film = { duration: 2, width: 1920, height: 1080, frame(t) { document.body.style.opacity = String(0.5 + t / 4); } };</script>');
+  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 1920, h: 1080 }, tracks: [{ clips: [{ src: 'a.html' }] }] }));
+  const cells = sheetCells(t);
+  const r = await look([dir], { count: 2 });
+  assert.notEqual(r.ok, false, r.lines.join('\n'));
+  assert.equal(cells.length, 2);
+  for (const cell of cells) assert.deepEqual({ width: cell.width, height: cell.height }, { width: 480, height: 270 });
+});
+
 /* the pages under test/: each one a mistake an agent makes (or one that only looks like one), and what look says */
 const page = (name) => fileURLToPath(new URL(`../test/${name}`, import.meta.url));
 const run = async (name) => { const r = await look([page(name)], {}); return { ok: r.ok !== false, text: r.lines.join('\n') }; };

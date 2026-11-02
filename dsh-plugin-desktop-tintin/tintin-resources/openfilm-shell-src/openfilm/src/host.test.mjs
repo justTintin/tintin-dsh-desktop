@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import fs from 'node:fs';
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { serve, vulkanFirst } from './host.mjs';
+import { launch, presentsVideo, serve, vulkanFirst } from './host.mjs';
 import { locate } from './shared.mjs';
 
 test('cancelled media requests close their files so the project can be renamed', { timeout: 10000 }, async (t) => {
@@ -58,6 +58,24 @@ test('cancelled media requests close their files so the project can be renamed',
     await site.close();
     mocked.mock.restore();
     syncBuiltinESMExports();
+  }
+});
+
+test('an open-ended media range returns at most 2 MiB', async () => {
+  const cap = 2 * 1024 * 1024;
+  const dir = mkdtempSync(join(tmpdir(), 'of-host-range-'));
+  const data = Buffer.alloc(cap + 2, '0123456789');
+  writeFileSync(join(dir, 'video.mp4'), data);
+  const site = await serve(dir);
+  try {
+    const res = await fetch(`${site.url}/video.mp4`, { headers: { range: 'bytes=1-' } });
+    assert.equal(res.status, 206);
+    assert.equal(res.headers.get('content-length'), String(cap));
+    assert.equal(res.headers.get('content-range'), `bytes 1-${cap}/${data.length}`);
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), data.subarray(1, cap + 1));
+  } finally {
+    await site.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -129,7 +147,8 @@ test('Windows: Vulkan when its renderer is a GPU, read once; otherwise the defau
   const vulkan = ['--use-angle=vulkan'];
 
   const gpu = reads(async () => 'ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA GeForce RTX 5070 Laptop GPU (0x00002D58)), NVIDIA)');
-  let l = launcher(), pick = vulkanFirst(gpu.renderer);
+  const always = async () => true;
+  let l = launcher(), pick = vulkanFirst(gpu.renderer, always);
   const browsers = await Promise.all([pick(l.open), pick(l.open), pick(l.open)]);
   assert.deepEqual(browsers.map((b) => b.angle), [vulkan, vulkan, vulkan]);
   assert.equal(gpu.count, 1);
@@ -143,7 +162,7 @@ test('Windows: Vulkan when its renderer is a GPU, read once; otherwise the defau
     async () => { throw new Error('page crashed'); },
   ]) {
     const software = reads(said);
-    l = launcher(); pick = vulkanFirst(software.renderer);
+    l = launcher(); pick = vulkanFirst(software.renderer, always);
     const [first, second] = await Promise.all([pick(l.open), pick(l.open)]);
     assert.deepEqual([first.angle, second.angle], [[], []]);
     assert.deepEqual(l.opened, [vulkan, [], []]);
@@ -152,9 +171,101 @@ test('Windows: Vulkan when its renderer is a GPU, read once; otherwise the defau
   }
 
   const never = reads(async () => 'unused');
-  l = launcher(true); pick = vulkanFirst(never.renderer);
+  l = launcher(true); pick = vulkanFirst(never.renderer, always);
   assert.deepEqual((await pick(l.open)).angle, []);
   assert.deepEqual((await pick(l.open)).angle, []);
   assert.deepEqual(l.opened, [vulkan, [], []]);
   assert.equal(never.count, 0);
+});
+
+test('Windows: when Vulkan never shows a video frame, Direct3D on the same GPU, else Vulkan decoding on the CPU, else Direct3D on the other GPU, else the default', async () => {
+  const vulkan = ['--use-angle=vulkan'];
+  const d3d11 = ['--use-angle=d3d11'];
+  const cpu = [...vulkan, '--disable-accelerated-video-decode'];
+  const nvidia = 'ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA GeForce RTX 4050 Laptop GPU (0x000028A1)), NVIDIA)';
+  const nvidiaD3d = 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4050 Laptop GPU (0x000028A1) Direct3D11 vs_5_0 ps_5_0, D3D11)';
+  const intelD3d = 'ANGLE (Intel, Intel(R) UHD Graphics (0x0000A7A8) Direct3D11 vs_5_0 ps_5_0, D3D11)';
+  const swiftShader = 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)';
+  /** Browsers by what they are opened with: Direct3D's renderer, and which ones show a video's frames. */
+  const machine = (/** @type {string} */ direct, /** @type {string[][]} */ showing) => {
+    const opened = /** @type {string[][]} */ ([]), closed = /** @type {string[][]} */ ([]);
+    const open = async (/** @type {string[]} */ angle) => {
+      opened.push(angle);
+      return /** @type {any} */ ({ angle, close: async () => { closed.push(angle); } });
+    };
+    const renderer = async (/** @type {any} */ b) => (b.angle[0] === '--use-angle=vulkan' ? nvidia : b.angle.length ? direct : swiftShader);
+    const presents = async (/** @type {any} */ b) => showing.some((a) => a.join() === b.angle.join());
+    return { pick: vulkanFirst(renderer, presents), open, opened, closed };
+  };
+
+  /* one GPU: Direct3D reaches it and shows the frames */
+  let m = machine(nvidiaD3d, [d3d11]);
+  assert.deepEqual((await m.pick(m.open)).angle, d3d11);
+  assert.deepEqual((await m.pick(m.open)).angle, d3d11);
+  assert.deepEqual(m.opened, [vulkan, d3d11, d3d11]);
+  assert.deepEqual(m.closed, [vulkan]);
+
+  /* two GPUs (#64): Direct3D takes the integrated one, so Vulkan stays, its videos decoded on the CPU */
+  m = machine(intelD3d, [d3d11, cpu]);
+  assert.deepEqual((await m.pick(m.open)).angle, cpu);
+  assert.deepEqual((await m.pick(m.open)).angle, cpu);
+  assert.deepEqual(m.opened, [vulkan, d3d11, cpu, cpu]);
+  assert.deepEqual(m.closed, [vulkan, d3d11]);
+
+  /* only Direct3D on the integrated GPU shows them: that, rather than the CPU */
+  m = machine(intelD3d, [d3d11]);
+  assert.deepEqual((await m.pick(m.open)).angle, d3d11);
+  assert.deepEqual(m.opened, [vulkan, d3d11, cpu]);
+  assert.deepEqual(m.closed, [vulkan, cpu]);
+
+  /* nothing shows them: the default */
+  m = machine(intelD3d, []);
+  assert.deepEqual((await m.pick(m.open)).angle, []);
+  assert.deepEqual(m.opened, [vulkan, d3d11, cpu, []]);
+  assert.deepEqual(m.closed, [vulkan, cpu, d3d11]);
+});
+
+test('Windows: a film whose video Vulkan never showed, though its check passed, moves every later browser to the next way, once', async () => {
+  const vulkan = ['--use-angle=vulkan'];
+  const opened = /** @type {string[][]} */ ([]);
+  const open = async (/** @type {string[]} */ angle) => { opened.push(angle); return /** @type {any} */ ({ angle, close: async () => {} }); };
+  const renderer = async (/** @type {any} */ b) => (b.angle.length
+    ? 'ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA GeForce RTX 4050 Laptop GPU (0x000028A1)), NVIDIA)'
+    : 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4050 Laptop GPU (0x000028A1) Direct3D11 vs_5_0 ps_5_0, D3D11)');
+  const pick = vulkanFirst(renderer, async () => true);
+  assert.deepEqual((await pick(open)).angle, vulkan);
+  assert.equal(await pick.videoNotShown(), true);
+  /* Direct3D on the same GPU, its check not asked of Vulkan again */
+  assert.deepEqual((await pick(open)).angle, ['--use-angle=d3d11']);
+  assert.deepEqual((await pick(open)).angle, ['--use-angle=d3d11']);
+  assert.deepEqual(opened, [vulkan, vulkan, ['--use-angle=d3d11'], ['--use-angle=d3d11']]);
+  assert.equal(await pick.videoNotShown(), false, 'no other way left to move to');
+});
+
+test('a browser shows a paused video\'s frame once sought; one that never presents it is told', { timeout: 60_000 }, async () => {
+  const browser = await launch();
+  try {
+    assert.equal(await presentsVideo(browser), true);
+    /* a compositor that never presents: the frame callback never comes */
+    const never = { newPage: async () => {
+      const page = await browser.newPage();
+      await page.evaluate(() => { HTMLVideoElement.prototype.requestVideoFrameCallback = () => 0; });
+      return page;
+    } };
+    assert.equal(await presentsVideo(/** @type {any} */ (never)), false);
+    /* one that shows a frame, never the one sought: as slow as none at all */
+    const wrong = { newPage: async () => {
+      const page = await browser.newPage();
+      await page.evaluate(() => {
+        HTMLVideoElement.prototype.requestVideoFrameCallback = function (callback) {
+          setTimeout(() => callback(performance.now(), /** @type {any} */ ({ mediaTime: this.currentTime + 1 })), 10);
+          return 0;
+        };
+      });
+      return page;
+    } };
+    assert.equal(await presentsVideo(/** @type {any} */ (wrong)), false);
+  } finally {
+    await browser.close();
+  }
 });

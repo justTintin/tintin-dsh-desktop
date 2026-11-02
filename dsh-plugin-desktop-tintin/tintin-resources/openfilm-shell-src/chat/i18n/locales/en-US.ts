@@ -1,4 +1,9 @@
 /** The chat's words (English): the paths its components look up with useT(). */
+
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'the Recycle Bin'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'the Trash' : 'the trash';
+
 export const enUS = {
   /* a turn of the app's own agent stopped: the service its model runs on has no balance left (BalanceNotice) */
   balance: {
@@ -112,20 +117,20 @@ export const enUS = {
   },
   agent: {
     contextCompacted: 'Earlier conversation folded into a summary',
+    modelGone: 'This agent no longer offers {model}. Choose a model again.',
+    settingFailed: 'Couldn’t set {setting} to {value}: {error}',
+    settingRejected: 'The agent couldn’t apply this setting.',
     thinking: 'Thinking',
   },
   assets: {
     close: 'Close',
     download: 'Download',
-    imageActualSize: 'Original size',
-    imageFit: 'Fit',
     noPreview: 'This file type cannot be previewed here — download it instead',
     previewFailed: 'This file could not be read',
   },
   composer: {
     contextFull: 'This conversation is getting long. A new one will work better.',
     contextFullNew: 'New conversation',
-    commands: 'Commands',
     agentLoading: 'Loading…',
     agentNone: 'Agent',
     agentNoneShown: 'No agent is switched on for the chat.',
@@ -138,6 +143,7 @@ export const enUS = {
     agentSection: 'Agent',
     agentSetUp: 'Set up',
     agentWaiting: 'Signing in…',
+    agentWas: 'This conversation used {name}, which isn’t available now. The next message goes to the agent below.',
     effort: 'Effort',
     filesFailed: 'Couldn\'t attach {names}: {error} Remove it to send.',
     filesPending: 'The files are still being attached.',
@@ -152,8 +158,12 @@ export const enUS = {
     copyDiagnostics: 'Copy diagnostic report',
     copyDiagnosticsHint: 'What OpenFilm finds on this computer and its recent problems, to paste into an issue',
     diagnosticsCopied: 'Copied',
-    removeFile: 'Remove file',
-    removeImage: 'Remove image',
+    switchAccount: 'Switch account',
+    signedInAs: 'Signed in as {account}.',
+    routeNoKey: "This model needs a DeepSeek API key, and none is set up on this computer. If you're only signed in to a DeepSeek account, use one of its models.",
+    routeNoKeyNoAccount: 'This model needs a DeepSeek API key, and none is set up on this computer. Sign in to your DeepSeek account in DeepSeek Harness, or add an API key in its model settings.',
+    useAccountModel: 'Use {model}',
+    accountModelPicked: 'Switched to {model}. Send your message again.',
     speed: 'Speed',
     thumbOnly: 'A thumbnail kept with the message. The original stays where it was, or in the project if it was pasted.',
   },
@@ -209,8 +219,8 @@ export const enUS = {
     assets: 'Assets',
     addAttachment: 'Add files',
     close: 'Close',
-    composerPlaceholder: 'Say what to change. Type @ to point at a file, a moment or what you selected',
-    composerPlaceholderBlank: 'Describe your film. Type @ to use a file from this project',
+    composerPlaceholder: 'Say what to change. Type @ for a file, a skill, a moment or what you selected',
+    composerPlaceholderBlank: 'Describe your film. Type @ to add a file or a skill',
     dismiss: 'Dismiss',
     jumpToLatest: 'Jump to latest',
     loadingMessages: 'Loading conversation…',
@@ -288,7 +298,7 @@ export const enUS = {
     cardDoes: 'What it does',
     next: 'Next',
     cancel: 'Cancel',
-    replaceNote: 'You have {names} already: adding it moves the old one to the trash.',
+    replaceNote: `You have {names} already: adding it moves the old one to ${TRASH}.`,
     replaceAndAdd: 'Replace and add',
     scriptsCount: '{n} scripts',
     fromLink: 'From a link',
@@ -399,5 +409,15 @@ export const enUS = {
     added: 'New',
     removed: 'Deleted',
     changed: 'Changed',
+  },
+  /** a turn that ended with film.html gone: under its reply, put it back as the turn found it (lib/film-restore) */
+  filmRestore: {
+    lost: 'film.html was removed in this turn and is not there now.',
+    restore: 'Restore film.html as it was before this turn',
+    restoring: 'Restoring…',
+    restored: 'film.html is back as it was before this turn.',
+    exists: 'film.html is back already, so it was left as it is.',
+    gone: 'The copy from before this turn is no longer kept. Restore film.html from Version history.',
+    failed: 'film.html could not be restored. Try again, or restore it from Version history.',
   },
 };

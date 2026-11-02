@@ -16,6 +16,7 @@ import {
   FILM_SUBTITLE_SIZE_PCT_MIN,
   filmSubtitleAt,
   filmSubtitleCss,
+  filmSubtitleOpacity,
   filmSubtitleText,
   matchFilmSubtitleLook,
   parseFilmSubtitleStyle,
@@ -52,6 +53,7 @@ export const SUBTITLE_SIZE_PCT_MAX = FILM_SUBTITLE_SIZE_PCT_MAX;
 export const SUBTITLE_DEFAULT = FILM_SUBTITLE_DEFAULT;
 export const SUBTITLE_HOME_Y = FILM_SUBTITLE_HOME_Y;
 export const cueAt = filmSubtitleAt;
+export const subtitleOpacity = filmSubtitleOpacity;
 export const cueText = filmSubtitleText;
 export const matchSubtitleLook = matchFilmSubtitleLook;
 
@@ -128,8 +130,8 @@ export function joinColor(hex: string, alpha: number): string {
 
 /**
  * The style is kept per project (in the project folder, see useSubtitleStyle); this browser also remembers the look
- * last used, the starting point for a project whose style was never changed: someone who set up large yellow
- * subtitles wants them in the next film too.
+ * last used, the look a new project starts in (written to it as it is made, see api.newProject): someone who set up
+ * large yellow subtitles wants them in the next film too.
  */
 const STORE_KEY = 'openfilm.subtitles';
 
@@ -253,9 +255,9 @@ export async function saveSourceSubtitles(projectId: string, src: string, cues: 
   }).catch(() => null));
 }
 
-/** Put a source's transcript files back as `to`, if they are still as `from` left them. */
-export async function restoreSubtitleFiles(projectId: string, src: string, from: SubtitleSnapshot, to: SubtitleSnapshot): Promise<void> {
+/** Put a source's transcript files back as `to`, if they are still as `from` left them. `undo`: an edit undone. */
+export async function restoreSubtitleFiles(projectId: string, src: string, from: SubtitleSnapshot, to: SubtitleSnapshot, undo = false): Promise<void> {
   await answer(await fetch(subtitlesApi(projectId, 'captions/files'), {
-    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ src, from, to }),
+    method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ src, from, to, ...(undo ? { undo: true } : {}) }),
   }).catch(() => null));
 }

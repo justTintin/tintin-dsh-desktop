@@ -17,7 +17,7 @@ import {
   type LocalAgentSessionInfo,
   type RosterAgent,
 } from '@/lib/desktop-bridge';
-import { forgetLocalAgentSessions, keepCommands, readCommands } from '@/lib/local-agent-run';
+import { forgetLocalAgentSessions } from '@/lib/local-agent-run';
 
 export type AgentPick = LocalAgentId;
 
@@ -50,17 +50,23 @@ interface LocalAgentStore extends Persisted {
 }
 
 const probing = new Set<LocalAgentId>();
-/** the agents asked for their options since the app started: the ones kept from before are shown until then, but an
-    agent updated since (Claude Code with new models) has other options, so each is asked once a launch */
-const askedThisLaunch = new Set<LocalAgentId>();
+/** The last model asked for this launch. Refresh saved catalogs once, and dependent options on each model pick. */
+const askedThisLaunch = new Map<LocalAgentId, string>();
 
-/* TinTin(2026-10-30): 键升 v3 一次性重置旧的选择 —— 名册新增「TinTin智能体」行并置首
-   (首个 ready 行=默认), 旧 v2 里点过的 deepseek 不再当作默认; 用户可再选并会记住。 */
-const KEY = 'openfilm.local-agents.v3';
+/** A selected model can have different effort/speed options from the agent's default model. */
+function probeModel(state: Persisted, agent: LocalAgentId): string | undefined {
+  const option = state.options[agent]?.find((o) => o.category === 'model');
+  const model = option && state.prefs[agent]?.[option.id];
+  if (agent === 'cursor' && typeof model === 'string') {
+    const legacy = /^([^\[]+)\[([^\]]*)\]$/.exec(model);
+    if (legacy) return legacy[1];
+  }
+  return typeof model === 'string' && option?.options?.some((o) => o.value === model) ? model : undefined;
+}
 
-/* TinTin(2026-11-01): TinTin智能体行禁用(服务端智能体观察期, 默认角色改回 deepseek) ——
-   存量 picked 仍指向 tintin-agent 的, 读入时回落 deepseek, 免得 roster 到达前的首帧拿它起会话。 */
-const DISABLED_FALLBACK: Partial<Record<LocalAgentId, LocalAgentId>> = { 'tintin-agent': 'deepseek' };
+const probeKey = (agent: LocalAgentId, model: string | undefined, revision = 0) => JSON.stringify([agent, model, revision]);
+
+const KEY = 'openfilm.local-agents.v2';
 
 function load(): Persisted {
   const empty: Persisted = { picked: 'claude', prefs: {}, options: {} };
@@ -68,9 +74,8 @@ function load(): Persisted {
   try {
     const raw = JSON.parse(window.localStorage.getItem(KEY) ?? window.localStorage.getItem('openfilm.local-agents.v1') ?? 'null') as Partial<Persisted> | null;
     if (!raw) return empty;
-    const picked = isAgent(raw.picked) ? raw.picked : 'claude';
     return {
-      picked: DISABLED_FALLBACK[picked] ?? picked,
+      picked: isAgent(raw.picked) ? raw.picked : 'claude',
       prefs: raw.prefs && typeof raw.prefs === 'object' ? raw.prefs : {},
       options: raw.options && typeof raw.options === 'object' ? raw.options : {},
     };
@@ -109,7 +114,16 @@ const EFFORT_NAMES: Record<string, string> = { auto: 'Auto', off: 'Off', minimal
  * `effort` options, apps/desktop/src/pi-config.mjs). The person's own agents' is the one a session last reported.
  */
 export function agentOptions(state: Pick<LocalAgentStore, 'options' | 'roster'> & Partial<Pick<LocalAgentStore, 'prefs'>>, agent: LocalAgentId): ConfigOptions | undefined {
-  if (agent !== 'byok') return state.options[agent];
+  if (agent !== 'byok') {
+    const options = state.options[agent];
+    const model = options?.find((o) => o.category === 'model');
+    const picked = model && state.prefs?.[agent]?.[model.id];
+    // Until the new model answers, none of the previous model's effort/speed/context options belong in its menu.
+    if (model && picked != null && picked !== model.currentValue) {
+      return options?.filter((o) => o.category === 'model' || o.category === 'mode' || o.category === 'permissions');
+    }
+    return options;
+  }
   const models = byokModels(state.roster);
   if (!models.length) return undefined;
   const model = ownModelPicked(models, state.prefs?.byok?.model) ?? models[0]!;
@@ -132,31 +146,32 @@ export function offeredOption(agent: LocalAgentId, _roster: RosterAgent[] | null
 const CLAUDE_MODELS_OFFERED = 4;
 
 /**
- * The choices a menu row offers, in the agent's order, without a "Default" row (a default is one of the others). Of
+ * The choices a menu row offers, in the agent's order. Native Default choices reset the model's effort. Of
  * Claude Code's models, the first four it lists, as its own picker shows them, and the one in use if it is further down.
  */
 export function offeredChoices<T extends { value: unknown }>(agent: LocalAgentId, option: { id: string; category?: string; options?: T[] }, chosen: unknown): T[] {
-  const choices = (option.options ?? []).filter((choice) => choice.value !== 'default');
-  if (agent !== 'claude' || (option.category !== 'model' && option.id !== 'model')) return choices;
+  const all = option.options ?? [];
+  if (agent !== 'claude') return all;
+  const choices = all.filter((choice) => choice.value !== 'default');
+  if (option.category !== 'model' && option.id !== 'model') return choices;
   return choices.filter((choice, i) => i < CLAUDE_MODELS_OFFERED || choice.value === chosen);
 }
 
-/** The agents the menu lists: the ones switched on in Settings, in the roster's order (a disabled one still listed, greyed). */
+/** The agents the menu lists: the ones switched on in Settings, in the roster's order. */
 export function shownAgents(roster: RosterAgent[] | null): RosterAgent[] {
   return (roster ?? []).filter((a) => a.shown);
 }
 
-/** The agent the chat uses: the one picked while it is shown, ready and not disabled, else the first such row.
- *  TinTin(2026-11-01): 禁用行不作为候选(行仍显示), 否则置首禁用行会一直被选中。 */
+/** The agent the chat uses: the one picked while it is shown and ready, else the first shown one that is ready. */
 export function currentAgent(state: Pick<LocalAgentStore, 'picked' | 'roster'>): LocalAgentId {
   const shown = shownAgents(state.roster);
-  const pickable = shown.filter((a) => !a.disabled);
-  const picked = pickable.find((a) => a.id === state.picked);
-  if (picked?.status === 'ready' || !state.roster) return state.picked;
-  return pickable.find((a) => a.status === 'ready')?.id ?? picked?.id ?? pickable[0]?.id ?? state.picked;
+  const picked = shown.find((a) => a.id === state.picked);
+  if (picked && ['ready', 'checking', 'waiting'].includes(picked.status) || !state.roster) return state.picked;
+  return shown.find((a) => a.status === 'ready')?.id ?? picked?.id ?? shown[0]?.id ?? state.picked;
 }
 
 let listening = false;
+let rosterRevision = 0;
 
 export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
   picked: 'claude',
@@ -172,9 +187,12 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
     if (api && !listening) {
       listening = true;
       api.onChange((roster) => {
+        rosterRevision++;
         /* an agent that stopped being ready: what its sessions held goes (it may be another account next time) */
         for (const before of get().roster ?? []) {
           const now = roster.find((a) => a.id === before.id);
+          if (before.configurationRevision !== now?.configurationRevision || before.status !== 'ready' && now?.status === 'ready') askedThisLaunch.delete(before.id);
+          if (before.configurationRevision !== now?.configurationRevision) forgetLocalAgentSessions(before.id);
           if (before.status === 'ready' && now?.status !== 'ready') forgetLocalAgentSessions(before.id);
           /* other models (the own key's): its sessions were closed for the next ones to use them */
           else if (JSON.stringify(byokModels([before])) !== JSON.stringify(byokModels(now ? [now] : []))) forgetLocalAgentSessions(before.id);
@@ -185,43 +203,68 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
     void get().refresh();
   },
   async refresh() {
+    const revision = rosterRevision;
     const roster = await desktopBridge()?.agents?.list().catch(() => null);
-    if (roster) set({ roster });
+    if (roster && revision === rosterRevision) set({ roster });
   },
   pick(picked) {
     set({ picked });
     save(get());
   },
   setPref(agent, configId, value) {
-    const prefs = { ...get().prefs, [agent]: { ...(get().prefs[agent] ?? {}), [configId]: value } };
+    const model = agentOptions(get(), agent)?.find((o) => o.category === 'model');
+    const before = get().prefs[agent] ?? {};
+    const changingModel = model?.id === configId && value !== (before[configId] ?? model.currentValue);
+    // A new model starts with its own defaults; parameters from a different model are not global agent settings.
+    const prefs = { ...get().prefs, [agent]: { ...(changingModel ? {} : before), [configId]: value } };
     set({ prefs });
     save(get());
+    if (get().options[agent]?.some((o) => o.id === configId && o.category === 'model')) void get().ensureOptions(agent);
   },
   noteOptions(agent, options) {
     if (!options) return;
-    set({ options: { ...get().options, [agent]: options } });
+    let prefs = get().prefs;
+    /* Before Cursor's parameterized picker, a model id included effort/speed/context in brackets. Keep that
+       selection when replacing the old catalog with the model and its separately configurable parameters. */
+    const legacy = agent === 'cursor' && typeof prefs.cursor?.model === 'string' ? /^([^\[]+)\[([^\]]*)\]$/.exec(prefs.cursor.model) : null;
+    if (legacy && options.find((o) => o.category === 'model')?.options?.some((o) => o.value === legacy[1])) {
+      const values = Object.fromEntries(legacy[2]!.split(',').map((part) => part.split('=').map((s) => s.trim())));
+      const picked: Record<string, unknown> = { ...prefs.cursor, model: legacy[1] };
+      for (const option of options) {
+        const value = option.category === 'thought_level' ? values.reasoning_effort ?? values.effort ?? values.reasoning : values[option.id];
+        if (!(option.id in picked) && option.options?.some((o) => o.value === value)) picked[option.id] = value;
+      }
+      prefs = { ...prefs, cursor: picked };
+    }
+    set({ prefs, options: { ...get().options, [agent]: options } });
     save(get());
   },
   async ensureOptions(agent, { retry = false } = {}) {
     /* the own key's are known from Settings (agentOptions); a failed probe is not tried again on every render, each
        try being a whole session of the agent's */
     if (agent === 'byok' || probing.has(agent)) return;
+    if (!get().roster?.some((a) => a.id === agent && a.shown && a.status === 'ready')) return;
+    const model = probeModel(get(), agent);
+    const currentKey = () => probeKey(agent, probeModel(get(), agent), get().roster?.find((a) => a.id === agent)?.configurationRevision ?? 0);
+    const key = currentKey();
     const kept = Boolean(get().options[agent]);
-    if (kept && askedThisLaunch.has(agent)) return;
-    if (get().optionsError[agent] && !retry) return;
+    const matched = model == null || get().options[agent]?.find((o) => o.category === 'model')?.currentValue === model;
+    if (askedThisLaunch.get(agent) === key && (matched || get().optionsError[agent]) && (!retry || !get().optionsError[agent])) return;
     const api = desktopBridge()?.localAgents;
     if (!api) return;
     probing.add(agent);
-    askedThisLaunch.add(agent);
+    askedThisLaunch.set(agent, key);
     set({ optionsError: { ...get().optionsError, [agent]: undefined } });
     try {
-      const r = await api.probe(agent).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e), code: undefined }));
-      if (r.ok && r.info.commands?.length) keepCommands(agent, readCommands({ availableCommands: r.info.commands }));
+      const r = await api.probe(agent, model).catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e), code: undefined }));
+      // A newer model pick wins; an older response must not replace its effort list.
+      if (currentKey() !== key || !get().roster?.some((a) => a.id === agent && a.shown && a.status === 'ready')) return;
       if (r.ok && r.info.configOptions?.length) get().noteOptions(agent, r.info.configOptions);
       /* the ones kept from before stay when this launch's ask fails */
-      else if (!kept) set({ optionsError: { ...get().optionsError, [agent]: r.ok ? { text: 'no options' } : { text: r.error, ...(r.code ? { code: r.code } : {}) } } });
+      else if (!kept || model != null) set({ optionsError: { ...get().optionsError, [agent]: r.ok ? { text: 'no options' } : { text: r.error, ...(r.code ? { code: r.code } : {}) } } });
     } finally {
       probing.delete(agent);
+      if (currentKey() !== key) void get().ensureOptions(agent);
     }
   },
 }));
@@ -250,18 +293,20 @@ const DROPPED_PREFS = new Set(['plan', 'collaboration_mode']);
  * picked by its name at the service (before each model was set up on its own) is its id now.
  */
 export function effectivePrefs(prefs: Persisted['prefs'], agent: LocalAgentId, roster?: RosterAgent[] | null, options?: ConfigOptions): Record<string, unknown> {
-  /* "default" was a row the menu no longer offers (the agents name their default for what it is): the agent's own
-     current value stands instead. A mode picked once (plan mode, offered for a while) is not kept: every agent works
+  /* An old "default" pick absent from the agent's choices is discarded; a native Default (effort reset, Cursor Auto)
+     remains an explicit selection. A mode picked once (plan mode, offered for a while) is not kept: every agent works
      with full access. A pick the agent no longer offers (a model gone in its update, one the own key no longer names)
      is not kept either: the agent's own stands instead */
   const offers = (id: string, value: unknown) => {
+    if (!options) return true;
     const option = options?.find((o) => o.id === id);
-    return !option?.options?.length || option.options.some((o) => o.value === value);
+    return !!option && (!option.options?.length || option.options.some((o) => o.value === value));
   };
   const models = agent === 'byok' ? byokModels(roster ?? null) : null;
   const own = Object.entries(prefs[agent] ?? {}).map(([id, value]): [string, unknown] => (models && id === 'model' ? [id, ownModelPicked(models, value)?.id ?? null] : [id, value]));
   const kept = Object.fromEntries(own
-    .filter(([id, value]) => value !== 'default' && value !== null && !DROPPED_PREFS.has(id) && offers(id, value)));
+    .filter(([id, value]) => value !== null && (value !== 'default' || options?.find((o) => o.id === id)?.options?.some((o) => o.value === value))
+      && !DROPPED_PREFS.has(id) && offers(id, value)));
   return { ...kept, ...(AGENT_FORCED_PREFS[agent] ?? {}) };
 }
 
@@ -271,21 +316,10 @@ export function optionValue(options: ConfigOptions | undefined, prefs: Record<st
   return options?.find((o) => o.id === id)?.currentValue;
 }
 
-/** Option value → display name.
- * TinTin(2026-10-30): ACP 的模型选项是 provider 分组嵌套(`options` 里每项自带一层
- * `options` 选择数组), 此前只在顶层找 → 永远落空, 标签回退成原始值(组合 JSON 串)。
- * 拍平分组后按值取显示名 —— 模型行的名称与按钮摘要因此显示补丁里的名字(如「视频生成」)。 */
-export function optionChoices(option: { options?: Array<Record<string, unknown>> } | undefined): Array<{ value: unknown; name: string; description?: string }> {
-  const entries = option?.options ?? [];
-  return entries.flatMap((entry) => {
-    const nested = (entry as { options?: unknown })?.options;
-    return Array.isArray(nested) ? (nested as Array<{ value: unknown; name: string; description?: string }>) : [entry as { value: unknown; name: string; description?: string }];
-  });
-}
-
+/** Option value → display name. */
 export function optionLabel(options: ConfigOptions | undefined, id: string, value: unknown): string | null {
   const option = options?.find((o) => o.id === id);
-  const hit = optionChoices(option).find((o) => o.value === value);
+  const hit = option?.options?.find((o) => o.value === value);
   return hit?.name ?? (typeof value === 'string' ? value : null);
 }
 
@@ -306,14 +340,8 @@ export function agentModelSummary(
   let model: string | null = null;
   if (modelOpt) {
     const value = optionValue(options, prefs, modelOpt.id);
-    /* TinTin(2026-10-30): 分组嵌套里找当前选择(见 optionChoices) —— 命中即显示补丁里的模型名 */
-    const choice = optionChoices(modelOpt).find((o) => o.value === value);
-    let raw = value === 'default' && choice?.description ? choice.description : optionLabel(options, modelOpt.id, value);
-    /* TinTin(2026-10-24): ACP 的组合值是 `["provider","model"]` 形状的 JSON 字符串 ——
-       标签解析不到时回退成了原始值, 又长又像报错。解析出模型名折叠显示。 */
-    if (raw && raw.startsWith('["')) {
-      try { raw = JSON.parse(raw).at(-1) ?? raw } catch { /* 非 JSON: 原样 */ }
-    }
+    const choice = modelOpt.options?.find((o) => o.value === value);
+    const raw = value === 'default' && choice?.description ? choice.description : optionLabel(options, modelOpt.id, value);
     model = raw ? (raw.split('·')[0]!.replace(/\s*\([^)]*\)/g, '').trim() || raw) : null;
   }
   const effortValue = effortOpt ? optionValue(options, prefs, effortOpt.id) : undefined;

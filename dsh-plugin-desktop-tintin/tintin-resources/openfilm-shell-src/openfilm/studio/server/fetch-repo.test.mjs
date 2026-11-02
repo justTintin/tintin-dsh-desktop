@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { FetchError, cloneInto, createFetches, fetchFilm, parseRepoUrl, splitTree } from './fetch-repo.mjs';
+import { downloadFiles } from './fetch-github.mjs';
 
 const refused = (input, code) => assert.throws(() => parseRepoUrl(input), (e) => e instanceof FetchError && e.code === code, String(input));
 
@@ -74,11 +75,15 @@ before(() => {
   const work = join(scratch, 'work');
   mkdirSync(join(work, 'films', 'one', 'assets'), { recursive: true });
   mkdirSync(join(work, 'films', 'two'), { recursive: true });
+  mkdirSync(join(work, 'films', 'dots', '..assets'), { recursive: true });
   mkdirSync(join(work, 'docs'), { recursive: true });
   writeFileSync(join(work, 'README.md'), '# films\n');
   writeFileSync(join(work, 'films', 'one', 'film.html'), '<!doctype html><title>one</title>');
   writeFileSync(join(work, 'films', 'one', 'assets', 'a.txt'), 'a');
   writeFileSync(join(work, 'films', 'two', 'film.html'), '<!doctype html><title>two</title>');
+  writeFileSync(join(work, 'films', 'dots', 'film.html'), '<!doctype html><img src="..assets/frame.svg">');
+  writeFileSync(join(work, 'films', 'dots', '..notes.md'), 'notes');
+  writeFileSync(join(work, 'films', 'dots', '..assets', 'frame.svg'), '<svg/>');
   writeFileSync(join(work, 'docs', 'notes.md'), 'no film here');
   writeFileSync(join(work, 'big.bin'), randomBytes(512 * 1024));
   writeFileSync(join(work, 'film.html'), '<!doctype html><title>root</title>');
@@ -245,6 +250,28 @@ test('over https: a branch with a slash in its name; the whole repository; a fil
   assert.ok(existsSync(join(whole, 'films', 'two', 'film.html')));
   assert.ok(!existsSync(join(whole, '.git')));
   assert.equal(await fetchFilm(overHttp(['main', 'films', 'two', 'film.html'], true), { library: lib, hosts: github.hosts }), join(lib, 'two'));
+});
+
+test('over https: files and folders whose names start with two dots are fetched, as through git', async () => {
+  const lib = library();
+  const tree = ['main', 'films', 'dots'];
+  const fromGit = await fetchFilm(source(tree), { library: lib });
+  const fromHttp = await fetchFilm(overHttp(tree), { library: lib, hosts: github.hosts });
+  for (const path of ['film.html', '..notes.md', '..assets/frame.svg']) {
+    assert.equal(readFileSync(join(fromHttp, path), 'utf8'), readFileSync(join(fromGit, path), 'utf8'), path);
+  }
+  assert.deepEqual(readdirSync(lib).sort(), ['dots', 'dots 2']);
+});
+
+test('over https: a download path outside the folder is refused before any file is requested', async () => {
+  const dir = library();
+  asked.length = 0;
+  for (const path of ['', '..', '../outside.txt', 'assets/../../outside.txt']) {
+    await assert.rejects(downloadFiles({ owner: 'o', repo: 'r' }, COMMIT, [], [{ path, size: 1 }], { dir, hosts: github.hosts }),
+      (e) => e instanceof FetchError && e.status === 422);
+  }
+  assert.deepEqual(asked, []);
+  assert.deepEqual(readdirSync(dir), []);
 });
 
 test('over https: no film, no folder, no branch, too big: said before anything downloads', async () => {

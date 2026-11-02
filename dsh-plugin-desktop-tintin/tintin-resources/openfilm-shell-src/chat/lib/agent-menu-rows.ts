@@ -16,7 +16,7 @@ export const isSpeed = (o: MenuOption) => o.category === 'speed' || /^(fast|fast
 
 /**
  * The rows the menu shows, in this order: the model and the reasoning effort, always, and the speed when the model has
- * one. A model or an effort the agent offers no choice of (GitHub Copilot picks its own) is a row all the same, its one
+ * one. A model or an effort the agent currently offers no choice of is a row all the same, its one
  * value `fixed`: `defaultName` when the agent names none.
  */
 export function menuOptions(options: MenuOption[] | undefined, defaultName: string): MenuOption[] {

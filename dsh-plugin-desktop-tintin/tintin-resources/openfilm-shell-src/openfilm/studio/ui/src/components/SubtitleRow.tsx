@@ -145,9 +145,11 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
   snap: boolean;
   /** Where the row's drags snap besides other cues: 0, the playhead, every clip's edges. */
   snapTargets: () => SnapTarget[];
+  /** Empty row space seeks and scrubs, just like the ruler; cue and text edits keep their own gestures. */
+  onScrub: (event: React.PointerEvent) => void;
   /** Why an edit could not be done, said in the timeline's toolbar. */
   onError: (text: string) => void;
-}>(function SubtitleRow({ spec, pxPerMs, scrollLeft, width, playheadMs, snap, snapTargets, onError }, ref) {
+}>(function SubtitleRow({ spec, pxPerMs, scrollLeft, width, playheadMs, snap, snapTargets, onScrub, onError }, ref) {
   const t = useT();
   const cues = React.useMemo(() => rowOrder(spec.cues), [spec.cues]);
   const [selected, setSelected] = React.useState<string | null>(null);
@@ -347,7 +349,7 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
       data-subtitle-row=""
       className="relative shrink-0 overflow-hidden border-b select-none"
       style={{ height: SUBTITLE_ROW_H, background: 'var(--tl-lane)', borderColor: 'var(--tl-line)' }}
-      onPointerDown={(e) => { if (e.button === 0) { setSelected(null); targeted.current = true; } }}
+      onPointerDown={(e) => { if (e.button === 0) { setSelected(null); targeted.current = true; onScrub(e); } }}
       onContextMenu={(e) => openMenu(e, null)}
     >
       <div ref={innerRef} className="absolute inset-y-0 left-0" style={{ width, transform: `translate3d(${-scrollLeft}px,0,0)` }}>

@@ -4,14 +4,16 @@
  *
  * Codex, Claude Code and the others are the person's own programs, on the account signed in on the computer:
  * connecting opens their own sign-in only when they are signed out (the app waits for it), disconnecting only stops
- * the app using them, and connecting again uses the account signed in then (switched in the agent itself).
- * Claude Code's and Codex's rows say whose account it is, and Codex's what is left of its plan. Codex and Claude Code
+ * the app using them, and connecting again uses the account signed in then. Switch account signs one out with its own
+ * command and opens its sign-in (the person agrees first); one without such a command says where it switches (its
+ * maker's app, or the agent itself), and Done reconnects it. A row says whose account it is when the agent tells it,
+ * and Codex's what is left of its plan. Codex and Claude Code
  * are always listed under the person's agents, with the person's own key; the others there once switched on (connecting
  * one does), else under "More agents", with where to get them when they are not installed. The person's own key is on a service of theirs, with a model that reads pictures (the agent looks at its own frames).
  *
- * One not found, or one disconnected, can be pointed at: Locate… opens the system's file dialog, the program chosen is
- * tried and used from then on (Find automatically goes back); an editor or a desktop app is refused. A connected one
- * keeps the program it found. "Why isn't it found?" says what was searched, with a report to copy. One not found that
+ * One not found, or one disconnected, can be pointed at: connection help opens the system's folder dialog, and the
+ * app finds and tries its connection program before using it (Find automatically goes back). An app with a bundled
+ * agent resolves to that agent. Connection actions stay beside the visibility switch. One not found that
  * has an official installer is installed from here: Install shows the exact command, which runs in a terminal window
  * once the person agrees; the row says when only the maker's desktop app is here.
  *
@@ -19,19 +21,21 @@
  * let in (its maker's own are always on).
  */
 import React from 'react';
-import { Check, Copy, Download, KeyRound, Loader2, Plus, X } from 'lucide-react';
+import { Check, CircleHelp, Download, KeyRound, Loader2, Plus, RefreshCw, X } from 'lucide-react';
 import { useLanguage, useT } from '@/i18n';
 import { BYOK_EFFORTS, studioHost, type HostAgent, type HostAgentDiagnosis, type HostAgentId, type HostAgentUsage, type HostByokEffort, type HostByokEffortLevel, type HostByokFormat, type HostOwnModel } from '@/lib/host';
 import { parseContextLength } from '@/lib/context-length';
-import { missingActions } from '@/lib/agent-row';
+import { accountOrg, missingActions, ownModelError, switchOffer } from '@/lib/agent-row';
 
 /** What is left of the plan: what Codex can say (the app's agent-usage.mjs; Claude Code's own report is wrong for Team accounts). */
 const PLAN_AGENTS: readonly HostAgentId[] = ['codex'];
+/** The words under an agent waiting for its sign-in, for those whose sign-in needs more than the usual hint. */
+const WAITING_HINTS: Partial<Record<HostAgentId, string>> = { minimax: 'settings.agents.waitingHintMinimax', codebuddy: 'settings.agents.waitingHintCodebuddy' };
 import { ProviderMark } from './ProviderMark';
 import { agentMark } from '@/lib/provider-marks';
 import { SettingsSelect } from './SettingsSelect';
 import { SettingsButton, SettingsField, SettingsGroup, SettingsInset, SettingsItem, SettingsLinkButton, SettingsPage, SettingsStatus, SettingsSwitch, settingsError } from './ui';
-import { ReportLink } from './DiagnosticsGroup';
+import { AgentConnectionHelp } from './AgentConnectionHelp';
 
 function useHostAgents(): HostAgent[] | null {
   const [agents, setAgents] = React.useState<HostAgent[] | null>(null);
@@ -39,10 +43,15 @@ function useHostAgents(): HostAgent[] | null {
     const host = studioHost?.agents;
     if (!host) return undefined;
     let live = true;
-    void host.list().then((list) => { if (live) setAgents(list); }).catch(() => {});
-    const stop = host.onChange((list) => setAgents(list));
+    let revision = 0;
+    const read = (ask: () => Promise<HostAgent[]>) => {
+      const started = revision;
+      void ask().then((list) => { if (live && revision === started) setAgents(list); }).catch(() => {});
+    };
+    const stop = host.onChange((list) => { revision++; if (live) setAgents(list); });
+    read(() => host.list());
     /* a sign-in finished in Terminal: coming back is the moment to look again */
-    const onFocus = () => { void host.list().then((list) => { if (live) setAgents(list); }).catch(() => {}); };
+    const onFocus = () => read(() => host.list());
     window.addEventListener('focus', onFocus);
     return () => { live = false; stop(); window.removeEventListener('focus', onFocus); };
   }, []);
@@ -113,37 +122,68 @@ export function AgentsSection() {
   const host = studioHost?.agents;
   const [busy, setBusy] = React.useState<HostAgentId | null>(null);
   const [error, setError] = React.useState<{ id: HostAgentId; text: string } | null>(null);
+  const [help, setHelp] = React.useState<HostAgentId | null>(null);
+  const [notice, setNotice] = React.useState<{ id: HostAgentId; text: string } | null>(null);
+  const [refreshing, setRefreshing] = React.useState(false);
+  const [refreshError, setRefreshError] = React.useState<string | null>(null);
   const [keyOpen, setKeyOpen] = React.useState(false);
-  const [diagnosis, setDiagnosis] = React.useState<{ id: HostAgentId; report: HostAgentDiagnosis | null; copied?: boolean } | null>(null);
+  const [diagnosis, setDiagnosis] = React.useState<{ id: HostAgentId; report: HostAgentDiagnosis | null; checking?: boolean; copied?: boolean } | null>(null);
   /* the agent whose installer the person is asked about */
   const [confirming, setConfirming] = React.useState<HostAgentId | null>(null);
+  /* the agent whose account the person is switching: asked first, or told where it switches */
+  const [switching, setSwitching] = React.useState<HostAgentId | null>(null);
   if (!host) return null;
+  const offerSwitch = (agent: HostAgent) => switchOffer(agent, { switchAccount: Boolean(host.switchAccount) });
+  const refreshAgents = () => {
+    setRefreshing(true);
+    setRefreshError(null);
+    setError(null);
+    setNotice(null);
+    setDiagnosis(null);
+    void (host.refresh ? host.refresh() : host.list())
+      .catch((e: unknown) => setRefreshError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setRefreshing(false));
+  };
 
   const act = (id: HostAgentId, run: () => Promise<{ ok?: boolean; error?: string } | unknown>) => {
     setBusy(id);
     setError(null);
+    setNotice(null);
+    const failed = (text: string) => { setError({ id, text }); if (id !== 'byok') setHelp(id); };
     void run()
-      .then((r) => { const res = r as { ok?: boolean; error?: string } | undefined; if (res && res.ok === false) setError({ id, text: res.error ?? t('settings.agents.failed') }); })
-      .catch((e: unknown) => setError({ id, text: e instanceof Error ? e.message : String(e) }))
+      .then((r) => { const res = r as { ok?: boolean; error?: string } | undefined; if (res && res.ok === false) failed(res.error ?? t('settings.agents.failed')); })
+      .catch((e: unknown) => failed(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(null));
   };
 
-  /* the person points at the program: tried by the app before it is used; cancelling says nothing */
+  /* find and try the connection program in the chosen installation folder; cancelling says nothing */
   const locate = (agent: HostAgent) => act(agent.id, async () => {
-    const r = await host.locate!(agent.id, { title: t('settings.agents.locateTitle').replace('{name}', agent.name), button: t('settings.agents.locateButton') });
+    const r = await host.locate!(agent.id, { title: t('settings.agents.locateFolderTitle').replace('{name}', agent.name), button: t('settings.agents.locateButton'), kind: 'folder' });
     if (r.ok) setDiagnosis(null);
-    if (r.ok || (!r.error && !r.code)) return { ok: true };
-    if (r.code === 'not-a-program') return { ok: false, error: t('settings.agents.notAProgram') };
-    if (r.code === 'app') return { ok: false, error: t('settings.agents.notTheAgentApp').replaceAll('{name}', agent.name) };
-    if (r.code === 'not-cursor-agent') return { ok: false, error: t('settings.agents.notCursorAgent') };
+    if (r.ok) {
+      setNotice({ id: agent.id, text: `${t('settings.agents.programReady')}${r.version ? ` · ${r.version}` : ''}` });
+      return { ok: true };
+    }
+    if (!r.error && !r.code) return { ok: true };
+    if (r.code === 'not-a-program') {
+      setHelp(agent.id);
+      setNotice({ id: agent.id, text: t('settings.agents.folderNoAgent').replaceAll('{name}', agent.name) });
+      return { ok: true };
+    }
+    if (r.code === 'app' || r.code === 'not-cursor-agent') {
+      setHelp(agent.id);
+      setNotice({ id: agent.id, text: t('settings.agents.appNeedsComponent').replaceAll('{name}', agent.name) });
+      return { ok: true };
+    }
     if (r.code === 'did-not-start') return { ok: false, error: `${t('settings.agents.didNotStart')} ${r.error ?? ''}`.trim() };
     return r;
   });
 
   const diagnose = (agent: HostAgent) => {
-    setDiagnosis({ id: agent.id, report: null });
+    setHelp(agent.id);
+    setDiagnosis({ id: agent.id, report: null, checking: true });
     void host.diagnose!(agent.id)
-      .then((report) => setDiagnosis((d) => (d?.id === agent.id ? { id: agent.id, report } : d)))
+      .then((report) => setDiagnosis((d) => (d?.id === agent.id ? { id: agent.id, report, checking: false } : d)))
       .catch((e: unknown) => { setDiagnosis(null); setError({ id: agent.id, text: e instanceof Error ? e.message : String(e) }); });
   };
 
@@ -164,8 +204,9 @@ export function AgentsSection() {
   };
 
   const statusLine = (agent: HostAgent) => {
+    if (agent.connectionIssue && (agent.status === 'ready' || agent.status === 'off')) return t(`settings.agents.${agent.connectionIssue.kind === 'quota' ? 'quotaReached' : 'modelCredentials'}`);
     switch (agent.status) {
-      case 'off': return t('settings.agents.off');
+      case 'off': return t(agent.shown ? 'settings.agents.off' : 'settings.agents.available');
       case 'sign-in': return t('settings.agents.signedOut');
       case 'waiting': return t('settings.agents.waiting');
       case 'missing':
@@ -188,7 +229,7 @@ export function AgentsSection() {
     const how = a.method === 'chatgpt' ? t('settings.agents.accountChatgpt') : a.method === 'api-key' ? t('settings.agents.accountApiKey')
       : a.method === 'console' ? t('settings.agents.accountConsole') : null;
     const plan = a.plan ? a.plan.charAt(0).toUpperCase() + a.plan.slice(1) : null;
-    const parts = [a.org, a.email, plan, a.email || a.org ? null : how].filter(Boolean);
+    const parts = [accountOrg(a), a.email, plan, a.email || a.org ? null : how].filter(Boolean);
     return parts.length ? parts.join(' · ') : null;
   };
 
@@ -196,49 +237,42 @@ export function AgentsSection() {
   const action = (agent: HostAgent, chosen = true) => {
     const working = busy === agent.id;
     if (agent.status === 'ready' && chosen) {
-      return (
-        <SettingsButton variant="quiet" disabled={working} title={agent.id === 'byok' ? undefined : t('settings.agents.disconnectHint').replaceAll('{name}', agent.name)}
-          onClick={() => act(agent.id, () => host.disconnect(agent.id))}>
-          {t('settings.agents.disconnect')}
-        </SettingsButton>
-      );
+      return <>
+        {offerSwitch(agent) ? <SettingsButton variant="quiet" disabled={working || switching === agent.id} onClick={() => setSwitching(agent.id)}>{t('settings.agents.switchAccount')}</SettingsButton> : null}
+        <SettingsButton variant="quiet" disabled={working} title={t('settings.agents.disconnectHint')} onClick={() => act(agent.id, () => host.disconnect(agent.id))}>{t('settings.agents.disconnect')}</SettingsButton>
+      </>;
     }
     if (agent.status === 'missing') {
+      if (agent.setupRequired === 'code-tab') return host.openSetup ? (
+        <SettingsButton disabled={working} onClick={() => act(agent.id, () => host.openSetup!(agent.id))}>{t('settings.agents.openClaude')}</SettingsButton>
+      ) : null;
       const offer = missingActions(agent, { locate: Boolean(host.locate), install: Boolean(host.install) });
-      if (!offer.locate && !offer.install) return null;
+      if (!offer.install) return null;
       return (
         <>
-          {offer.locate ? (
-            <SettingsButton variant="quiet" disabled={working} onClick={() => locate(agent)}>
-              {working ? <Loader2 size={16} className="animate-spin" aria-hidden /> : null}
-              {t('settings.agents.locate')}
-            </SettingsButton>
-          ) : null}
           {/* its official installer, run once the person agrees to the command; else its install page */}
           {offer.install === 'run' ? (
             <SettingsButton disabled={working || agent.installing || confirming === agent.id} onClick={() => setConfirming(agent.id)}>
-              <Download size={16} />{t('settings.agents.install')}
+              <Download size={16} />{t('settings.agents.installComponent')}
             </SettingsButton>
-          ) : offer.install === 'page' && agent.install ? <SettingsLinkButton href={agent.install}><Download size={16} />{t('settings.agents.install')}</SettingsLinkButton> : null}
+          ) : offer.install === 'page' && agent.install ? <SettingsLinkButton href={agent.install}><Download size={16} />{t('settings.agents.installComponent')}</SettingsLinkButton> : null}
         </>
       );
     }
     if (agent.status === 'key') return <SettingsButton onClick={() => setKeyOpen(true)}>{t('settings.agents.setUpKey')}</SettingsButton>;
     if (agent.status === 'unavailable') return null;
     if (agent.status === 'checking') return <Loader2 size={16} className="animate-spin text-[var(--text-muted)]" aria-hidden />;
-    /* disconnected: the program it runs can be pointed at before connecting again (a particular version, another
-       install); a connected one keeps the program it found. The own key has none */
-    const canLocate = agent.status === 'off' && host.locate && agent.id !== 'byok';
+    if (agent.status === 'waiting') return (
+      <SettingsButton variant="quiet" disabled={working} onClick={() => act(agent.id, () => host.cancelSignIn ? host.cancelSignIn(agent.id) : host.disconnect(agent.id))}>
+        {t('settings.agents.cancel')}
+      </SettingsButton>
+    );
+    /* Manual location is in connection help. Connecting reuses an existing sign-in. */
     return (
       <>
-        {canLocate ? (
-          <SettingsButton variant="quiet" disabled={working} onClick={() => locate(agent)}>
-            {t('settings.agents.locate')}
-          </SettingsButton>
-        ) : null}
-        <SettingsButton disabled={working || agent.status === 'waiting'} onClick={() => act(agent.id, () => host.connect(agent.id))}>
+        <SettingsButton disabled={working} onClick={() => act(agent.id, () => host.connect(agent.id))}>
           {working ? <Loader2 size={16} className="animate-spin" aria-hidden /> : null}
-          {agent.status === 'sign-in' ? t('settings.agents.signIn') : t('settings.agents.connect')}
+          {t(agent.status === 'sign-in' ? 'settings.agents.signInConnect' : 'settings.agents.connect')}
         </SettingsButton>
       </>
     );
@@ -248,16 +282,21 @@ export function AgentsSection() {
     const ownKey = agent.id === 'byok' && agent.byok;
     /* found, but it cannot read its own settings, so no session starts: what it says, to fix in its config file */
     const problem = agent.status === 'ready' && agent.problem ? agent.problem : null;
+    /* older than the chat was tried with: it works, but may not list the newest models; how to update it */
+    const outdated = chosen && agent.status === 'ready' && agent.outdated ? agent.outdated : null;
     const said = error?.id === agent.id ? error.text : agent.error ?? (problem ? `${t('settings.agents.unreadable')} ${problem}` : undefined);
     const open = agent.id === 'byok' && keyOpen;
     /* where it is not found: why, on asking (Claude Code waiting for its app's Code tab is not lost) */
-    const lost = agent.status === 'missing' && agent.setupRequired !== 'code-tab' && Boolean(host.diagnose);
-    const diag = diagnosis?.id === agent.id ? diagnosis : null;
+    const showHelper = agent.id !== 'byok' && (['missing', 'off', 'sign-in', 'waiting'].includes(agent.status) || Boolean(said) || Boolean(agent.connectionIssue));
+    const description = agent.connectionIssue ? statusLine(agent) : agent.status === 'ready' ? chosen ? accountLine(agent) : t('settings.agents.available') : statusLine(agent);
     /* what is left of its plan: while being asked, and once told (an agent that can't say shows nothing) */
     const plan = usage[agent.id];
     const meter = chosen && agent.status === 'ready' && PLAN_AGENTS.includes(agent.id) && Boolean(host.usage) && (plan === undefined || Boolean(plan?.windows.length));
-    const hint = diag?.report ? hintOf(diag.report) : null;
     const asking = confirming === agent.id && agent.status === 'missing' && agent.installer && host.install ? agent.installer : null;
+    /* Switch account: here, once the person agrees to the sign-out; elsewhere, where (in its maker's app or itself) */
+    const switchHow = chosen && switching === agent.id ? offerSwitch(agent) : null;
+    const whereKey = `settings.agents.switchWhere.${agent.id}`;
+    const where = t(whereKey) === whereKey ? agent.name : t(whereKey);
     return (
       <SettingsItem
         key={agent.id}
@@ -272,10 +311,14 @@ export function AgentsSection() {
                 {t('settings.agents.recommended')}
               </span>
             ) : null}
-            {agent.status === 'ready' && chosen && !problem ? <SettingsStatus>{ownKey ? agent.byok!.models.map((m) => m.name).join(', ') : t('settings.agents.ready')}</SettingsStatus> : null}
+            {agent.status === 'ready' && chosen && !problem && !agent.connectionIssue ? <SettingsStatus>{ownKey ? agent.byok!.models.map((m) => m.name).join(', ') : t('settings.agents.ready')}</SettingsStatus> : null}
           </>
         )}
-        description={agent.status === 'ready' ? accountLine(agent) : statusLine(agent)}
+        description={description || showHelper ? <div className="flex items-center gap-1">
+          {description ? <span className="min-w-0">{description}</span> : null}
+          {showHelper ? <button type="button" aria-label={t('settings.agents.helpFor').replace('{name}', agent.name)} title={t('settings.agents.helpFor').replace('{name}', agent.name)}
+            onClick={() => setHelp(agent.id)} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"><CircleHelp size={15} aria-hidden /></button> : null}
+        </div> : null}
         control={(
           <>
             {ownKey && !open ? <SettingsButton variant="quiet" onClick={() => setKeyOpen(true)}>{t('settings.agents.change')}</SettingsButton> : null}
@@ -285,8 +328,19 @@ export function AgentsSection() {
           </>
         )}
       >
-        {agent.status === 'waiting' || open || said || agent.chosen || lost || meter || asking || (chosen && agent.status === 'ready' && (host.mcp || host.skills)) ? (
+        {agent.status === 'waiting' || open || said || asking || switchHow || agent.chosen || meter || outdated || notice?.id === agent.id || (chosen && agent.status === 'ready' && (host.mcp || host.skills)) ? (
           <div className="flex flex-col gap-1.5 pl-[34px]">
+            {notice?.id === agent.id ? <p role="status" className="text-[13.5px] leading-relaxed text-[var(--text-muted)]">{notice.text}</p> : null}
+            {said ? <p role="alert" className={settingsError}>{said}</p> : null}
+            {outdated ? (
+              <div className="flex flex-col gap-1.5">
+                <p role="status" className="text-[13.5px] leading-relaxed text-[var(--text-muted)]">
+                  {t(outdated.update ? 'settings.agents.outdated' : outdated.app ? 'settings.agents.outdatedApp' : 'settings.agents.outdatedOther')
+                    .replace('{name}', agent.name).replace('{version}', outdated.version).replace('{tested}', outdated.tested)}
+                </p>
+                {outdated.update ? <code className="block break-all rounded-[6px] bg-[var(--fill-tsp)] px-2.5 py-2 font-mono text-[12.5px] text-[var(--text)]">{outdated.update}</code> : null}
+              </div>
+            ) : null}
             {meter ? (
               <div className="flex flex-col gap-1.5" aria-label={t('settings.agents.usage')}>
                 {plan === undefined ? (
@@ -314,37 +368,31 @@ export function AgentsSection() {
                 </div>
               </SettingsInset>
             ) : null}
-            {lost && !diag ? (
-              <p className="text-[13.5px] leading-relaxed text-[var(--text-muted)]">
-                <button type="button" onClick={() => diagnose(agent)} className="underline underline-offset-2 hover:text-[var(--text)]">{t('settings.agents.whyMissing')}</button>
-              </p>
-            ) : null}
-            {lost && diag && !diag.report ? (
-              <p className="flex items-center gap-1.5 text-[13.5px] text-[var(--text-muted)]"><Loader2 size={14} className="animate-spin" aria-hidden />{t('settings.agents.searching')}</p>
-            ) : null}
-            {lost && diag?.report ? (
+            {switchHow ? (
               <SettingsInset>
-                {hint ? <p className="break-words text-[14px] leading-relaxed text-[var(--text)]">{hint}</p> : null}
-                <p className="text-[13px] leading-relaxed text-[var(--text-faint)]">{t('settings.agents.reportNote')}</p>
+                <p className="text-[14px] leading-relaxed text-[var(--text)]">
+                  {switchHow === 'here'
+                    ? t('settings.agents.switchConfirm').replaceAll('{name}', agent.name)
+                    : t('settings.agents.switchElsewhere').replaceAll('{name}', agent.name).replace('{where}', where)}
+                </p>
                 <div className="flex justify-end gap-1.5">
-                  <SettingsButton variant="quiet" onClick={() => setDiagnosis(null)}>{t('settings.agents.close')}</SettingsButton>
-                  <SettingsButton onClick={() => copyReport(diag.report!, agent.id)}>
-                    {diag.copied ? <Check size={15} aria-hidden /> : <Copy size={15} aria-hidden />}
-                    {diag.copied ? t('settings.agents.copied') : t('settings.agents.copyReport')}
+                  <SettingsButton variant="quiet" onClick={() => setSwitching(null)}>{t('settings.agents.cancel')}</SettingsButton>
+                  <SettingsButton variant="primary" onClick={() => {
+                    setSwitching(null);
+                    act(agent.id, () => (switchHow === 'here' ? host.switchAccount!(agent.id) : host.connect(agent.id)));
+                  }}>
+                    {switchHow === 'here' ? t('settings.agents.switchRun') : t('settings.agents.switchDone')}
                   </SettingsButton>
                 </div>
               </SettingsInset>
             ) : null}
             {agent.status === 'waiting' ? (
               <p className="text-[14.5px] leading-relaxed text-[var(--text-muted)]">
-                {t('settings.agents.waitingHint')}{' '}
-                <button type="button" onClick={() => act(agent.id, () => host.connect(agent.id))} className="underline underline-offset-2 hover:text-[var(--text)]">{t('settings.agents.startAgain')}</button>
+                {t(WAITING_HINTS[agent.id] ?? 'settings.agents.waitingHint')}{' '}
+                <button type="button" disabled={busy === agent.id} onClick={() => act(agent.id, () => host.connect(agent.id))} className="underline underline-offset-2 hover:text-[var(--text)]">{t('settings.agents.startAgain')}</button>
               </p>
             ) : null}
             {open ? <OwnModels agent={agent} onDone={() => setKeyOpen(false)} /> : null}
-            {said ? <p className={settingsError}>{said}</p> : null}
-            {/* what to send when it keeps failing */}
-            {said ? <ReportLink /> : null}
           </div>
         ) : null}
       </SettingsItem>
@@ -352,6 +400,9 @@ export function AgentsSection() {
   };
 
   const list = agents ?? [];
+  const helpAgent = list.find((agent) => agent.id === help);
+  const helpDiagnosis = diagnosis?.id === help ? diagnosis : null;
+  const helpError = helpAgent ? error?.id === help ? error.text : helpAgent.error ?? (helpAgent.problem ? `${t('settings.agents.unreadable')} ${helpAgent.problem}` : undefined) : undefined;
   const byId = (id: HostAgentId) => list.find((a) => a.id === id);
   /* always yours: Codex, Claude Code and your own key; then the others switched on, the rest under "More" */
   const always = (['codex', 'claude', 'byok'] as const).map(byId).filter((a): a is HostAgent => Boolean(a));
@@ -359,10 +410,21 @@ export function AgentsSection() {
   const more = others.filter((a) => !a.shown);
   return (
     <SettingsPage note={t('settings.agents.intro')}>
+      <div className="mb-3 flex justify-end">
+        <SettingsButton variant="quiet" disabled={refreshing} aria-busy={refreshing} onClick={refreshAgents}><RefreshCw size={15} className={refreshing ? 'animate-spin' : ''} />{t('settings.agents.refreshCheck')}</SettingsButton>
+      </div>
+      {refreshError ? <p role="alert" className={settingsError}>{refreshError}</p> : null}
       <SettingsGroup title={t('settings.agents.groupYours')} footnote={t('settings.agents.showHint')}>
         {[...always, ...others.filter((a) => a.shown)].map((a) => row(a))}
       </SettingsGroup>
       {more.length ? <SettingsGroup title={t('settings.agents.groupMore')}>{more.map((a) => row(a, false))}</SettingsGroup> : null}
+      {helpAgent ? <AgentConnectionHelp key={helpAgent.id} agent={helpAgent}
+        status={helpAgent.status === 'ready' && !helpAgent.connectionIssue ? t('settings.agents.ready') : statusLine(helpAgent)}
+        report={helpDiagnosis?.report ?? null} checking={Boolean(helpDiagnosis?.checking)}
+        hint={helpDiagnosis?.report ? hintOf(helpDiagnosis.report) : null} error={helpError} notice={notice?.id === helpAgent.id ? notice.text : undefined} copied={helpDiagnosis?.copied}
+        onClose={() => setHelp(null)} onCheck={host.diagnose ? () => diagnose(helpAgent) : undefined}
+        onLocate={host.locate && ['missing', 'off'].includes(helpAgent.status) ? () => locate(helpAgent) : undefined}
+        onCopy={helpDiagnosis?.report ? () => copyReport(helpDiagnosis.report!, helpAgent.id) : undefined} /> : null}
     </SettingsPage>
   );
 }
@@ -513,7 +575,7 @@ function OwnModelForm({ model, models, onDone }: { model?: HostOwnModel; models:
     if (!host || !ready) return;
     setState({ busy: true, error: null });
     void host.saveOwnModel({ ...(model ? { id: model.id } : {}), name, format, baseUrl, model: modelId, ...(key.trim() ? { key } : {}), levels: effort.levels, effort: effort.effort, ...context })
-      .then((r) => { if (r.ok) onDone(); else setState({ busy: false, error: r.error || t('settings.agents.failed') }); })
+      .then((r) => { if (r.ok) onDone(); else setState({ busy: false, error: ownModelError(r, t) || t('settings.agents.failed') }); })
       .catch((e: unknown) => setState({ busy: false, error: e instanceof Error ? e.message : String(e) }));
   };
   const keyHint = model ? t('settings.agents.keyKept').replace('{last4}', model.last4)

@@ -3,6 +3,7 @@
  * cookie `/open` set; writes are refused from any other origin.
  */
 import type { ExportJob } from '@/lib/export-jobs';
+import type { SubtitleStyle } from '@/lib/subtitles';
 import { studioHost } from '@/lib/host';
 import { watchStudioVersion } from '@/lib/studio-version';
 
@@ -13,7 +14,7 @@ export interface StudioVersion { version: string; latest: string | null; newer: 
   update?: { status: 'updating' | 'failed'; version: string; error?: string } }
 
 /** `cover`: when the person set a cover of its own (studio/server/cover.mjs), absent when it has none. */
-export type Project = { id: string; path: string; name: string; openedAt: number; missing: boolean; working?: boolean; cover?: number };
+export type Project = { id: string; path: string; name: string; openedAt: number; missing: boolean; missingReason?: 'folder' | 'film'; working?: boolean; cover?: number };
 export type Clip = { src: string; id: string; at?: number; time?: [number] | [number, number];
   box?: { x: number; y: number; w?: number; h?: number; r?: number }; volume?: number; speed?: number; overrides?: unknown[];
   /** a page that sets no size of its own: the px it is laid out at (the stage's without it) */
@@ -25,7 +26,8 @@ export type Clip = { src: string; id: string; at?: number; time?: [number] | [nu
 export type Track = { clips: Clip[]; locked?: boolean; hidden?: boolean; muted?: boolean; attrs?: Record<string, string> };
 export type Film = { stage?: { w: number; h: number }; tracks: Track[] };
 /** `value`: film.html as read, every clip named (a clip with no id takes its file's name, as the server and preview do). */
-export type ProjectFilm = { project: Project; folder: string; text: string; rev: string; value: Film | null; doc: Film | null; problems: string[] };
+/** `filmMissing`: the folder is there but film.html is not (read as an empty film; see FolderEvent `film-missing`). */
+export type ProjectFilm = { project: Project; folder: string; text: string; rev: string; value: Film | null; doc: Film | null; problems: string[]; filmMissing?: boolean };
 export type MediaFile = { path: string; kind: 'video' | 'image' | 'audio' | 'page' | 'other'; size: number; mtime: number; added?: number };
 /** A project's editor settings (studio/server/project-settings.mjs). */
 export type ProjectSettings = { fps?: number; trackNames?: { name: string; index: number; clips: string[] }[]; trackHeights?: { height: number; index: number; clips: string[] }[] };
@@ -85,6 +87,8 @@ export interface StudioPrefs {
   projectsFolder: string | null;
   /** the keyboard shortcuts: the scheme in use and the custom ones (lib/keymap `KeyPrefs`, checked there) */
   keys?: unknown;
+  /** whether open projects save versions on their own (studio/server/auto-versions.mjs) */
+  autoVersions?: boolean;
 }
 /** Where the projects library is (src/locations.mjs): the folder, its default, whether the person chose it, the free space on its disk, how many projects are in it. */
 export interface StudioLocation { path: string; default: string; chosen: boolean; free: number | null; count: number }
@@ -127,14 +131,14 @@ export const api = {
   revealProject: (id: string) => call<object>(`projects/${encodeURIComponent(id)}/reveal`, { method: 'POST', json: {} }),
   /** one of them in the system's file manager */
   openLocation: (which: keyof StudioLocations) => call<{ ok: true }>(`locations/${which}`, { method: 'POST', json: {} }),
-  setPrefs: (patch: { proxies?: Partial<StudioPrefs['proxies']>; seenVersion?: string; projectsFolder?: string | null; keys?: unknown }) => call<StudioPrefs>('prefs', { method: 'PATCH', json: patch }).then((prefs) => {
+  setPrefs: (patch: { proxies?: Partial<StudioPrefs['proxies']>; seenVersion?: string; projectsFolder?: string | null; keys?: unknown; autoVersions?: boolean }) => call<StudioPrefs>('prefs', { method: 'PATCH', json: patch }).then((prefs) => {
     window.dispatchEvent(new Event(PREFS_EVENT));
     return prefs;
   }),
   /** the system's folder dialog, opened by Studio (a page in a browser cannot learn a path): the folder, or null when
       cancelled; throws (501) where this system has none */
   pickFolder: (title: string, at?: string) => call<{ path: string | null }>('pick-folder', { method: 'POST', json: { title, ...(at ? { at } : {}) } }).then((r) => r.path),
-  newProject: (name?: string) => call<{ project: Project }>('projects', { method: 'POST', json: { name } }).then((r) => r.project),
+  newProject: (name?: string, subtitleStyle?: SubtitleStyle) => call<{ project: Project }>('projects', { method: 'POST', json: { name, subtitleStyle } }).then((r) => r.project),
   /** open a folder (its full path) as a project: made one when it is not yet */
   openFolder: (path: string) => call<{ project: Project }>('projects', { method: 'POST', json: { path } }).then((r) => r.project),
   rename: (id: string, name: string) => call<{ project: Project }>(p(id), { method: 'PATCH', json: { name } }).then((r) => {
@@ -145,7 +149,8 @@ export const api = {
   film: (id: string) => call<ProjectFilm>(p(id)),
   /** the person opened it here: the one `openfilm open` alone comes back to */
   opened: (id: string) => call<{ project: Project }>(`${p(id)}/opened`, { method: 'POST' }),
-  edit: (id: string, base: string | null, ops: Op[]) => call<{ text: string; rev: string; value: Film; doc: Film; rebased: boolean }>(`${p(id)}/edit`, { method: 'POST', json: { base, ops } }),
+  /* `undo`: the edit puts back an earlier one (Studio keeps the person's edits over an agent's writes until then) */
+  edit: (id: string, base: string | null, ops: Op[], undo = false) => call<{ text: string; rev: string; value: Film; doc: Film; rebased: boolean }>(`${p(id)}/edit`, { method: 'POST', json: { base, ops, ...(undo ? { undo: true } : {}) } }),
   files: (id: string) => call<Listing>(`${p(id)}/files`),
   /** the editor's settings of the project (`.film/settings.json`): its frame rate, its tracks' names */
   settings: (id: string) => call<{ settings: ProjectSettings }>(`${p(id)}/settings`).then((r) => r.settings),
@@ -180,6 +185,17 @@ export const api = {
   takeSaved: (id: string, path: string) => call<{ clip: Record<string, unknown> & { src: string } } | { clips: SavedGroupClip[] } | { path: string }>(
     `${p(id)}/saved/take`, { method: 'POST', json: { path } },
   ),
+  /** a page of the project as text, with its rev (studio/server/page-text.mjs) */
+  readPage: (id: string, path: string) => call<{ text: string; rev: string }>(`${p(id)}/page?path=${encodeURIComponent(path)}`),
+  /** a page written (text null: taken away) when it is still the page of rev `expect` (null: none there yet); its new
+      rev. `undo`: the write takes back one of Studio's (a paste undone) */
+  writePage: (id: string, path: string, text: string | null, expect: string | null, undo = false) => (
+    call<{ rev: string | null }>(`${p(id)}/page`, { method: 'PUT', json: { path, text, expect, ...(undo ? { undo: true } : {}) } }).then((r) => r.rev)
+  ),
+  /** a clip of project `from` brought into this one with the files it needs (layers pasted from there): its src here */
+  bringClip: (id: string, from: string, clip: Record<string, unknown> & { src: string }) => (
+    call<{ clip: Record<string, unknown> & { src: string } }>(`${p(id)}/bring`, { method: 'POST', json: { from, clip } }).then((r) => r.clip)
+  ),
 };
 
 /** A clip of a saved group: its track counted from the group's top one, its time in seconds from the group's start. */
@@ -199,7 +215,10 @@ export type StudioNotice = { id: string; kind: 'balance'; provider: string; prov
 export type FolderEvent = { type: 'film'; rev: string } | { type: 'files'; paths?: string[] } | { type: 'history' } | { type: 'export'; job: ExportJob } | { type: 'open'; to: string }
   | { type: 'history-progress'; op: string; phase: string; done: number; total: number }
   | { type: 'ask'; ask: SpendAsk } | { type: 'asked'; id: string } | { type: 'notice'; notice: StudioNotice } | { type: 'project'; project: Project }
-  /* the project was deleted, or its folder is not there any more: its pages leave it */
+  /* its folder is there but film.html is not (an agent writing it again, or it lost): the project stays open and
+     says so, until a `film` event says it is back */
+  | { type: 'film-missing' }
+  /* the project was deleted, or its folder is missing: its pages leave it */
   | { type: 'gone' };
 
 /**
@@ -313,8 +332,8 @@ export function projectEvents(id: string, on: (event: FolderEvent) => void): () 
     /* back after Studio was away: the film, the files and the history may all have changed meanwhile */
     const stop = listen(`${p(id)}/events`, tell, {
       onBack: () => { tell({ type: 'film', rev: '' }); tell({ type: 'files' }); tell({ type: 'history' }); },
-      /* the project off the list, or its folder missing: gone (a list that can't be read says nothing) */
-      gone: () => call<{ projects: Project[] }>('projects').then((r) => { const found = r.projects.find((x) => x.id === id); return !found || Boolean(found.missing); }),
+      /* off the list, or missing its folder: gone (an unreadable list says nothing). Missing only film.html is not */
+      gone: () => call<{ projects: Project[] }>('projects').then((r) => { const found = r.projects.find((x) => x.id === id); return !found || (found.missing && found.missingReason !== 'film'); }),
     });
     stream = { stop, listeners };
     streams.set(id, stream);

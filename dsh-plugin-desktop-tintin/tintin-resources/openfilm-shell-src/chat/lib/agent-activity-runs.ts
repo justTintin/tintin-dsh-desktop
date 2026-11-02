@@ -8,9 +8,9 @@ import type { AgentActAsset } from '@openfilm/shared';
  * everything below; with many actions in parallel the list jumps up and down.
  *
  * So:
- *   · running actions are not in the list; they live in the single status row under the turn (see pendingWork),
- *     one row high throughout, its content changing in place;
- *   · finished actions between two messages fold into one row; new ones merge in and the row updates in place;
+ *   · actions appear in the list from the moment they start, in the same row and group when they finish;
+ *   · adjacent actions between two messages fold into one row, including pending actions, so completing an
+ *     action never moves it out of the status line or merges away a row;
  *   · the agent's messages, plans and notices each get a row.
  *
  * Some are only status words, not work (thinking, working, planning, reconnecting): shown in the status row
@@ -48,25 +48,25 @@ function isEphemeral(item: ActivityRunItem): boolean {
 const STANDALONE_ACT_LABELS = new Set(['act.chat.ask']);
 
 /**
- * Finished work (tool calls). It folds into one summary row, including steps that made something (voice, sound,
+ * Work (tool calls). It folds into one summary row, including steps that made something (voice, sound,
  * music, an image, a frame), so a turn with many of them doesn't push the answer away. Expanded, each result still
  * hangs under the row that made it.
  */
-function isFinishedWork(item: ActivityRunItem): boolean {
-  return item.kind === 'act' && !item.pending && !isEphemeral(item)
+function isWork(item: ActivityRunItem): boolean {
+  return item.kind === 'act' && !isEphemeral(item)
     && !(item.label != null && STANDALONE_ACT_LABELS.has(item.label));
 }
 
 export function buildRuns<T extends ActivityRunItem>(items: T[]): ActivityRun<T>[] {
   const runs: ActivityRun<T>[] = [];
-  /* Whether the last run is finished work. Only the last run matters, so one flag is enough; this runs every frame
+  /* Whether the last run is work. Only the last run matters, so one flag is enough; this runs every frame
      while live and must not rescan the run on every merge. */
   let lastIsWork = false;
   for (const item of items) {
-    /* Running actions take no row; status words (thinking, working…) vanish when done */
-    if (item.kind === 'thought' || (item.kind === 'act' && (item.pending || isEphemeral(item)))) continue;
+    /* Status words (thinking, working…) stay in the status line, not the tool list. */
+    if (item.kind === 'thought' || isEphemeral(item)) continue;
     const last = runs[runs.length - 1];
-    const work = isFinishedWork(item);
+    const work = isWork(item);
     if (last && lastIsWork && work) {
       last.items.push(item);
       continue;

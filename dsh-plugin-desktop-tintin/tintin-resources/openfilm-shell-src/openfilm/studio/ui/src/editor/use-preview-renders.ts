@@ -3,14 +3,12 @@
  * are asked to be rendered once the film has stopped for a moment (studio/server/preview-cache.mjs, in the
  * background), followed while they are made, and told to the preview when they are, to play in the film's place.
  * Anything changed in the project (film.html, a page, a file) and those renders are not played until the server names
- * them for the project as it is now. `bar`: what the timeline's ruler shows of them.
+ * them for the project as it is now.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { addHeat, joinStretches, lateStretches, sameStretches, type Heat } from '@/lib/preview-renders';
 import type { PlayedReport, PreviewHandle, PreviewRender } from './Preview';
 
-/** A stretch on the ruler: plays late (not rendered), being rendered, rendered, or one that could not be. */
-export type PreviewBarRange = { a: number; b: number; state: 'late' | 'making' | 'ready' | 'failed'; ratio?: number };
 type Made = { a: number; b: number; key: string; state: 'waiting' | 'making' | 'ready' | 'failed'; ratio?: number };
 
 /** How long the film stays stopped (and unchanged) before what plays late is rendered (ms). */
@@ -87,12 +85,5 @@ export function usePreviewRenders({ projectId, folder, fps, playing, on, film, f
     ? made.filter((r) => r.state === 'ready').map((r) => ({ a: r.a, b: r.b, src: `${folder}__film/preview/${r.key}.mp4` }))
     : []), [on, made, folder]);
   useEffect(() => { preview.current?.renders?.(list); }, [list, preview]);
-  const bar = useMemo<PreviewBarRange[]>(() => {
-    if (!on) return [];
-    /* the server's answer is the stretches as asked, put on the frame grid; a stretch found late since is late */
-    const asked = made.map((r): PreviewBarRange => ({ a: r.a, b: r.b, state: r.state === 'waiting' ? 'making' : r.state, ...(r.state === 'making' ? { ratio: r.ratio ?? 0 } : {}) }));
-    const since = late.filter(([a, b]) => !made.some((r) => r.a < b && a < r.b)).map(([a, b]): PreviewBarRange => ({ a, b, state: 'late' }));
-    return [...asked, ...since].sort((x, y) => x.a - y.a);
-  }, [on, late, made]);
-  return { onPlayed, bar };
+  return { onPlayed };
 }

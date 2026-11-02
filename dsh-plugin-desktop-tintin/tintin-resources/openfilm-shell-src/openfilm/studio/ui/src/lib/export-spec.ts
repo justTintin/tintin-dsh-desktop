@@ -149,6 +149,9 @@ function givenBitrate(size: { w: number; h: number }, fps: number, quality: Expo
 const TYPICAL_VIDEO = { w: 1920, h: 1080, fps: 30, bytes: 150_000 };
 const VIDEO_SPREAD: readonly [number, number] = [0.25, 4];
 const FIXED_SPREAD: readonly [number, number] = [0.9, 1.1];
+/* ProRes spends what each picture needs, up to about its rate: detailed footage comes to the rate, a title card on a
+   plain background to a twentieth or a tenth of it, a plain frame alone to a fortieth (by its pixels, at any size) */
+const PRORES_SPREAD: readonly [number, number] = [0.04, 1.1];
 
 /** How a CRF file's size follows the settings: the quality's CRF, the codec at its CRF. */
 const QUALITY_SIZE: Record<ExportQuality, number> = { standard: 0.58, high: 1, master: 1.6 };
@@ -187,9 +190,9 @@ export function exportEstimateBytes(spec: {
   let videoBps: number;
   let spread = FIXED_SPREAD;
   switch (spec.codec) {
-    /* ProRes is a fixed-rate family: 422 HQ about 220 Mbps at 1080p30, 4444 about 330, scaled by pixels × fps */
-    case 'prores422hq': videoBps = 220_000_000 * (px / (1920 * 1080)) * (spec.fps / 30); break;
-    case 'prores4444': videoBps = 330_000_000 * (px / (1920 * 1080)) * (spec.fps / 30); break;
+    /* ProRes's rate: 422 HQ about 220 Mbps at 1080p30, 4444 about 330, scaled by pixels × fps */
+    case 'prores422hq': videoBps = 220_000_000 * (px / (1920 * 1080)) * (spec.fps / 30); spread = PRORES_SPREAD; break;
+    case 'prores4444': videoBps = 330_000_000 * (px / (1920 * 1080)) * (spec.fps / 30); spread = PRORES_SPREAD; break;
     /* HEVC with alpha (VideoToolbox) is given its bitrate */
     case 'hevc_alpha': videoBps = givenBitrate(spec.size, spec.fps, spec.quality, 0.8); break;
     /* a PNG sequence of motion graphics compresses well: about a byte per pixel */

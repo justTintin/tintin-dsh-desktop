@@ -33,10 +33,12 @@
  * layers after, every layer intersecting the ones below it (mask layers composite from the bottom up), so each hides
  * what it hides. `mask-composite` is then one `intersect`, or a list when an inverted shape needs its `exclude`.
  *
+ * A stroke along the mask's edge is drawn by a filter, since a mask only hides (see "a stroke along the edge" below).
+ *
  * Anything else in `mask-image` (written by hand, or by an agent) is a custom mask: shown as such, never rewritten,
  * the raw CSS (Advanced) has it.
  */
-import { fadeCss, fadeOf, type Fade } from './clip-look.ts';
+import { MASK_STROKE_ID, fadeCss, fadeOf, filterParts, isMaskStroke, type Fade } from './clip-look.ts';
 
 export type MaskShape = 'linear' | 'mirror' | 'ellipse' | 'rect' | 'star' | 'heart';
 export const MASK_SHAPES: readonly MaskShape[] = ['linear', 'mirror', 'ellipse', 'rect', 'star', 'heart'];
@@ -72,7 +74,7 @@ export const MASK_FIELDS: Record<MaskShape, { size: 'box' | 'band' | null; rotat
 };
 
 /** One `mask-image` layer and how it composites with the layers below it. */
-export interface MaskLayer { image: string; op: 'intersect' | 'exclude' }
+export interface MaskLayer { image: string; op: 'intersect' | 'exclude' | 'add' }
 
 /* ───────────── numbers ───────────── */
 
@@ -221,8 +223,10 @@ export const HEART_D = 'M0 1C-.55 .62 -1 .22 -1 -.32C-1 -.72 -.72 -1 -.45 -1C-.2
 /** The blur that feathers an SVG rect: its standard deviation is the feather over this. */
 const BLUR_PER_FEATHER = 3;
 
-/** `url("data:image/svg+xml,…")`: only what a URL or the attribute around it cannot hold is escaped. */
-const svgUrl = (svg: string) => `url("data:image/svg+xml,${svg.replace(/[%#<>"]/g, (c) => encodeURIComponent(c))}")`;
+/** An SVG in a data URL: only what a URL or the attribute around it cannot hold is escaped. */
+const svgData = (svg: string) => `data:image/svg+xml,${svg.replace(/[%#<>"]/g, (c) => encodeURIComponent(c))}`;
+/** `url("data:image/svg+xml,…")`. */
+const svgUrl = (svg: string) => `url("${svgData(svg)}")`;
 
 function svgOf(u: U, body: string): string {
   return svgUrl(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${fmt(u.W)} ${fmt(u.H)}' preserveAspectRatio='none'>${body}</svg>`);
@@ -469,10 +473,11 @@ export function maskStackOf(maskImage: string | undefined, maskComposite: string
   /* a shape is the last one to three layers; what is above it has to be faded edges, intersected */
   for (const len of [3, 2, 1]) {
     if (len > n) continue;
-    const head = layers.slice(0, n - len);
-    const tail = layers.slice(n - len);
-    const shape = shapeOfLayers(tail, ops.slice(n - len), u);
+    const shape = shapeOfLayers(layers.slice(n - len), ops.slice(n - len), u);
     if (!shape) continue;
+    /* a stroke's outer part, added right above the shape, goes with it */
+    const from = n - len - 1 >= 0 && ops[n - len - 1] === 'add' && strokeLayer(layers[n - len - 1]!) ? n - len - 1 : n - len;
+    const head = layers.slice(0, from);
     if (head.length && ops.slice(0, head.length).some((op) => op !== 'intersect')) continue;
     const fade = head.length ? fadeOf(head.join(', '), 'intersect') : undefined;
     if (fade === null) continue;
@@ -480,7 +485,10 @@ export function maskStackOf(maskImage: string | undefined, maskComposite: string
       fade,
       shape,
       fadeLayers: head,
-      shapeLayers: tail.map((image, i) => ({ image, op: ops[n - len + i] === 'exclude' ? 'exclude' : 'intersect' })),
+      shapeLayers: layers.slice(from).map((image, i) => {
+        const op = ops[from + i];
+        return { image, op: op === 'exclude' ? 'exclude' : op === 'add' ? 'add' : 'intersect' };
+      }),
     };
   }
   const fade = fadeOf(maskImage, maskComposite);
@@ -510,15 +518,6 @@ export function fadeIn(maskImage: string | undefined, maskComposite: string | un
   return maskStackOf(maskImage, maskComposite).fade;
 }
 
-/** The properties with the shape set (null: taken off), the faded edges kept as written; null when it is a custom mask. */
-export function withMask(
-  maskImage: string | undefined, maskComposite: string | undefined, mask: Mask | null, box?: MaskBox | null,
-): { 'mask-image': string | null; 'mask-composite': string | null } | null {
-  const now = maskStackOf(maskImage, maskComposite, box);
-  if (now.shape === null) return null;
-  return maskStackCss(now.fadeLayers, mask ? shapeLayers(clampMask(mask, box), box) : []);
-}
-
 /** The properties with the faded edges set (null: taken off), the shape kept as written; null when it is a custom mask. */
 export function withFade(
   maskImage: string | undefined, maskComposite: string | undefined, fade: Fade | null,
@@ -533,4 +532,183 @@ export function maskOwned(prop: string, value: string, all: (p: string) => strin
   if (prop === 'mask-image') return maskStackOf(value, all('mask-composite')).shape !== null && maskLayersOf(value).length > 0;
   if (prop === 'mask-composite') return maskStackOf(all('mask-image'), value).shape !== null && maskLayersOf(all('mask-image')).length > 0;
   return false;
+}
+
+/* ───────────── a stroke along the edge ───────────── */
+
+/*
+ * A stroke `width` wide (% of the box's shorter side, as the feather) along the shape's edge (the middle of its
+ * feather): inside it, across it or outside it — the side the picture shows on being the inside, so an inverted
+ * shape's inside is around it.
+ *
+ * A mask only hides, and nothing else in a box's own CSS paints over its picture, so the stroke is an SVG filter,
+ * `url("data:image/svg+xml,…#openfilm-mask-stroke")`, last in `filter`, laying an image of the stroke over the
+ * picture. The image is an SVG in the box's proportions, as the mask's own (its viewBox in units,
+ * `preserveAspectRatio='none'`), placed over the whole box (`primitiveUnits='objectBoundingBox'`), so the stroke
+ * scales with the box as the mask does. It is base64: the only way Chromium loads an image inside a filter that is
+ * itself a data URL. WebKit loads no such filter: there no stroke is drawn, and the mask layer below lets the picture
+ * show past the edge as far as the stroke would reach.
+ *
+ * A filter is drawn before the mask, which then hides what is past the edge: the stroke's outer part is let through
+ * by one more mask layer, added right above the shape's layers (`mask-composite: add`). The filter draws that part
+ * opaque and the layer in the stroke's color, so a see-through color shows nothing of the picture.
+ * Both images say what they draw on their root, `data-stroke='<position> <width> <color>'`: what is read back.
+ */
+
+export type MaskStrokePosition = 'inside' | 'center' | 'outside';
+export const MASK_STROKE_POSITIONS: readonly MaskStrokePosition[] = ['inside', 'center', 'outside'];
+
+export interface MaskStroke {
+  /** % of the box's shorter side. */
+  width: number;
+  color: string;
+  position: MaskStrokePosition;
+}
+
+/** A color as an SVG attribute can hold it (no quote, no markup), else white. */
+const safeColor = (c: string) => (/^[#\w(),.%\s-]+$/.test(c.trim()) ? c.trim() : '#ffffff');
+
+/** The color without its transparency: hex or rgb() / rgba(); anything else is taken as it is. */
+function opaqueOf(color: string): string {
+  const c = color.trim();
+  const hex = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(c);
+  if (hex) {
+    const h = hex[1]!;
+    return h.length === 4 ? `#${h.slice(0, 3)}` : h.length === 8 ? `#${h.slice(0, 6)}` : c;
+  }
+  const rgb = /^rgba?\(\s*([^,\s]+)[,\s]+([^,\s]+)[,\s]+([^,\s/)]+)/i.exec(c);
+  return rgb ? `rgb(${rgb[1]}, ${rgb[2]}, ${rgb[3]})` : c;
+}
+
+/** The shape as one SVG element, `id='s'`, in units: what the stroke follows. A line's side or a band is a polygon far past the box. */
+function shapeElement(m: Mask, u: U): string {
+  const px = (m.x / 100) * u.W;
+  const py = (m.y / 100) * u.H;
+  switch (m.shape) {
+    case 'linear':
+    case 'mirror': {
+      /* along the gradient's line (d) and across it (e); the picture shows before the line, or within the band */
+      const d = dirOf(m.rotate);
+      const e = { x: -d.y, y: d.x };
+      const far = 10 * (u.W + u.H);
+      const [a, b] = m.shape === 'linear' ? [-far, 0] : [-m.h / 2, m.h / 2];
+      const at = (s: number, k: number) => `${fmt(px + d.x * s + e.x * k)},${fmt(py + d.y * s + e.y * k)}`;
+      return `<polygon id='s' points='${at(a, -far)} ${at(b, -far)} ${at(b, far)} ${at(a, far)}'/>`;
+    }
+    case 'ellipse':
+      return `<ellipse id='s' cx='${fmt(px)}' cy='${fmt(py)}' rx='${fmt(((m.w / 2) / 100) * u.W)}' ry='${fmt(((m.h / 2) / 100) * u.H)}'/>`;
+    case 'rect': {
+      const wu = (m.w / 100) * u.W;
+      const hu = (m.h / 100) * u.H;
+      const r = Math.min(m.radius, wu / 2, hu / 2);
+      return `<rect id='s' transform='translate(${fmt(px)} ${fmt(py)}) rotate(${fmt(m.rotate)})' x='${fmt(-wu / 2, 3)}' y='${fmt(-hu / 2, 3)}' width='${fmt(wu, 3)}' height='${fmt(hu, 3)}'${r > 0 ? ` rx='${fmt(r)}'` : ''}/>`;
+    }
+    default: {
+      /* the path placed in units here, not by a transform: a stroke scaled across and down unevenly would not be even */
+      const sx = ((m.w / 100) * u.W) / 2;
+      const sy = ((m.h / 100) * u.H) / 2;
+      const a = (m.rotate * Math.PI) / 180;
+      const cos = Math.cos(a);
+      const sin = Math.sin(a);
+      let held: number | null = null;
+      let d = '';
+      for (const tok of (m.shape === 'star' ? STAR_D : HEART_D).match(/[a-z]|-?\d*\.?\d+/gi) ?? []) {
+        if (/[a-z]/i.test(tok)) { d += tok; continue; }
+        if (held == null) { held = Number(tok); continue; }
+        const x = held * sx;
+        const y = Number(tok) * sy;
+        held = null;
+        d += `${/[\d]$/.test(d) ? ' ' : ''}${fmt(px + x * cos - y * sin)} ${fmt(py + x * sin + y * cos)}`;
+      }
+      return `<path id='s' d='${d}'/>`;
+    }
+  }
+}
+
+/** How far the stroke reaches in from the edge and out past it (units). */
+function strokeReach(s: MaskStroke): [inner: number, outer: number] {
+  const w = Math.max(0, s.width);
+  return s.position === 'inside' ? [w, 0] : s.position === 'outside' ? [0, w] : [w / 2, w / 2];
+}
+
+/**
+ * The stroke as an SVG over the box: both parts for the filter (the outer one opaque), or the outer part, in its
+ * color, for the mask layer. Each part is a stroke twice its reach on the edge, cut to its side in the filter.
+ */
+function strokeSvg(m: Mask, s: MaskStroke, u: U, outerOnly: boolean): string {
+  const [inner, outer] = strokeReach(s);
+  const color = safeColor(s.color);
+  const inside = "clip-path='url(#i)'";
+  const outside = "mask='url(#o)'";
+  const [innerSide, outerSide] = m.invert ? [outside, inside] : [inside, outside];
+  const part = (reach: number, paint: string, side: string, more = '') => `<use href='#s' fill='none' stroke='${paint}' stroke-width='${fmt(reach * 2)}'${side ? ` ${side}` : ''}${more}/>`;
+  const both = !outerOnly && inner > 0 && outer > 0;
+  /* the two parts meet at the edge, each smoothed there: added (not one over the other), no seam shows between them */
+  const parts = (!outerOnly && inner > 0 ? part(inner, color, innerSide) : '')
+    /* the mask's layer is added to the shape's, which shows all inside: it goes across the edge, so the two overlap */
+    + (outer > 0 ? part(outer, outerOnly ? color : opaqueOf(color), outerOnly ? '' : outerSide, both ? " style='mix-blend-mode:plus-lighter'" : '') : '');
+  const [x, y, w, h] = [-u.W, -u.H, 3 * u.W, 3 * u.H].map((n) => fmt(n));
+  const defs = shapeElement(m, u)
+    + (parts.includes('#i') ? "<clipPath id='i'><use href='#s'/></clipPath>" : '')
+    + (parts.includes('#o') ? `<mask id='o' maskUnits='userSpaceOnUse' x='${x}' y='${y}' width='${w}' height='${h}'><rect x='${x}' y='${y}' width='${w}' height='${h}' fill='#fff'/><use href='#s'/></mask>` : '');
+  return `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${fmt(u.W)} ${fmt(u.H)}' preserveAspectRatio='none' data-stroke='${s.position} ${fmt(Math.max(0, s.width))} ${color}'><defs>${defs}</defs>${parts}</svg>`;
+}
+
+/** The filter function that draws the stroke (the last in `filter`). */
+function strokeFilter(m: Mask, s: MaskStroke, u: U): string {
+  const image = `data:image/svg+xml;base64,${btoa(strokeSvg(m, s, u, false))}`;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg'><filter id='${MASK_STROKE_ID}' x='0' y='0' width='1' height='1' primitiveUnits='objectBoundingBox' color-interpolation-filters='sRGB'>`
+    + `<feImage href='${image}' x='0' y='0' width='1' height='1' preserveAspectRatio='none'/><feComposite in2='SourceGraphic'/></filter></svg>`;
+  return `url("${svgData(svg)}#${MASK_STROKE_ID}")`;
+}
+
+const STROKE_RE = /\sdata-stroke='(inside|center|outside) (\d*\.?\d+) ([^']+)'/;
+
+/** Whether a mask layer is a stroke's outer part (as strokeSvg writes it). */
+function strokeLayer(layer: string): boolean {
+  const svg = svgText(layer);
+  return Boolean(svg && STROKE_RE.test(svg));
+}
+
+/** The mask's stroke, from `filter`: undefined when there is none, null when there is one that cannot be read. */
+export function maskStrokeOf(filter: string | undefined): MaskStroke | null | undefined {
+  const part = filterParts(filter)?.find(isMaskStroke);
+  if (!part) return undefined;
+  const url = /^(["']?)data:image\/svg\+xml,(.*)#[\w-]+\1$/s.exec(part.args);
+  let svg = '';
+  try { svg = url ? decodeURIComponent(url[2]!) : ''; } catch { return null; }
+  const image = /href='data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)'/.exec(svg);
+  let inner = '';
+  try { inner = image ? atob(image[1]!) : ''; } catch { return null; }
+  const m = STROKE_RE.exec(inner);
+  return m ? { position: m[1] as MaskStrokePosition, width: Number(m[2]), color: m[3]! } : null;
+}
+
+/**
+ * Everything a mask writes, from the properties as they are (`read`): `mask-image` and `mask-composite` with the shape
+ * set (null: taken off) and the faded edges kept as written, and — when there is a stroke, or was — `filter` with the
+ * stroke drawn for that shape last, its other functions kept. `stroke`: the stroke to set (null: none); undefined keeps
+ * the one there is. Null when it is a custom mask. A filter the panel cannot read gets no stroke.
+ */
+export function maskCss(
+  read: (prop: string) => string | undefined, mask: Mask | null, box?: MaskBox | null, stroke?: MaskStroke | null,
+): Record<'mask-image' | 'mask-composite', string | null> & { filter?: string | null } | null {
+  const now = maskStackOf(read('mask-image'), read('mask-composite'), box);
+  if (now.shape === null) return null;
+  const u = unitsOf(box);
+  const m = mask ? clampMask(mask, box) : null;
+  const filter = read('filter');
+  const parts = filterParts(filter);
+  const was = parts?.find(isMaskStroke);
+  const want = stroke === undefined ? maskStrokeOf(filter) ?? null : stroke;
+  const s = m && want && want.width > 0 && parts ? want : null;
+  const layers = m ? shapeLayers(m, box) : [];
+  if (m && s && strokeReach(s)[1] > 0) layers.unshift({ image: svgUrl(strokeSvg(m, s, u, true)), op: 'add' });
+  const css: Record<'mask-image' | 'mask-composite', string | null> & { filter?: string | null } = maskStackCss(now.fadeLayers, layers);
+  if (parts && (was || s)) {
+    const kept = parts.filter((p) => !isMaskStroke(p)).map((p) => `${p.name}(${p.args})`);
+    if (m && s) kept.push(strokeFilter(m, s, u));
+    css.filter = kept.length ? kept.join(' ') : null;
+  }
+  return css;
 }

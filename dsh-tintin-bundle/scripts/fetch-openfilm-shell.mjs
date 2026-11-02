@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const COMMIT = process.env.TINTIN_OPENFILM_GIT_COMMIT ?? 'cf6cd6fa9b3d4ee50dd963853ee6ca4f8354ecf4'
+const COMMIT = process.env.TINTIN_OPENFILM_GIT_COMMIT ?? 'b7673b585e3e9c3b434fe663e68619cc1984ae8b'
 const LOCAL_CLONE = process.env.TINTIN_OPENFILM_GIT_DIR ?? 'D:\\Project\\openfilm'
 const here = dirname(fileURLToPath(import.meta.url))
 /* vendor 到 tintin-resources(第三方源树的指定去处, 1000 行门禁豁免该段; 见 verify-tintin-gate.mjs) */

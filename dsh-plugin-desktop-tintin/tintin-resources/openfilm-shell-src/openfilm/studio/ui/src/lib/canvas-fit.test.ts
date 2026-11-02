@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canvasFor, canvasSide, fitToCanvas, originalShape } from './canvas-fit.ts';
+import { canvasFor, canvasSide, firstPictureSize, fitToCanvas, originalShape } from './canvas-fit.ts';
 
 const wide = { w: 1920, h: 1080 }, tall = { w: 1080, h: 1440 }, cinema = { w: 2538, h: 1080 };
 const boxOf = (out: ReturnType<typeof fitToCanvas>, id: string) => out.find((c) => c.id === id)?.box;
@@ -57,6 +57,26 @@ test('a canvas side typed or dragged stays in reason: 16 to 8192 px, even, at mo
   assert.equal(canvasSide(300000, 1080), 4320);
   assert.equal(canvasSide(9000, 4000), 8192);
   assert.equal(canvasSide(2, 40), 16);
+});
+
+test('the first picture is the earliest one with a size of its own: a page laid out at the canvas\'s has none', () => {
+  const clips = [
+    { id: 'title', src: 'title.html', at: 0 },
+    { id: 'bed', src: 'assets/bed.m4a', at: 0, sound: true },
+    { id: 'shot', src: 'assets/shot.mp4', at: 5 },
+    { id: 'card', src: 'card.html', at: 9 },
+  ];
+  const spans = [
+    { id: 'title', w: 1920, h: 1080, reflows: true as const },
+    { id: 'shot', w: 1080, h: 1920 },
+    { id: 'card', w: 1200, h: 1200 },
+  ];
+  assert.deepEqual(firstPictureSize(clips, spans), { w: 1080, h: 1920 }, 'past the page that takes the canvas\'s size');
+  /* a film of such pages has no Original: the canvas shows its own shape (16:9), not "Original" */
+  assert.equal(firstPictureSize(clips.slice(0, 2), spans), null);
+  assert.equal(originalShape(wide, firstPictureSize(clips.slice(0, 2), spans)).current, false);
+  /* a page with its own size is a picture like any other */
+  assert.deepEqual(firstPictureSize([clips[3]], spans), { w: 1200, h: 1200 });
 });
 
 test('Original is the first picture\'s shape, current when the stage has it', () => {

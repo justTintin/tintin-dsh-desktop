@@ -8,8 +8,13 @@
  * than show a broken preview.
  */
 import React from 'react';
-import { Download } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Download, X } from 'lucide-react';
 import { PREVIEW_BTN, PreviewFrame, previewMediaFit } from './PreviewFrame';
+import { POPOVER_CHROME } from './ComposerCard';
+import { chatLayer } from '@/lib/chat-layer';
+import { escTaken } from '@/lib/esc-stop';
+import { previewTop } from '@/lib/preview-top';
 import { Tooltip } from './Tooltip';
 import { attachmentIcon, attachmentKind } from '@/lib/project-resources';
 import { useT } from '@/i18n';
@@ -123,36 +128,33 @@ export function AttachmentPreview({
 }) {
   const t = useT();
   const body = bodyOf(item);
-  if (body === 'image' && !item.thumbOnly) return <OriginalImagePreview key={item.url} item={item} onClose={onClose} />;
+  /* a picture, the original or the thumbnail kept with a sent message: the light viewer */
+  if (body === 'image') return <ImageViewer key={item.url} item={item} onClose={onClose} />;
   const Icon = attachmentIcon(item);
-  /* The two kinds with their own shape. Audio and documents get a fixed reading area. */
-  const onStage = body === 'image' || body === 'video';
+  /* Video has its own shape. Audio and documents get a fixed reading area. */
+  const onStage = body === 'video';
 
   return (
     <PreviewFrame
       name={item.name}
       onClose={onClose}
       icon={<Icon size={15} className="shrink-0 text-white/45" />}
-      /* Images and video fit their own shape, so the black backdrop hugs the picture; a light
-         surround makes a frame look darker. Text gets a fixed reading area on the paper
-         color, laid out from the top left, not centered. */
+      /* Video fits its own shape, so the black backdrop hugs the picture; a light surround
+         makes a frame look darker. Text gets a fixed reading area on the paper color, laid
+         out from the top left, not centered. */
       fit={onStage}
       bodyClassName={onStage ? 'bg-black' : 'bg-[var(--surface-2)]'}
       actions={
-        /* No download for a thumbnail: a 320px copy under the original's name would be
-           mistaken for the original. */
-        item.thumbOnly ? null : (
-          <Tooltip label={t('assets.download')} side="bottom">
-            <a
-              href={item.url}
-              download={item.name}
-              aria-label={t('assets.download')}
-              className={`${PREVIEW_BTN} w-8 px-0`}
-            >
-              <Download size={14} />
-            </a>
-          </Tooltip>
-        )
+        <Tooltip label={t('assets.download')} side="bottom">
+          <a
+            href={item.url}
+            download={item.name}
+            aria-label={t('assets.download')}
+            className={`${PREVIEW_BTN} w-8 px-0`}
+          >
+            <Download size={14} />
+          </a>
+        </Tooltip>
       }
     >
       <div
@@ -162,43 +164,122 @@ export function AttachmentPreview({
       >
         <PreviewBody item={item} body={body} />
       </div>
-      {item.thumbOnly && (
-        <p className="shrink-0 border-t border-[var(--border)] px-4 py-2 text-[11.5px] text-[var(--text-faint)]">
-          {t('composer.thumbOnly')}
-        </p>
-      )}
     </PreviewFrame>
   );
 }
 
-/** Uses the original file URL in both modes; 1:1 never stretches a thumbnail. */
-function OriginalImagePreview({ item, onClose }: { item: AttachmentPreviewItem; onClose: () => void }) {
+/**
+ * A picture opened to look at it: the window dimmed, the picture at its own size in the middle (at most nine tenths of
+ * the window, never enlarged), a × to close; Esc and a click beside it close it too. Downloading it is in its
+ * right-click menu, which the keyboard opens too (the menu key, Shift+F10). A thumbnail kept with a sent message says
+ * so under it, and has no Download: a 320px copy under the original's name would be taken for the original.
+ */
+function ImageViewer({ item, onClose }: { item: AttachmentPreviewItem; onClose: () => void }) {
   const t = useT();
-  const [actualSize, setActualSize] = React.useState(false);
-  const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
-  return (
-    <PreviewFrame name={item.name} onClose={onClose} bodyClassName="bg-black"
-      actions={<>
-        {size ? <span className="mr-2 hidden text-[11px] tabular-nums text-white/45 sm:block">{size.w} × {size.h}</span> : null}
-        <div className="flex rounded-lg bg-white/5 p-0.5">
-          <button type="button" aria-pressed={!actualSize} onClick={() => setActualSize(false)}
-            className={`${PREVIEW_BTN} ${!actualSize ? 'bg-white/10 text-white' : ''}`}>{t('assets.imageFit')}</button>
-          <button type="button" aria-label={t('assets.imageActualSize')} aria-pressed={actualSize} onClick={() => setActualSize(true)}
-            className={`${PREVIEW_BTN} ${actualSize ? 'bg-white/10 text-white' : ''}`}>100%</button>
+  /** where its right-click menu is open, or null */
+  const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
+  const box = React.useRef<HTMLDivElement>(null);
+  const picture = React.useRef<HTMLImageElement>(null);
+  const menuBox = React.useRef<HTMLDivElement>(null);
+  /** a press that began on the backdrop: only such a click closes it, not one dragged out of the picture */
+  const pressedBeside = React.useRef(false);
+  const closeRef = React.useRef(onClose);
+  closeRef.current = onClose;
+  const menuRef = React.useRef(menu);
+  menuRef.current = menu;
+  const top = previewTop(navigator.platform);
+  React.useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    /* the picture takes the keys, so its menu key opens its menu */
+    (picture.current ?? box.current)?.focus({ preventScroll: true });
+    const onKey = (event: KeyboardEvent) => {
+      /* Esc closes the menu first, then the picture; nothing under it takes the key */
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        escTaken(event);
+        if (menuRef.current) { setMenu(null); picture.current?.focus({ preventScroll: true }); } else closeRef.current();
+        return;
+      }
+      /* Tab goes round what is here, never to the chat behind it (as PreviewFrame's) */
+      if (event.key !== 'Tab') return;
+      const targets = Array.from(box.current?.querySelectorAll<HTMLElement>('button, a[href], [tabindex="0"]') ?? []).filter((el) => el.getClientRects().length > 0);
+      const first = targets[0];
+      const last = targets.at(-1);
+      if (!first) { event.preventDefault(); return; }
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === box.current)) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, []);
+  /* the menu inside the window, however near its edge it was opened; its item focused, for the keyboard */
+  React.useLayoutEffect(() => {
+    const el = menuBox.current;
+    if (!menu || !el) return;
+    const { width, height } = el.getBoundingClientRect();
+    const x = Math.max(8, Math.min(menu.x, window.innerWidth - width - 8));
+    const y = Math.max(8, Math.min(menu.y, window.innerHeight - height - 8));
+    if (x !== menu.x || y !== menu.y) setMenu({ x, y });
+    el.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+  }, [menu]);
+  /** the menu where it was asked for: at the pointer, or, from the keyboard, the picture's middle */
+  const openMenu = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (item.thumbOnly) return;
+    const rect = picture.current?.getBoundingClientRect();
+    const onPicture = rect && event.clientX >= rect.left && event.clientX <= rect.right && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    if (onPicture) setMenu({ x: event.clientX, y: event.clientY });
+    else if (rect) setMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+  };
+
+  if (typeof document === 'undefined') return null;
+  return createPortal(
+    <div ref={box} tabIndex={-1} role="dialog" aria-modal="true" aria-label={item.name}
+      className="fixed inset-0 z-[10100] flex flex-col items-center justify-center gap-3 bg-black/75 outline-none"
+      style={{ paddingTop: top, WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+      onPointerDown={(event) => { pressedBeside.current = event.target === event.currentTarget; }}
+      onClick={(event) => {
+        if (menu) { setMenu(null); return; }
+        if (event.target === event.currentTarget && pressedBeside.current) onClose();
+      }}
+      onContextMenu={(event) => { event.preventDefault(); setMenu(null); }}>
+      <button type="button" onClick={onClose} aria-label={t('assets.close')}
+        className="absolute right-4 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/40 text-white/80 transition hover:bg-black/60 hover:text-white"
+        /* below the window's own buttons, which Windows draws over the top right (preview-top) */
+        style={{ top }}>
+        <X size={16} />
+      </button>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img ref={picture} src={item.url} alt={item.name} draggable={false} tabIndex={0}
+        className="block max-w-[90vw] object-contain shadow-2xl outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        /* nine tenths of the window, less the room above it and the thumbnail's note under it */
+        style={{ maxHeight: `calc(90vh - ${top}${item.thumbOnly ? ' - 3rem' : ''})` }}
+        onClick={(event) => { event.stopPropagation(); setMenu(null); }}
+        onContextMenu={openMenu}
+        /* the menu key and Shift+F10 open it on every system: macOS's browser makes no right-click of them */
+        onKeyDown={(event) => {
+          if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+          event.preventDefault();
+          const rect = picture.current?.getBoundingClientRect();
+          if (rect && !item.thumbOnly) setMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        }} />
+      {item.thumbOnly ? <p className="max-w-[90vw] text-center text-[11.5px] text-white/60">{t('composer.thumbOnly')}</p> : null}
+      {menu ? (
+        <div ref={menuBox} role="menu" className="fixed min-w-[140px] p-1" style={{ ...POPOVER_CHROME, left: menu.x, top: menu.y }}
+          onClick={(event) => event.stopPropagation()}>
+          <a role="menuitem" href={item.url} download={item.name} onClick={() => setMenu(null)}
+            className="flex h-7 items-center gap-2 rounded-[6px] px-2 text-[13px] text-[var(--text)] outline-none hover:bg-[var(--bg-hover)] focus-visible:bg-[var(--bg-hover)]">
+            <Download size={13} />{t('assets.download')}
+          </a>
         </div>
-        <Tooltip label={t('assets.download')} side="bottom">
-          <a href={item.url} download={item.name} aria-label={t('assets.download')} className={`${PREVIEW_BTN} w-8 px-0`}><Download size={14} /></a>
-        </Tooltip>
-      </>}>
-      <div className="flex h-full min-h-0 w-full overflow-auto overscroll-contain">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={item.url} alt={item.name} className="m-auto block shrink-0 object-contain"
-          onLoad={event => setSize({ w: event.currentTarget.naturalWidth, h: event.currentTarget.naturalHeight })}
-          style={actualSize && size
-            ? { width: size.w, height: size.h, maxWidth: 'none', maxHeight: 'none' }
-            : { maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto' }} />
-      </div>
-    </PreviewFrame>
+      ) : null}
+    </div>,
+    chatLayer(),
   );
 }
 
@@ -206,19 +287,6 @@ function PreviewBody({ item, body }: { item: AttachmentPreviewItem; body: Body }
   const t = useT();
   const pdfUrl = useBlobUrl(item.url, body === 'pdf');
 
-  if (body === 'image') {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={item.url}
-        alt={item.name}
-        /* Only maximums, no size: the box is the picture at its own ratio, and a thumbnail
-           is never scaled up into a blur. */
-        style={previewMediaFit()}
-        className={item.thumbOnly ? 'p-6' : undefined}
-      />
-    );
-  }
   if (body === 'video') return <VideoPreview item={item} />;
   if (body === 'audio') return <AudioPreview item={item} />;
   if (body === 'pdf') {

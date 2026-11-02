@@ -692,7 +692,7 @@ function ProjectCard({
           ) : null}
         </button>
         <SelectToggle selecting={selecting} selected={selected} onToggle={onToggleSelect} label={t('library.toggleSelect')} />
-        {project.missing && !selecting ? <MissingActions onLocate={onLocate} onRemove={onDelete} /> : null}
+        {project.missing && !selecting ? <MissingActions reason={project.missingReason} onLocate={onLocate} onRemove={onDelete} /> : null}
       </div>
 
       <div className="mt-2 flex min-w-0 items-start gap-1.5">
@@ -713,7 +713,7 @@ function ProjectCard({
           >
             <Video size={11} />
             {formatDate(project.openedAt, language)}
-            {project.missing ? <span className="truncate text-[var(--err)]">· {t('projects.missing')}</span> : null}
+            {project.missing ? <span className="truncate text-[var(--err)]">· {t(project.missingReason === 'film' ? 'projects.missingFilm' : 'projects.missing')}</span> : null}
             {project.working ? <span className="truncate text-[var(--accent)]">· {t('projects.agentRunning')}</span> : null}
           </button>
         </div>
@@ -727,12 +727,12 @@ function ProjectCard({
  * On the cover of a project whose folder is gone: "Folder not found", and the two things to do about it: point it at
  * the folder it is in now (it keeps its place, and its history goes with the folder), or take it off the list.
  */
-function MissingActions({ onLocate, onRemove, compact = false }: { onLocate: () => void; onRemove: () => void; compact?: boolean }) {
+function MissingActions({ reason, onLocate, onRemove, compact = false }: { reason?: Project['missingReason']; onLocate: () => void; onRemove: () => void; compact?: boolean }) {
   const t = useT();
   const button = 'inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-medium transition';
   return (
     <div className={compact ? 'flex items-center gap-1' : 'pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 p-2'}>
-      {compact ? null : <span className="text-[12px] font-semibold text-white drop-shadow">{t('projects.missing')}</span>}
+      {compact ? null : <span className="text-[12px] font-semibold text-white drop-shadow">{t(reason === 'film' ? 'projects.missingFilm' : 'projects.missing')}</span>}
       <div className="pointer-events-auto flex items-center gap-1.5">
         <button type="button" onClick={onLocate} className={`${button} bg-[var(--surface)] text-[var(--text)] shadow hover:brightness-95`}>
           <FolderSearch size={13} />
@@ -831,12 +831,12 @@ function ProjectListRow({
           </p>
           <p className="mt-2 flex items-center gap-2 text-[11.5px] text-[var(--text-faint)]">
             {formatDate(project.openedAt, language)}
-            {project.missing ? <span className="text-[var(--err)]">· {t('projects.missing')}</span> : null}
+            {project.missing ? <span className="text-[var(--err)]">· {t(project.missingReason === 'film' ? 'projects.missingFilm' : 'projects.missing')}</span> : null}
             {project.working ? <span className="text-[var(--accent)]">· {t('projects.agentRunning')}</span> : null}
           </p>
         </button>
       </div>
-      {project.missing && !selecting ? <MissingActions compact onLocate={onLocate} onRemove={onDelete} /> : null}
+      {project.missing && !selecting ? <MissingActions compact reason={project.missingReason} onLocate={onLocate} onRemove={onDelete} /> : null}
       {!selecting ? <ItemMenu project={project} onOpen={onOpen} onStartRename={onStartRename} onStartSelect={onStartSelect} onMoveToFolder={onMoveToFolder} onLocate={onLocate} onDelete={onDelete} size={15} /> : null}
     </article>
   );
@@ -908,8 +908,26 @@ function FolderFace({ posters, small = false }: { posters: FolderItemProps['post
 }
 
 /**
- * A folder card: the project card's frame (a 16:9 face and a name under it), its face the covers of its newest
- * projects, so what it holds shows at a glance; an empty one shows the folder picture. Double-click the name to rename.
+ * A folder's 16:9 box drawn as a folder, so it doesn't read as a project: the back's tab (`--folder-back`, as in the
+ * folder picture) at the top left, and the front under it, which holds the face and anything over it (`children`).
+ * The card's, and the list row's thumbnail (`small`).
+ */
+function FolderFrame({ small = false, children }: { small?: boolean; children: React.ReactNode }) {
+  return (
+    <>
+      <span aria-hidden className={`absolute left-0 top-0 h-1/2 w-[38%] bg-[var(--folder-back)] ${small ? 'rounded-[5px]' : 'rounded-lg'}`} />
+      <span
+        className={`absolute inset-x-0 bottom-0 overflow-hidden bg-[var(--surface-2)] ring-1 ring-[var(--border)] transition duration-200 group-hover/frame:bg-[var(--surface-3)] group-hover/frame:ring-[var(--border-strong)] ${small ? 'top-[9%] rounded-md' : 'top-[7%] rounded-lg'}`}
+      >
+        {children}
+      </span>
+    </>
+  );
+}
+
+/**
+ * A folder card: the project card's size (a 16:9 box and a name under it), drawn as a folder (FolderFrame), its face
+ * the covers of its newest projects, so what it holds shows at a glance; an empty one shows the folder picture.
  */
 function FolderCard({
   folder,
@@ -931,19 +949,21 @@ function FolderCard({
         type="button"
         onClick={onOpen}
         aria-label={folder.name}
-        className="relative block aspect-video w-full overflow-hidden rounded-lg bg-[var(--surface-2)] text-left ring-1 ring-[var(--border)] transition duration-200 hover:bg-[var(--surface-3)] hover:ring-[var(--border-strong)]"
+        className="group/frame relative block aspect-video w-full text-left"
       >
-        <FolderFace posters={posters} />
-        {/* the count: dark glass over covers; on the plain face a dark patch is too heavy, so the face's own style */}
-        <span
-          className={`absolute bottom-2 right-2 rounded-full px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums ${
-            posters.length > 0
-              ? 'bg-black/45 text-white/90 backdrop-blur-sm'
-              : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
-          }`}
-        >
-          {count}
-        </span>
+        <FolderFrame>
+          <FolderFace posters={posters} />
+          {/* the count: dark glass over covers; on the plain face a dark patch is too heavy, so the face's own style */}
+          <span
+            className={`absolute bottom-2 right-2 rounded-full px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums ${
+              posters.length > 0
+                ? 'bg-black/45 text-white/90 backdrop-blur-sm'
+                : 'border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]'
+            }`}
+          >
+            {count}
+          </span>
+        </FolderFrame>
       </button>
       {/* the same two lines as a project card (name, then a dated line); no folder icon before the name: the face says
           it is a folder already, and an icon would put this name out of line with the projects'. A click on the name
@@ -1023,10 +1043,12 @@ function FolderListRow({
       <button
         type="button"
         onClick={onOpen}
-        className="group relative block aspect-video w-28 shrink-0 overflow-hidden rounded-md bg-[var(--surface-2)] ring-1 ring-[var(--border)] transition hover:bg-[var(--surface-3)] sm:w-36"
+        className="group/frame relative block aspect-video w-28 shrink-0 sm:w-36"
         aria-label={folder.name}
       >
-        <FolderFace posters={posters} small />
+        <FolderFrame small>
+          <FolderFace posters={posters} small />
+        </FolderFrame>
       </button>
       <div className="min-w-0 flex-1">
         {renaming ? (

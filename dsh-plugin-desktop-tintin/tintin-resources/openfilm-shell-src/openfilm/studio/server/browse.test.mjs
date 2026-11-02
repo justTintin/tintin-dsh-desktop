@@ -18,8 +18,9 @@ before(() => {
   writeFileSync(join(root, 'Films', 'Launch', 'film.html'), '<!doctype html>');
   writeFileSync(join(root, 'a file.txt'), 'x');
   writeFileSync(join(outside, 'film.html'), '<!doctype html>');
-  symlinkSync(outside, join(root, 'out-link'), 'dir');
-  symlinkSync(join(root, 'Films'), join(root, 'films-link'), 'dir');
+  /* a junction on Windows, which needs no Developer Mode; a symlink elsewhere */
+  symlinkSync(outside, join(root, 'out-link'), 'junction');
+  symlinkSync(join(root, 'Films'), join(root, 'films-link'), 'junction');
 });
 
 const refused = async (path, code) => assert.rejects(browseFolder(path, { root }), (e) => e instanceof BrowseError && e.code === code, path);

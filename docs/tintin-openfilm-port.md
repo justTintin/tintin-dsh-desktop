@@ -1,6 +1,6 @@
 # TinTin 视频剪辑 × OpenFilm 移植说明(第三行形态)
 
-状态:现行 · 依据:2026-10-18/23/24 用户裁决 + 官方 openfilm 0.2.5 源码(pin `cf6cd6f`)+ 实测(铁律 12/14) · 关联:[移植方案](tintin-migration-plan.md)、[验收追踪表](tintin-openfilm-alignment-acceptance.md)、[服务端兼容说明](tintin-openfilm-server-providers.md)
+状态:现行 · 依据:2026-10-18/23/24 用户裁决 + 官方 openfilm 0.2.7 源码(pin `b7673b5`)+ 实测(铁律 12/14) · 关联:[移植方案](tintin-migration-plan.md)、[验收追踪表](tintin-openfilm-alignment-acceptance.md)、[服务端兼容说明](tintin-openfilm-server-providers.md)
 
 ## 0. 本文范围
 
@@ -221,7 +221,7 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | 契约 | `dsh-plugin-desktop-tintin/src/openfilm-view-contract.ts`(三通道镜像) |
 | 客户端视图 | `dsh-tintin-client-ui/client.js`(mountOpenFilm + 抽屉/日志条/接管) |
 | 宿主桥插件 | `dsh-tintin-bundle/lib/openfilm/*`(studio-runtime 对账、providers-seed、skill-sync、libs-sync) |
-| 官方运行时 | `dsh-plugin-desktop-tintin/tintin-resources/openfilm`(0.2.5,editor dist 由 shell 构建覆盖;**覆盖后自验 shell 标记**[build.mjs 2026-10-26],`verify-tintin-resources.mjs` 同步内容闸门——防 fetch:openfilm/热调把官方原版 dist 静默带进包) |
+| 官方运行时 | `dsh-plugin-desktop-tintin/tintin-resources/openfilm`(0.2.7,editor dist 由 shell 构建覆盖;**覆盖后自验 shell 标记**[build.mjs 2026-10-26],`verify-tintin-resources.mjs` 同步内容闸门——防 fetch:openfilm/热调把官方原版 dist 静默带进包) |
 
 ## 13. 生命周期与自愈
 

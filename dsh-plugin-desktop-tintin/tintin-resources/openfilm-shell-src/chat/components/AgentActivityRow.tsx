@@ -24,7 +24,7 @@ import { WaitingContext } from '@/lib/developer';
  * sight does not depend on anyone guarding a switch.
  *
  * No expandable input / output here, no ✓/✗. One row is one plain sentence. Acts finished back to back
- * fold into one row that opens on click, like Cursor's step summary.
+ * fold into one row that opens on click, including while they run, like Cursor's step summary.
  */
 
 export interface AgentActivityItem {
@@ -57,7 +57,7 @@ export interface AgentActivityItem {
   endedAt?: number;
 }
 
-/** One folded run. Acts finished back to back form a group; text and the running row stand alone. */
+/** One folded run. Adjacent acts form a group from the start; text stands alone. */
 interface ActivityRun {
   items: AgentActivityItem[];
 }
@@ -73,23 +73,20 @@ interface ActivityRun {
  * `oldProps === newProps`, without comparing props.
  *
  * The inner map is bucketed by key because one row has different keys in different lists (live and
- * archived). The fold count is in the key too: when a run of repeated acts grows, only that row is
- * rebuilt, not the ones before it.
+ * archived). Member identities are checked too: completing any tool in a group must update its row.
  */
-const ROW_ELEMENTS = new WeakMap<AgentActivityItem, Map<string, React.ReactElement>>();
+const ROW_ELEMENTS = new WeakMap<AgentActivityItem, Map<string, { items: AgentActivityItem[]; element: React.ReactElement }>>();
 
 function rowElement(run: ActivityRun, key: string): React.ReactElement {
   const first = run.items[0]!;
   let byKey = ROW_ELEMENTS.get(first);
   if (!byKey) { byKey = new Map(); ROW_ELEMENTS.set(first, byKey); }
-  // An asset can arrive late (the saved transcript fills in a receipt the live stream missed) with the count unchanged, so the asset count is in the key too.
-  let assets = 0;
-  for (const item of run.items) if (item.asset) assets += 1;
-  const cacheKey = `${key}#${run.items.length}#${assets}`;
+  const cacheKey = `${key}#${run.items.length}`;
   const hit = byKey.get(cacheKey);
-  if (hit) return hit;
+  // A later member can finish or gain an asset while the first member and the group size stay unchanged.
+  if (hit && hit.items.every((item, index) => item === run.items[index])) return hit.element;
   const made = <AgentActivityRow key={key} items={run.items} />;
-  byKey.set(cacheKey, made);
+  byKey.set(cacheKey, { items: run.items, element: made });
   return made;
 }
 
@@ -294,11 +291,11 @@ const ACT_ICONS: Record<string, LucideIcon> = {
 };
 
 /**
- * A folded group of finished acts.
+ * A folded group of adjacent acts, running or finished.
  *
  * Closed by default. The summary says which kinds of act ran and how many of each (see actGroupParts);
- * the pictures and sounds the group made stay in the rows of the acts that made them. The running row is
- * not in here; it uses the progressive form and shimmers.
+ * the pictures and sounds the group made stay in the rows of the acts that made them. Pending acts join
+ * the group from the start, so finishing updates its label without replacing the row.
  *
  * Opening changes the content height. The asset drawer pins the bottom (pinIfFollowing in the same
  * frame); here the clicked row must stay put instead: skip the next bottom pin and, in the same frame,
@@ -312,19 +309,23 @@ function ActGroup({ items }: { items: AgentActivityItem[] }) {
   const thread = React.useContext(StickToBottomContext);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const anchorTop = React.useRef<number | null>(null);
-  /* Closed until the user opens it — also while the turn runs. The summary counts up in place and the
-     status line under the turn says what is running, so unrolling each finished act only made a wall of rows. */
+  /* Closed until the user opens it — also while the turn runs. The summary counts up in place without
+     unrolling a wall of rows or moving a tool from the status line when it finishes. */
   const [picked, setPicked] = React.useState<boolean | null>(null);
   const open = picked ?? false;
   const parts = React.useMemo(() => actGroupParts(items), [items]);
   /* At most three kinds, the rest as a count: seven or eight cut off by an ellipsis tell the reader nothing. */
   const shown = parts.slice(0, GROUP_PARTS_MAX);
   const rest = parts.slice(GROUP_PARTS_MAX).reduce((n, part) => n + part.count, 0);
-  const summary = shown
-    .map((part) => `${t(actCopyKey(part.label, false))}${part.count > 1 ? ` ×${part.count}` : ''}`)
-    .join(' · ');
+  const pendingLabels = new Set(items.filter((item) => item.pending).map((item) => item.label));
+  const pending = pendingLabels.size > 0;
+  const since = items.reduce<number | undefined>((start, item) => item.pending && item.startedAt != null
+    ? Math.min(start ?? item.startedAt, item.startedAt) : start, undefined);
   const full = parts
-    .map((part) => `${t(actCopyKey(part.label, false))}${part.count > 1 ? ` ×${part.count}` : ''}`)
+    .map((part) => `${t(actCopyKey(part.label, pendingLabels.has(part.label)))}${part.count > 1 ? ` ×${part.count}` : ''}`)
+    .join(' · ');
+  const summary = shown
+    .map((part) => `${t(actCopyKey(part.label, pendingLabels.has(part.label)))}${part.count > 1 ? ` ×${part.count}` : ''}`)
     .join(' · ');
   const Icon = ACT_ICONS[parts[0]?.label ?? ''] ?? Layers;
 
@@ -355,15 +356,21 @@ function ActGroup({ items }: { items: AgentActivityItem[] }) {
         aria-expanded={open}
         onClick={toggle}
         title={full}
-        className="group/act flex max-w-full min-w-0 items-start gap-2 text-left text-[14px] leading-relaxed text-[var(--chat-hint)] hover:text-[var(--chat-text)]"
+        data-activity-header=""
+        data-activity-id={items[0]?.id}
+        aria-busy={pending}
+        className="group/act flex h-6 w-full min-w-0 items-center gap-2 text-left text-[14px] leading-6 text-[var(--chat-hint)] hover:text-[var(--chat-text)]"
       >
-        <Icon size={13} aria-hidden className="mt-[5px] shrink-0" />
-        <span className="min-w-0 truncate">{summary}</span>
+        <Icon size={13} aria-hidden className="shrink-0" />
+        <span data-activity-label="" className="min-w-0 truncate">{summary}</span>
         {rest ? <span className="shrink-0 tabular-nums opacity-80">+{rest}</span> : null}
+        <span className="ml-auto flex w-12 shrink-0 justify-end">
+          {pending ? <PendingElapsed startedAt={since} /> : null}
+        </span>
         <ChevronRight
           size={13}
           aria-hidden
-          className={`mt-[5px] shrink-0 transition-[transform,opacity] ${open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/act:opacity-100 group-focus-visible/act:opacity-100'}`}
+          className={`shrink-0 transition-[transform,opacity] ${open ? 'rotate-90 opacity-100' : 'opacity-0 group-hover/act:opacity-100 group-focus-visible/act:opacity-100'}`}
         />
       </button>
       {open ? (
@@ -384,28 +391,28 @@ function ActGroup({ items }: { items: AgentActivityItem[] }) {
  * does not code; the agent usually fixes it next, and a red cross only suggests the film is broken. When
  * the turn really fails, a generic message shows above the composer.
  *
- * A running row animates one thing only, the shimmer on its title: several animations per row, over ten
- * rows, read like a dashboard alarm.
+ * The same row stays in place from start to finish. Only its label and clock change; typography, icon,
+ * spacing stay the same. The description follows the visible label, without invisible text reserving a gap.
  *
  * The description (a narration line, a sound or picture description) is film content: it gets quotes and
  * reads apart from the act name. What the act made hangs under the row: images as thumbnails, sounds play
  * on click.
  */
 function ActRow({ item }: { item: AgentActivityItem }) {
-  const t = useT();
   const Icon = ACT_ICONS[item.label];
   return (
-    <div className="flex min-w-0 items-start gap-2 py-1 text-[14px] leading-relaxed">
+    <div className="flex min-w-0 items-start gap-2 py-1 text-[14px] leading-6">
       {Icon ? (
         <Icon size={13} aria-hidden className="mt-[5px] shrink-0 text-[var(--chat-hint)]" />
       ) : null}
       <div className="min-w-0 flex-1">
         <div
-          className="flex max-w-full min-w-0 items-baseline gap-1.5 text-left"
+          data-activity-header=""
+          data-activity-id={item.id}
+          aria-busy={!!item.pending}
+          className="flex h-6 max-w-full min-w-0 items-center gap-1.5 text-left"
         >
-          <span className={item.pending ? 'text-sweep shrink-0' : 'shrink-0 text-[var(--chat-hint)]'}>
-            {t(actCopyKey(item.label, item.pending))}
-          </span>
+          <ActivityLabel label={item.label} pending={!!item.pending} />
           {item.query ? (
             <span className="min-w-0 truncate text-[var(--chat-hint)] opacity-80" title={item.query}>
               “{item.query}”
@@ -417,12 +424,25 @@ function ActRow({ item }: { item: AgentActivityItem }) {
               {item.detail}
             </span>
           ) : null}
-          {item.pending ? <PendingElapsed startedAt={item.startedAt} /> : null}
+          {/* Reserve the clock's width after completion so long commands keep the same truncation. */}
+          <span className="ml-auto flex w-12 shrink-0 justify-end">
+            {item.pending ? <PendingElapsed startedAt={item.startedAt} /> : null}
+          </span>
         </div>
         {item.asset ? <AssetPreview asset={item.asset} /> : null}
         {item.ask?.status ? <AskOutcome ask={item.ask} /> : null}
       </div>
     </div>
+  );
+}
+
+/** Keep both states in the same type style, using only the visible words' width. */
+function ActivityLabel({ label, pending }: { label: string; pending: boolean }) {
+  const t = useT();
+  return (
+    <span data-activity-label="" className="min-w-0 shrink-0 truncate text-[var(--chat-hint)]">
+      {t(actCopyKey(label, pending))}
+    </span>
   );
 }
 
@@ -608,16 +628,14 @@ function togglePlayer(url: string, owner: string): void {
 /**
  * While a turn runs, the single row underneath: what is happening now.
  *
- * It stays from start to finish, always one row high, and only its text changes, which keeps the
- * panel from jumping.
+ * A visible status has its own row above the hover actions. When there is nothing to say, render nothing
+ * rather than an empty row separating the reply from its copy button and model name.
  *
- *   · work running: that act (with its description or command when there is one); several in
- *     parallel read "Narrate ×7 · Sound effect ×6";
+ *   · work running: nothing, because the tool already has its row in the conversation;
  *   · thinking: "Thinking";
  *   · neither: the caller's text (reconnecting and the like), else "Thinking".
  *
- * The clock counts from the earliest start among the running acts. When the turn ends this row becomes
- * the footer, at the same height (h-6). `ownAgent`: the turn runs on the app's own agent (see IdleStatus).
+ * `ownAgent`: the turn runs on the app's own agent (see IdleStatus).
  */
 export function StatusLine({ items, fallback, ownAgent = false }: { items: AgentActivityItem[]; fallback?: string | null; ownAgent?: boolean }) {
   const t = useT();
@@ -631,32 +649,18 @@ export function StatusLine({ items, fallback, ownAgent = false }: { items: Agent
   if (waitingForYou) return <StatusShell Icon={MessageCircleQuestion} label={t('act.waitingForYou')} since={changedAt} waiting />;
   const acts = running.filter((item) => item.kind === 'act');
   if (acts.length) {
-    const parts = actGroupParts(acts);
-    const label = parts.slice(0, GROUP_PARTS_MAX)
-      .map((part) => `${t(part.label)}${part.count > 1 ? ` ×${part.count}` : ''}`)
-      .join(' · ');
-    const extra = acts.length === 1 ? (acts[0]!.query ? `“${acts[0]!.query}”` : acts[0]!.detail) : undefined;
-    let since: number | undefined;
-    for (const item of acts) if (item.startedAt != null && (since == null || item.startedAt < since)) since = item.startedAt;
-    /* Only waiting on the person's answer: that time is theirs, not the agent's work — no clock, no sweep. */
-    const waiting = acts.every((item) => item.label === 'act.chat.ask');
-    return <StatusShell Icon={ACT_ICONS[parts[0]!.label]} label={label} extra={extra} since={since ?? changedAt} waiting={waiting} />;
+    return null;
   }
   if (running.length || fallback) {
     return <StatusShell label={running.length ? t('act.thinking') : fallback!} since={changedAt} />;
   }
-  /* The agent is speaking (text still streaming): no "Working" underneath, the text itself moves. The row
-     keeps its height so what comes next does not jump. Just after a paragraph, stay blank a while (the
-     seconds spent wrapping up a turn, or an act about to start) and say "Working" only once it is quiet. */
+  /* The agent is speaking (text still streaming): no "Working" underneath, the text itself moves. Just after a
+     paragraph, say nothing for a while (the seconds spent wrapping up a turn, or an act about to start)
+     and say "Working" only once it is quiet. */
   let last: AgentActivityItem | undefined;
   for (let i = items.length - 1; i >= 0; i -= 1) if (items[i]!.kind !== 'notice') { last = items[i]; break; }
-  if (last?.kind === 'text' && last.pending) return <StatusBlank />;
+  if (last?.kind === 'text' && last.pending) return null;
   return <IdleStatus since={changedAt} quietFirst={last?.kind === 'text'} ownAgent={ownAgent} />;
-}
-
-/** The status row's empty slot: same height, says nothing. */
-function StatusBlank() {
-  return <div role="status" aria-hidden className="h-6" />;
 }
 
 /** How long after a paragraph before saying "Working". */
@@ -678,7 +682,7 @@ function IdleStatus({ since, quietFirst = false, ownAgent = false }: { since: nu
   const t = useT();
   const tick = useTick();
   const idle = (tick ?? Date.now()) - since;
-  if (quietFirst && idle < AFTER_TEXT_MS) return <StatusBlank />;
+  if (quietFirst && idle < AFTER_TEXT_MS) return null;
   const label = idleStatus(idle, ownAgent);
   return <StatusShell label={t(label)} extra={label === 'act.waitingForModel' ? t('act.waitingForModelHint') : undefined} plain since={since} />;
 }

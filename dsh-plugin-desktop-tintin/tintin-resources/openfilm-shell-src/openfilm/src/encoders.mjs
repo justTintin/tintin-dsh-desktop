@@ -114,8 +114,9 @@ function works(encoder) {
     const prores = encoder.startsWith('prores_') ? proresOptions(encoder, true) : null;
     const options = prores ? ['-vf', prores.pix, ...prores.video] : ['-vf', 'format=yuv420p', ...hardwareOptions(encoder, 2e6)];
     tried.set(encoder, new Promise((done) => {
+      /* one that hangs in the chip's driver never sees a SIGTERM, and its answer would never come: killed */
       execFile('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-frames:v', '10',
-        ...options, '-f', 'null', '-'], { timeout: 20_000, windowsHide: true }, (error) => done(!error));
+        ...options, '-f', 'null', '-'], { timeout: 20_000, killSignal: 'SIGKILL', windowsHide: true }, (error) => done(!error));
     }));
   }
   return /** @type {Promise<boolean>} */ (tried.get(encoder));

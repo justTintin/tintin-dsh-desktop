@@ -7,7 +7,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createExports, diskFull, exportCapabilities, exportsRoot, ExportError, frameBox, dimsForShortEdge, keepChanges, projectFiles, projectSizes, shareOf, writableFolder } from './exports.mjs';
 import { encoders, hardwareEncoder } from '../../src/encoders.mjs';
-import { allocateLanes, containMotion, fadeKeyframes, frameSpan, nleRate, planNleTimeline, xmemlDocument } from './nle.mjs';
+import { allocateLanes, containMotion, fadeKeyframes, frameSpan, nleRate, planNleTimeline, probeSource, xmemlDocument } from './nle.mjs';
 import { fcpxmlDocument } from './fcpxml.mjs';
 import { pptxParts } from './slides.mjs';
 import { filmSubtitleSrt, parseFilmSubtitleStyle } from './film-subtitle.mjs';
@@ -18,11 +18,27 @@ import { filmHtml } from '../../src/film-doc.mjs';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
 const ffmpeg = { skip: !hasFfmpeg && 'no ffmpeg', timeout: 120_000 };
+/** The processes started by `parent` whose command matches `pattern`: pgrep's, or on Windows the system's process list. */
+function children(parent, pattern) {
+  if (process.platform !== 'win32') return spawnSync('pgrep', ['-P', String(parent), '-f', pattern], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
+  const listed = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `Get-CimInstance Win32_Process -Filter 'ParentProcessId=${parent}' | ForEach-Object { "$($_.ProcessId) $($_.CommandLine)" }`], { encoding: 'utf8', timeout: 20_000, windowsHide: true });
+  if (listed.status !== 0) throw new Error(`the process list did not answer: ${listed.error?.message ?? listed.stderr}`);
+  return listed.stdout.split(/\r?\n/).filter((line) => new RegExp(pattern).test(line.slice(line.indexOf(' ') + 1))).map((line) => Number(line.split(' ')[0]));
+}
+/** End a process as a crash would; one gone already (a browser's helper, ended with the browser) is ended. */
+function end(pid) {
+  try { process.kill(pid, 'SIGKILL'); } catch (e) { if (/** @type {NodeJS.ErrnoException} */ (e).code !== 'ESRCH') throw e; }
+}
+/* the tests that end an export's processes find them in the process list, which on Windows (WMI) can stop answering */
+const processes = { skip: process.platform === 'win32' && (() => { try { children(process.pid, '.'); return false; } catch { return 'the process list does not answer'; } })() };
 let root, scratch;
 
 before(() => {
   scratch = mkdtempSync(join(tmpdir(), 'of-exports-'));
   process.env.OPENFILM_EXPORTS = join(scratch, 'Exports');
+  /* the problems the failing exports here record go to this home's log, not to the person's (Studio's report reads it) */
+  process.env.OPENFILM_HOME = join(scratch, 'home');
   root = join(scratch, 'Tiny');
   mkdirSync(join(root, 'assets', 'audio', 'sfx'), { recursive: true });
   mkdirSync(join(root, 'assets', 'audio', 'music'), { recursive: true });
@@ -114,6 +130,51 @@ async function parseXml(texts, query = () => null) {
 }
 const frameCount = (file) => parseInt(execFileSync('ffprobe', ['-v', 'error', '-count_packets', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_packets', '-of', 'csv=p=0', file]).toString(), 10);
 
+test('a 16× clip exports its trimmed picture and pitch-preserved sound at the shortened duration', ffmpeg, async () => {
+  const folder = join(scratch, 'Fast');
+  mkdirSync(folder);
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:size=160x90:rate=10:duration=8[a];color=c=red:size=160x90:rate=10:duration=32[b];[a][b]concat=n=2:v=1:a=0',
+    '-f', 'lavfi', '-i', 'sine=frequency=880:duration=8[a];sine=frequency=440:duration=32[b];[a][b]concat=n=2:v=0:a=1', '-shortest', '-pix_fmt', 'yuv420p', '-c:a', 'aac', join(folder, 'source.mp4')]);
+  writeFileSync(join(folder, 'film.html'), filmHtml({ stage: { w: 160, h: 90 }, tracks: [
+    { clips: [{ src: 'source.mp4', id: 'fast', time: [8, 40], speed: 16 }] },
+  ] }));
+  const done = await exported({ kind: 'video', fps: 10, hardware: false }, 'Fast', folder);
+  assert.equal(frameCount(done.out), 20, '32 source seconds become 2 seconds at 10 fps');
+  const [red, green, blue] = firstFrame(done.out).at(80, 45);
+  assert.ok(red > 200 && green < 80 && blue < 50, `the source's red picture is present: ${red},${green},${blue}`);
+  const pcm = execFileSync('ffmpeg', ['-v', 'error', '-ss', '0.05', '-i', done.out, '-t', '1', '-ac', '1', '-ar', '48000', '-f', 's16le', '-']);
+  const samples = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length / 2);
+  assert.ok(samples.length >= 47000, 'sound lasts through the clip');
+  let crossings = 0;
+  for (let i = 1; i < samples.length; i++) if (samples[i - 1] <= 0 && samples[i] > 0) crossings++;
+  assert.ok(Math.abs(crossings - 440) < 5, `pitch stays 440 Hz: ${crossings}`);
+});
+
+test('the ends of the range: a 100× clip and a 0.1× one export at their length, every frame there, the pitch kept', ffmpeg, async () => {
+  /* 100 source seconds at 100× are 1 s; 1 source second at 0.1× is 10 s */
+  for (const [name, seconds, speed, frames] of [['Fastest', 100, 100, 10], ['Slowest', 1, 0.1, 100]]) {
+    const folder = join(scratch, name);
+    mkdirSync(folder);
+    execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `color=c=red:size=160x90:rate=10:duration=${seconds}`,
+      '-f', 'lavfi', '-i', `sine=frequency=440:duration=${seconds}`, '-shortest', '-pix_fmt', 'yuv420p', '-c:a', 'aac', join(folder, 'source.mp4')]);
+    writeFileSync(join(folder, 'film.html'), filmHtml({ stage: { w: 160, h: 90 }, tracks: [
+      { clips: [{ src: 'source.mp4', id: 'clip', time: [0, seconds], speed }] },
+    ] }));
+    const done = await exported({ kind: 'video', fps: 10, hardware: false }, name, folder);
+    assert.equal(frameCount(done.out), frames, `${name}: ${seconds} source seconds at ${speed}× are ${frames / 10} s at 10 fps`);
+    const length = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', done.out], { encoding: 'utf8' }));
+    assert.ok(Math.abs(length - frames / 10) < 0.1, `${name}: ${length} s`);
+    const [red] = firstFrame(done.out).at(80, 45);
+    assert.ok(red > 200, `${name}: the picture is there`);
+    const pcm = execFileSync('ffmpeg', ['-v', 'error', '-ss', '0.05', '-i', done.out, '-t', '0.9', '-ac', '1', '-ar', '48000', '-f', 's16le', '-']);
+    const samples = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length / 2);
+    assert.ok(samples.length >= 0.85 * 48000, `${name}: the sound lasts through the clip`);
+    let crossings = 0;
+    for (let i = 1; i < samples.length; i++) if (samples[i - 1] <= 0 && samples[i] > 0) crossings++;
+    assert.ok(Math.abs(crossings - 396) < 8, `${name}: the pitch stays 440 Hz: ${crossings} in 0.9 s`);
+  }
+});
+
 test('the exports folder: OPENFILM_EXPORTS, else `exports` in OPENFILM_HOME, else the Movies folder', () => {
   const env = { exports: process.env.OPENFILM_EXPORTS, home: process.env.OPENFILM_HOME };
   try {
@@ -203,18 +264,18 @@ test('a full disk is said plainly, whichever words ffmpeg or the system use for 
   assert.equal(done.error, 'the disk is full: free up some space, then export again');
 });
 
-test('a renderer that dies fails its export with the reason, and exports go on', { ...ffmpeg, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('a renderer that dies fails its export with the reason, and exports go on', { ...ffmpeg, skip: ffmpeg.skip || processes.skip }, async () => {
   const exports = createExports();
   const job = exports.start(project('Crash'), { kind: 'video' });
   await until(exports, job.id, (j) => j.status === 'running' && j.out);
   /* the film renders in a process of its own: ended from outside, as a crash would end it */
-  let pid = '';
+  let pid = 0;
   for (let i = 0; i < 200 && !pid; i++) {
-    pid = spawnSync('pgrep', ['-P', String(process.pid), '-f', 'render-worker'], { encoding: 'utf8' }).stdout.trim().split('\n')[0];
+    [pid] = children(process.pid, 'render-worker');
     if (!pid) await new Promise((r) => setTimeout(r, 25));
   }
   assert.ok(pid, 'a render process is running');
-  process.kill(Number(pid), 'SIGKILL');
+  process.kill(pid, 'SIGKILL');
   const failed = await ended(exports, job);
   assert.equal(failed.status, 'failed');
   assert.match(failed.error, /renderer stopped/);
@@ -222,19 +283,19 @@ test('a renderer that dies fails its export with the reason, and exports go on',
   assert.equal((await ended(exports, again)).status, 'done');
 });
 
-test('a video whose browser is ended partway, as a crash would end it, is drawn again and done', { ...ffmpeg, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('a video whose browser is ended partway, as a crash would end it, is drawn again and done', { ...ffmpeg, skip: ffmpeg.skip || processes.skip }, async () => {
   const exports = createExports();
   const job = exports.start(project('Browser crash'), { kind: 'video' });
   await until(exports, job.id, (j) => j.status === 'running' && j.out);
   /** @type {number[]} */
   let browsers = [];
   for (let i = 0; i < 400 && !browsers.length; i++) {
-    const [worker] = spawnSync('pgrep', ['-P', String(process.pid), '-f', 'render-worker'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
-    if (worker) browsers = spawnSync('pgrep', ['-P', String(worker), '-f', 'chrom'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
+    const [worker] = children(process.pid, 'render-worker');
+    if (worker) browsers = children(worker, 'chrom');
     if (!browsers.length) await new Promise((r) => setTimeout(r, 25));
   }
   assert.ok(browsers.length, 'the film draws in a browser of the render process');
-  for (const pid of browsers) process.kill(pid, 'SIGKILL');
+  for (const pid of browsers) end(pid);
   const done = await ended(exports, job);
   assert.equal(done.status, 'done', done.error);
 });
@@ -253,7 +314,7 @@ test('a cancelled export stops and leaves no file, and a bad ask is refused befo
   assert.ok(!existsSync(running.out), 'the half-written file is gone');
   assert.deepEqual(readdirSync(exportsRoot()).filter((n) => n.startsWith('Cancel') || n.includes('.partial-')), [], 'nothing under its name, nothing half made');
   for (const bad of [{ kind: 'pdf' }, { kind: 'video', range: [3, 1] }, { kind: 'video', codec: 'av1' }, { kind: 'video', frame: '9:1' }, { kind: 'video', frame: 'wide' },
-    { kind: 'audio', mix: false }, { kind: 'stills', range: [0, 1] }, { kind: 'gif', width: 5000 }, { kind: 'subtitles', format: 'ass' },
+    { kind: 'audio', mix: false }, { kind: 'stills', range: [0, 1] }, { kind: 'stills', as: 'pdf' }, { kind: 'gif', width: 5000 }, { kind: 'subtitles', format: 'ass' },
     { kind: 'slides', format: 'key' }, { kind: 'slides', range: [0, 1] }, { kind: 'nle', fps: 500 }, { kind: 'nle', audio: 'mix' }, { kind: 'nle', range: [0, 1] },
     { kind: 'nle', format: 'fcpxml', alpha: 'png' }, { kind: 'nle', alpha: 'auto' }, { kind: 'nle', format: 'jianying', alpha: 'hevc_alpha' }, { kind: 'nle', format: 'jianying', alpha: 'prores4444' }]) {
     assert.throws(() => exports.start(project(), bad), ExportError, JSON.stringify(bad));
@@ -455,11 +516,28 @@ test('scene stills: the middle of each picture clip, zipped; a poster: one frame
   const stills = await exported({ kind: 'stills', format: 'png', shortEdge: 90 });
   assert.equal(stills.out, join(exportsRoot(), 'Tiny stills.zip'));
   assert.deepEqual(zipNames(stills.out).names, ['01 title.png', '02 badge.png']);
+  /* the moments picked, each named by the scene it is in: of two showing, the one that started last */
+  const picked = await exported({ kind: 'stills', format: 'png', shortEdge: 90, at: [0.2, 0.7, 0.9] }, 'Picked');
+  assert.deepEqual(zipNames(picked.out).names, ['01 title.png', '02 badge.png', '03 badge.png']);
   const poster = await exported({ kind: 'poster', format: 'jpg', at: 0.25, frame: '1:1', shortEdge: 100 });
   assert.equal(poster.out, join(exportsRoot(), 'Tiny poster.jpg'));
   const jpg = readFileSync(poster.out);
   assert.equal(jpg[0], 0xff);
   assert.equal(probe(poster.out, 'stream=width,height'), '100,100');
+});
+
+test('picked frames export as separate images or an explicit zip, including a one-frame zip', ffmpeg, async () => {
+  const files = await exported({ kind: 'stills', as: 'files', format: 'png', shortEdge: 90, at: [0.2, 0.7] }, 'Separate');
+  assert.deepEqual(files.outputs.map((f) => basename(f)), ['Separate stills 01 title.png', 'Separate stills 02 badge.png']);
+  assert.equal(files.out, files.outputs[0]);
+  for (const file of files.outputs) assert.equal(probe(file, 'stream=width,height'), '160,90');
+  const original = readFileSync(files.outputs[0]);
+  const again = await exported({ kind: 'stills', as: 'files', format: 'png', shortEdge: 90, at: [0.2] }, 'Separate');
+  assert.notEqual(again.out, files.outputs[0], 'an existing image is never overwritten');
+  assert.deepEqual(readFileSync(files.outputs[0]), original);
+  const zip = await exported({ kind: 'stills', as: 'zip', format: 'jpg', shortEdge: 90, at: [0.2] }, 'One zipped');
+  assert.ok(zip.out.endsWith('.zip'));
+  assert.deepEqual(zipNames(zip.out).names, ['01 title.jpg']);
 });
 
 test('several exports at once, into a folder of the person\'s; one wrong ask queues none', ffmpeg, async () => {
@@ -518,6 +596,10 @@ test('slides: a PowerPoint deck and a PDF, one page per scene, the scene named i
       assert.ok(parts.has(resolved), `${name} → ${resolved}`);
     }
   }
+  /* the moments picked, a page each, each named by its scene */
+  const picked = zipEntries((await exported({ kind: 'slides', format: 'pptx', shortEdge: 180, at: [0.2, 0.3, 0.7] }, 'Picked')).out);
+  assert.ok(picked.has('ppt/slides/slide3.xml') && !picked.has('ppt/slides/slide4.xml'), 'three moments, three slides');
+  assert.deepEqual([1, 2, 3].map((n) => picked.get(`ppt/notesSlides/notesSlide${n}.xml`).toString().match(/<a:t>([^<]*)<\/a:t>/)?.[1]), ['title', 'title', 'badge']);
   const pdf = await exported({ kind: 'slides', format: 'pdf', shortEdge: 180, frame: '1:1' }, 'Deck');
   assert.equal(pdf.out, join(exportsRoot(), 'Deck.pdf'));
   const bytes = readFileSync(pdf.out).toString('latin1');
@@ -566,6 +648,44 @@ test('fades in the editor\'s timeline: a picture that fades is rendered; a sound
   assert.equal(sound.in, 0);
   assert.deepEqual(sound.levels, [{ when: 0, value: 0 }, { when: 13, value: 1 }]);
   assert.match(xmemlDocument(timeline), /<parameterid>level<\/parameterid>[\s\S]*<keyframe>\s*<when>0<\/when>\s*<value>0<\/value>\s*<\/keyframe>\s*<keyframe>\s*<when>13<\/when>/);
+});
+
+test('an editing project\'s copied files get names of their own when two differ only in case or in how an accent is written', () => {
+  const facts = { duration: 4, hasAudio: true, channels: 2, sampleRate: 48000 };
+  const sound = (id, src, at) => ({ id, src, path: join(scratch, src), at, from: 0, to: 2, speed: 1, volume: 1, enabled: true, role: 'voice', facts });
+  const nfc = 'caf\u00e9', nfd = 'cafe\u0301';
+  const timeline = planNleTimeline({ stage: { w: 320, h: 180 }, duration: 6, pictures: [], sounds: [
+    sound('a', `assets/a/${nfc}.wav`, 0), sound('b', `assets/b/${nfd}.wav`, 2), sound('c', `assets/c/CAF\u00c9.wav`, 4),
+  ] }, { title: 'Names', fps: 25, audio: 'clips', media: 'copy', mediaDir: '/out/media' });
+  const names = timeline.files.map((f) => f.name);
+  assert.equal(names.length, 3);
+  assert.equal(new Set(names.map((n) => n.toLowerCase().normalize('NFC'))).size, 3, names.join(', '));
+  assert.deepEqual(timeline.files.map((f) => f.job.from), ['a', 'b', 'c'].map((d, i) => join(scratch, `assets/${d}/${[nfc, nfd, 'CAF\u00c9'][i]}.wav`)));
+});
+
+test('Premiere XML timecode matches a full video conversion without moving source-relative cuts', ffmpeg, async () => {
+  const folder = join(scratch, 'Source timecode');
+  mkdirSync(folder);
+  const source = join(folder, 'Camera Original.mkv');
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i',
+    'color=red:s=160x90:r=25:d=4[r];color=green:s=160x90:r=25:d=4[g];color=blue:s=160x90:r=25:d=4[b];[r][g][b]concat=n=3:v=1:a=0',
+    '-c:v', 'libx264', '-metadata', 'timecode=01:00:00:00', source]);
+  assert.equal((await probeSource(source)).timecode?.value, '01:00:00:00', 'Matroska uses uppercase TIMECODE metadata');
+  writeFileSync(join(folder, 'film.html'), filmHtml({ stage: { w: 160, h: 90 }, tracks: [
+    { clips: [{ id: 'plain-cut', src: 'Camera Original.mkv', at: 0, time: [4, 6] }] },
+  ] }));
+  const done = await exported({ kind: 'nle', format: 'xml', fps: 25, audio: 'clips', subtitles: false }, 'Source timecode', folder);
+  const converted = done.outputs.find((path) => path.endsWith('.mov'));
+  assert.ok(converted);
+  assert.equal((await probeSource(converted)).timecode?.value, '01:00:00:00');
+  const [{ error, found }] = await parseXml([readFileSync(done.out, 'utf8')], (doc) => {
+    const text = (selector) => doc.querySelector(selector)?.textContent;
+    return { source: text('file > timecode > string'), rate: text('file > timecode > rate > timebase'),
+      sequence: text('sequence > timecode > string'), start: text('clipitem > start'), end: text('clipitem > end'),
+      from: text('clipitem > in'), to: text('clipitem > out') };
+  });
+  assert.equal(error, null);
+  assert.deepEqual(found, { source: '01:00:00:00', rate: '25', sequence: '00:00:00:00', start: '0', end: '50', from: '100', to: '150' });
 });
 
 test('Final Cut Pro keeps source audio rows when an effect overlaps adjacent narration clips', () => {
@@ -1034,10 +1154,8 @@ document.body.style.background='hsl('+Math.round(${hue}+t*60)+',70%,40%)'}}</scr
   mkdirSync(drafts, { recursive: true });
   return { dir, drafts, exports: createExports({ captions: subtitles, drafts: (app) => (app === 'jianying' ? drafts : null) }) };
 }
-/** The processes started by `parent` whose command matches `pattern`. */
-const children = (parent, pattern) => spawnSync('pgrep', ['-P', String(parent), '-f', pattern], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
 
-test('剪映: the pages\' browsers, ended partway as a crash would end them, are started again and the draft is whole', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('剪映: the pages\' browsers, ended partway as a crash would end them, are started again and the draft is whole', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || processes.skip }, async () => {
   const { dir, exports } = threePages('Crashing browsers');
   const job = exports.start(project('Crashing browsers', dir), { kind: 'nle', format: 'jianying', fps: 30, subtitles: false });
   await until(exports, job.id, (j) => ['done', 'failed', 'cancelled'].includes(j.status) || (j.framesDone ?? 0) > 20);
@@ -1046,13 +1164,13 @@ test('剪映: the pages\' browsers, ended partway as a crash would end them, are
   assert.ok(worker, 'the pages draw in a process of their own');
   const browsers = children(worker, 'chrom');
   assert.ok(browsers.length, 'with browsers of its own');
-  for (const pid of browsers) process.kill(pid, 'SIGKILL');
+  for (const pid of browsers) end(pid);
   const done = await ended(exports, job);
   assert.equal(done.status, 'done', done.error);
   for (const id of ['a', 'b', 'c']) assert.equal(frameCount(join(dirname(done.out), 'media', `${id}.mov`)), 120, `${id}: every frame`);
 });
 
-test('剪映: the process drawing the pages, ended partway, fails the draft with the reason and leaves nothing', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('剪映: the process drawing the pages, ended partway, fails the draft with the reason and leaves nothing', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || processes.skip }, async () => {
   const { dir, drafts, exports } = threePages('Crashing drawer');
   const job = exports.start(project('Crashing drawer', dir), { kind: 'nle', format: 'jianying', fps: 30, subtitles: false });
   await until(exports, job.id, (j) => ['done', 'failed', 'cancelled'].includes(j.status) || (j.framesDone ?? 0) > 20);
@@ -1065,7 +1183,7 @@ test('剪映: the process drawing the pages, ended partway, fails the draft with
   assert.deepEqual(readdirSync(drafts), [], 'no draft, and no part of one');
 });
 
-test('剪映: a draft cancelled partway stops drawing at once, its browsers closed, nothing left', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+test('剪映: a draft cancelled partway stops drawing at once, its browsers closed, nothing left', { ...ffmpeg, timeout: 240_000, skip: ffmpeg.skip || processes.skip }, async () => {
   const { dir, drafts, exports } = threePages('Cancelled draft');
   const job = exports.start(project('Cancelled draft', dir), { kind: 'nle', format: 'jianying', fps: 30, subtitles: false });
   await until(exports, job.id, (j) => ['done', 'failed', 'cancelled'].includes(j.status) || (j.framesDone ?? 0) > 20);
@@ -1253,10 +1371,14 @@ function fullProject() {
   put('.git/HEAD');
   put('node_modules/x/index.js');
   put('.DS_Store');
-  /* footage linked in from elsewhere: the export carries the file itself */
+  /* footage linked in from elsewhere: the export carries the file itself (links need Developer Mode on Windows:
+     without it the footage is a copy) */
   const outside = join(dir, '..', 'shoot.mov');
   writeFileSync(outside, 'footage');
-  symlinkSync(outside, join(dir, 'assets', 'shoot.mov'));
+  try { symlinkSync(outside, join(dir, 'assets', 'shoot.mov')); } catch (e) {
+    if (e.code !== 'EPERM') throw e;
+    writeFileSync(join(dir, 'assets', 'shoot.mov'), 'footage');
+  }
   return dir;
 }
 
@@ -1292,6 +1414,34 @@ test('a project exports as a zip holding its folder, or as the folder, each open
   assert.equal((await exported({ kind: 'project', as: 'folder' }, 'My Film', dir)).out, join(exportsRoot(), 'My Film 2'));
   assert.throws(() => createExports().start(project('My Film', dir), { kind: 'project', parts: ['cache'] }), ExportError);
   assert.throws(() => createExports().start(project('My Film', dir), { kind: 'project', range: [0, 1] }), ExportError);
+});
+
+test('a project\'s export takes the files of a linked folder the film uses, as files, and leaves the rest of it out', async () => {
+  const dir = fullProject();
+  const library = join(dir, '..', 'Library');
+  const put = (rel, text = rel) => { mkdirSync(join(library, rel, '..'), { recursive: true }); writeFileSync(join(library, rel), text); };
+  put('ext.mp4');
+  put('ext.vtt');
+  put('ext.zh.vtt');
+  put('day2/b.wav');
+  put('unused.mp4');
+  put('day2/unused.wav');
+  /* a junction on Windows, which needs no Developer Mode; a symlink elsewhere (as Studio's link makes it) */
+  symlinkSync(library, join(dir, 'assets', 'linked'), 'junction');
+  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [
+    { clips: [{ src: 'assets/linked/ext.mp4', id: 'ext' }] },
+    { clips: [{ src: 'assets/linked/day2/b.wav', id: 'b', time: [0, 1] }] },
+  ] }));
+  const used = ['assets/linked/day2/b.wav', 'assets/linked/ext.mp4', 'assets/linked/ext.vtt', 'assets/linked/ext.zh.vtt'];
+  const names = (await projectFiles(dir, [])).map((f) => f.name);
+  assert.deepEqual(names.filter((n) => n.startsWith('assets/linked/')).sort(), used);
+  assert.ok((await projectSizes(dir)).work >= used.reduce((n, f) => n + f.slice('assets/linked/'.length).length, 0));
+  const entries = zipEntries((await exported({ kind: 'project' }, 'My Film', dir)).out);
+  assert.deepEqual([...entries.keys()].filter((n) => n.startsWith('My Film/assets/linked/')).sort(), used.map((n) => `My Film/${n}`));
+  assert.equal(entries.get('My Film/assets/linked/ext.mp4').toString(), 'ext.mp4');
+  const copied = (await exported({ kind: 'project', as: 'folder' }, 'My Film', dir)).out;
+  for (const n of used) assert.equal(readFileSync(join(copied, ...n.split('/')), 'utf8'), n.slice('assets/linked/'.length));
+  assert.ok(!existsSync(join(copied, 'assets', 'linked', 'unused.mp4')) && !existsSync(join(copied, 'assets', 'linked', 'day2', 'unused.wav')));
 });
 
 test('a project export named where it is asked for: the zip and the folder in it take that name', async () => {

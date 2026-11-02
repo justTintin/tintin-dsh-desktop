@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { filmCaptions, translateFilmSubtitles } from './captions.mjs';
 import { readTranscript } from './transcripts.mjs';
 import { VERBS, WEB_VERBS, WHERE_TO_CONNECT, catalog, flagHelp, runGet, services, subtitleTranslator } from './get.mjs';
+import { wav } from './providers/common.mjs';
 import { changeSettings, kindOf, providersFile } from './keys.mjs';
 import { listProviders } from './providers/index.mjs';
 import { startStudio } from './server.mjs';
@@ -75,7 +76,7 @@ before(async () => {
   base = `http://127.0.0.1:${service.address().port}`;
   Object.assign(process.env, {
     OPENFILM_HOME: join(scratch, 'home'), OPENFILM_LIBRARY: join(scratch, 'library'),
-    OPENFILM_ELEVENLABS_URL: base, OPENFILM_FAL_URL: base, OPENFILM_OPENAI_URL: base,
+    OPENFILM_ELEVENLABS_URL: base, OPENFILM_FAL_URL: base, OPENFILM_OPENAI_URL: base, OPENFILM_MIMO_URL: base,
   });
   for (const p of [...listProviders(), { env: 'GOOGLE_API_KEY' }]) delete process.env[p.env];
 });
@@ -272,6 +273,38 @@ test('asr: a recording outside assets/ gets its transcript beside it too; the to
   assert.equal(calls.filter((c) => c.path === '/v1/speech-to-text').length, 2);
 });
 
+test('asr: a MiMo transcript lands beside the recording, its words carrying the time each stretch was said', async () => {
+  const root = project();
+  mkdirSync(join(root, 'assets'), { recursive: true });
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', join(root, 'assets/talk.wav')]);
+  refuse = () => [200, { choices: [{ message: { content: '你好，世界。Hello there.' } }], usage: { seconds: 4 } }];
+  const receipt = JSON.parse(await runGet(root, 'asr', { src: 'assets/talk.wav' }, { via: 'mimo' }));
+  assert.deepEqual(receipt, { src: 'assets/talk.wav', text: '你好，世界。 Hello there.', transcript: 'assets/talk.vtt' });
+  const sent = calls.at(-1);
+  const body = JSON.parse(sent.body.toString('utf8'));
+  assert.equal(sent.path, '/v1/chat/completions');
+  assert.equal(sent.headers['api-key'], 'mimo-test-0123456789');
+  assert.equal(body.model, 'mimo-v2.5-asr');
+  assert.match(body.messages[0].content[0].input_audio.data, /^data:audio\/mpeg;base64,/);
+  /* one line a sentence; each word a timestamp tag inside it, the first of a line the cue's own start */
+  const vtt = readFileSync(join(root, 'assets/talk.vtt'), 'utf8');
+  assert.match(vtt, /^WEBVTT\n\n00:00:00\.000 --> 00:00:00\.\d{3}\n你<00:00:00\.\d{3}>好，<00:00:00\.\d{3}>世<00:00:00\.\d{3}>界。\n\n00:00:00\.\d{3} --> 00:00:01\.\d{3}\nHello <00:00:00\.\d{3}>there\.\n$/);
+  assert.equal(JSON.parse(await runGet(root, 'asr', { src: 'assets/talk.wav' })).skip, true, 'not made twice');
+});
+
+test('tts: a line spoken as a chat completion lands as a WAV, with no transcript until asr makes one', async () => {
+  const root = project();
+  refuse = () => [200, { choices: [{ message: { content: '', audio: { data: Buffer.from(wav(new Uint8Array(32000), 16000)).toString('base64') } } }] }];
+  const said = JSON.parse(await runGet(root, 'tts', { out: 'line', text: 'Hello there.', voice: 'Chloe' }, { via: 'mimo' }));
+  assert.deepEqual(said, { src: 'assets/audio/vo/line.wav', dur: 1, voiceId: 'Chloe', transcript: 'none: the service does not time words; `get asr --src` makes one' });
+  assert.ok(existsSync(join(root, 'assets/audio/vo/line.wav')));
+  const body = JSON.parse(calls.at(-1).body.toString('utf8'));
+  assert.equal(calls.at(-1).path, '/v1/chat/completions');
+  assert.equal(body.model, 'mimo-v2.5-tts');
+  assert.deepEqual(body.messages, [{ role: 'assistant', content: 'Hello there.' }]);
+  assert.deepEqual(body.audio, { format: 'wav', voice: 'Chloe' });
+});
+
 test('what lands stays in assets/, and the receipt leaves out what it cost', async (t) => {
   const root = project();
   const fal = listProviders().find((p) => p.id === 'fal');
@@ -405,7 +438,7 @@ test('openfilm get: what can be got here, connected, partly or not at all; wrong
     assert.equal(nothing.stdout, 'Nothing is connected for media here: each kind works only once the person connects a service that makes it (below). '
       + 'Until then, make sound and pictures in code, or use a service the person has a key for (with its API docs), and save them under assets/. '
       + `\`openfilm get <what> --help\` shows what one kind takes (${media.join(', ')}).\n\n${services()}\n`);
-    assert.match(services(), /^Media services, each used with the person's own key: Brave Search \(web search\), Doubao \(transcripts\), ElevenLabs \(voice-over, sound effects, music, transcripts\), fal\.ai \(images, video, music, sound effects\), .*, Microsoft Azure \(voice-over\), .*, Tavily \(web search\)\. In Studio, the OpenFilm logo at the top left opens Settings/);
+    assert.match(services(), /^Media services, each used with the person's own key: Brave Search \(web search\), Doubao \(transcripts\), ElevenLabs \(voice-over, sound effects, music, transcripts\), fal\.ai \(images, video, music, sound effects\), .*, Microsoft Azure \(voice-over\), .*, Tavily \(web search\), Xiaomi MiMo \(voice-over, transcripts\)\. In Studio, the OpenFilm logo at the top left opens Settings/);
 
     /* partly: what is connected, then one line for the rest with the services that make each, then the services there
        are; never who makes what is connected */

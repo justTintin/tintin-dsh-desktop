@@ -81,7 +81,8 @@ test('OpenFilm\'s keys are the keys Studio had', () => {
   assert.equal(mac('`'), 'toggle-linkage');
   assert.equal(mac('~', { shiftKey: true }), 'toggle-linkage');
   assert.equal(actionOf({ ...press('`'), code: 'Backquote' }, OPENFILM_MAC, true), 'toggle-linkage');
-  assert.equal(mac('s'), 'toggle-preview-axis');
+  assert.equal(mac('s'), null);
+  assert.equal(win('s'), null);
   assert.equal(mac('S', { shiftKey: true, ctrlKey: true }), 'detach-audio');
   assert.equal(win('S', { shiftKey: true, ctrlKey: true }), 'detach-audio');
   assert.equal(mac('q'), 'ripple-start');
@@ -178,7 +179,6 @@ test('the built-in schemes: each app\'s keys where Studio has the action, OpenFi
   assert.deepEqual(premiere['split-all'], ['mod+shift+k']);
   assert.deepEqual(premiere['split-mode'], ['c'], 'the Razor tool');
   assert.deepEqual(premiere['toggle-snap'], ['s']);
-  assert.deepEqual(premiere['toggle-preview-axis'], [], 'S snaps there: the preview axis has no key');
   assert.deepEqual(premiere['toggle-magnet'], ['p', 'shift+n'], 'what the app has no key for keeps OpenFilm\'s');
   assert.deepEqual(premiere.refer, ['mod+l']);
   assert.deepEqual(premiere['nudge-back'], ['mod+ArrowLeft'], 'macOS');

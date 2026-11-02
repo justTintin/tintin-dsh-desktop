@@ -1,9 +1,9 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createFolder, createProject, forgetProject, listFolders, listProjects, locateProject, moveFolder, moveLibrary, openProject, projectById, renameProject, ProjectError } from './projects.mjs';
+import { createFolder, createProject, deleteProject, forgetProject, listFolders, listProjects, locateProject, moveFolder, moveLibrary, openProject, projectById, renameProject, ProjectError } from './projects.mjs';
 import { chooseFolder } from '../../src/locations.mjs';
 import { readFilmFile } from '../../src/film-doc.mjs';
 
@@ -101,10 +101,29 @@ test('forgetting a project leaves its folder; a deleted folder shows as missing'
   const q = await openProject(join(scratch, 'gone'));
   (await import('node:fs')).rmSync(q.path, { recursive: true });
   assert.equal((await listProjects()).find((x) => x.id === q.id).missing, true);
-  /* only the folder being gone is missing: one that lost its film.html is still there (and opens) */
+  /* caches or other remaining files do not make a folder without its film a project */
   const r = await openProject(join(scratch, 'no-film'));
-  (await import('node:fs')).rmSync(join(r.path, 'film.html'));
-  assert.equal((await listProjects()).find((x) => x.id === r.id).missing, false);
+  const film = readFileSync(join(r.path, 'film.html'), 'utf8');
+  rmSync(join(r.path, 'film.html'));
+  assert.equal((await listProjects()).find((x) => x.id === r.id).missing, true);
+  assert.equal((await projectById(r.id)).missingReason, 'film');
+  writeFileSync(join(r.path, 'film.html'), film);
+  assert.equal((await projectById(r.id)).missing, false, 'restoring the file makes it available again');
+  writeFileSync(join(r.path, 'film.html'), '');
+  assert.equal((await projectById(r.id)).missing, false, 'an existing empty file can still be edited');
+  rmSync(join(r.path, 'film.html'));
+  mkdirSync(join(r.path, 'film.html'));
+  assert.equal((await projectById(r.id)).missingReason, 'film', 'a directory named film.html is not a film file');
+});
+
+test('taking an unavailable project off the list preserves its remaining assets and history', async () => {
+  const project = await openProject(join(scratch, 'remaining-files'));
+  rmSync(join(project.path, 'film.html'));
+  writeFileSync(join(project.path, 'keep.txt'), 'work to recover');
+  await deleteProject(project.id);
+  assert.equal(readFileSync(join(project.path, 'keep.txt'), 'utf8'), 'work to recover');
+  assert.equal(readFileSync(join(project.path, '.film', 'id'), 'utf8').trim(), project.id);
+  assert.ok(!(await listProjects()).some((p) => p.id === project.id));
 });
 
 test('the disk root, the home folder and files are not projects', async () => {

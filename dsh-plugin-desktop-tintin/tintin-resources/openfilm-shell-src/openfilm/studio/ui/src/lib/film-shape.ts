@@ -65,6 +65,8 @@ export function filmShape(
   const scenes: TimelineFilm['scenes'][number][] = [];
   const videos: TimelineFilm['videos'][number][] = [];
   const sounds: TimelineFilm['sounds'][number][] = [];
+  /* videos whose file was not probed (yet): whether they carry sound is not known */
+  let unprobed = 0;
 
   doc.tracks.forEach((track: FilmTrack, ti: number) => {
     const ref: NonNullable<Track> = {
@@ -160,6 +162,7 @@ export function filmShape(
         });
         /* the footage's own sound: the timeline draws it on the video block, not as a block of its own (at volume 0
            too: it is still there, turned down, and the inspector turns it up again) */
+        if (!still && !media.has(clip.src)) unprobed++;
         if (!still && media.get(clip.src)?.audio) {
           sounds.push({ ...shared, kind: 'voice', src: clip.src, ...(inMs ? { inMs } : {}), ...(speed !== 1 ? { speed } : {}) });
         }
@@ -168,5 +171,5 @@ export function filmShape(
   });
 
   /* the timeline also draws tracks with nothing on them (somewhere to drop), named by their kind */
-  return { scenes, videos, sounds, captions: [], doc: { ...doc, tracks: doc.tracks.map((t) => ({ ...t, kind: filmTrackKind(t) })) } };
+  return { scenes, videos, sounds, captions: [], ...(unprobed ? { unprobed } : {}), doc: { ...doc, tracks: doc.tracks.map((t) => ({ ...t, kind: filmTrackKind(t) })) } };
 }

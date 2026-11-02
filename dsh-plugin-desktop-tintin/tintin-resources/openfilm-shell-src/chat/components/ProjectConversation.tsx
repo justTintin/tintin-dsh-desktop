@@ -27,10 +27,12 @@ import { relativeTime, useMinuteTick } from '@/lib/relative-time';
 import { isPendingAssetId } from '@/lib/asset-lists';
 import { TurnLogButton } from './TurnLog';
 import { FileChangesList } from './FileChangesList';
+import { FilmRestoreOffer } from './FilmRestoreOffer';
 import { ChatProjectContext, useDeveloperMode, useShowChanges } from '@/lib/developer';
 import { isVideoAttachment } from '@/lib/composer-attachments';
 import { desktopBridge } from '@/lib/desktop-bridge';
 import { attachmentPlace } from '@/lib/attachment-place';
+import { attachmentPillPictures } from '@/lib/attachment-pills';
 import { ATTACHMENT_CARD, ATTACHMENT_THUMB, AttachmentCardBody, PlayMark } from './AttachmentCard';
 
 /** What past turns get as "no live process". One constant: a new array each time would defeat the memo. */
@@ -309,6 +311,11 @@ const ConversationTurn = React.memo(function ConversationTurn({
   /* Two users need this node: one measures its distance from the viewport (whether to fetch the process), the
      other the last turn's height (the space below). One callback rather than a wrapper div, which would change
      the flex gaps. */
+  /* the thumbnails of the files brought in, by their pills (null for a message from before they were pills) */
+  const pillPictures = React.useMemo(
+    () => attachmentPillPictures(entry.promptDisplay, entry.attachments),
+    [entry.promptDisplay, entry.attachments],
+  );
   const attach = React.useCallback((node: HTMLDivElement | null) => {
     shell.current = node;
     rootRef?.(node);
@@ -355,7 +362,9 @@ const ConversationTurn = React.memo(function ConversationTurn({
       <div className="group/ask flex min-w-0 flex-col gap-1">
       <div className="flex justify-end">
         <div className="flex max-w-[88%] flex-col gap-1.5 rounded-[12px] border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
-          {entry.attachments.length > 0 && <TurnAttachments items={entry.attachments} />}
+          {/* files brought in are pills in the sentence, with their thumbnails; a message from before that shows
+              them in a row of their own */}
+          {entry.attachments.length > 0 && !pillPictures && <TurnAttachments items={entry.attachments} />}
           {/* The sent message must look like it did in the composer: an asset picked there is a pill, and turning
               it into a bare workspace path after Enter would disown what the user saw. With the original text,
               render the pills; otherwise the expanded prompt, which is the same for plain text and is all that
@@ -363,7 +372,7 @@ const ConversationTurn = React.memo(function ConversationTurn({
           {entry.promptDisplay || entry.prompt.trim() ? (
             <p className="whitespace-pre-wrap break-words text-[14px] leading-[1.65] text-[var(--chat-text)]">
               {entry.promptDisplay
-                ? <PromptWithPills display={entry.promptDisplay} />
+                ? <PromptWithPills display={entry.promptDisplay} {...(pillPictures ? { pictures: pillPictures } : {})} />
                 : entry.prompt}
             </p>
           ) : null}
@@ -403,10 +412,11 @@ const ConversationTurn = React.memo(function ConversationTurn({
 
       {/* What this turn changed in the project's files, as a coding agent's app lists them (Settings → Developer
           turns it off). No "version N · switch to it" link: going back belongs to the top bar's history. */}
+      {settled && entry.filmLost ? <FilmRestoreOffer turnId={entry.assetId} /> : null}
       {settled && showChanges && entry.fileChanges?.length ? <FileChangesList changes={entry.fileChanges} /> : null}
 
-      {/* Still running: one status line, always one line high, only its text changes (see StatusLine), and the
-          footer under it on hover (its Log is the turn so far). Done, the footer alone. Always there, in one place
+      {/* The status and hover actions occupy separate rows. An empty status takes no room; a visible status
+          stays above the complete footer, including on hover and focus. The footer stays in one place
           in the tree: a log opened from it stays open as the turn finishes. An interruption doesn't
           show Failed here: the reason and Resume appear above the composer (the last turn's, even after a
           restart); an older one's reason is on its footer's Interrupted, on hover. */}
@@ -649,14 +659,13 @@ function CopyButton({ text }: { text: string }) {
 
 /**
  * The line under a reply: copy, who answered (icon only) · the model · how long ago, and how it stopped if it
- * didn't finish normally. While it runs, under the status line: copy what it said so far, its log so far, who.
+ * didn't finish normally. While it runs, on hover below the status: copy what it said so far, its log so far, who.
  *
  * Several agents can answer in one project and their replies look alike, so the footer says which one. A stopped
  * turn says so, or a reply cut short leaves the reader unsure whether it finished, broke or was stopped.
  *
- * As in Claude, it appears on hover over the reply and keeps its space (h-6, as tall as the status line while
- * running, so the bottom edge stays put when one replaces the other). The time is how long ago; how long it
- * worked is in the "Worked …" line.
+ * It appears on hover over the reply and keeps its space (h-6), independently of the status above it.
+ * The time is how long ago; how long it worked is in the "Worked …" line.
  */
 function TurnFooter({ entry, items, running = false }: { entry: ProjectVersion; items: TranscriptItem[] | null; running?: boolean }) {
   const t = useT();
@@ -677,8 +686,7 @@ function TurnFooter({ entry, items, running = false }: { entry: ProjectVersion; 
   const project = React.useContext(ChatProjectContext);
 
   return (
-    /* -mt-1.5: the footer belongs to the reply above it — close to it, not a row of its own */
-    <div className={`-mt-1.5 flex h-6 min-w-0 items-center gap-1.5 text-[11.5px] text-[var(--chat-hint)] group-hover/reply:opacity-100 ${HOVER_LINE}`}>
+    <div data-turn-footer="" className={`-mt-1.5 flex h-6 min-w-0 items-center gap-1.5 text-[11.5px] text-[var(--chat-hint)] group-hover/reply:opacity-100 ${HOVER_LINE}`}>
       {answer ? <CopyButton text={answer} /> : null}
       {/* developer mode (Settings → Developer): the turn as it happened, every event; while it runs, as it goes */}
       {developer && project && !isPendingAssetId(entry.assetId) ? <TurnLogButton project={project} turnId={entry.assetId} live={running} /> : null}

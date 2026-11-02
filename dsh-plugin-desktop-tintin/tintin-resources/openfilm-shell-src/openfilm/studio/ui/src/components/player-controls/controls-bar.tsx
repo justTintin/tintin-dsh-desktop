@@ -13,6 +13,7 @@ import {
   TransportSeekBar,
   transportTimeText,
 } from './transport';
+import { PLAYBACK_SPEEDS } from '@/lib/playback-speed';
 
 /* YouTube-style icons, 24×24, currentColor */
 function Icon({ d, size = 24 }: { d: string; size?: number }) {
@@ -44,8 +45,6 @@ export function CaptionsIcon({ size = 24 }: { size?: number }) {
     </svg>
   );
 }
-
-const SPEED_OPTIONS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
 export interface PlayerControlsBarProps {
   timeMs: number;
@@ -350,7 +349,7 @@ function SettingsMenu({
                 <Icon d={PATH_CHEVRON_BACK} size={20} />
                 <span>{t('player.speed')}</span>
               </button>
-              {SPEED_OPTIONS.map((s) => (
+              {PLAYBACK_SPEEDS.map((s) => (
                 <MenuOption
                   key={s}
                   style={row}

@@ -157,6 +157,15 @@ export function filterParts(v: string | undefined): { name: string; args: string
 
 const joinFilter = (parts: { name: string; args: string }[]) => (parts.length ? parts.map((p) => `${p.name}(${p.args})`).join(' ') : null);
 
+/** The id of the SVG filter that draws a mask's stroke (lib/clip-mask): `url("data:…#openfilm-mask-stroke")`. */
+export const MASK_STROKE_ID = 'openfilm-mask-stroke';
+/**
+ * Whether a filter function is a mask's stroke: the panel's own (an SVG in a data URL, with its id), kept last so no
+ * adjustment tints it. A filter of the page's own, `url(#…)`, is not.
+ */
+export const isMaskStroke = (p: { name: string; args: string }) => p.name === 'url'
+  && /^["']?data:image\/svg\+xml,/.test(p.args) && new RegExp(`#${MASK_STROKE_ID}["']?$`).test(p.args);
+
 /** A number or a percentage as a factor (`1.1`, `110%`). */
 const factorOf = (args: string) => (/^-?\d*\.?\d+%$/.test(args) ? Number(args.slice(0, -1)) / 100 : /^-?\d*\.?\d+$/.test(args) ? Number(args) : NaN);
 
@@ -202,8 +211,9 @@ export function adjustOf(filter: string | undefined): Record<AdjustKey, number |
 }
 
 /**
- * The filter with one adjustment set (the function in place where it was, a new one before any shadow so the shadow
- * is not tinted), or taken out at 0. Null: no filter left. Functions the panel has no control for are kept as written.
+ * The filter with one adjustment set (the function in place where it was, a new one before any shadow or mask stroke
+ * so they are not tinted), or taken out at 0. Null: no filter left. Functions the panel has no control for are kept as
+ * written.
  */
 export function withAdjust(filter: string | undefined, key: AdjustKey, n: number): string | null {
   const parts = filterParts(filter);
@@ -215,7 +225,7 @@ export function withAdjust(filter: string | undefined, key: AdjustKey, n: number
     if (args == null) parts.splice(at, 1);
     else parts[at] = { name, args };
   } else if (args != null) {
-    const shadow = parts.findIndex((p) => p.name === 'drop-shadow');
+    const shadow = parts.findIndex((p) => p.name === 'drop-shadow' || isMaskStroke(p));
     parts.splice(shadow < 0 ? parts.length : shadow, 0, { name, args });
   }
   return joinFilter(parts);
@@ -259,7 +269,7 @@ export function shadowOf(filter: string | undefined): Shadow | null | undefined 
   return part ? shadowArgs(part.args) : undefined;
 }
 
-/** The filter with its drop shadow set (last, after the adjustments) or taken out (null). Null: no filter left. */
+/** The filter with its drop shadow set (after the adjustments, before a mask's stroke) or taken out (null). Null: no filter left. */
 export function withShadow(filter: string | undefined, shadow: Shadow | null): string | null {
   const parts = filterParts(filter);
   if (!parts) return filter ?? null;
@@ -267,7 +277,8 @@ export function withShadow(filter: string | undefined, shadow: Shadow | null): s
   if (at >= 0) parts.splice(at, 1);
   if (shadow) {
     const args = `${round(shadow.x, 1)}px ${round(shadow.y, 1)}px ${round(Math.max(0, shadow.blur), 1)}px ${shadow.color}`;
-    parts.splice(at >= 0 ? at : parts.length, 0, { name: 'drop-shadow', args });
+    const stroke = parts.findIndex(isMaskStroke);
+    parts.splice(at >= 0 ? at : stroke >= 0 ? stroke : parts.length, 0, { name: 'drop-shadow', args });
   }
   return joinFilter(parts);
 }
@@ -282,6 +293,7 @@ function filterOwned(filter: string): boolean {
     if (seen.has(p.name)) return false;
     seen.add(p.name);
     if (p.name === 'drop-shadow') { if (!shadowArgs(p.args)) return false; continue; }
+    if (isMaskStroke(p)) continue;
     const key = ADJUST_KEYS.find((k) => FILTER_FN[k] === p.name);
     if (!key || !known.has(p.name) || !Number.isFinite(adjustValue(key, p.args))) return false;
   }

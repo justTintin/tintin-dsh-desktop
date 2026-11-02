@@ -47,3 +47,13 @@ test('a clip shows from its start up to, not including, its end', () => {
   assert.equal(spanShows(span, 6100), false);
   assert.equal(spanShows(span, 5160), true);
 });
+
+test('a video not probed yet may carry sound: the film is not known to be silent until every one has said', () => {
+  const film = doc([{ src: 'assets/a.mp4', id: 'a', time: [0, 2] }, { src: 'assets/b.mp4', id: 'b', at: 2, time: [0, 2] }]);
+  const spans: ClipSpan[] = [{ id: 'a', src: 'assets/a.mp4', at: 0, end: 2, native: 9 }, { id: 'b', src: 'assets/b.mp4', at: 2, end: 4, native: 9 }];
+  assert.equal(filmShape(film, spans).unprobed, 2);
+  assert.equal(filmShape(film, spans, new Map([['assets/a.mp4', { audio: false }]])).unprobed, 1);
+  const both = filmShape(film, spans, new Map([['assets/a.mp4', { audio: false }], ['assets/b.mp4', { audio: true }]]));
+  assert.equal(both.unprobed, undefined);
+  assert.deepEqual(both.sounds.map((x) => x.src), ['assets/b.mp4']);
+});

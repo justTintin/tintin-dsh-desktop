@@ -32,11 +32,18 @@ export function useUiLocale(): UiLocale {
   return React.useSyncExternalStore(subscribe, () => language, () => 'en' as UiLocale);
 }
 
+function say(locale: UiLocale, path: string): string {
+  const said = locale === 'en' ? null : lookup(TABLES[locale], path);
+  return said && said !== path ? said : lookup(enUS, path);
+}
+
 /** t('project.stop'), in the language shown. */
 export function useT(): (path: string) => string {
   const now = useUiLocale();
-  return React.useCallback((path: string) => {
-    const said = now === 'en' ? null : lookup(TABLES[now], path);
-    return said && said !== path ? said : lookup(enUS, path);
-  }, [now]);
+  return React.useCallback((path: string) => say(now, path), [now]);
+}
+
+/** The same outside a component (an error made in lib/), in the language shown now. */
+export function translate(path: string): string {
+  return say(language, path);
 }

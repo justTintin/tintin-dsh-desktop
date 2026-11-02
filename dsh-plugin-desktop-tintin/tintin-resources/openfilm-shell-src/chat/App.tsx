@@ -6,15 +6,13 @@
  * (lib/local-agent-run's saved turns).
  */
 import React from 'react';
-import { ArrowDown, Blocks, Coins, CornerDownLeft, LibraryBig, Loader2, Plus, ShieldQuestion, Square, SquareSlash, X } from 'lucide-react';
+import { ArrowDown, Blocks, Coins, CornerDownLeft, LibraryBig, Loader2, Plus, ShieldQuestion, Square, X } from 'lucide-react';
 import { buildPromptDisplay, type Turn } from '@openfilm/shared';
 import { useT, useUiLocale } from '@/i18n';
 import { ConversationSessionBar } from '@/components/ConversationSessionBar';
 import { ProjectConversation, primeStoredTranscript } from '@/components/ProjectConversation';
 import { ProjectStarters } from '@/components/ProjectStarters';
 import { AttachmentPreview, type AttachmentPreviewItem } from '@/components/AttachmentPreview';
-import { ATTACHMENT_CARD, ATTACHMENT_THUMB, AttachmentCardBody, PlayMark } from '@/components/AttachmentCard';
-import { attachmentPlace } from '@/lib/attachment-place';
 import { ModelPopover } from '@/components/ModelPopover';
 import { AddSkillDialog, type PickedSkill } from '@/components/AddSkill';
 import { SKILLS_CHANGED } from 'openfilm/studio-ui/lib/project-sources.ts';
@@ -24,8 +22,8 @@ import { Tooltip } from '@/components/Tooltip';
 import { StickToBottomContext, useStickToBottom, useTailSpacer } from '@/components/useStickToBottom';
 import { PromptEditor, PromptPill, PromptPillHoverContext, PromptPillRevealContext, activatedSkillIds, fileReferenceId, fileReferencePath, promptReferenceToken, resolvePromptReferences, skillReferenceId, skillReferencePackage, splitPromptReferenceText, type MentionProvider, type PromptEditorHandle, type PromptEditorState, type PromptPillHover, type PromptReference } from '@/components/prompt-editor';
 import { filesFromTransfer, transferHasFiles } from '@/lib/composer-attachments';
-import { attachmentIcon } from '@/lib/project-resources';
-import { PROMPT_PICTURES_MAX, attachedPictures, attachedText, attachmentBlocker, formatFileSize, turnAttachments, useDesktopAttachments } from '@/lib/desktop-attachments';
+import { PROMPT_PICTURES_MAX, attachedPictures, attachmentBlocker, formatFileSize, turnAttachments, useDesktopAttachments } from '@/lib/desktop-attachments';
+import { attachmentPill, attachmentsInText, attachmentWords, isAttachmentPill, projectFilePath, sentPill } from '@/lib/attachment-pills';
 import { deriveProjectTurns } from '@/lib/project-versions';
 import { makePlaceholder, mergeAssetLists } from '@/lib/asset-lists';
 import { isEmptyBackgroundTurn } from '@/lib/unprompted';
@@ -48,7 +46,6 @@ import {
   restingItems,
   saveLocalAgentTurn,
   steerLocalAgentTurn,
-  useAgentCommands,
   useAgentContext,
   useLocalAgentTurn,
   type LocalAgentTurn,
@@ -57,20 +54,26 @@ import {
 import { desktopBridge, type LocalAgentId, type LocalAgentTurnMeta, type PromptImage } from '@/lib/desktop-bridge';
 import { referencePictures } from '@/lib/ref-pictures';
 import type { TurnFileChanges } from '@/lib/file-changes';
+import { offersFilmRestore } from '@/lib/film-restore';
 import { readBalance, type TurnBalance } from '@/lib/balance';
 import { BalanceNotice } from '@/components/BalanceNotice';
 import { CopyDiagnostics } from '@/components/CopyDiagnostics';
-import { readStudioFilm } from '@/lib/studio-film';
+import { accountName, accountTrouble } from '@/lib/account-trouble';
+import { accountModel, accountModelOf, routeWithoutKey } from '@/lib/route-without-key';
+import { keptNote, readStudioFilm } from '@/lib/studio-film';
 import { studioRefsFromTransfer, transferHasStudioRefs } from '@/lib/studio-transfer';
 import { agentModelSummary, agentOptions, currentAgent, effectivePrefs, offeredOption, useLocalAgents } from '@/state/local-agent-store';
 import { useLiveActivityFromStore } from '@/lib/live-activity';
 import { loadLastSession, loadSessions, newSession, saveLastSession, saveSessions } from '@/lib/local-sessions';
 import type { ProjectSessionItem } from '@/lib/project-sessions';
+import { conversationAgent, conversationPrefs, keptPrefs } from '@/lib/conversation-agent';
+import { AGENT_DEFINITIONS, isAgentId } from '../../src/agent-definitions.mjs';
 import type { TranscriptItem } from '@/lib/agent-transcript';
 import { app, type FfmpegState, type Project, type SkillListing, type StudioRef, type StudioSelection } from './app-bridge';
 import { Divider } from './components/Divider';
 import { draftRefs, pillCard, refFromPill, refPill, sameStudioThing, selectionMoment, selectionRange, selectionRefs, studioReferencesText } from './studio-refs';
 import { inChat } from './lib/chat-layer';
+import { escStopper } from './lib/esc-stop';
 import { useProjectChat } from './lib/chat-store';
 import { givenAfter, pagesToSend } from './lib/skill-pages';
 import { ChatProjectContext, WaitingContext } from './lib/developer';
@@ -194,6 +197,8 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
   function settleLocalTurn(meta: LocalAgentTurnMeta, turn: LocalAgentTurn, patch: Partial<Turn & TurnBalance>): Turn {
     const id = meta.turnId;
     finishRunningLocalTurn(id);
+    /* the model that answered, for an agent whose session names none (GitHub Copilot's): its footer says it */
+    if (turn.model) patch = { ...patch, localAgent: { id: meta.agent, model: turn.model } };
     const done: Turn = { ...(meta.turn as Turn), ...patch, updatedAt: new Date().toISOString() };
     primeStoredTranscript(id, turn.items);
     saveLocalAgentTurn(meta.projectId, done, turn.items);
@@ -247,8 +252,24 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
 
   /* ── the agent ── */
   const la = useLocalAgents();
-  React.useEffect(() => { la.hydrate(); void la.refresh(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const agent = currentAgent(la);
+  React.useEffect(() => { la.hydrate(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  /* the agent this conversation used and its options, whatever was picked since in another one; a new conversation
+     takes the one picked last (lib/conversation-agent). A conversation from before they kept it: its last turn's agent */
+  const shownSessionItem = sessions.find((s) => s.id === sessionId);
+  const lastTurnAgent = asset?.sessionId === sessionId ? asset.localAgent?.id : undefined;
+  const usedAgent = [shownSessionItem?.agent, lastTurnAgent].find((id): id is LocalAgentId => Boolean(id) && isAgentId(id));
+  const { agent, was: agentWas } = conversationAgent(usedAgent, la.roster, currentAgent(la));
+  const agentPrefs = conversationPrefs(la.prefs, shownSessionItem?.agentPrefs);
+  /** the agent or an option changed in the menu: kept on this conversation, once it has said something (a new one
+      takes the pick); not a use of it, so it keeps its place in the list */
+  const keepOnSession = React.useCallback((patch: (s: ProjectSessionItem) => Partial<ProjectSessionItem>) => {
+    setSessions((list) => {
+      if (!list.some((s) => s.id === sessionId && s.turns > 0)) return list;
+      const out = list.map((s) => (s.id === sessionId ? { ...s, ...patch(s) } : s));
+      saveSessions(projectKey, out);
+      return out;
+    });
+  }, [projectKey, sessionId]);
 
   /* what an agent's command asks before it spends: above the composer, as the agent's own questions are */
   const spendAsks = React.useSyncExternalStore((change) => app.asks.onChange(change), app.asks.get);
@@ -291,35 +312,37 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
   /** skills named with the Skills button or `/` (each pill turns into the skill's name, its SKILL.md after the message) */
   const [skillRefs, setSkillRefs] = React.useState<PromptReference[]>([]);
   const composerPills = React.useMemo(
-    () => [...[...studioRefs.entries()].map(([id, ref]) => refPill(id, ref)), ...fileRefs, ...skillRefs],
-    [studioRefs, fileRefs, skillRefs],
+    () => [...[...studioRefs.entries()].map(([id, ref]) => refPill(id, ref)), ...fileRefs, ...skillRefs, ...composerFiles.files.map(attachmentPill)],
+    [studioRefs, fileRefs, skillRefs, composerFiles.files],
+  );
+  /** files brought in (dropped, pasted, picked with +): pills where they were let go, or at the caret */
+  const attachFiles = (files: File[], point?: { x: number; y: number }) => {
+    const added = composerFiles.add(files);
+    if (added.length) composerRef.current?.insertReferences(added.map(attachmentPill), point);
+  };
+  const attachmentOf = React.useCallback(
+    (pill: { id: string }) => (isAttachmentPill(pill.id) ? composerFiles.files.find((f) => f.id === pill.id) : undefined),
+    [composerFiles.files],
+  );
+  const attachmentState = React.useCallback((pill: PromptReference) => {
+    const state = attachmentOf(pill)?.state;
+    return state === 'pending' || state === 'failed' ? state : null;
+  }, [attachmentOf]);
+  const opensPill = React.useCallback((pill: PromptReference) => isAttachmentPill(pill.id), []);
+  /** what the card takes from a drag: files from the disk, Studio's things */
+  const showsDropCaret = React.useCallback(
+    (data: DataTransfer) => transferHasStudioRefs(data) || [...data.types].includes('Files'),
+    [],
   );
 
   /* ── the @ menu: this moment in Studio, and the project's files (asked for when the menu opens) ── */
   const [mentionFiles, setMentionFiles] = React.useState<Array<{ path: string; kind: string; size: number }>>([]);
-  /* TinTin cover (2026-10-28 会话移植): the canvas's layers as @ items (the bridge serves them; absent elsewhere) */
-  const [coverLayerItems, setCoverLayerItems] = React.useState<Array<{ id: string; label: string; type: string; propsKey?: string; value?: unknown }>>([]);
-  /* TinTin cover: the host's own composer placeholders (null in the film chat → built-in film wording stands) */
-  const [hostPlaceholders, setHostPlaceholders] = React.useState<{ blank: string; followUp: string } | null>(null);
-  React.useEffect(() => {
-    void Promise.resolve(app.composerPlaceholder?.() ?? null).then((p) => {
-      if (p && typeof p.blank === 'string' && typeof p.followUp === 'string') setHostPlaceholders(p);
-    }).catch(() => {});
-  }, []);
   const loadMentionFiles = React.useCallback(() => {
     void app.projectFiles().then((listing) => setMentionFiles([
       ...(listing.files ?? []).filter((f) => ['image', 'video', 'audio'].includes(f.kind)),
       ...(listing.pages ?? []).map((p) => ({ ...p, kind: 'mg' })),
     ])).catch(() => {});
-    /* coverLayers 只在封面编辑器的桥上有:影片场景 undefined,必须兜成空数组再 .then */
-    void Promise.resolve(app.coverLayers?.() ?? []).then((layers) => setCoverLayerItems(layers)).catch(() => {});
   }, []);
-  /* TinTin cover (2026-10-29): the @ menu only opens when some provider already has items
-     (MentionMenuPlugin.triggerFn suppresses an empty menu), and this load is what fills the
-     providers — but it only runs on the menu's onOpen. The film page bootstraps on its always-present
-     moment group; the cover page (timeline and skills hidden) had zero providers at first open, so the
-     menu never opened and the data never loaded — a deadlock. Load once at mount instead. */
-  React.useEffect(() => { loadMentionFiles(); }, [loadMentionFiles]);
   /** Studio's things become this message's pills (what each points at is kept by its pill's id) */
   const takeStudioRefs = React.useCallback((refs: StudioRef[]): PromptReference[] => {
     const pills = refs.map((ref) => refPill(undefined, ref));
@@ -341,7 +364,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
   const [contextNoticeOff, setContextNoticeOff] = React.useState<string | null>(null);
   const contextFull = Boolean(agentContext && agentContext.size > 0 && agentContext.used / agentContext.size >= CONTEXT_NOTICE_SHARE) && contextNoticeOff !== sessionId;
 
-  /* the skills this message can name (the Skills button, and `/`) */
+  /* the skills this message can name (the Skills button, and `@`) */
   const [skillListing, setSkillListing] = React.useState<SkillListing | null>(null);
   const reloadSkills = React.useCallback(async () => {
     const next = await app.skills?.list(project.path, agent).catch(() => null);
@@ -391,72 +414,12 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     window.addEventListener(MAKE_SKILL, make);
     return () => { window.removeEventListener(SKILLS_CHANGED, changed); window.removeEventListener(MAKE_SKILL, make); };
   }, [reloadSkills, skillListing, t]);
-  /* the agent's own skills hidden in OpenFilm: not offered among its commands either */
-  const hiddenSkills = React.useMemo(() => new Set((skillListing?.own.filtered ? skillListing.own.skills.filter((s) => !s.allowed) : []).map((s) => s.name)), [skillListing]);
-
-  /* the agent's own commands, a `/` at the start of the message, as in its own chat: they go as typed; above them, the
-     skills, each a pill */
-  const agentCommands = useAgentCommands(agent);
-  const commandMenu = React.useMemo(() => (agentCommands.length || nameableSkills.length ? {
-    label: t('composer.commands'),
-    providers: [...(nameableSkills.length ? [{
-      id: 'skills',
-      groupLabel: t('skills.button'),
-      items: nameableSkills.map((skill) => ({
-        id: skillReferenceId(skill.name),
-        kind: 'skill' as const,
-        icon: Blocks,
-        label: skillWords(skill.name).title,
-        ...(skillWords(skill.name, skill.description).summary ? { detail: skillWords(skill.name, skill.description).summary, describes: true } : {}),
-        keywords: [skill.name, skillWords(skill.name).title],
-        select: () => skillPill(skill),
-      })),
-    }] : []), ...(agentCommands.length ? [{
-      id: 'commands',
-      groupLabel: t('composer.commands'),
-      items: agentCommands.filter((c) => !hiddenSkills.has(c.name)).map((c) => ({
-        id: `command:${c.name}`,
-        kind: 'file' as const,
-        icon: SquareSlash,
-        label: `/${c.name}`,
-        /* what it does, cut to the row */
-        ...(c.description ? { detail: c.description, describes: true } : {}),
-        /* found by its name, as in the agent's own chat (its description would put a word in it first) */
-        keywords: [c.name],
-        select: () => ({ text: `/${c.name}` }),
-      })),
-    }] : [])],
-  } : undefined), [agentCommands, nameableSkills, hiddenSkills, skillPill, skillWords, t]);
   const mentionProviders = React.useMemo<MentionProvider[]>(() => {
     const picked = selection?.refs ?? [];
     const range = selection ? selectionRange(selection) : null;
     const pickedDetail = picked.length ? `${refPill(undefined, picked[0]!).label}${picked.length > 1 ? ` +${picked.length - 1}` : ''}` : '';
-    /* TinTin cover (2026-10-28): the canvas's layers, above the files. A layer becomes a layer pill
-       (its current value rides along as `text`), so the sent block names it like a Studio layer. */
-    const cut = (value: unknown) => {
-      const text = Array.isArray(value) ? value.map((v) => String(v)).join(' / ') : typeof value === 'string' ? value : '';
-      return text.length > 42 ? `${text.slice(0, 41).trimEnd()}…` : text;
-    };
-    const coverLayerGroup: MentionProvider[] = coverLayerItems.length ? [{
-      id: 'cover-layer',
-      groupLabel: locale.startsWith('zh') ? '图层' : 'Layers',
-      items: coverLayerItems.map((layer) => ({
-        id: `cover-layer:${layer.id}`,
-        kind: 'element' as const,
-        label: layer.label,
-        ...(cut(layer.value) ? { detail: cut(layer.value) } : {}),
-        keywords: [layer.id, layer.label, layer.propsKey ?? ''],
-        select: () => takeStudioRefs([{
-          kind: 'layer', clipId: 'cover', loc: null, label: layer.label,
-          text: cut(layer.value) || null, tag: layer.propsKey ?? layer.id, source: null,
-        } as StudioRef]),
-      })),
-    }] : [];
     return [
-      ...coverLayerGroup,
-      /* TinTin cover: no film timeline — the host sets `timelineDisabled`, so no moment/range/selection group
-         (nothing on a cover to point a time at). The film chat keeps it unchanged. */
-      ...(app.timelineDisabled ? [] : [{
+      {
         id: 'moment',
         groupLabel: t('mention.groupMoment'),
         items: [{
@@ -484,9 +447,8 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
           /* everything selected, each its own pill: the clips picked on the timeline, then the layer picked in one */
           select: () => takeStudioRefs(picked),
         }],
-      }]),
+      },
       {
-        id: 'asset',
         id: 'asset',
         groupLabel: t('mention.groupAssets'),
         items: mentionFiles.map((file) => {
@@ -498,24 +460,27 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
           };
         }),
       },
-      /* TinTin(2026-10-24 §9.2 用户裁决): 技能也能从 @ 菜单引用 —— 原生 + 服务端全部技能,
-         与 `/` 命令菜单同源(nameableSkills), 选中即插入技能 pill(正文注入走 app.skills.texts)。
-         TinTin cover(2026-10-29 用户裁决): 封面的 @ 只做引用(图层/素材), 技能归 `/` —— 桥置 hideSkillsInMentions 时隐藏。 */
-      ...(!(window.openfilmDesktop as unknown as { hideSkillsInMentions?: boolean } | undefined)?.hideSkillsInMentions && nameableSkills.length ? [{
+      /* the skills, each the pill the Skills button makes: after the files, which people reach for most and which stop
+         at 20. Every one, uncut: an agent's own can be a hundred or more, and a person may not remember the name to type */
+      {
         id: 'skills',
         groupLabel: t('skills.button'),
-        items: nameableSkills.slice(0, 32).map((skill) => ({
-          id: skillReferenceId(skill.name),
-          kind: 'skill' as const,
-          icon: Blocks,
-          label: skillWords(skill.name).title,
-          ...(skillWords(skill.name, skill.description).summary ? { detail: skillWords(skill.name, skill.description).summary, describes: true } : {}),
-          keywords: [skill.name, skillWords(skill.name).title],
-          select: () => skillPill(skill),
-        })),
-      }] : []),
+        limit: Infinity,
+        items: nameableSkills.map((skill) => {
+          const words = skillWords(skill.name, skill.description);
+          return {
+            id: skillReferenceId(skill.name),
+            kind: 'skill' as const,
+            label: words.title,
+            /* what it does, cut to the row */
+            ...(words.summary ? { detail: words.summary, describes: true } : {}),
+            keywords: [skill.name],
+            select: () => skillPill(skill),
+          };
+        }),
+      },
     ];
-  }, [selection, mentionFiles, coverLayerItems, locale, nameableSkills, skillPill, skillWords, t, takeStudioRefs]);
+  }, [selection, mentionFiles, nameableSkills, skillWords, skillPill, t, takeStudioRefs]);
   const onComposerChange = React.useCallback((state: PromptEditorState) => {
     setFollowUp(state.text);
     setFollowUpRefs(state.references);
@@ -550,15 +515,31 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
       const words = skillWords(name, skill?.description);
       return { title: words.title, rows: [], text: words.text };
     }
+    /* a file brought in: where it is, or why it could not be had */
+    const file = attachmentOf(pill);
+    if (file) {
+      return {
+        title: file.folder ? `${file.name}/` : file.name,
+        rows: file.path ? [[t('refCard.path'), file.path] as [string, string]] : [],
+        ...(file.state === 'failed' && file.error ? { text: [file.error] } : {}),
+      };
+    }
     return pillCard(pill, t);
-  }, [t, nameableSkills, skillWords]);
+  }, [t, nameableSkills, skillWords, attachmentOf]);
   const revealPill = React.useCallback((pill: { id: string; label: string; target?: Record<string, unknown> }) => {
     /* a skill: its page in the Community; anything else: where it is in Studio */
     const name = skillReferencePackage(pill.id);
     if (name) { app.showExamples?.({ kind: 'skill', name }); return; }
+    /* a file brought in opens to look at: a picture large, a video played, a text read; a folder, shown where it is */
+    const file = attachmentOf(pill);
+    if (file) {
+      if (file.folder) { if (file.path && file.state === 'ready') void desktopBridge()?.revealPath(file.path); }
+      else if (file.previewUrl) setOpenedFile({ name: file.name, kind: file.kind, url: file.previewUrl, ...(file.mediaType ? { mediaType: file.mediaType } : {}) });
+      return;
+    }
     const ref = refFromPill(pill);
     if (ref) app.showInStudio(ref);
-  }, []);
+  }, [attachmentOf]);
   const sentPills = React.useMemo(
     () => ({ onReveal: revealPill, revealLabel: t('library.revealReference'), describe: describePill }),
     [revealPill, describePill, t],
@@ -574,7 +555,8 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     const listeners = new Set<() => void>();
     const hover: PromptPillHover = {
       hover: (pill) => {
-        const path = pill && !pill.target ? fileReferencePath(pill.id) : null;
+        /* a file of the project lights up in Studio's media; one elsewhere on the disk is in no pane there */
+        const path = pill && !pill.target ? projectFilePath(fileReferencePath(pill.id)) : null;
         app.highlightInStudio(pill ? refFromPill(pill) ?? (path ? { kind: 'file', path, fileKind: pill.kind } : null) : null);
       },
       lit: (pill) => {
@@ -635,8 +617,10 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     const shown = conversation === shownSession.current;
     const turn = createLocalAgentTurn(id, agent, ordered.length);
     const agentStore = useLocalAgents.getState();
-    const options = agentOptions(agentStore, agent);
-    const prefs = effectivePrefs(agentStore.prefs, agent, agentStore.roster, options);
+    const own = sessions.find((s) => s.id === sessionId)?.agentPrefs;
+    const picked = conversationPrefs(agentStore.prefs, own);
+    const options = agentOptions({ ...agentStore, prefs: picked }, agent);
+    const prefs = effectivePrefs(picked, agent, agentStore.roster, options);
     const summary = agentModelSummary(options, prefs);
     /* how hard it thinks, as the menu offers it */
     const effortOption = options?.find((o) => o.category === 'thought_level');
@@ -652,7 +636,12 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     if (shown) setTurns((list) => mergeAssetLists([started], list));
     /* the conversation is named by the words: a reference reads as its name there, not as "[1: name]" */
     const title = instruction.replace(/\[\d+: ([^\]]*)\]/g, '$1').replace(/\s+/g, ' ').trim().slice(0, 80);
-    touchSession(sessionId, (s) => ({ title: s.title || title, turns: s.turns + 1 }));
+    /* the agent and the model and effort it ran on, kept on the conversation: it goes on with them when opened again.
+       A turn the agent started by itself keeps no options: the person chose none there */
+    touchSession(sessionId, (s) => ({
+      title: s.title || title, turns: s.turns + 1, agent,
+      ...(origin ? {} : { agentPrefs: { ...s.agentPrefs, [agent]: { ...s.agentPrefs?.[agent], ...keptPrefs(options, prefs) } } }),
+    }));
     const meta: LocalAgentTurnMeta = {
       turnId: id, projectId: projectKey, projectTitle: project.name, sessionId, agent, prompt: instruction,
       turnNo: ordered.length, startedAt: Date.now(), turn: started,
@@ -678,7 +667,10 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
         if (!fileChanges.length) return;
         const kept: Turn & TurnFileChanges = { ...done, fileChanges };
         saveLocalAgentTurn(meta.projectId, kept, turn.items);
-        setTurns((list) => list.map((item) => (item.id === id ? { ...item, fileChanges } : item)));
+        /* film.html gone as the turn ends: offered back under its reply, as the turn found it. Not kept with the turn:
+           the app keeps the file only while it runs (lib/film-restore) */
+        const filmLost = offersFilmRestore(found);
+        setTurns((list) => list.map((item) => (item.id === id ? { ...item, fileChanges, ...(filmLost ? { filmLost } : {}) } : item)));
       });
     });
     keep();
@@ -689,7 +681,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
    * Send a turn to the agent: what it is sent (`prepared`: the text, and the pictures) may take a moment to make. It
    * settles the turn the agent's run ends on: this one, or the last message sent into it while it ran (steerTurn).
    */
-  function runTurn(opened: ReturnType<typeof openTurn>, prepared: Promise<{ text: string; images: PromptImage[]; skills?: string[] }>): void {
+  function runTurn(opened: ReturnType<typeof openTurn>, prepared: Promise<{ text: string; images: PromptImage[]; skills?: string[]; said?: () => void }>): void {
     const { turn, meta, prefs, ready } = opened;
     const id = meta.turnId;
     const finish = (lastTurnId: string | undefined, patch: Partial<Turn & TurnBalance>) => {
@@ -698,7 +690,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     };
     /* the agent's own session of this conversation, gone on with (after a restart too); a new one is kept for next time */
     const resume = sessions.find((s) => s.id === sessionId)?.agentSessions?.[agent] ?? null;
-    const run = Promise.all([prepared, ready]).then(([{ text, images, skills }]) => runLocalAgentTurn({
+    const run = Promise.all([prepared, ready]).then(([{ text, images, skills, said }]) => runLocalAgentTurn({
       projectId: projectKey,
       conversation: sessionId,
       resume,
@@ -709,8 +701,10 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
       turn,
       options: prefs,
       meta,
+      onOptions: (options) => useLocalAgents.getState().noteOptions(agent, options),
+      /* Studio's note in the message reached the agent: Studio counts it told (lib/studio-film keptNote) */
+      onStarted: said,
       onSessionInfo: (info) => {
-        useLocalAgents.getState().noteOptions(agent, info.configOptions);
         /* a session it could not take up again has none of the skills' pages from before: those of this message only */
         const fresh = !info.resumed || info.sessionId !== resume;
         if (info.sessionId && fresh) {
@@ -740,16 +734,17 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
    * (an agent that takes steering). It shows as a turn of its own, what the agent says from then on under it, and the
    * running one is done. One that did not join (the turn ended meanwhile) is sent once that run ends.
    */
-  function steerTurn(fromId: string, opened: ReturnType<typeof openTurn>, prepared: Promise<{ text: string; images: PromptImage[]; skills?: string[] }>): void {
+  function steerTurn(fromId: string, opened: ReturnType<typeof openTurn>, prepared: Promise<{ text: string; images: PromptImage[]; skills?: string[]; said?: () => void }>): void {
     /* the agent's run going now (one at a time in a conversation): a message that did not join waits for it */
     const run = [...runs.current.values()].at(-1) ?? Promise.resolve();
-    void Promise.all([prepared, opened.ready]).then(async ([{ text, images, skills }]) => {
+    void Promise.all([prepared, opened.ready]).then(async ([{ text, images, skills, said }]) => {
       if (await steerLocalAgentTurn(fromId, opened.turn, text, images)) {
+        said?.();
         settlers.current.get(fromId)?.({ status: 'ready' });
         return;
       }
       await run.catch(() => {});
-      runTurn(opened, Promise.resolve({ text, images, ...(skills ? { skills } : {}) }));
+      runTurn(opened, Promise.resolve({ text, images, ...(skills ? { skills } : {}), ...(said ? { said } : {}) }));
     });
   }
 
@@ -759,23 +754,31 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     const steer = active && asset ? canSteer(asset.id) : false;
     if (active && !steer) { setQueued(true); return; }
     setQueued(false);
-    /* the sentence as the agent reads it: a pill becomes "[n: name]", and what each number is follows, in a block */
+    /* the sentence as the agent reads it: a pill becomes "[n: name]", and what each number is follows, in a block; a
+       file brought in becomes where it is */
+    const attached = attachmentsInText(composerFiles.files, followUpRefs);
+    const attachedById = new Map(attached.map((f) => [f.id, f]));
     const used: StudioRef[] = [];
     const instruction = resolvePromptReferences(followUp, (pillId, index) => {
       const ref = studioRefs.get(pillId);
       if (!ref) return null;
       used[index - 1] = ref;
       return `[${index}: ${refPill(pillId, ref).label}]`;
-    }, (pillId) => { const name = skillReferencePackage(pillId); return name ? `skill “${name}”` : null; }).trim();
+    }, (pillId) => {
+      const name = skillReferencePackage(pillId);
+      if (name) return `skill “${name}”`;
+      const file = attachedById.get(pillId);
+      return file ? attachmentWords(file) ?? '' : null;
+    }).trim();
     /* the skills it names, for this message: each one's SKILL.md follows it, unseen in the chat, the first time this
        conversation's agent session meets that skill (lib/skill-pages) */
     const agentSession = sessions.find((s) => s.id === sessionId)?.agentSessions?.[agent] ?? null;
     const skillNames = pagesToSend(activatedSkillIds(followUpRefs), sessions.find((s) => s.id === sessionId)?.skillsGiven, agent, agentSession);
     if (!instruction) return;
-    const blocker = attachmentBlocker(composerFiles.files, t);
+    const blocker = attachmentBlocker(attached, t);
     if (blocker) { setFollowUpError(blocker); return; }
     setFollowUpError(null);
-    const promptDisplay = buildPromptDisplay(followUp, followUpRefs);
+    const promptDisplay = buildPromptDisplay(followUp, followUpRefs.map(sentPill));
     thread.scrollToBottom({ smooth: true });
     composerRef.current?.clear();
     setFollowUp('');
@@ -783,9 +786,8 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     setStudioRefs(new Map());
     setFileRefs([]);
     setSkillRefs([]);
-    const files = composerFiles.take();
+    const files = composerFiles.take(attached.map((f) => f.id));
     const id = makeLocalAgentTurnId();
-    const said = instruction + attachedText(files);
     const refs = used.filter(Boolean);
     const stage = selection?.stage ?? null;
     /* each reference's picture is kept in the project for the agent (the block names it), and sent to one that takes pictures */
@@ -794,12 +796,15 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     /* an example pointed at: its folder fetched now if it is not yet (the turn waits, as it waits for its reply) */
     const withFolders = Promise.all(refs.map(async (ref) => (ref.kind === 'example' && !ref.folder
       ? { ...ref, folder: await app.exampleFolder?.(ref.id).catch(() => undefined) } : ref)));
-    /* the pictures sent: the references' first, then the attached ones while there is room (the rest by their path) */
-    const prepared = withFolders.then((ready) => Promise.all([referencePictures(ready, { project: project.path, turnId: id }), skillTexts])
-      .then(async ([{ pictures, images }, skills]) => ({
-        text: said + studioReferencesText(ready, { stage, pictures }) + skills.map((s) => `\n\n${s.text}`).join(''),
+    /* the pictures sent: the references' first, then the files brought in, in the order of their pills, while there is
+       room (the rest by their path) */
+    /* what the person changed while the agent last worked that Studio kept over its writes, said with this message */
+    const prepared = withFolders.then((ready) => Promise.all([referencePictures(ready, { project: project.path, turnId: id }), skillTexts, keptNote(project.id, sessionId)])
+      .then(async ([{ pictures, images }, skills, kept]) => ({
+        text: instruction + studioReferencesText(ready, { stage, pictures }) + kept.text + skills.map((s) => `\n\n${s.text}`).join(''),
         images: [...images, ...await attachedPictures(files, PROMPT_PICTURES_MAX - images.length)],
         skills: skills.map((s) => s.name),
+        said: kept.said,
       })));
     const opened = openTurn(id, instruction, promptDisplay ?? null, turnAttachments(files));
     if (steer && asset) steerTurn(asset.id, opened, prepared);
@@ -823,9 +828,32 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
   );
 
   const agentName = agent === 'byok' ? t('composer.agentOwnKey') : la.roster?.find((a) => a.id === agent)?.name ?? agent;
+  /* the last turn failed for the account of the person's own agent it ran on: Switch account, and whose it is */
+  const failedOn = asset?.localAgent?.id ?? agent;
+  const switchFor = turnError && failedOn !== 'byok' && accountTrouble(turnError) && desktopBridge()?.openSettings
+    ? { who: accountName(la.roster?.find((a) => a.id === failedOn)?.account) } : null;
+  /* DeepSeek Harness's model runs on an API key this computer has none of: said in the chat's words, and a model of
+     the person's DeepSeek account offered in its place, picked as the model menu picks it (for this agent from now on) */
+  const keyless = turnError && failedOn === 'deepseek' ? routeWithoutKey(turnError) : null;
+  const onAccount = keyless ? accountModel(agentOptions(la, 'deepseek')) : null;
+  /* any of the account's models counts, picked here or in the menu: the one they are on is named */
+  const onAccountPicked = onAccount ? accountModelOf(agentOptions(la, 'deepseek'), agentPrefs.deepseek?.[onAccount.configId]) : null;
+  const pickAccountModel = () => {
+    if (!onAccount) return;
+    la.setPref('deepseek', onAccount.configId, onAccount.value);
+    keepOnSession((s) => ({ agentPrefs: { ...s.agentPrefs, deepseek: { ...s.agentPrefs?.deepseek, [onAccount.configId]: onAccount.value } } }));
+    composerRef.current?.focus();
+  };
+  const wasName = agentWas === 'byok' ? t('composer.agentOwnKey') : agentWas ? la.roster?.find((a) => a.id === agentWas)?.name ?? AGENT_DEFINITIONS[agentWas]?.name ?? agentWas : '';
 
   const editComposerCard = (
     <div className="flex flex-col gap-1">
+      {/* the agent this conversation used cannot be used now: the next message goes to the one picked below */}
+      {agentWas ? (
+        <div className="flex items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-[12px] text-[var(--text-muted)]">
+          <span className="min-w-0 flex-1">{t('composer.agentWas').replace('{name}', wasName)}</span>
+        </div>
+      ) : null}
       {contextFull ? (
         <div className="flex items-center gap-2 rounded-[10px] border border-[var(--border)] bg-[var(--surface-2)] py-1.5 pl-3 pr-1.5 text-[12px] text-[var(--text-muted)]">
           <span className="min-w-0 flex-1">{t('composer.contextFull')}</span>
@@ -836,11 +864,11 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
         </div>
       ) : null}
       <div
-        /* a file from the disk dropped on the card is brought along (it goes into the project); Studio's things
-           dropped on it become pills */
+        /* a file from the disk dropped on the card is brought along, a pill where it was let go (on the words) or at
+           the cursor; Studio's things dropped on it become pills too */
         onKeyDownCapture={onComposerKey}
         onDragOver={(event) => {
-          if (!transferHasStudioRefs(event.dataTransfer) && ![...event.dataTransfer.types].includes('Files')) return;
+          if (!showsDropCaret(event.dataTransfer)) return;
           event.preventDefault();
           event.dataTransfer.dropEffect = 'copy';
           setDropping(true);
@@ -864,66 +892,13 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
           if (!transferHasFiles(event.dataTransfer)) return;
           event.preventDefault();
           event.stopPropagation();
-          composerFiles.add(filesFromTransfer(event.dataTransfer));
+          attachFiles(filesFromTransfer(event.dataTransfer), { x: event.clientX, y: event.clientY });
         }}
         data-prompt-shell=""
         className={`rounded-[12px] border bg-[var(--composer-bg)] shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-colors duration-200 ${
           dropping ? 'border-[var(--accent)]' : 'border-[var(--composer-border)] focus-within:border-[var(--composer-border-active)]'
         }`}
       >
-        {composerFiles.files.length > 0 && (
-          /* whole rows: up to three show at once, only more than that scrolls */
-          <div className="flex max-h-[144px] flex-wrap gap-1.5 overflow-y-auto px-3.5 pt-3">
-            {composerFiles.files.map((file) => {
-              const Icon = attachmentIcon({ name: file.name, mediaType: file.mediaType, folder: file.folder });
-              const remove = (
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  onClick={(event) => { event.stopPropagation(); composerFiles.drop(file.id); }}
-                  aria-label={t(file.kind === 'image' ? 'composer.removeImage' : 'composer.removeFile')}
-                  className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition group-hover:opacity-100"
-                >
-                  <X size={10} />
-                </span>
-              );
-              const busy = file.state === 'pending' ? <Loader2 size={12} className="absolute inset-0 m-auto animate-spin text-white drop-shadow" /> : null;
-              /* a picture shows itself; a video, a frame of itself with a play mark (once one is had) */
-              const picture = file.kind === 'image' ? file.previewUrl : file.thumb;
-              /* clicked, it opens to look at: a picture large, a video played, a text read; a folder, shown where it is */
-              const folderPath = file.folder && file.state === 'ready' ? file.path : undefined;
-              const open = file.previewUrl || folderPath ? {
-                role: 'button' as const,
-                tabIndex: 0,
-                'aria-label': t(folderPath ? 'composer.revealFolder' : 'composer.openAttachment').replace('{name}', file.name),
-                onClick: () => (folderPath
-                  ? void desktopBridge()?.revealPath(folderPath)
-                  : setOpenedFile({ name: file.name, kind: file.kind, url: file.previewUrl!, ...(file.mediaType ? { mediaType: file.mediaType } : {}) })),
-                onKeyDown: (event: React.KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); (event.currentTarget as HTMLElement).click(); } },
-              } : {};
-              return picture ? (
-                <div key={file.id} title={file.error ?? file.path ?? file.name} {...open}
-                  className={`group ${ATTACHMENT_THUMB} transition ${file.previewUrl ? 'cursor-pointer' : ''} ${file.state === 'failed' ? 'border-[var(--danger)]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'}`}>
-                  <img src={picture} alt={file.name} className={`h-full w-full object-cover transition ${file.state === 'ready' ? '' : 'opacity-45'}`} />
-                  {file.kind !== 'image' && !busy ? <PlayMark /> : null}
-                  {busy}
-                  {remove}
-                </div>
-              ) : (
-                <div key={file.id} title={file.error ?? file.path ?? file.name} {...open}
-                  className={`group ${ATTACHMENT_CARD} transition ${file.previewUrl || folderPath ? 'cursor-pointer' : ''} ${file.state === 'failed' ? 'border-[var(--danger)]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'}`}>
-                  <AttachmentCardBody
-                    icon={file.state === 'pending' ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
-                    name={file.name}
-                    /* a folder's size is not read: where it is says more */
-                    detail={file.state === 'failed' ? 'Not added' : file.folder ? (file.path ? attachmentPlace(file.path) : null) : formatFileSize(file.size)}
-                  />
-                  {remove}
-                </div>
-              );
-            })}
-          </div>
-        )}
         {openedFile ? <AttachmentPreview item={openedFile} onClose={() => setOpenedFile(null)} /> : null}
         <div className="flex items-end gap-1 py-2.5 pl-3.5 pr-2">
           <div className="min-w-0 flex-1">
@@ -938,13 +913,15 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
               onTransferReferences={onTransferReferences}
               revealLabel={t('library.revealReference')}
               removeLabel={t('library.removeReference')}
-              placeholder={hostPlaceholders ? (blank ? hostPlaceholders.blank : hostPlaceholders.followUp) : t(blank ? 'project.composerPlaceholderBlank' : 'project.composerPlaceholder')}
+              placeholder={t(blank ? 'project.composerPlaceholderBlank' : 'project.composerPlaceholder')}
               minHeight={22}
               maxHeight={158}
               contentClassName="text-[14px] leading-[22px] text-[var(--chat-text)]"
-              onPasteFiles={(files) => composerFiles.add(files)}
+              onPasteFiles={(files) => attachFiles(files)}
+              pillState={attachmentState}
+              pillOpens={opensPill}
+              showsDropCaret={showsDropCaret}
               mentions={{ providers: mentionProviders, label: t('mention.menu'), onOpen: loadMentionFiles }}
-              commands={commandMenu}
             />
           </div>
           {/* while it works: Stop, or Send once something is written (it goes into the turn, or after it); Esc stops */}
@@ -962,14 +939,21 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
         </div>
       </div>
       <div className="flex items-center gap-0.5 px-0.5">
-        <ModelPopover placement="top" align="start" />
+        <ModelPopover
+          placement="top"
+          align="start"
+          agent={agent}
+          prefs={agentPrefs}
+          onPick={(id) => keepOnSession(() => ({ agent: id }))}
+          onPref={(id, configId, value) => keepOnSession((s) => ({ agentPrefs: { ...s.agentPrefs, [id]: { ...s.agentPrefs?.[id], [configId]: value } } }))}
+        />
         <div className="min-w-0 flex-1" />
         <input
           ref={attachInputRef}
           type="file"
           multiple
           hidden
-          onChange={(event) => { composerFiles.add(Array.from(event.target.files ?? [])); event.target.value = ''; }}
+          onChange={(event) => { attachFiles(Array.from(event.target.files ?? [])); event.target.value = ''; }}
         />
         <Tooltip label={t('project.addAttachment')}>
           <button type="button" onClick={() => attachInputRef.current?.click()} className="openfilm-composer-tool" aria-label={t('project.addAttachment')}>
@@ -993,11 +977,12 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     </div>
   );
 
-  /* Esc stops the turn while it runs (the send button's other half) */
+  /* Esc stops the turn while it runs (the send button's other half): only one pressed in the chat, not held, and not
+     just after one in Studio (lib/esc-stop.ts) */
+  const escStops = React.useRef(escStopper());
   React.useEffect(() => {
     if (!active || !asset) return undefined;
-    /* only an Esc pressed in the chat: one in Studio closes Studio's menu or dialog, it does not stop the agent */
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !event.defaultPrevented && inChat(event.target)) void cancelLocalAgentTurn(asset.id); };
+    const onKey = (event: KeyboardEvent) => { if (escStops.current(event, inChat(event.target))) void cancelLocalAgentTurn(asset.id); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [active, asset]);
@@ -1112,7 +1097,25 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
                   ) : null}
                   {turnError ? (
                     <p role="alert" className="text-xs text-[var(--err)]">
-                      {turnError}{' '}
+                      {keyless ? t(onAccount ? 'composer.routeNoKey' : 'composer.routeNoKeyNoAccount') : turnError}{' '}
+                      {onAccount ? (
+                        <span className="text-[var(--text-muted)]">
+                          {onAccountPicked ? `${t('composer.accountModelPicked').replace('{model}', onAccountPicked.name)} ` : (
+                            <><button type="button" onClick={pickAccountModel} className="underline underline-offset-2 hover:text-[var(--text)]">
+                              {t('composer.useAccountModel').replace('{model}', onAccount.name)}
+                            </button>{' '}</>
+                          )}
+                        </span>
+                      ) : null}
+                      {/* failed for its account: whose it is, and Settings → Agents to switch it */}
+                      {switchFor ? (
+                        <span className="text-[var(--text-muted)]">
+                          {switchFor.who ? `${t('composer.signedInAs').replace('{account}', switchFor.who)} ` : null}
+                          <button type="button" onClick={() => desktopBridge()?.openSettings?.('agents')} className="underline underline-offset-2 hover:text-[var(--text)]">
+                            {t('composer.switchAccount')}
+                          </button>{' '}
+                        </span>
+                      ) : null}
                       {/* what to send when it keeps failing */}
                       <span className="text-[var(--text-muted)]"><CopyDiagnostics /></span>
                     </p>

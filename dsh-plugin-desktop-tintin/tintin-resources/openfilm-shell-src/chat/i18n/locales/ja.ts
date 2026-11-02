@@ -1,5 +1,9 @@
 import type { Words } from './words';
 
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'ごみ箱'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'ゴミ箱' : 'ゴミ箱';
+
 export const ja: Words = {
   /* a turn of the app's own agent stopped: the service its model runs on has no balance left (BalanceNotice) */
   balance: {
@@ -113,20 +117,20 @@ export const ja: Words = {
   },
   agent: {
     contextCompacted: 'これまでの会話を要約にまとめました',
+    modelGone: 'このエージェントでは {model} を使えなくなりました。モデルを選び直してください。',
+    settingFailed: '{setting} を {value} に設定できませんでした: {error}',
+    settingRejected: 'エージェントがこの設定を適用できませんでした。',
     thinking: '考え中',
   },
   assets: {
     close: '閉じる',
     download: 'ダウンロード',
-    imageActualSize: '原寸',
-    imageFit: '全体を表示',
     noPreview: 'この種類のファイルはここでプレビューできません。ダウンロードしてください',
     previewFailed: 'このファイルを読み込めませんでした',
   },
   composer: {
     contextFull: 'この会話は長くなっています。新しい会話のほうがうまくいきます。',
     contextFullNew: '新しい会話',
-    commands: 'コマンド',
     agentLoading: '読み込み中…',
     agentNone: 'エージェント',
     agentNoneShown: 'チャットで使えるエージェントがオンになっていません。',
@@ -139,6 +143,7 @@ export const ja: Words = {
     agentSection: 'エージェント',
     agentSetUp: '設定',
     agentWaiting: 'サインイン中…',
+    agentWas: 'この会話は {name} を使っていましたが、今は使えません。次のメッセージは下で選んだエージェントに送られます。',
     effort: '思考レベル',
     filesFailed: '{names} を追加できませんでした：{error} 削除してから送信してください。',
     filesPending: 'ファイルを追加しています。',
@@ -153,8 +158,12 @@ export const ja: Words = {
     copyDiagnostics: '診断レポートをコピー',
     copyDiagnosticsHint: 'このコンピュータで OpenFilm が見つけた状況と最近の問題。issue に貼り付けられます',
     diagnosticsCopied: 'コピーしました',
-    removeFile: 'ファイルを削除',
-    removeImage: '画像を削除',
+    switchAccount: 'アカウントを切り替え',
+    signedInAs: '{account} でサインイン中です。',
+    routeNoKey: 'このモデルには DeepSeek の API キーが必要ですが、このコンピューターには設定されていません。DeepSeek アカウントにだけサインインしている場合は、アカウントのモデルを使ってください。',
+    routeNoKeyNoAccount: 'このモデルには DeepSeek の API キーが必要ですが、このコンピューターには設定されていません。DeepSeek Harness で DeepSeek アカウントにサインインするか、モデル設定で API キーを追加してください。',
+    useAccountModel: '{model} を使う',
+    accountModelPicked: '{model} に切り替えました。もう一度送信してください。',
     speed: '速度',
     thumbOnly: 'メッセージにはサムネイルだけが残ります。元のファイルは元の場所にあります。貼り付けたものはプロジェクトに保存されています。',
   },
@@ -209,8 +218,8 @@ export const ja: Words = {
     assets: '素材',
     addAttachment: 'ファイルを追加',
     close: '閉じる',
-    composerPlaceholder: '変更したい内容を入力。@ でファイル、タイミング、選択中のものを指定できます',
-    composerPlaceholderBlank: '作りたい映像を説明してください。@ でこのプロジェクトのファイルを使えます',
+    composerPlaceholder: '変更したい内容を入力。@ でファイル、スキル、タイミング、選択中のものを指定できます',
+    composerPlaceholderBlank: '作りたい映像を説明してください。@ でファイルやスキルを追加できます',
     dismiss: '閉じる',
     jumpToLatest: '最新へ移動',
     loadingMessages: '会話を読み込み中…',
@@ -288,7 +297,7 @@ export const ja: Words = {
     cardDoes: '用途',
     next: '次へ',
     cancel: 'キャンセル',
-    replaceNote: '{names} はすでにあります。追加すると古いものはゴミ箱に移動します。',
+    replaceNote: `{names} はすでにあります。追加すると古いものは${TRASH}に移動します。`,
     replaceAndAdd: '置き換えて追加',
     scriptsCount: 'スクリプト {n} 個',
     fromLink: 'リンクから',
@@ -399,5 +408,15 @@ export const ja: Words = {
     added: '新規',
     removed: '削除',
     changed: '変更',
+  },
+  /** a turn that ended with film.html gone: under its reply, put it back as the turn found it (lib/film-restore) */
+  filmRestore: {
+    lost: 'このターンで film.html が削除され、今はありません。',
+    restore: 'film.html をこのターンの前の状態に戻す',
+    restoring: '復元しています…',
+    restored: 'film.html をこのターンの前の状態に戻しました。',
+    exists: 'film.html はすでに戻っているため、そのままにしました。',
+    gone: 'このターンの前のコピーはもう保持されていません。バージョン履歴から film.html を復元してください。',
+    failed: 'film.html を復元できませんでした。もう一度試すか、バージョン履歴から復元してください。',
   },
 };

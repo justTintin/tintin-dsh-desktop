@@ -511,6 +511,8 @@ export interface TimelineFilm {
     silent?: boolean;
   }[];
   captions: readonly { key: string; startMs: number; durMs: number; text: string; loc?: string }[];
+  /** Video clips whose file was not probed (yet): whether they carry sound is not known. */
+  unprobed?: number;
   /**
    * film.html as on disk. The evaluated lists only hold clips with a length, so an empty track vanishes from them;
    * the timeline still draws it, as a place to drop onto.

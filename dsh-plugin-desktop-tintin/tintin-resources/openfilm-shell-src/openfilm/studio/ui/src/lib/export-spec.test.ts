@@ -25,7 +25,27 @@ test('the sizes measured exports came to fall inside the range shown', () => {
   assert.ok(video('16:9', 16_523, true)[1] < 21e6 / 8 * 16.523);
 });
 
-test('bars cost nothing; half the length is half the size; a CRF range is 16× wide, fixed-rate codecs ±10%', () => {
+test('ProRes exports measured on Windows (prores_ks) fall inside the range shown, from a title card to detailed footage', () => {
+  /* 5 s at 30 fps, no sound */
+  const prores = (codec: 'prores422hq' | 'prores4444', shortEdge: number) =>
+    exportEstimateBytes({ codec, size: { w: Math.round(shortEdge * 16 / 9), h: shortEdge }, fps: 30, quality: 'high', durationMs: 5_000, audio: false });
+  /* #227: a title card made in the app, a dark background and white words fading in */
+  within(prores('prores422hq', 1080), 13_338_371, 'title card, 422 HQ 1080p');
+  within(prores('prores4444', 720), 9_947_711, 'title card, 4444 720p');
+  within(prores('prores4444', 1080), 17_457_502, 'title card, 4444 1080p, transparent');
+  /* another title card, from 720p to 4K */
+  within(prores('prores422hq', 720), 4_810_000, 'title card, 422 HQ 720p');
+  within(prores('prores422hq', 2160), 27_210_000, 'title card, 422 HQ 4K');
+  within(prores('prores4444', 2160), 38_410_000, 'title card, 4444 4K');
+  /* motion graphics: a turning gradient, fourteen moving shapes, sliding words */
+  within(prores('prores422hq', 1080), 113_490_000, 'motion graphics, 422 HQ 1080p');
+  within(prores('prores4444', 720), 87_930_000, 'motion graphics, 4444 720p');
+  within(prores('prores4444', 1080), 172_010_000, 'motion graphics, 4444 1080p');
+  /* a fractal zoom, every frame full of detail */
+  within(prores('prores422hq', 1080), 135_670_000, 'detailed footage, 422 HQ 1080p');
+});
+
+test('bars cost nothing; half the length is half the size; a CRF range is 16× wide, ProRes from a twenty-fifth of its rate to its rate', () => {
   const size = exportFramedDims(stage, '9:16', 'contain', 1080);
   assert.deepEqual(size, { w: 1080, h: 1920 });
   assert.ok(Math.abs(exportFilmPixels(stage, '9:16', 'contain', size) / (1080 * 607.5) - 1) < 0.01, 'the film, 1080 × 607.5, between bars');
@@ -35,7 +55,7 @@ test('bars cost nothing; half the length is half the size; a CRF range is 16× w
   assert.ok(Math.abs(half[0] * 2 - low) <= 2 && Math.abs(half[1] * 2 - high) <= 2);
   assert.ok(Math.abs(high / low - 16) < 0.01, "a CRF picture: 0.25× to 4× of a typical film");
   const [p0, p1] = exportEstimateBytes({ codec: 'prores422hq', size: stage, fps: 30, quality: 'high', durationMs: 1_000, audio: false });
-  assert.ok(Math.abs(p0 / 27.5e6 - 0.9) < 0.01 && Math.abs(p1 / 27.5e6 - 1.1) < 0.01, `${p0}–${p1}`);
+  assert.ok(Math.abs(p0 / 27.5e6 - 0.04) < 0.001 && Math.abs(p1 / 27.5e6 - 1.1) < 0.01, `${p0}–${p1}`);
 });
 
 test('a part of the film starts where clips start and ends where clips end, each named by those clips', () => {

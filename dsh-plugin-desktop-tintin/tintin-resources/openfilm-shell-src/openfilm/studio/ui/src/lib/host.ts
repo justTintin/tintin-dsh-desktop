@@ -90,22 +90,30 @@ export interface StudioHost {
    */
   agents?: {
     list: () => Promise<HostAgent[]>;
+    /** Explicitly reload local configuration and idle sessions; no model prompt is sent. */
+    refresh?: () => Promise<HostAgent[]>;
     connect: (id: HostAgentId) => Promise<{ ok: boolean; error?: string }>;
+    /** Stop waiting for terminal sign-in without disconnecting the agent or changing its own sign-in. */
+    cancelSignIn?: (id: HostAgentId) => Promise<unknown>;
     disconnect: (id: HostAgentId) => Promise<unknown>;
+    /** Another account, for one that signs out with its own command (`HostAgent.signOut`): signed out, then its sign-in opened. An older app has none. */
+    switchAccount?: (id: HostAgentId) => Promise<{ ok: boolean; error?: string }>;
     /** Codex: what is left of its plan, as it says for the account signed in (null: it can't say; other agents, null) */
     usage?: (id: HostAgentId, fresh?: boolean) => Promise<HostAgentUsage | null>;
     setShown: (id: HostAgentId, shown: boolean) => Promise<unknown>;
-    locate?: (id: HostAgentId, words?: { title?: string; button?: string }) => Promise<{ ok: boolean; error?: string; code?: 'not-a-program' | 'did-not-start' | 'app' | 'not-cursor-agent' | string }>;
+    locate?: (id: HostAgentId, words?: { title?: string; button?: string; kind?: 'file' | 'folder' }) => Promise<{ ok: boolean; error?: string; path?: string; version?: string; code?: 'not-a-program' | 'did-not-start' | 'app' | 'not-cursor-agent' | string }>;
     install?: (id: HostAgentId) => Promise<{ ok: boolean; error?: string }>;
     useAutomatic?: (id: HostAgentId) => Promise<unknown>;
     diagnose?: (id: HostAgentId) => Promise<HostAgentDiagnosis | null>;
+    /** Open the installed desktop app to complete its Code component setup. */
+    openSetup?: (id: HostAgentId) => Promise<{ ok: boolean; error?: string }>;
     /** The app's part of Settings → Developer's diagnostic report: the app, and each agent's program, version and state, as text. */
     report?: () => Promise<string>;
     /**
      * One of the person's own models set up (no `id`) or changed: checked before it is kept. A key left empty keeps its
      * own, or takes the one of another model on the same address.
      */
-    saveOwnModel: (config: HostOwnModelConfig) => Promise<{ ok: true; id: string } | { ok: false; error: string; code?: string }>;
+    saveOwnModel: (config: HostOwnModelConfig) => Promise<{ ok: true; id: string } | { ok: false; error: string; code?: string; url?: string; status?: number; reason?: string }>;
     removeOwnModel: (id: string) => Promise<unknown>;
     /**
      * The MCP servers the person added to an agent themselves (its maker's not among them), each let into the app or
@@ -224,7 +232,7 @@ export type HostByokFormat = 'responses' | 'chat' | 'anthropic';
 
 /**
  * One agent as the app has it. `status`: ready · off (disconnected in the app; its own sign-in is kept) · sign-in (its
- * own sign-in is needed) · waiting (signing in, in Terminal) · missing (not installed: `install` says where from) ·
+ * own sign-in is needed) · waiting (signing in, in Terminal) · missing (connection component not found) ·
  * key (no key set up) · unavailable (not offered yet) · checking. `account`: whose sign-in it uses, as the program says
  * (no key or token).
  */
@@ -236,7 +244,7 @@ export interface HostAgent {
   install?: string | null;
   /** What installing it takes, when `install` is not a download: 'code-tab', Claude Code comes with the Claude app (its Code tab). */
   setupRequired?: string | null;
-  /** Not installed: the maker's desktop app when only that is here (`Cursor`), and the official command that installs it. */
+  /** The desktop app when only that is here (`Cursor`), and the official command that installs the connection component. */
   app?: string | null;
   installer?: string | null;
   /** Its installer is running in a terminal window: it is looked for again until it is there. */
@@ -244,10 +252,18 @@ export interface HostAgent {
   /** The program used (the person's own agents), and the one the person chose for it, if they did. */
   path?: string | null;
   chosen?: string | null;
+  /** Changes when configuration is explicitly refreshed, so model menus discard older probes. */
+  configurationRevision?: number;
   error?: string;
+  /** Last actionable model failure; finding a program or opening a protocol session does not clear it. */
+  connectionIssue?: { kind: 'quota' | 'credentials'; message: string };
   /** Found, but it cannot read its own settings (Codex's config file), as it says: no session starts until fixed. */
   problem?: string;
+  /** Older than the chat was tried with (Claude Code): its version, the one tried, the command that updates it, and `app` when its app updates it. */
+  outdated?: { version: string; tested: string; update: string | null; app?: boolean } | null;
   account?: HostAgentAccount;
+  /** It signs out with its own command, so the app can switch its account (`agents.switchAccount`); else that is done in the agent itself. */
+  signOut?: boolean;
   /** The own key's models, each set up on its own; the first is the one a conversation starts on. */
   byok?: { models: HostOwnModel[] };
 }
@@ -353,7 +369,7 @@ export interface StudioSelection {
 }
 
 /**
- * What an app can ask Studio to show: a clip selected (by its film.html id, or its place), a moment, a range marked,
+ * What an app can ask Studio to show: a clip selected (by its film.html id, or its place), a moment, a range briefly lit,
  * a box on the picture shown at its moment, a track, a file of the media pane, a subtitle line (its span marked, the
  * subtitle panel open on it).
  *

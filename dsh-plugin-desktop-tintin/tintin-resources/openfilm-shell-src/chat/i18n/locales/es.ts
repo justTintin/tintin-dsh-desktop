@@ -1,5 +1,9 @@
 import type { Words } from './words';
 
+/* the system's trash, by its name there */
+const TRASH = typeof navigator !== 'undefined' && /^win/i.test(navigator.platform) ? 'la Papelera de reciclaje'
+  : typeof navigator !== 'undefined' && /^mac/i.test(navigator.platform) ? 'la Papelera' : 'la papelera';
+
 export const es: Words = {
   /* a turn of the app's own agent stopped: the service its model runs on has no balance left (BalanceNotice) */
   balance: {
@@ -113,20 +117,20 @@ export const es: Words = {
   },
   agent: {
     contextCompacted: 'La conversación anterior se resumió',
+    modelGone: 'Este agente ya no ofrece {model}. Vuelve a elegir un modelo.',
+    settingFailed: 'No se pudo poner {setting} en {value}: {error}',
+    settingRejected: 'El agente no pudo aplicar este ajuste.',
     thinking: 'Pensando',
   },
   assets: {
     close: 'Cerrar',
     download: 'Descargar',
-    imageActualSize: 'Tamaño original',
-    imageFit: 'Ajustar',
     noPreview: 'Este tipo de archivo no se puede previsualizar aquí: descárgalo',
     previewFailed: 'No se pudo leer este archivo',
   },
   composer: {
     contextFull: 'Esta conversación ya es larga. Una nueva funcionará mejor.',
     contextFullNew: 'Nueva conversación',
-    commands: 'Comandos',
     agentLoading: 'Cargando…',
     agentNone: 'Agente',
     agentNoneShown: 'No hay ningún agente activado para el chat.',
@@ -139,6 +143,7 @@ export const es: Words = {
     agentSection: 'Agente',
     agentSetUp: 'Configurar',
     agentWaiting: 'Iniciando sesión…',
+    agentWas: 'Esta conversación usaba {name}, que ahora no está disponible. El siguiente mensaje irá al agente de abajo.',
     effort: 'Esfuerzo',
     filesFailed: 'No se pudo adjuntar {names}: {error} Quítalo para enviar.',
     filesPending: 'Los archivos aún se están adjuntando.',
@@ -153,8 +158,12 @@ export const es: Words = {
     copyDiagnostics: 'Copiar informe de diagnóstico',
     copyDiagnosticsHint: 'Lo que OpenFilm encuentra en este equipo y sus problemas recientes, para pegar en un issue',
     diagnosticsCopied: 'Copiado',
-    removeFile: 'Quitar archivo',
-    removeImage: 'Quitar imagen',
+    switchAccount: 'Cambiar de cuenta',
+    signedInAs: 'Sesión iniciada como {account}.',
+    routeNoKey: 'Este modelo necesita una clave de API de DeepSeek y no hay ninguna configurada en este equipo. Si solo iniciaste sesión con una cuenta de DeepSeek, usa uno de sus modelos.',
+    routeNoKeyNoAccount: 'Este modelo necesita una clave de API de DeepSeek y no hay ninguna configurada en este equipo. Inicia sesión con tu cuenta de DeepSeek en DeepSeek Harness o añade una clave de API en su configuración de modelos.',
+    useAccountModel: 'Usar {model}',
+    accountModelPicked: 'Cambiado a {model}. Vuelve a enviar el mensaje.',
     speed: 'Velocidad',
     thumbOnly: 'Una miniatura guardada con el mensaje. El original sigue donde estaba, o en el proyecto si se pegó.',
   },
@@ -209,8 +218,8 @@ export const es: Words = {
     assets: 'Recursos',
     addAttachment: 'Añadir archivos',
     close: 'Cerrar',
-    composerPlaceholder: 'Di qué cambiar. Escribe @ para señalar un archivo, un momento o lo que seleccionaste',
-    composerPlaceholderBlank: 'Describe tu película. Escribe @ para usar un archivo de este proyecto',
+    composerPlaceholder: 'Di qué cambiar. Escribe @ para un archivo, una skill, un momento o lo que seleccionaste',
+    composerPlaceholderBlank: 'Describe tu película. Escribe @ para añadir un archivo o una skill',
     dismiss: 'Descartar',
     jumpToLatest: 'Ir a lo más reciente',
     loadingMessages: 'Cargando la conversación…',
@@ -288,7 +297,7 @@ export const es: Words = {
     cardDoes: 'Para qué sirve',
     next: 'Siguiente',
     cancel: 'Cancelar',
-    replaceNote: 'Ya tienes {names}: al añadirla, la anterior va a la papelera.',
+    replaceNote: `Ya tienes {names}: al añadirla, la anterior va a ${TRASH}.`,
     replaceAndAdd: 'Reemplazar y añadir',
     scriptsCount: '{n} scripts',
     fromLink: 'Desde un enlace',
@@ -399,5 +408,15 @@ export const es: Words = {
     added: 'Nuevo',
     removed: 'Eliminado',
     changed: 'Cambiado',
+  },
+  /** a turn that ended with film.html gone: under its reply, put it back as the turn found it (lib/film-restore) */
+  filmRestore: {
+    lost: 'En este turno se eliminó film.html y ahora no está.',
+    restore: 'Restaurar film.html como estaba antes de este turno',
+    restoring: 'Restaurando…',
+    restored: 'film.html ha vuelto como estaba antes de este turno.',
+    exists: 'film.html ya ha vuelto, así que se ha dejado como está.',
+    gone: 'La copia de antes de este turno ya no se conserva. Restaura film.html desde el Historial de versiones.',
+    failed: 'No se pudo restaurar film.html. Inténtalo de nuevo o restáuralo desde el Historial de versiones.',
   },
 };

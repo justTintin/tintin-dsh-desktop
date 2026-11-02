@@ -69,7 +69,9 @@ export const StickToBottomContext = React.createContext<StickToBottom | null>(nu
  *
  * Finished tool rows collapse into a summary while the answer keeps growing; that
  * shrink would make the bottom-pinned view bounce back. So the running turn gets a
- * min-height equal to the tallest it has been, released when the run ends.
+ * min-height equal to the tallest it has been. Keep it when the run ends too: removing
+ * the status row must not pull the reply down in a bottom-pinned view. The next turn
+ * (or a viewport resize) releases it.
  *
  * The min-height only applies when the turn shrinks, so it is never a frame late: the
  * value was recorded while the turn grew.
@@ -91,11 +93,10 @@ export function useTailSpacer(
     if (!viewport || !node) return;
     const size = `${viewport.clientWidth}:${viewport.clientHeight}`;
     if (viewportSize.current !== size) { tallest.current = 0; viewportSize.current = size; }
-    let min = 0;
     if (activeRef.current) {
       tallest.current = Math.max(tallest.current, node.getBoundingClientRect().height);
-      min = Math.max(min, Math.floor(tallest.current));
-    } else tallest.current = 0;
+    }
+    const min = Math.floor(tallest.current);
     const next = min > 0 ? `${min}px` : '';
     if (node.style.minHeight !== next) {
       node.style.minHeight = next;

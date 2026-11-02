@@ -1,13 +1,10 @@
 /**
- * The timeline's switches, kept on this machine across projects, in the toolbar's order, on by default but the preview
- * axis:
+ * The timeline's switches, kept on this machine across projects, in the toolbar's order, on by default:
  *   · `magnet` (主轨磁吸): the main track (the lowest picture track) stays closed up — a clip put on it goes in between,
  *     one deleted or taken off it closes up after it, a trim or a new speed there moves what follows. Off, the main
  *     track is like the others (lib/timeline-edit);
  *   · `snap` (自动吸附): drags line up with edges and the playhead; off means "it lands exactly where I let go";
- *   · `linkage` (联动): titles, overlays and sounds riding on a main-track clip move with it and go with it;
- *   · `previewAxis` (预览轴): the picture follows the pointer over the timeline, the playhead staying where it is. Off
- *     by default: the picture stays at the playhead until it is turned on.
+ *   · `linkage` (联动): titles, overlays and sounds riding on a main-track clip move with it and go with it.
  *
  * Clips sharing a `data-link` (a video and its detached sound) are always selected and edited together; ⌥-click picks
  * one alone. The inspector reads the switches too (a slower speed pushes the next clip only with the magnet on), so a
@@ -17,17 +14,16 @@ import { useSyncExternalStore } from 'react';
 
 import type { Switches } from './timeline-edit.ts';
 
-export type TimelinePrefs = { snap: boolean; magnet: boolean; linkage: boolean; previewAxis: boolean };
+export type TimelinePrefs = { snap: boolean; magnet: boolean; linkage: boolean };
 type Pref = keyof TimelinePrefs;
 
-const DEFAULTS: TimelinePrefs = { snap: true, magnet: true, linkage: true, previewAxis: false };
+const DEFAULTS: TimelinePrefs = { snap: true, magnet: true, linkage: true };
 const KEY: Record<Pref, string> = {
   snap: 'openfilm.timeline.snap',
   /* new keys: the main track came back on 10-19 with its magnet and linkage, so choices made for the switches before
      do not carry over */
   magnet: 'openfilm.timeline.mainTrackMagnet',
   linkage: 'openfilm.timeline.mainTrackLinkage',
-  previewAxis: 'openfilm.timeline.previewAxis',
 };
 
 /** Without localStorage (private window), the choices last this session. */
@@ -44,7 +40,7 @@ function read(pref: Pref): boolean {
 }
 
 export function readTimelinePrefs(): TimelinePrefs {
-  current ??= { snap: read('snap'), magnet: read('magnet'), linkage: read('linkage'), previewAxis: read('previewAxis') };
+  current ??= { snap: read('snap'), magnet: read('magnet'), linkage: read('linkage') };
   return current;
 }
 

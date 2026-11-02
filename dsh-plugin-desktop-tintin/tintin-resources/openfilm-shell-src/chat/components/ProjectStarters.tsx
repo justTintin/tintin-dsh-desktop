@@ -10,19 +10,15 @@
  *
  * The line below says files can simply be added: not only photos and videos, but audio, slides, PDFs, sheets, any
  * file. That is the one other way in besides typing.
- *
- * TinTin cover (2026-10-28): the host may serve its own domain's starters (`app.starters()` — the cover editor
- * serves image/cover sentences); absent there, the built-in video ones stand, unchanged for the film chat.
  */
 import React from 'react';
 import {
-  ArrowUpRight, Atom, Briefcase, Cake, Camera, Cat, ChartColumn, ChefHat, Dumbbell, Flower2, Heart, Images,
-  Mic, Moon, Orbit, PartyPopper, Palette, Plane, Presentation, RefreshCw, Rocket, Scissors, ShoppingBag,
-  Sparkles, Type, Upload, Wand2, type LucideIcon,
+  ArrowUpRight, Atom, Briefcase, Cake, Cat, ChartColumn, ChefHat, Dumbbell, Flower2, Heart, Images,
+  Mic, Moon, Orbit, PartyPopper, Plane, Presentation, RefreshCw, Rocket, Scissors, ShoppingBag, Sparkles,
+  Upload, type LucideIcon,
 } from 'lucide-react';
 import { useT } from '@/i18n';
 import { BrandLogo } from './BrandLogo';
-import { app } from '../app-bridge';
 
 /**
  * Four groups of five, most common first (a promo, an explainer, a social ad, cutting your own footage, slides to
@@ -46,9 +42,6 @@ const ICONS: Record<string, LucideIcon> = {
   s16: Cat, s17: Heart, s18: Briefcase, s19: ChefHat, s20: Images,
 };
 
-/** Icons for host-served starters, round-robin by position (cover's are image/cover flavoured). */
-const HOST_ICONS: LucideIcon[] = [Images, Wand2, Palette, Type, Sparkles, Camera];
-
 export function ProjectStarters({
   onPick,
   onAttach,
@@ -59,24 +52,6 @@ export function ProjectStarters({
 }) {
   const t = useT();
   const [group, setGroup] = React.useState(0);
-  /* Host-served starters (the cover editor's own domain); null until told, so the film chat
-     renders its built-in groups with zero change. */
-  const [hostLines, setHostLines] = React.useState<string[] | null>(null);
-  React.useEffect(() => {
-    void Promise.resolve(app.starters?.() ?? null).then((lines) => {
-      if (Array.isArray(lines) && lines.length) setHostLines(lines);
-    }).catch(() => {});
-  }, []);
-  const built = GROUPS.map((ids) => ids.map((id) => t(`starter.${id}`)));
-  const linesOf = (gi: number): string[] => {
-    if (hostLines) {
-      const size = 5;
-      return hostLines.slice(gi * size, gi * size + size);
-    }
-    return built[gi] ?? [];
-  };
-  const groups = hostLines ? Math.ceil(hostLines.length / 5) : GROUPS.length;
-  const iconOf = (gi: number, i: number): LucideIcon => (hostLines ? HOST_ICONS[(gi * 5 + i) % HOST_ICONS.length] : ICONS[GROUPS[gi]?.[i] ?? ''] ?? Sparkles);
   return (
     <div className="mx-auto w-full max-w-[400px] py-2">
       <BrandLogo size={26} />
@@ -87,7 +62,7 @@ export function ProjectStarters({
         <span className="text-[12px] text-[var(--text-faint)]">{t('starter.tryLabel')}</span>
         <button
           type="button"
-          onClick={() => setGroup((g) => (g + 1) % groups)}
+          onClick={() => setGroup((g) => (g + 1) % GROUPS.length)}
           className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] text-[var(--text-muted)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text)]"
         >
           <RefreshCw size={11} />
@@ -98,7 +73,7 @@ export function ProjectStarters({
           group's. Otherwise lines wrapping differently per group would change the height, and the centered title and
           "Shuffle" would jump out from under the pointer. */}
       <div className="mt-2 grid">
-        {Array.from({ length: groups }, (_, gi) => {
+        {GROUPS.map((ids, gi) => {
           const on = gi === group;
           return (
             <ul
@@ -108,10 +83,11 @@ export function ProjectStarters({
               className={`col-start-1 row-start-1 flex flex-col gap-1.5 ${on ? '' : 'invisible'}`}
               style={on ? { animation: 'openfilm-rise 0.2s ease-out both' } : undefined}
             >
-              {linesOf(gi).map((text, i) => {
-                const Icon = iconOf(gi, i);
+              {ids.map((id) => {
+                const text = t(`starter.${id}`);
+                const Icon = ICONS[id]!;
                 return (
-                  <li key={`${gi}-${i}`}>
+                  <li key={id}>
                     <button
                       type="button"
                       onClick={() => onPick(text)}

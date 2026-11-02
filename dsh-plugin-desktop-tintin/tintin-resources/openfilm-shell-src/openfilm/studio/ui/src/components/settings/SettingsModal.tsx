@@ -12,7 +12,7 @@ import { LANGUAGES, phrasesUnder, useLanguage, useLanguageChoice, useT, type Lan
 import { studioHost, type HostDeveloper, type HostUpdateState } from '@/lib/host';
 import { showWhatsNew } from '@/lib/whats-new';
 import { usePreviewPrefs, writePreviewPref } from '@/lib/preview-prefs';
-import { hasNotes, newestVersion } from '../WhatsNew';
+import { hasNotes, notesVersion } from '../WhatsNew';
 import { useWebUpdate } from '../UpdateButton';
 import { api, type StudioPrefs, type StudioVersion } from '@/api';
 import { AgentsSection } from './AgentsSection';
@@ -59,7 +59,7 @@ const SECTION_WORDS: Record<SettingsSection, string | string[]> = {
   models: 'settings.models',
   developer: ['settings.developer', 'settings.report'],
   shortcuts: 'settings.shortcuts',
-  advanced: ['settings.advanced', 'settings.playback'],
+  advanced: ['settings.advanced', 'settings.versions', 'settings.playback'],
 };
 
 export interface SettingsModalProps {
@@ -299,11 +299,37 @@ function PlaybackGroup() {
   );
 }
 
-/** What is already set for the best experience, for whoever wants it otherwise: how the preview plays (PlaybackGroup). */
+/**
+ * Versions saved on their own (studio/server/auto-versions.mjs): whether open projects save them while they are worked
+ * on. Showing these versions is controlled by the type filter in Version history.
+ */
+function VersionsGroup() {
+  const t = useT();
+  const [prefs, setPrefs] = React.useState<StudioPrefs | null>(null);
+  React.useEffect(() => { void api.prefs().then(setPrefs).catch(() => {}); }, []);
+  if (!prefs) return null;
+  const change = (patch: { autoVersions?: boolean }) => {
+    setPrefs({ ...prefs, ...patch });
+    void api.setPrefs(patch).then(setPrefs).catch(() => setPrefs(prefs));
+  };
+  return (
+    <SettingsGroup title={t('settings.versions.group')}>
+      <SettingsItem
+        title={t('settings.versions.auto')}
+        description={t('settings.versions.autoHint')}
+        control={<SettingsSwitch checked={prefs.autoVersions === true} onChange={(on) => change({ autoVersions: on })} label={t('settings.versions.auto')} />}
+      />
+    </SettingsGroup>
+  );
+}
+
+/** What is already set for the best experience, for whoever wants it otherwise: versions saved on their own
+ * (VersionsGroup), how the preview plays (PlaybackGroup). */
 function AdvancedSection() {
   const t = useT();
   return (
     <SettingsPage note={t('settings.advanced.intro')}>
+      <VersionsGroup />
       <PlaybackGroup />
     </SettingsPage>
   );
@@ -345,7 +371,7 @@ function AboutGroup() {
           <SettingsButton disabled={state === 'checking'} onClick={check}>{t('settings.about.check')}</SettingsButton>
         )}
       >
-        {hasNotes(info?.version) ? <WhatsNewLink version={info!.version} /> : null}
+        {hasNotes(info?.version) ? <WhatsNewLink /> : null}
       </SettingsItem>
       {!inApp && !info?.source && info?.newer ? (
         <SettingsItem
@@ -370,10 +396,10 @@ function AboutGroup() {
 }
 
 /** This release's notes again (components/WhatsNew). */
-function WhatsNewLink({ version }: { version: string }) {
+function WhatsNewLink() {
   const t = useT();
   return (
-    <button type="button" onClick={() => showWhatsNew([version])}
+    <button type="button" onClick={() => showWhatsNew()}
       className="mb-2 text-[13.5px] text-[var(--text-muted)] underline underline-offset-2 transition hover:text-[var(--text)]">
       {t('settings.about.whatsNew')}
     </button>
@@ -442,7 +468,7 @@ function AppAboutGroup() {
         description={description}
         control={control}
       >
-        {hasNotes(s?.version) ? <WhatsNewLink version={s!.version} /> : null}
+        {hasNotes(s?.version) ? <WhatsNewLink /> : null}
         {s?.status === 'downloading' ? (
           <div className="h-1 overflow-hidden rounded-full bg-[var(--fill-tsp)]" role="progressbar" aria-valuenow={Math.round(s.progress)} aria-valuemin={0} aria-valuemax={100}>
             <div className="h-full rounded-full bg-[var(--text)] transition-[width]" style={{ width: `${Math.max(2, s.progress)}%` }} />
@@ -497,15 +523,13 @@ function DeveloperSection() {
           />
         </SettingsGroup>
       ) : null}
-      {newestVersion() ? (
-        <SettingsGroup title={t('settings.developer.releaseGroup')}>
-          <SettingsItem
-            title={t('settings.developer.previewWhatsNew')}
-            description={t('settings.developer.previewWhatsNewHint').replace('{version}', newestVersion()!)}
-            control={<SettingsButton onClick={() => showWhatsNew([newestVersion()!])}>{t('settings.developer.preview')}</SettingsButton>}
-          />
-        </SettingsGroup>
-      ) : null}
+      <SettingsGroup title={t('settings.developer.releaseGroup')}>
+        <SettingsItem
+          title={t('settings.developer.previewWhatsNew')}
+          description={t('settings.developer.previewWhatsNewHint').replace('{version}', notesVersion())}
+          control={<SettingsButton onClick={() => showWhatsNew()}>{t('settings.developer.preview')}</SettingsButton>}
+        />
+      </SettingsGroup>
     </SettingsPage>
   );
 }

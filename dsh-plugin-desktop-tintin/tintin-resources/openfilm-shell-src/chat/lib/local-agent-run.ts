@@ -28,7 +28,9 @@ import type { Turn } from '@openfilm/shared';
 import type { Balance } from '@/lib/balance';
 import { chatTurns, putChatTurn, type SavedTurn } from '@/lib/chat-store';
 import { app } from '../app-bridge';
+import { translate } from '@/i18n';
 import { isEmptyBackgroundTurn, opensUnprompted } from '@/lib/unprompted';
+import { baseName, titleFile } from '@/lib/step-file';
 import { reduceTranscript, type TranscriptItem, type TranscriptPlanEntry } from '@/lib/agent-transcript';
 import {
   desktopBridge,
@@ -71,10 +73,6 @@ const DETAIL_MAX = 60;
 function clipDetail(text: string): string {
   const one = text.replace(/\s+/g, ' ').trim();
   return one.length > DETAIL_MAX ? `${one.slice(0, DETAIL_MAX - 1)}…` : one;
-}
-
-function baseName(path: string): string {
-  return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? path;
 }
 
 /** The files this call touches: ACP's locations, and the path in diff content such as an edit's. */
@@ -168,9 +166,11 @@ export function localToolActivity(
   const files = touchedFiles(extra, input);
   const detail = (value: string | undefined) => (value ? { detail: value } : {});
   switch (kind) {
-    case 'read':
-      /* Codex viewing an image (View Image …) is a read too */
-      return { act: 'files.read', ...detail(filesDetail(files) ?? (name ? clipDetail(name.replace(/^(?:Read|View Image)\s+/i, '')) : undefined)) };
+    case 'read': {
+      /* Codex viewing an image (View Image …) is a read too. No path given, its title may be one */
+      const titled = titleFile(name);
+      return { act: 'files.read', ...detail(filesDetail(files) ?? (titled ? clipDetail(titled) : undefined)) };
+    }
     case 'search':
       if (/^web search/i.test(name)) return { act: 'research.search', ...(searchedFor(name, input) ? { query: searchedFor(name, input)! } : {}) };
       return { act: 'files.search', ...detail(searchedFor(name, input)) };
@@ -314,6 +314,9 @@ export class LocalAgentTurn {
   /** When its last update arrived (see drain). */
   lastEventAt = Date.now();
 
+  /** The model that answered, when its session names none (GitHub Copilot's, from its record): for the footer. */
+  model: string | null = null;
+
   apply(update: AcpUpdate): void {
     this.lastEventAt = Date.now();
     const kind = update.sessionUpdate;
@@ -338,6 +341,7 @@ export class LocalAgentTurn {
       this.calls.set(String(u.toolCallId), {
         ...(typeof u.title === 'string' ? { title: u.title } : {}),
         ...(typeof u.kind === 'string' ? { kind: u.kind } : {}),
+        ...(u.rawInput != null ? { rawInput: u.rawInput } : {}),
         ...(tool ? { tool } : {}),
       });
       /* It asked the user through our MCP (ask_user): the question and options go on this row, and the panel shows the card */
@@ -382,8 +386,8 @@ export class LocalAgentTurn {
   /** acpUpdateToEvent only yields the closed-set fields; the file name / command reaches the next agent-act from here. */
   private pendingDetail: string | undefined;
   private pendingAsk: TranscriptItem['ask'];
-  /** Each call's first title and kind: later updates often carry only the fields that changed. */
-  private calls = new Map<string, { title?: string; kind?: string; tool?: string }>();
+  /** Each call's first title, kind and input: later updates often carry only the fields that changed. */
+  private calls = new Map<string, { title?: string; kind?: string; rawInput?: unknown; tool?: string }>();
   private thoughtNo = 0;
   private openThought: string | null = null;
 
@@ -468,7 +472,7 @@ export class LocalAgentTurn {
     const activity = localToolActivity(
       typeof u.title === 'string' ? u.title : first?.title,
       typeof u.kind === 'string' ? u.kind : first?.kind,
-      u.rawInput ?? {},
+      u.rawInput ?? first?.rawInput ?? {},
       { locations: u.locations, content: u.content },
     );
     if (!activity || activity.act !== item.act) return;
@@ -534,6 +538,7 @@ interface LiveSession {
   agent: LocalAgentId;
   cwd: string;
   info: LocalAgentSessionInfo;
+  onOptions?: (options: LocalAgentSessionInfo['configOptions']) => void;
   /** the project and the conversation it is the session of */
   projectId: string;
   conversation: string;
@@ -548,47 +553,6 @@ const sessions = new Map<string, LiveSession>();
 export function forgetLocalAgentSessions(agent: LocalAgentId): void {
   for (const [k, s] of sessions) if (s.agent === agent) sessions.delete(k);
 }
-/* ── the agent's own commands (its `/` menu: built-in ones, the person's skills and custom commands), as its sessions
-   say them (ACP available_commands_update). Kept by agent: the last list any of its sessions gave, so a new
-   conversation has them before its first message. A list that comes before its session is known here waits for it. */
-
-export interface AgentCommand { name: string; description: string; hint: string | null }
-
-/* kept between launches (this page's storage), so the menu has them before the agent's first session */
-const COMMANDS_KEY = 'openfilm.agent-commands.v1';
-const commandsByAgent = new Map<LocalAgentId, AgentCommand[]>((() => {
-  try { return Object.entries(JSON.parse(localStorage.getItem(COMMANDS_KEY) ?? '{}')) as Array<[LocalAgentId, AgentCommand[]]>; } catch { return []; }
-})());
-const unclaimedCommands = new Map<string, AgentCommand[]>();
-const commandListeners = new Set<() => void>();
-const NO_COMMANDS: AgentCommand[] = [];
-
-/** The commands as ACP lists them (`availableCommands`: { name, description, input?.hint }). */
-export function readCommands(update: Record<string, unknown>): AgentCommand[] {
-  const list = Array.isArray(update.availableCommands) ? update.availableCommands as Array<Record<string, unknown>> : [];
-  return list.flatMap((c) => (typeof c?.name === 'string' && c.name ? [{
-    name: c.name.replace(/^\//, ''),
-    description: typeof c.description === 'string' ? c.description : '',
-    hint: typeof (c.input as { hint?: unknown } | null)?.hint === 'string' ? (c.input as { hint: string }).hint : null,
-  }] : []));
-}
-
-/** The agent's commands as one of its sessions said them (the menu's probe too). */
-export function keepCommands(agent: LocalAgentId, list: AgentCommand[]): void {
-  commandsByAgent.set(agent, list);
-  try { localStorage.setItem(COMMANDS_KEY, JSON.stringify(Object.fromEntries(commandsByAgent))); } catch { /* kept for this launch */ }
-  for (const listener of commandListeners) listener();
-}
-
-/** The agent's commands, for the composer's `/` menu (empty until one of its sessions has said them). */
-export function useAgentCommands(agent: LocalAgentId): AgentCommand[] {
-  return React.useSyncExternalStore(
-    (listener) => { commandListeners.add(listener); return () => { commandListeners.delete(listener); }; },
-    () => commandsByAgent.get(agent) ?? NO_COMMANDS,
-    () => NO_COMMANDS,
-  );
-}
-
 /* ── how full the agent's context is (ACP usage_update): tokens in the conversation now, of its context window, as
    the agent's own chat shows it. By session: each conversation has its own. ── */
 
@@ -699,25 +663,29 @@ function dispatch(turn: LocalAgentTurn, event: Record<string, unknown> & { kind:
 
 /** Recovered turns (see recoverLocalAgentTurns) wait on the shell's `done` for their key. */
 const doneWaiters = new Map<string, (result: { ok: true; stopReason: string } | { ok: false; error: string; balance?: Balance }) => void>();
+/** what to do when a turn's first event comes: the agent has the message (runLocalAgentTurn's `onStarted`) */
+const startedHooks = new Map<LocalAgentTurn, () => void>();
+const started = (turn: LocalAgentTurn) => { const hook = startedHooks.get(turn); startedHooks.delete(turn); hook?.(); };
 
 function listen(): void {
   if (unlisten) return;
   const bridge = desktopBridge()?.localAgents;
   if (!bridge) return;
   unlisten = bridge.onEvent((event) => {
+    if (event.kind === 'update' && event.update.sessionUpdate === 'config_option_update' && Array.isArray(event.update.configOptions)) {
+      const session = [...sessions.values()].find((s) => s.key === event.key);
+      if (session) {
+        session.info.configOptions = event.update.configOptions as LocalAgentSessionInfo['configOptions'];
+        session.onOptions?.(session.info.configOptions);
+      }
+      return;
+    }
     if (event.kind === 'update' && event.update.sessionUpdate === 'usage_update') {
       const { used, size, _meta } = event.update as { used?: unknown; size?: unknown; _meta?: Record<string, unknown> };
       if (typeof used === 'number' && typeof size === 'number' && size > 0) { contextByKey.set(event.key, { used, size }); tellContext(); }
       /* the agent's result for work it took up by itself (Claude Code says where it came from): that turn is done */
       const origin = _meta?.['_claude/origin'] as { kind?: unknown } | undefined;
       if (origin && origin.kind !== 'human' && unprompted.has(event.key)) endUnprompted(event.key);
-      return;
-    }
-    if (event.kind === 'update' && event.update.sessionUpdate === 'available_commands_update') {
-      const list = readCommands(event.update);
-      const agent = [...sessions.values()].find((s) => s.key === event.key)?.agent;
-      if (agent) keepCommands(agent, list);
-      else unclaimedCommands.set(event.key, list);
       return;
     }
     const turn = turnByKey.get(event.key);
@@ -749,6 +717,7 @@ function listen(): void {
       if (event.kind === 'permission' || event.kind === 'question') void denyUnlessHeld(event);
       return;
     }
+    started(turn);
     dispatch(turn, event as Record<string, unknown> & { kind: string });
   });
 }
@@ -804,6 +773,8 @@ export async function runLocalAgentTurn({
   turn,
   options = {},
   onSessionInfo,
+  onOptions,
+  onStarted,
   meta,
   images,
 }: {
@@ -823,12 +794,16 @@ export async function runLocalAgentTurn({
   /** Options the user picked in the model menu (configId → value), set one by one once the session is open. */
   options?: Record<string, unknown>;
   onSessionInfo?: (info: LocalAgentSessionInfo) => void;
+  onOptions?: (options: LocalAgentSessionInfo['configOptions']) => void;
+  /** Called once the agent has the message: its first event of the turn, or the turn's end without one. */
+  onStarted?: () => void;
 }): Promise<{ stopReason: string; lastTurnId: string }> {
   const bridge = desktopBridge()?.localAgents;
   if (!bridge) throw new Error('This needs the OpenFilm Mac app.');
   listen();
   turns.set(turn.turnId, turn);
   current = turn;
+  if (onStarted) startedHooks.set(turn, onStarted);
 
   const sessionKey = `${projectId}:${conversation}:${agent}`;
   let session = sessions.get(sessionKey);
@@ -840,8 +815,6 @@ export async function runLocalAgentTurn({
     session = { key: started.key, agent, cwd, info: started.info, projectId, conversation };
     sessions.set(sessionKey, session);
     tellContext();
-    const said = unclaimedCommands.get(started.key);
-    if (said) { unclaimedCommands.delete(started.key); keepCommands(agent, said); }
     onSessionInfo?.(started.info);
   }
   /* a turn the agent was working on by itself ends as the person writes */
@@ -852,33 +825,48 @@ export async function runLocalAgentTurn({
      there are), then the rest one after another. An agent may change other options when one is set (MiniMax Code
      resets its thinking effort when the model changes), so what it answers replaces what the session holds */
   const live = session;
-  const setOption = async ([configId, value]: [string, unknown]) => {
-    const option = live.info.configOptions?.find((o) => o.id === configId);
-    if (!option || option.currentValue === value) return;
-    const r = await bridge.setOption(live.key, configId, value);
-    if (!r.ok) return;
-    const answered = r.result?.configOptions;
-    if (Array.isArray(answered) && answered.length) live.info.configOptions = answered;
-    else option.currentValue = value;
-  };
-  const picked = Object.entries(options);
-  const isModel = ([configId]: [string, unknown]) => live.info.configOptions?.find((o) => o.id === configId)?.category === 'model';
-  for (const entry of picked.filter(isModel)) await setOption(entry);
-  for (const entry of picked.filter((entry) => !isModel(entry))) await setOption(entry);
-
-  /* where it is and how to work (the project, the `openfilm` manual, Studio already open) it was told when the
-     session started (apps/desktop src/agents.mjs INSTRUCTIONS): the message goes as the person wrote it */
+  live.onOptions = onOptions;
   const key = session.key;
-  /* the turn the agent's words go to at the end: this one, or the last message sent into it while it ran (steer) */
+  /* A message sent while it ran may have joined this turn. */
   const last = () => turnByKey.get(key) ?? turn;
   try {
+    const setOption = async ([configId, value]: [string, unknown]) => {
+      const option = live.info.configOptions?.find((o) => o.id === configId);
+      if (!option) return;
+      const model = option.category === 'model';
+      // Cursor can restore a different model when reusing a session. Reassert the selection and read its parameters.
+      if (option.currentValue === value && !(agent === 'cursor' && model)) return;
+      if (option.options?.length && !option.options.some((choice) => choice.value === value)) {
+        if (model) throw new Error(translate('agent.modelGone').replace('{model}', () => String(value)));
+        return;
+      }
+      const r = await bridge.setOption(live.key, configId, value);
+      if (!r.ok) {
+        throw new Error(translate('agent.settingFailed').replace('{setting}', () => option.name).replace('{value}', () => String(value))
+          .replace('{error}', () => r.error ?? translate('agent.settingRejected')));
+      }
+      const answered = r.result?.configOptions;
+      if (Array.isArray(answered) && answered.length) live.info.configOptions = answered;
+      else option.currentValue = value;
+    };
+    const picked = Object.entries(options);
+    const isModel = ([configId]: [string, unknown]) => live.info.configOptions?.find((o) => o.id === configId)?.category === 'model';
+    for (const entry of picked.filter(isModel)) await setOption(entry);
+    for (const entry of picked.filter((entry) => !isModel(entry))) await setOption(entry);
+    onOptions?.(live.info.configOptions);
+
+    /* where it is and how to work (the project, the `openfilm` manual, Studio already open) it was told when the
+       session started (apps/desktop src/agents.mjs INSTRUCTIONS): the message goes as the person wrote it */
     const r = await bridge.prompt(key, text, meta, images?.length ? images : undefined);
     /* The answer to the prompt can overtake its last updates (the closing words of its reply): stop
        listening only once they have stopped coming, or the saved reply ends mid-sentence. */
     await drain(last());
     if (!r.ok) throw Object.assign(new Error(r.error), { lastTurnId: last().turnId }, r.balance ? { balance: r.balance } : {});
+    started(turn);
+    turn.model = last().model = r.model ?? null;
     return { stopReason: r.stopReason, lastTurnId: last().turnId };
   } finally {
+    startedHooks.delete(turn);
     const ended = last();
     turn.seal();
     ended.seal();

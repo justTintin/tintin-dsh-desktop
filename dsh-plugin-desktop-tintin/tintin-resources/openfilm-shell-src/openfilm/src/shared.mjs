@@ -220,15 +220,24 @@ export async function filmSound(s, from) {
 }
 
 const audioStreams = new Map();
-/** How many channels a file's first sound stream has: 0 without one (a video clip may be silent). */
+/**
+ * How many channels a file's first sound stream has: 0 without one (a video clip may be silent). Kept by the file's
+ * version, so a file made again at the same path (Studio runs for days) is asked again; a file ffprobe could not read
+ * is not kept as silent.
+ */
 export function audioChannels(file) {
-  if (!audioStreams.has(file)) {
+  let version = '';
+  try { const s = statSync(file); version = `${s.mtimeMs}:${s.size}`; } catch { /* gone: asked as it is */ }
+  const key = `${file}\0${version}`;
+  if (!audioStreams.has(key)) {
     const r = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=channels', '-of', 'csv=p=0', file], { encoding: 'utf8', windowsHide: true });
     if (r.error) throw new Error(`ffprobe: ${/** @type {NodeJS.ErrnoException} */ (r.error).code === 'ENOENT' ? 'not found on the PATH (it comes with ffmpeg)' : r.error.message}`);
     const out = (r.stdout ?? '').trim();
-    audioStreams.set(file, out ? Number.parseInt(out, 10) || 2 : 0);
+    const channels = out ? Number.parseInt(out, 10) || 2 : 0;
+    if (r.status !== 0) return channels;
+    audioStreams.set(key, channels);
   }
-  return audioStreams.get(file);
+  return audioStreams.get(key);
 }
 
 /** Whether a file has a sound stream (a video clip may be silent). */

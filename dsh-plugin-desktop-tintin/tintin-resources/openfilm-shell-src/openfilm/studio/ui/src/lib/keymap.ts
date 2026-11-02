@@ -32,7 +32,6 @@ export const ACTIONS = [
   { id: 'toggle-magnet', tab: 'timeline', keys: ['p', 'shift+n'] },
   { id: 'toggle-snap', tab: 'timeline', keys: ['n'] },
   { id: 'toggle-linkage', tab: 'timeline', keys: ['`', 'shift+`'] },
-  { id: 'toggle-preview-axis', tab: 'timeline', keys: ['s'] },
   { id: 'zoom-in', tab: 'timeline', keys: ['mod++', 'mod+='] },
   { id: 'zoom-out', tab: 'timeline', keys: ['mod+-'] },
   { id: 'zoom-reset', tab: 'timeline', keys: ['mod+0'] },
@@ -220,9 +219,8 @@ const FINAL_CUT: Partial<Record<ActionId, Binding>> = {
   /* Nudge Left / Right */
   'nudge-back': [','],
   'nudge-forward': ['.'],
-  /* Snapping, Skimming */
+  /* Snapping */
   'toggle-snap': ['n'],
-  'toggle-preview-axis': ['s'],
   'zoom-in': ['mod++', 'mod+='],
   'zoom-out': ['mod+-'],
   'zoom-fit': ['shift+z'],

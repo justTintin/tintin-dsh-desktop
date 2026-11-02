@@ -4,9 +4,9 @@
  * file projects in folders of the list; or, switched to "Examples", to start from an example (ExamplesGallery). Its
  * projects are ProjectsView; this file holds the data and actions.
  *
- * Studio's projects are folders on disk: deleting one moves its folder to the system's Trash. One whose folder is gone
- * (moved, renamed or deleted outside Studio: `missing`) cannot be opened; it can be located (the folder it is in now)
- * or taken off the list.
+ * Studio's projects are folders on disk: deleting one moves its folder to the system's Trash. One whose folder or film
+ * file is gone (`missing`) cannot be opened; it can be located (the folder it is in now) or taken off the list,
+ * preserving any remaining files.
  *
  * A folder is picked with the app's own dialog where there is an app (lib/host.ts `folders`), else with Studio's
  * folder browser; one without a film is opened only once the person agrees to start a film in it.
@@ -25,6 +25,7 @@ import { stillThere } from '@/lib/project-delete';
 import { studioHost } from '@/lib/host';
 import { SourceError, sourcesApi } from '@/lib/project-sources';
 import { LIST_WAIT_MS, within } from '@/lib/projects-page';
+import { readLastSubtitleStyle } from '@/lib/subtitles';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ProjectsView, type LibraryProject } from './ProjectsView';
 import { FolderBrowserDialog, GitHubDialog } from './ProjectSources';
@@ -54,32 +55,35 @@ function useProjectLibrary(open: boolean) {
     errorTimer.current = setTimeout(() => setError(null), 4000);
   }, []);
 
-  /* fetched fresh on every open: the agent or another window may have made or removed one meanwhile. Waited for a
-     while only: a list that never comes is said, not shown as a spinner for ever (one shown already stays) */
+  /* Read on open and when coming back to it (focus, shown again), as returning from Finder. External changes need no
+     app restart, and a slow refresh never overlaps the next one or hides the list already shown. Opening a card
+     checks that project again (openListed). */
   React.useEffect(() => {
     if (!open) return undefined;
     let alive = true;
+    let loading = false;
     setLoadFailed(false);
-    Promise.all([within(api.projects(), LIST_WAIT_MS), within(folderApi.list(), LIST_WAIT_MS)]).then(
-      ([list, folderList]) => {
-        if (!alive) return;
-        setProjects(list.map((p) => ({ ...p, poster: posterOf(p) })));
-        setFolders(folderList);
-        setLoaded(true);
-      },
-      () => { if (alive) setLoadFailed(true); },
-    );
-    return () => { alive = false; };
+    const refresh = () => {
+      if (!alive || loading) return;
+      loading = true;
+      void Promise.all([within(api.projects(), LIST_WAIT_MS), within(folderApi.list(), LIST_WAIT_MS)]).then(
+        ([list, folderList]) => {
+          if (!alive) return;
+          setProjects(list.map((p) => ({ ...p, poster: posterOf(p) })));
+          setFolders(folderList);
+          setLoaded(true);
+          setLoadFailed(false);
+        },
+        () => { if (alive) setLoadFailed(true); },
+      ).finally(() => { loading = false; });
+    };
+    const visible = () => { if (document.visibilityState === 'visible') refresh(); };
+    refresh();
+    window.addEventListener('focus', visible);
+    document.addEventListener('visibilitychange', visible);
+    return () => { alive = false; window.removeEventListener('focus', visible); document.removeEventListener('visibilitychange', visible); };
   }, [open, tries]);
   const retryLoad = React.useCallback(() => setTries((n) => n + 1), []);
-  /* shown again (the app's projects page when the last tab closes, a window brought back): read afresh, as it may
-     have changed meanwhile */
-  React.useEffect(() => {
-    if (!open) return undefined;
-    const back = () => { if (document.visibilityState === 'visible') retryLoad(); };
-    document.addEventListener('visibilitychange', back);
-    return () => document.removeEventListener('visibilitychange', back);
-  }, [open, retryLoad]);
 
   const reloadFolders = React.useCallback(() => {
     void folderApi.list().then(setFolders, () => {});
@@ -292,6 +296,28 @@ export function ProjectsPopover({
     setBusy(kind);
     onOpen(projectId);
   };
+
+  /** The card may have gone since the last refresh: check before opening a tab or entering the editor. */
+  async function openListed(project: LibraryProject) {
+    if (project.missing) { lib.flash(t(project.missingReason === 'film' ? 'projects.missingFilmOpen' : 'projects.missingOpen')); return; }
+    setBusy('opening');
+    try {
+      const { project: current } = await within(api.opened(project.id), LIST_WAIT_MS);
+      if (current.missing) {
+        setBusy(null);
+        lib.retryLoad();
+        lib.flash(t(current.missingReason === 'film' ? 'projects.missingFilmOpen' : 'projects.missingOpen'));
+        return;
+      }
+      go(project.id, 'opening');
+    } catch (e) {
+      setBusy(null);
+      lib.retryLoad();
+      lib.flash(e instanceof ApiError && (e.status === 404 || e.status === 410)
+        ? t(e.body.code === 'missing-film' ? 'projects.missingFilmOpen' : 'projects.missingOpen')
+        : t('projects.openFolderFailed').replace('{error}', e instanceof Error ? e.message : String(e)));
+    }
+  }
   /* closed: nothing in progress shows when it opens again */
   React.useEffect(() => { if (!open) setBusy(null); }, [open]);
   /* another project opened: done */
@@ -311,7 +337,7 @@ export function ProjectsPopover({
   async function newProject(folderId: string | null) {
     setBusy('creating');
     try {
-      const project = await newProjectIn(folderId, { create: () => api.newProject(t('project.untitled')), move: folderApi.move });
+      const project = await newProjectIn(folderId, { create: () => api.newProject(t('project.untitled'), readLastSubtitleStyle() ?? undefined), move: folderApi.move });
       go(project.id, 'creating');
     } catch {
       setBusy(null);
@@ -394,7 +420,7 @@ export function ProjectsPopover({
 
   if (!open) return null;
 
-  /* what the delete dialog says: a project whose folder is gone only leaves the list (the server keeps to that too) */
+  /* unavailable projects only leave the list; any remaining files stay on disk */
   const pendingMissing = (pendingDelete ?? []).filter((id) => lib.projects.find((p) => p.id === id)?.missing).length;
   const onlyMissing = pendingDelete != null && pendingMissing === pendingDelete.length;
   const deleteTitle = !pendingDelete ? ''
@@ -440,8 +466,8 @@ export function ProjectsPopover({
               onOpenFolder={() => void openFolder()}
               onGetFromGitHub={() => setGithub({})}
               onLocate={(project) => void locate(project)}
-              /* its folder is gone: there is nothing to open, and the editor would only say so */
-              onOpen={(project) => (project.missing ? lib.flash(t('projects.missingOpen')) : go(project.id, 'opening'))}
+              /* presence is checked again before opening the editor */
+              onOpen={(project) => { void openListed(project); }}
               onRename={(projectId, name) => void lib.renameProject(projectId, name)}
               /* an agent working in one: said at once, before asking (the server refuses it too) */
               onDelete={(ids) => void lib.workingIn(ids).then((working) => {

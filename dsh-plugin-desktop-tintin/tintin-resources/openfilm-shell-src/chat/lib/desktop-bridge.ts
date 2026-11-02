@@ -12,10 +12,8 @@ import type { Balance } from './balance';
 /** The coding agents the shell can connect to its MCP endpoint. */
 export type DesktopAgentId = 'claude' | 'codex' | 'cursor' | 'copilot' | 'opencode' | 'codebuddy' | 'devin';
 
-/** The chat's agents: the person's own (Codex, Claude Code, Qwen Code, …), and the app's own on their own key.
- * TinTin(2026-10-30): `tintin-agent` is the film chat's TinTin智能体 persona (dispatches the server-side
- * generation sub-agents), launched by the desktop itself (no CLI). */
-export type LocalAgentId = 'claude' | 'codex' | 'copilot' | 'cursor' | 'opencode' | 'codebuddy' | 'qwen' | 'kimi' | 'minimax' | 'deepseek' | 'tintin-agent' | 'byok';
+/** The chat's agents: the person's own (Codex, Claude Code, Qwen Code, …), and the app's own on their own key. */
+export type LocalAgentId = 'claude' | 'codex' | 'copilot' | 'cursor' | 'opencode' | 'codebuddy' | 'qwen' | 'kimi' | 'minimax' | 'deepseek' | 'byok';
 
 /** One agent as the app's roster has it (apps/desktop/src/agent-roster.mjs; Studio's lib/host.ts HostAgent). */
 export interface RosterAgent {
@@ -25,12 +23,10 @@ export interface RosterAgent {
   status: 'ready' | 'off' | 'sign-in' | 'waiting' | 'missing' | 'key' | 'checking';
   install?: string | null;
   setupRequired?: string | null;
+  configurationRevision?: number;
   error?: string;
-  /**
-   * TinTin(2026-11-01): 行保留但不可选(服务端智能体观察期)。true=仅禁用;字符串=禁用并显示该理由。
-   * 与 status 正交:status 描述安装态,disabled 描述产品裁决;禁用行不作为 currentAgent 候选。
-   */
-  disabled?: boolean | string;
+  /** Whose sign-in it uses, when the agent tells (no key or token). */
+  account?: { method: string; email?: string; org?: string; plan?: string };
   /**
    * The own key's models, each set up on its own (its name, its service, the model asked for there), with the reasoning
    * efforts it offers and the one it starts on (apps/desktop src/pi-config.mjs EFFORTS); the first one to begin with.
@@ -57,8 +53,6 @@ export interface LocalAgentSessionInfo {
   resumed?: boolean;
   /** a message sent while it works can join the running turn (`steer`) */
   steering?: boolean;
-  /** its commands, as a session opened only to ask said them (`probe`): ACP's availableCommands */
-  commands?: unknown[];
   agentInfo: { name: string; title?: string; version?: string } | null;
   authMethods: Array<{ id: string; name: string; description?: string }>;
   /** Whether our MCP tools were handed over (not when the agent does not take HTTP). */
@@ -201,7 +195,7 @@ export interface DesktopBridge {
     /** Opens Terminal to run its own sign-in command, which opens Anthropic's / OpenAI's sign-in page. */
     signIn(agent: LocalAgentId): Promise<{ ok: true } | { ok: false; error: string }>;
     /** Opens a session and closes it at once, only for its options. Sends no message, so costs nothing. */
-    probe(agent: LocalAgentId): Promise<{ ok: true; info: LocalAgentSessionInfo } | { ok: false; error: string; code?: string }>;
+    probe(agent: LocalAgentId, model?: string): Promise<{ ok: true; info: LocalAgentSessionInfo } | { ok: false; error: string; code?: string }>;
     /**
      * `resume`: the agent's own id of a conversation it had (an earlier start's info.sessionId), to go on with.
      * `meta`: the turn it starts for, whose log says why when it does not start.
@@ -212,7 +206,8 @@ export interface DesktopBridge {
     >;
     /** `images`: pictures sent after the text, to an agent that takes them (the shell asks the session) */
     /** `balance`: the service the app's own agent runs on had no balance left for it */
-    prompt(key: string, text: string, meta?: LocalAgentTurnMeta, images?: PromptImage[]): Promise<{ ok: true; stopReason: string } | { ok: false; error: string; balance?: Balance }>;
+    /** `model`: the model that answered, for an agent whose session names none (GitHub Copilot's, from its record) */
+    prompt(key: string, text: string, meta?: LocalAgentTurnMeta, images?: PromptImage[]): Promise<{ ok: true; stopReason: string; model?: string } | { ok: false; error: string; balance?: Balance }>;
     /** Turns still held by the shell (a reload mid-turn). Older shells lack it. */
     running?(): Promise<LocalAgentRunningTurn[]>;
     /** The page has put this finished turn back: the shell forgets it. */

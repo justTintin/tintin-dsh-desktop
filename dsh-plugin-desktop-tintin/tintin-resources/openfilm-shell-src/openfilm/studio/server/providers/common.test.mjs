@@ -79,11 +79,20 @@ test('no balance, as each service says it, is one error for all; a plain rate li
   assert.ok(!outOfBalance(429, JSON.stringify({ error: { message: 'Rate limit reached for requests', type: 'requests', code: 'rate_limit_exceeded' } })));
   assert.ok(!outOfBalance(429, JSON.stringify({ error: { code: 429, message: 'Resource has been exhausted (e.g. check quota).', status: 'RESOURCE_EXHAUSTED' } })));
   assert.ok(!outOfBalance(401, JSON.stringify({ error: { message: 'Incorrect API key provided' } })));
+  /* ElevenLabs' free plan: music, or a voice from its library, is a 402 whatever the credits left */
+  const freePlan = { detail: { status: 'paid_plan_required', message: 'Free users cannot use library voices via the API. Please upgrade your subscription to use this voice.' } };
+  assert.ok(!outOfBalance(402, JSON.stringify(freePlan)));
+  /* and its documented plan errors, both 403s */
+  const subscription = { detail: { type: 'authorization_error', code: 'subscription_required', message: 'A paid subscription is required to access this feature.' } };
+  const feature = { detail: { type: 'authorization_error', code: 'feature_not_available', message: 'This feature is not available on your current plan.' } };
+  assert.ok(!outOfBalance(403, JSON.stringify(subscription)));
+  assert.ok(!outOfBalance(403, JSON.stringify(feature)));
 
   const ctx = { key: 'sk-test', signal: new AbortController().signal };
   const { createServer } = await import('node:http');
   const server = createServer((req, res) => {
-    const [status, body] = req.url === '/quota' ? [429, { error: { type: 'insufficient_quota' } }] : [401, { error: { message: 'bad key sk-test' } }];
+    const answers = { '/quota': [429, { error: { type: 'insufficient_quota' } }], '/plan': [402, freePlan], '/subscription': [403, subscription], '/feature': [403, feature] };
+    const [status, body] = answers[/** @type {keyof typeof answers} */ (req.url)] ?? [401, { error: { message: 'bad key sk-test' } }];
     res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body));
   });
   await new Promise((done) => server.listen(0, '127.0.0.1', done));
@@ -91,6 +100,12 @@ test('no balance, as each service says it, is one error for all; a plain rate li
   try {
     await assert.rejects(call('OpenAI', `${at}/quota`, {}, ctx), (e) => e.code === 'balance' && e.message === "OpenAI doesn't have enough balance for this.");
     await assert.rejects(call('OpenAI', `${at}/key`, {}, ctx), (e) => e.code === undefined && /did not accept your key/.test(e.message));
+    await assert.rejects(call('ElevenLabs', `${at}/plan`, {}, ctx), (e) => e.code === undefined
+      && e.message === 'ElevenLabs needs a paid plan for this (402): Free users cannot use library voices via the API. Please upgrade your subscription to use this voice.');
+    await assert.rejects(call('ElevenLabs', `${at}/subscription`, {}, ctx), (e) => e.code === undefined
+      && e.message === 'ElevenLabs needs a paid plan for this (403): A paid subscription is required to access this feature.');
+    await assert.rejects(call('ElevenLabs', `${at}/feature`, {}, ctx), (e) => e.code === undefined
+      && e.message === 'ElevenLabs needs a paid plan for this (403): This feature is not available on your current plan.');
   } finally {
     server.close();
   }

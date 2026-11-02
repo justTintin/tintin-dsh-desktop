@@ -4,7 +4,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { COMMAND_ROOM, audioClips, checkSound, fadeFilter, ffmpeg, fileOf, mix, mixGraph } from './shared.mjs';
+import { COMMAND_ROOM, audioChannels, audioClips, checkSound, fadeFilter, ffmpeg, fileOf, mix, mixGraph } from './shared.mjs';
 import { addLinkedPlaces } from './media-links.mjs';
 
 test('an ffmpeg that does not end is stopped, and says what did not finish', { timeout: 20_000 }, async () => {
@@ -111,13 +111,16 @@ test('fileOf: a sound stays inside the film\'s folder, however its path is writt
     /* a slash hidden as %2F is decoded after the URL resolved its `..`: the join must not walk out */
     assert.throws(() => fileOf(ws, 'film.html', 'x%2F..%2F..%2Foutside.mp3'), /outside the film's folder/);
     assert.throws(() => fileOf(ws, 'film.html', '%2E%2E%2Foutside.mp3'), /outside the film's folder/);
-    /* a link inside the folder that leads out of it */
-    symlinkSync(join(root, 'outside.mp3'), join(ws, 'assets', 'link.mp3'));
-    assert.throws(() => fileOf(ws, 'film.html', 'assets/link.mp3'), /link out of the film's folder/);
+    /* a link inside the folder that leads out of it (links need Developer Mode on Windows: there the rest of the
+       test stands) */
+    if (process.platform !== 'win32') {
+      symlinkSync(join(root, 'outside.mp3'), join(ws, 'assets', 'link.mp3'));
+      assert.throws(() => fileOf(ws, 'film.html', 'assets/link.mp3'), /link out of the film's folder/);
+    }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('fileOf: a link to media the person linked is followed; a link a project brought from elsewhere is not', () => {
+test('fileOf: a link to media the person linked is followed; a link a project brought from elsewhere is not', { skip: process.platform === 'win32' && 'links need Developer Mode on Windows' }, () => {
   /* the places the person linked are kept in Studio's home: this test's own */
   const home = process.env.OPENFILM_HOME;
   const root = mkdtempSync(join(tmpdir(), 'openfilm-fileof-links-'));
@@ -193,6 +196,19 @@ test('a mix of hundreds of sounds keeps its command short: its graph goes in a f
     assert.ok(Math.abs(seconds - 15) < 0.01, `${seconds} s`);
     assert.ok(levelAt(out, 7.525) > 0.01 && levelAt(out, 7.575) < levelAt(out, 7.525) * 2, 'a tick where one plays');
     assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith('.filter')), [], 'the graph file is gone');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a file made again at the same path is asked again for its sound: one that was silent can have it now', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'openfilm-channels-'));
+  try {
+    const file = join(dir, 'clip.mp4');
+    spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=1', '-pix_fmt', 'yuv420p', file]);
+    assert.equal(audioChannels(file), 0);
+    spawnSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=black:s=64x64:d=1', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-pix_fmt', 'yuv420p', '-shortest', file]);
+    assert.equal(audioChannels(file), 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
