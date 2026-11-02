@@ -163,6 +163,13 @@ export function createHttpRequest({ getServerUrl, getMachineId, log = () => {}, 
         'X-Machine-ID': getMachineId(),
         'User-Agent': 'TintinElectron/3.0'
       }
+      /* 2026-11-01 按入口分账标记(防空转第 2 步收尾):页面 REST llmChat 面(素材创作/
+         媒体/运营)对 /llm/* 附加链路 key——服务端 /llm 计量按 key 分账;ACP 子进程面由
+         各自 spawn env 区分(--film/--cover),主聊天为用户自配 key 天然可区分。
+         服务端无鉴权不校验值,调用方已带 Authorization 时不覆盖。 */
+      if (url.pathname.startsWith('/llm/') && !headers['Authorization']) {
+        defaultHeaders['Authorization'] = 'Bearer sk-tintin-local--rest'
+      }
 
       let bodyData = null
       if (body !== undefined && body !== null) {
