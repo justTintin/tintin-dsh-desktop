@@ -2,10 +2,13 @@
 // 编辑器预览(vite 构建把 public/ 拷进 dist/editor;运行期新素材必须补写这里)、
 // Remotion staticFile 服务根(dist/remotion-bundle/public/,导出用)、源(public/)。
 // 此前上传/AI 底图只双写后两处,运行期生成的图片在编辑器预览里 404 —— 本模块统一收口。
+// ASSET_NAME_RE(2026-11-02 放宽):拒绝 路径分隔符/Windows 非法字符/控制符/任何 ".."
+// (穿越防护),其余(中文/空格/emoji)放行——首版仅英数字,中文名导入被「素材名不合法」
+// 挡死且曾被假成功掩盖(2026-11-02 用户报障)。镜像副本=templates/CoverImg.tsx。
 import { copyFileSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
-export const ASSET_NAME_RE = /^[A-Za-z0-9._-]{1,120}$/
+export const ASSET_NAME_RE = /^(?!.*\.\.)[^\\/:*?"<>|\u0000-\u001f]{1,120}$/
 export const ASSET_EXT_RE = /\.(?:jpe?g|png|webp)$/i
 
 /** 封面项目素材根(2026-10-31 用户报障:路由按项目制前旧口径 join(coverDir,'..','projects')

@@ -6,7 +6,7 @@ import { getTemplate } from '../registry'
 import { CanvasPlayer } from './canvas-player'
 import { useCanvasShortcuts } from './canvas-keys'
 import { canvasBoxIn, compositionRectIn, type CanvasBox } from './canvas-geom'
-import { clampScale, lockedOf } from './image-ops'
+import { clampScale, cornerResize, lockedOf, type Corner } from './image-ops'
 import type { CustomLayer } from '../../templates/CustomLayers'
 import { lookScale, type ImageLook } from '../../templates/image-style'
 import { redo, sanitizeCustomLayers, undo, useEditor } from './store'
@@ -147,20 +147,29 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (rot.custom) setCustomLayer(rot.id, { rotate: rot.curDeg })
     else setLayerStyle(rot.id, { rotate: rot.curDeg })
   }
-  /** 缩放手柄(右下角柄,等比;预览-提交分离)。自由图层=左上角为锚改宽(有显式高时同比);
-   *  产品图槽位(2026-11-01 对齐 PhotoCraft)=以中心为锚改缩放倍率——槽位的变换原点在中心。 */
-  const resRef = React.useRef<{ id: string; slot: boolean; ax: number; ay: number; startDist: number; el: HTMLElement | null; f: number; w0: number; h0?: number; sx0: number; sy0: number; signX: number; signY: number; baseTransform: string } | null>(null)
+  /** 缩放手柄(PhotoCraft 四角柄,2026-11-02 用户裁决:对角为锚等比缩放;预览-提交分离)。
+   *  自由图层=对角锚改宽(显式高同比)+x/y 随锚补正;产品图槽位=以中心为锚改缩放倍率
+   *  (槽位变换原点在中心,四角等价)。 */
+  const resRef = React.useRef<{
+    id: string; slot: boolean; corner: Corner
+    ax: number; ay: number; startDist: number
+    el: HTMLElement | null; f: number
+    w0: number; h0?: number
+    sx0: number; sy0: number; signX: number; signY: number; baseTransform: string
+    box0: CanvasBox
+    layer: CustomLayer | null
+  } | null>(null)
   const resized = (r: NonNullable<typeof resRef.current>): { w: number; h?: number; sx: number; sy: number } => ({
     w: Math.max(20, Math.min(4000, Math.round(r.w0 * r.f))),
     h: r.h0 === undefined ? undefined : Math.max(20, Math.min(4000, Math.round(r.h0 * r.f))),
     sx: clampScale(r.sx0 * r.f), sy: clampScale(r.sy0 * r.f),
   })
-  const onResizeDown = (e: React.PointerEvent): void => {
+  const onResizeDown = (corner: Corner) => (e: React.PointerEvent): void => {
     if (!handleBox || !selectedLayer || lockedOf(props, selectedLayer)) return
     const slot = selectedLayer === 'product'
     if (!slot && !selectedLayer.startsWith('img-')) return
     e.stopPropagation()
-    const layer = ((props.customLayers as CustomLayer[] | undefined) ?? []).find((l) => l.id === selectedLayer)
+    const layer = ((props.customLayers as CustomLayer[] | undefined) ?? []).find((l) => l.id === selectedLayer) ?? null
     const look = (props.styles as Record<string, ImageLook> | undefined)?.[selectedLayer]
     const el = hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`) as HTMLElement | null
     const rect = compositionRect()
@@ -169,12 +178,13 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     const scale = Math.max(rect.width / tpl.width, 0.05)
     const px = (e.clientX - rect.left) / scale
     const py = (e.clientY - rect.top) / scale
-    const ax = slot ? box.left + box.w / 2 : box.left
-    const ay = slot ? box.top + box.h / 2 : box.top
+    const ax = slot ? box.left + box.w / 2 : corner === 'nw' || corner === 'sw' ? box.left + box.w : box.left
+    const ay = slot ? box.top + box.h / 2 : corner === 'nw' || corner === 'ne' ? box.top + box.h : box.top
     resRef.current = {
-      id: selectedLayer, slot, ax, ay, startDist: Math.max(8, Math.hypot(px - ax, py - ay)), el, f: 1,
+      id: selectedLayer, slot, corner, ax, ay, startDist: Math.max(8, Math.hypot(px - ax, py - ay)), el, f: 1,
       w0: layer?.width ?? 0, h0: layer?.height, sx0: lookScale(look?.sx), sy0: lookScale(look?.sy),
       signX: look?.flipX ? -1 : 1, signY: look?.flipY ? -1 : 1, baseTransform: el.style.transform,
+      box0: { left: box.left, top: box.top, w: box.w, h: box.h }, layer,
     }
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
   }
@@ -183,15 +193,19 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     const rect = compositionRect()
     if (!r || !rect) return
     const scale = Math.max(rect.width / tpl.width, 0.05)
-    r.f = Math.hypot((e.clientX - rect.left) / scale - r.ax, (e.clientY - rect.top) / scale - r.ay) / r.startDist
+    const distNow = Math.hypot((e.clientX - rect.left) / scale - r.ax, (e.clientY - rect.top) / scale - r.ay)
+    r.f = distNow / r.startDist
     const n = resized(r)
     if (!r.el) return // 预览-提交分离:以下纯视觉
     if (r.slot) {
       const i = r.baseTransform.lastIndexOf(' scale(')
       r.el.style.transform = `${i < 0 ? r.baseTransform : r.baseTransform.slice(0, i)} scale(${n.sx * r.signX}, ${n.sy * r.signY})`
     } else {
-      r.el.style.width = `${n.w}px`
-      if (n.h !== undefined) r.el.style.height = `${n.h}px`
+      const c = cornerResize(r.box0, r.corner, distNow, r.startDist, { x: r.layer?.x ?? 0, y: r.layer?.y ?? 0, w: r.layer?.width ?? n.w, h: r.layer?.height ?? null })
+      r.el.style.width = `${c.width}px`
+      if (c.height !== null) r.el.style.height = `${c.height}px`
+      r.el.style.left = `${c.x}px`
+      r.el.style.top = `${c.y}px`
     }
   }
   const onResizeUp = (e: React.PointerEvent): void => {
@@ -203,11 +217,16 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     const unchanged = r.slot ? n.sx === r.sx0 && n.sy === r.sy0 : n.w === r.w0
     if (unchanged) { // 不写 props 就不重渲染:还原预览
       if (r.el && r.slot) r.el.style.transform = r.baseTransform
-      else if (r.el) { r.el.style.width = `${r.w0}px`; if (r.h0 !== undefined) r.el.style.height = `${r.h0}px` }
+      else if (r.el) {
+        r.el.style.width = `${r.w0}px`
+        if (r.h0 !== undefined) r.el.style.height = `${r.h0}px`
+        if (r.layer) { r.el.style.left = `${r.layer.x}px`; r.el.style.top = `${r.layer.y}px` }
+      }
       return
     }
-    if (r.slot) setLayerStyle(r.id, { sx: n.sx, sy: n.sy })
-    else setCustomLayer(r.id, n.h === undefined ? { width: n.w } : { width: n.w, height: n.h })
+    if (r.slot) { setLayerStyle(r.id, { sx: n.sx, sy: n.sy }); return }
+    const c = cornerResize(r.box0, r.corner, r.f * r.startDist, r.startDist, { x: r.layer?.x ?? 0, y: r.layer?.y ?? 0, w: r.layer?.width ?? 0, h: r.layer?.height ?? null })
+    setCustomLayer(r.id, c.height === null ? { x: c.x, y: c.y, width: c.width } : { x: c.x, y: c.y, width: c.width, height: c.height })
   }
 
   /** 合成盒(Player 内按模板比例缩放的画布容器)= 拖动/对齐/落点的统一坐标系 */
@@ -267,7 +286,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     void (async () => {
       try {
         if (!name.startsWith('public/')) {
-          await fetch('/tintin/ipc/cover:acp/asset-sync', {
+          await fetch('/tintin/ipc/cover/acp/asset-sync', {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
           })
         }
@@ -279,7 +298,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     void (async () => {
       try {
         const buf = await file.arrayBuffer()
-        const r = await fetch(`/tintin/ipc/cover:upload-image?name=${encodeURIComponent(file.name)}&project=${encodeURIComponent(project)}`, {
+        const r = await fetch(`/tintin/ipc/cover/upload-image?name=${encodeURIComponent(file.name)}&project=${encodeURIComponent(project)}`, {
           method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: buf,
         }).then((resp) => resp.json())
         if (r.ok && r.name) dropAsLayer(String(r.name), clientX, clientY)
@@ -296,7 +315,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     const tick = async (): Promise<void> => {
       if (canvasDragFreeze.active) return // 拖动中冻结:props 回流会触发整树重渲(抖动源),拖完下个轮询自然追上
       try {
-        const r = await fetch('/tintin/ipc/cover:pc/screenshot').then((resp) => resp.json())
+        const r = await fetch('/tintin/ipc/cover/pc/screenshot').then((resp) => resp.json())
         if (!stop && r.ok && r.data) { setPcRunning(true); setShot(`data:image/png;base64,${r.data}`) }
         else if (!stop && pcRunning === null) setPcRunning(false)
       } catch { if (!stop) setPcRunning(false) }
@@ -386,9 +405,9 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   const onPointerMove = (e: React.PointerEvent): void => {
     const drag = dragRef.current
     if (!drag) {
-      // 悬停手型反馈
+      // 悬停光标(2026-11-02 用户裁决:对齐 PhotoCraft=箭头,不用手型)
       const host = hostRef.current
-      if (host) host.style.cursor = layerAt(e.clientX, e.clientY) ? 'grab' : 'default'
+      if (host) host.style.cursor = 'default'
       return
     }
     if (e.pointerId !== drag.pointerId) return
@@ -591,15 +610,18 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                 />
               </>
             ) : null}
-            {/* 缩放手柄(右下角柄,等比;自由图层=改宽,产品图槽位=中心缩放;预览-提交分离) */}
+            {/* 缩放手柄(PhotoCraft 四角柄,对角为锚等比缩放;自由图层=x/y 随锚补正,产品图槽位=中心缩放;预览-提交分离) */}
             {isImageLayer && handleBox && !pcRunning && !lockedOf(props, selectedLayer) ? (
-              <div
-                onPointerDown={onResizeDown}
-                onPointerMove={onResizeMove}
-                onPointerUp={onResizeUp}
-                title="拖动改尺寸(等比)"
-                style={{ position: 'absolute', left: handleBox.x + handleBox.w - 7, top: handleBox.y + handleBox.h - 7, width: 14, height: 14, borderRadius: 3, background: '#4f7cff', border: '2px solid #fff', cursor: 'nwse-resize', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
-              />
+              ([['nw', 'nwse-resize'], ['ne', 'nesw-resize'], ['sw', 'nesw-resize'], ['se', 'nwse-resize']] as const).map(([c, cursor]) => (
+                <div
+                  key={c}
+                  onPointerDown={onResizeDown(c)}
+                  onPointerMove={onResizeMove}
+                  onPointerUp={onResizeUp}
+                  title="拖动角改尺寸(等比,对角为锚)"
+                  style={{ position: 'absolute', left: handleBox.x + (c === 'ne' || c === 'se' ? handleBox.w - 7 : -7), top: handleBox.y + (c === 'sw' || c === 'se' ? handleBox.h - 7 : -7), width: 14, height: 14, borderRadius: 3, background: '#4f7cff', border: '2px solid #fff', cursor, zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
+                />
+              ))
             ) : null}
           </div>
         </>
@@ -728,7 +750,7 @@ export const EditorApp: React.FC = () => {
     void reloadProjectState()
   }
   const refreshProjects = (): void => {
-    void fetch('/tintin/ipc/cover:projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    void fetch('/tintin/ipc/cover/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
       .then((x) => x.json())
       .then((r) => { if (r?.ok) { setProjects(r.projects ?? []); setCurrentProject(String(r.current ?? '')) } })
       .catch(() => {})
@@ -739,13 +761,13 @@ export const EditorApp: React.FC = () => {
   const switchProject = async (name: string): Promise<void> => {
     if (!name || name === currentProject) return
     try {
-      const r = await fetch('/tintin/ipc/cover:projects/switch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }).then((x) => x.json())
+      const r = await fetch('/tintin/ipc/cover/projects/switch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }).then((x) => x.json())
       if (r?.ok) applyProjectSwitch(r)
     } catch { /* 请求失败保持原项目 */ }
   }
   const createProject = async (): Promise<void> => {
     try {
-      const r = await fetch('/tintin/ipc/cover:projects/create', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then((x) => x.json())
+      const r = await fetch('/tintin/ipc/cover/projects/create', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).then((x) => x.json())
       if (r?.ok) applyProjectSwitch(r)
     } catch { /* 同上 */ }
   }
@@ -756,7 +778,7 @@ export const EditorApp: React.FC = () => {
     const to = task.value.trim()
     if (!to || to === task.from) return
     try {
-      const r = await fetch('/tintin/ipc/cover:projects/rename', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ from: task.from, to }) }).then((x) => x.json())
+      const r = await fetch('/tintin/ipc/cover/projects/rename', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ from: task.from, to }) }).then((x) => x.json())
       if (!r?.ok) return
       if (String(r.current ?? '') === to) applyProjectSwitch(r)
       else if (Array.isArray(r.projects)) setProjects(r.projects)
@@ -794,7 +816,7 @@ export const EditorApp: React.FC = () => {
   const openPhotoCraft = (): void => {
     /* 送当前模板+props:主进程按其构建图层底稿,PhotoCraft 随文档启动(不再开空窗) */
     const s = useEditor.getState()
-    void fetch('/tintin/ipc/cover:pc/launch', {
+    void fetch('/tintin/ipc/cover/pc/launch', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ templateId: s.templateId, props: { ...s.props, hiddenLayers: s.hiddenLayers } }),
     })
@@ -903,25 +925,22 @@ export const EditorApp: React.FC = () => {
       {showExport ? <ExportModal onClose={() => setShowExport(false)} /> : null}
       {showServer ? <ServerSettingsModal onClose={() => setShowServer(false)} /> : null}
       {showSkills ? <SkillsModal onClose={() => setShowSkills(false)} /> : null}
-      {/* 素材横带=底部全宽但不含会话列(2026-10-30 用户裁决:扩展高宽,跨预览列+中栏,中栏底部让位;会话列保持全高) */}
+      {/* 布局(2026-11-02 用户裁决:素材条右侧让出给图层列——素材条只随预览列宽,
+          图层+编辑列下延至窗口底;2026-10-30「素材横带跨预览列+中栏」裁决由本条取代) */}
       <div style={{ flex: '1 1 auto', display: 'flex', minHeight: 0 }}>
+        {/* 预览列 = 设置顶条 + 画布 + 素材条(底部,只随本列宽) */}
         <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div style={{ flex: '1 1 auto', display: 'flex', minHeight: 0 }}>
-            {/* 预览列 = 设置顶条(横竖屏+预览显示) + 画布 */}
-            <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              <CanvasSettingsStrip />
-              <CanvasPanel project={currentProject} />
-            </div>
-            {/* 中栏 = 图层+编辑整栏(素材移出后整栏让给图层;高度随素材底带让位) */}
-            <div style={{ width: 260, flexShrink: 0, background: '#1a1a1c', borderLeft: '1px solid #333', borderRight: '1px solid #333', padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'hidden', gap: 10 }}>
-              <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-                <LayersPanel project={currentProject} />
-              </div>
-            </div>
-          </div>
+          <CanvasSettingsStrip />
+          <CanvasPanel project={currentProject} />
           {/* 素材条感知项目(2026-10-30 用户裁决方案 1):key=项目纪元,切换/新建/改名即重挂
               重拉——此前它只靠 3 秒轮询,切完最慢 3 秒才出新项目素材 */}
           <AssetsPanel key={projectEpoch} project={currentProject} />
+        </div>
+        {/* 中栏 = 图层+编辑整栏(横向兄弟,全高;2026-11-02 用户裁决:下延至窗口底) */}
+        <div style={{ width: 260, flexShrink: 0, background: '#1a1a1c', borderLeft: '1px solid #333', borderRight: '1px solid #333', padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'hidden', gap: 10 }}>
+          <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <LayersPanel project={currentProject} />
+          </div>
         </div>
         {/* 右栏 = 会话列(2026-10-28 裁决:通栏全高官方聊天,不被素材带挤占) */}
         <div style={{ width: 420, flexShrink: 0, background: '#1a1a1c', borderLeft: '1px solid #333', display: 'flex', flexDirection: 'column', minHeight: 0 }}>

@@ -52,6 +52,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 ## 生图(画面归 AI,文字归排版——铁律)
 
 - **所有生成(底图/环境图/产品图重绘)统一走服务端 MCP 工具 `create_image`**:mode=t2i(文生图,prompt 直接出图)或 mode=cover(封面图生图,参考图 script_id/images/material_ids 三选一)。**不要用 curl/pwsh 直调任何 `/generate/*` 端点或编辑器的 generate-background/generate-product**(那些是编辑器界面自身使用的通道;会话里的生成一律经 create_image 工具)。异步任务按会话工作纪律用 task_status_unified 轮询到终态(间隔 ≥5 秒,预算 30 分钟)。
+- **参考图必须是服务端可达的引用(2026-11-02 用户裁决:传给服务端的不是路径)**:`images`/`material_ids`/`script_id` 只认 material id、script、服务端可达 URL;**本机/客户端项目里的文件路径对服务端不可见**(生成服务跑在另一台 Linux 主机上),传本地路径必报「找不到」且重试无效。用户拿本机图当参考时:①该图已在服务端素材库→给 material_ids;②用户能提供图片 URL→直传 URL;③都没有→如实说明「本机文件需先上传到服务端素材库才能作为参考」,等用户提供,不要传本地路径。抠图例外:`/matting` 是 multipart 上传文件字节,本地图可直接用。
 - 产物落盘后按用途写回 props(底图 → `props.bgImage` = 文件名;产品图 → `props.image`),写回规则见上节。
 - **抠图/去背景**:`POST <服务端>/matting`,multipart 表单 `file=@<图片绝对路径>`(可选 `model`,默认 u2net),约 2-3 秒直出**透明底 PNG**(RGBA)。用户说抠图/去背景/透明底时用 curl 调它:输出存进影片封面项目目录(如 `matting-<时间戳>.png`)。**抠图结果是一个素材(2026-10-31 用户裁决)**,可用于任何图层(产品图/底图/新增图层都行),用在哪由用户说了算;落盘后进素材区并告知路径即可,**不要默认写 `props.image`/`props.bgImage`、不要自动加图层**——用户明确要求设为产品图/底图时才写对应字段。`GET <服务端>/matting/models` 可列可用模型。
 - prompt 只描述画面/光影/材质/氛围;**任何文字、标语、Logo 都不要写进 prompt**(文字由模板排版,写了必崩)。

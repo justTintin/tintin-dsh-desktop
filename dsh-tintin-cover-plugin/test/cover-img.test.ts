@@ -14,8 +14,9 @@ describe('classifyImageName', () => {
     }
   })
 
-  it('rejects everything staticFile() throws on or that can never be in the asset dir', () => {
-    const invalid = ['https://x.com/a.png', '../a.png', './a.png', '..', 'C:\\Users\\a.png', 'D:/a.png', '/Users/a.png', 'public/a.png', '中文.png', 'a b.png', 42, {}, []]
+  it('rejects everything staticFile() throws on; 中文/空格 2026-11-02 起放行', () => {
+    const invalid = ['https://x.com/a.png', '../a.png', './a.png', '..', 'a..b.png', 'C:\\Users\\a.png', 'D:/a.png', '/Users/a.png', 'public/a.png', 42, {}, []]
     for (const value of invalid) expect(classifyImageName(value)).toBe('invalid')
+    for (const value of ['中文.png', 'a b.png', '微信图片_20261102113546_96_194.png']) expect(classifyImageName(value)).toBe('ok')
   })
 })

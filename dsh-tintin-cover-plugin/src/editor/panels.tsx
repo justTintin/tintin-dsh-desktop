@@ -76,7 +76,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
     } catch { /* 私密模式等存储失败不阻断 */ }
   }
   React.useEffect(() => {
-    void fetch('/tintin/ipc/cover:acp/hello').then((r) => r.json()).then((d) => {
+    void fetch('/tintin/ipc/cover/acp/hello').then((r) => r.json()).then((d) => {
       coverDirRef.current = String(d.coverDir ?? '')
     }).catch(() => {})
   }, [])
@@ -88,7 +88,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
   const reloadNow = (): void => {
     /* project 显式跟随激活 tab(2026-10-31 用户报障「导入成功却不显示」):列表/上传
        不再依赖服务端指针项目,切 tab 后永不串项目。 */
-    void fetch(`/tintin/ipc/cover:acp/files?project=${encodeURIComponent(project)}`).then((r) => r.json()).then((d) => {
+    void fetch(`/tintin/ipc/cover/acp/files?project=${encodeURIComponent(project)}`).then((r) => r.json()).then((d) => {
       setItems(((d.files ?? []) as Array<{ path: string; kind: string; size: number }>)
         .filter((f) => f.kind === 'image' && !f.path.startsWith('public/')))
       setLoaded(true)
@@ -103,7 +103,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
     void (async () => {
       try {
         if (!name.startsWith('public/')) {
-          await fetch('/tintin/ipc/cover:acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })
+          await fetch('/tintin/ipc/cover/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) })
         }
         useEditor.getState().addCustomLayer(name.replace(/^public\//, ''), Math.round(tpl.width / 2 - 180), Math.round(tpl.height / 3), 360)
       } catch { /* 失败静默(同原按钮口径) */ }
@@ -114,8 +114,8 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
   }
   /** 导入/拖入(2026-10-30 用户裁决):图片文件上传落当前项目目录(upload-image 双写
       三写位+项目,画布/素材条/导出三处可用);重名自动加时间戳前缀。
-      2026-11-02 用户裁决:成败按服务端真实应答判定——fetch 对 403/500 也正常 resolve,
-      此前不检查应答=没写盘也报「已导入」;失败把状态码与原因如实报出。 */
+      2026-11-02 用户裁决:成败按服务端真实应答判定;失败界面只说人话(拒绝原因),
+      HTTP 状态码与 JSON 原文进 console 供排查——UI 禁现传输层噪音。 */
   const importFiles = async (list: FileList | null): Promise<void> => {
     const files = Array.from(list ?? []).filter((f) => /^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(f.name))
     if (!files.length) { flashNotice('仅支持图片文件(png/jpg/webp/gif/svg)'); return }
@@ -124,17 +124,26 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
     let ok = 0
     const failures: string[] = []
     for (const f of files) {
-      let name = f.name.replace(/[\\/:*?"<>|]/g, '-')
+      let name = f.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').replace(/\.\./g, '-')
       if (existing.has(name)) name = `${Date.now()}-${name}`
       existing.add(name)
       try {
         const bytes = await f.arrayBuffer()
-        const r = await fetch(`/tintin/ipc/cover:upload-image?name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}`, {
+        const r = await fetch(`/tintin/ipc/cover/upload-image?name=${encodeURIComponent(name)}&project=${encodeURIComponent(project)}`, {
           method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: bytes,
         })
         if (!r.ok) {
-          const detail = (await r.text()).trim().slice(0, 80)
-          throw new Error(`HTTP ${r.status}${detail ? ` ${detail}` : ''}`)
+          const raw = (await r.text()).trim()
+          console.warn(`[tintin] 导入被拒 HTTP ${r.status} ${name} ${raw.slice(0, 200)}`)
+          let server = ''
+          try { const j = JSON.parse(raw); if (typeof j?.error === 'string') server = j.error } catch { if (raw && !raw.startsWith('{') && !raw.startsWith('<')) server = raw.slice(0, 80) }
+          const human = r.status === 400 ? (server || '文件内容或名称不被接受')
+            : r.status === 403 ? '本地服务安全校验未通过'
+            : r.status === 404 ? '服务接口缺失(版本不匹配?)'
+            : r.status === 413 ? '文件过大'
+            : r.status >= 500 ? (server || '本地服务处理失败')
+            : (server || `本地服务返回错误码 ${r.status}`)
+          throw new Error(human)
         }
         ok += 1
       } catch (e) {
@@ -153,7 +162,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
     setImportBusy(true)
     void (async () => {
       try {
-        const r = await (await fetch('/tintin/ipc/cover:upload-url', {
+        const r = await (await fetch('/tintin/ipc/cover/upload-url', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, project }),
         })).json() as { ok?: boolean; name?: string; error?: string }
         if (!r.ok || !r.name) throw new Error(r.error || 'URL 导入失败')
@@ -221,7 +230,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
         <button
           type="button"
           title="打开封面项目的文件目录"
-          onClick={() => { void fetch('/tintin/ipc/cover:reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }) }}
+          onClick={() => { void fetch('/tintin/ipc/cover/reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }) }}
           style={{ ...iconBtn, width: 30, height: 30, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c9c9c7' }}
         >📁</button>
         <span style={{ fontSize: 10, color: '#8b8b88' }}>拖图入库 · 拖到画布成层</span>
@@ -285,7 +294,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
             >
               {/* 1:1 方格+棋盘格衬底=透明素材可见（RGBA 装饰落在近黑底上曾是黑块） */}
               <div style={{ height: 128, background: 'repeating-conic-gradient(#2e2e35 0% 25%, #1b1b21 0% 50%) 0 0 / 12px 12px' }}>
-                <img src={`/tintin/ipc/cover:acp/asset?name=${encodeURIComponent(name)}`} alt={base} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+                <img src={`/tintin/ipc/cover/acp/asset?name=${encodeURIComponent(name)}`} alt={base} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
               </div>
               <div style={{ padding: '3px 6px', fontSize: 10, lineHeight: '12px', color: '#8b8b88', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{base}</div>
               {fav ? <span className="tintin-as-fav">★</span> : null}
@@ -301,7 +310,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
           <div className="tintin-as-menu" style={{ left: Math.min(menu.x, window.innerWidth - 216), top: Math.min(menu.y, window.innerHeight - 260) }}>
             <button onClick={() => { asNewLayer(menu.name); setMenu(null) }}><span className="ico">✚</span>添加为图层</button>
             <button onClick={() => { referFile(menu.name); setMenu(null) }}><span className="ico">💬</span>在对话中引用</button>
-            <button onClick={() => { void fetch('/tintin/ipc/cover:reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: menu.name }) }); setMenu(null) }}><span className="ico">📂</span>在文件资源管理器中显示</button>
+            <button onClick={() => { void fetch('/tintin/ipc/cover/reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ file: menu.name }) }); setMenu(null) }}><span className="ico">📂</span>在文件资源管理器中显示</button>
             <button onClick={() => {
               const abs = (coverDirRef.current ? coverDirRef.current.replace(/[\\/]+$/, '') + '\\' : '') + menu.name
               const write = (): void => { navigator.clipboard?.writeText(abs).catch(() => {}) }
@@ -320,7 +329,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
             <button className="danger" onClick={() => {
               void (async () => {
                 try {
-                  const r = await (await fetch('/tintin/ipc/cover:delete-asset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: menu.name }) })).json() as { ok?: boolean; error?: string }
+                  const r = await (await fetch('/tintin/ipc/cover/delete-asset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: menu.name }) })).json() as { ok?: boolean; error?: string }
                   if (!r.ok) throw new Error(r.error || '删除失败')
                   if (selected === menu.name) setSelected(null)
                   reloadNow()
@@ -392,7 +401,7 @@ function ExportModal({ onClose }: { onClose: () => void }): React.ReactElement {
           outDir = sep > 0 ? picked.slice(0, sep) : undefined
           fileName = sep > 0 ? picked.slice(sep + 1) : picked
         }
-        const r = await fetch('/tintin/ipc/cover:render', {
+        const r = await fetch('/tintin/ipc/cover/render', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ templateId: tid, props, hiddenLayers, fileName, outDir }),
@@ -437,7 +446,7 @@ function ExportModal({ onClose }: { onClose: () => void }): React.ReactElement {
               <button
                 onClick={() => {
                   const firstOk = results.find((r) => r.ok && r.file)
-                  void fetch('/tintin/ipc/cover:reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(firstOk?.file ? { dir: firstOk.file.slice(0, firstOk.file.length - dirNameOf(firstOk.file).length - 1) } : {}) }).catch(() => {})
+                  void fetch('/tintin/ipc/cover/reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(firstOk?.file ? { dir: firstOk.file.slice(0, firstOk.file.length - dirNameOf(firstOk.file).length - 1) } : {}) }).catch(() => {})
                 }}
                 style={{ ...ghostBtn, width: 'auto', padding: '4px 12px', fontSize: 11, marginTop: 4 }}
               >📂 打开目录</button>
@@ -488,7 +497,7 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
     void (async () => {
       try {
         if (!assetName.startsWith('public/')) {
-          await fetch('/tintin/ipc/cover:acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: assetName }) })
+          await fetch('/tintin/ipc/cover/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: assetName }) })
         }
         const id = useEditor.getState().addCustomLayer(assetName.replace(/^public\//, ''), Math.round(tpl.width / 2 - 180), Math.round(tpl.height / 3), 360)
         if (afterLayerId) reorderLayer(id, afterLayerId)
@@ -558,7 +567,7 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                     void (async () => {
                       try {
                         if (!assetName.startsWith('public/')) {
-                          await fetch('/tintin/ipc/cover:acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: assetName }) })
+                          await fetch('/tintin/ipc/cover/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: assetName }) })
                         }
                         const newId = useEditor.getState().addCustomLayer(assetName.replace(/^public\//, ''), Math.round(tpl.width / 2 - 180), Math.round(tpl.height / 3), 360, id)
                         reorderLayer(newId, id)
@@ -575,8 +584,8 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                 onDragLeave={(e) => { if (assetOverId === id && !e.currentTarget.contains(e.relatedTarget as Node)) setAssetOverId(null) }}
                 onClick={() => selectLayer(id)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 7, padding: '5px 7px', borderRadius: 8,
-                  cursor: 'grab', userSelect: 'none',
+                display: 'flex', alignItems: 'center', gap: 7, padding: '5px 7px', borderRadius: 8,
+                cursor: 'default', userSelect: 'none',
                   background: selected ? 'linear-gradient(90deg, rgba(79,124,255,0.22), rgba(79,124,255,0.07))' : 'rgba(127,127,127,0.05)',
                   border: selected
                     ? '1px solid rgba(79,124,255,0.55)'
@@ -629,7 +638,7 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
               onClick={() => selectLayer(id)}
               style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '5px 7px', borderRadius: 8,
-                cursor: 'grab', userSelect: 'none',
+                cursor: 'default', userSelect: 'none',
                 background: selected ? 'linear-gradient(90deg, rgba(79,124,255,0.22), rgba(79,124,255,0.07))' : 'rgba(127,127,127,0.05)',
                 border: selected
                   ? '1px solid rgba(79,124,255,0.55)'

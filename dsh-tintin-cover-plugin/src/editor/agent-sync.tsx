@@ -26,7 +26,7 @@ function pushChatContextNow(): void {
  *  画布/图层停留在旧项目内容(实撞:切到新建项目画布还是上一张的图)。 */
 async function reloadProjectState(): Promise<void> {
   try {
-    const r = await fetch('/tintin/ipc/cover:acp/props').then((x) => x.json())
+    const r = await fetch('/tintin/ipc/cover/acp/props').then((x) => x.json())
     const record = r?.record as { templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
     const tid = useEditor.getState().templateId
     if (record && typeof record.templateId === 'string' && record.templateId && record.props && typeof record.props === 'object') {
@@ -105,7 +105,7 @@ function useAgentPropsSync(isBusy: () => boolean): void {
     let pushing = false
     const tick = async (): Promise<void> => {
       try {
-        const r = await fetch('/tintin/ipc/cover:acp/props').then((x) => x.json())
+        const r = await fetch('/tintin/ipc/cover/acp/props').then((x) => x.json())
         if (stop) return
         const record = r?.record as { origin?: string; updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
         if (record && record.origin === 'agent' && typeof record.updatedAt === 'number'
@@ -142,7 +142,7 @@ function useAgentPropsSync(isBusy: () => boolean): void {
         const s = useEditor.getState()
         lastOwnWrite = Date.now()
         pushing = true
-        void fetch('/tintin/ipc/cover:acp/props', {
+        void fetch('/tintin/ipc/cover/acp/props', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ templateId: s.templateId, props: s.props, hiddenLayers: s.hiddenLayers }),

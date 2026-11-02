@@ -6,7 +6,7 @@ import { registerCoverPluginRoute } from '../lib/cover-plugin-route.js'
 
 interface Spec { path: string; handler: (req: EventEmitter & { url?: string; method?: string; headers?: Record<string, string>; socket?: unknown }, res: unknown) => Promise<void> | void }
 
-describe('编辑器业务通道(/tintin/ipc/cover:*)', () => {
+describe('编辑器业务通道(/tintin/ipc/cover/*)', () => {
   it('注册后可经别名派发:GET fonts 200;未知频道 404;POST 无信任被内层 403', async () => {
     const routes = new Map<string, Spec>()
     registerCoverPluginRoute({
@@ -20,7 +20,7 @@ describe('编辑器业务通道(/tintin/ipc/cover:*)', () => {
       httpRequest: async () => ({}),
       getServerUrl: () => '',
     })
-    const alias = routes.get('/tintin/ipc/cover:')!
+    const alias = routes.get('/tintin/ipc/cover')!
     expect(alias).toBeDefined()
 
     const call = (method: string, url: string, headers: Record<string, string> = {}): Promise<{ code: number; body: unknown }> =>
@@ -35,15 +35,15 @@ describe('编辑器业务通道(/tintin/ipc/cover:*)', () => {
         }, 2)
       })
 
-    const fonts = await call('GET', '/tintin/ipc/cover:fonts')
+    const fonts = await call('GET', '/tintin/ipc/cover/fonts')
     expect(fonts.code).toBe(200)
     expect((fonts.body as { ok: boolean; families: unknown[] }).ok).toBe(true)
     expect(Array.isArray((fonts.body as { families: unknown[] }).families)).toBe(true)
 
-    const unknown = await call('GET', '/tintin/ipc/cover:no-such-channel')
+    const unknown = await call('GET', '/tintin/ipc/cover/no-such-channel')
     expect(unknown.code).toBe(404)
 
-    const denied = await call('POST', '/tintin/ipc/cover:delete-asset', { 'content-type': 'application/json' })
+    const denied = await call('POST', '/tintin/ipc/cover/delete-asset', { 'content-type': 'application/json' })
     expect(denied.code).toBe(403)
   })
 })

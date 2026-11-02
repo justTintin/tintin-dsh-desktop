@@ -61,6 +61,9 @@ window.__ModuleLoader__.load({
 ${bundle}
       })(resolve)
     })(require)
+    // loader 把 factory 返回值当 cordis 插件加载(必须有 apply,2026-11-02 启动事故:
+    // 返回 undefined → "invalid plugin" → 恢复模式);视图注册在上方为命令式副作用。
+    return { apply() {} }
   },
 })
 `

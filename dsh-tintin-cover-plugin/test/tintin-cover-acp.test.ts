@@ -28,7 +28,7 @@ describe('cover plugin route registration (TDZ regression)', () => {
     expect(paths).toContain('/tintin/cover/chat')
     expect(paths).toContain('/tintin/cover/api/fonts')
     expect(paths).toContain('/tintin/cover/api/render')
-    expect(paths).toContain('/tintin/ipc/cover:')
+    expect(paths).toContain('/tintin/ipc/cover')
     expect(paths.filter((p) => p.startsWith('/tintin/cover/api/acp/')).length).toBeGreaterThanOrEqual(20)
     dispose()
   })
@@ -48,6 +48,14 @@ describe('cover-asset triple write', () => {
     const pluginDir = tempRoot()
     expect(() => writeCoverAsset(pluginDir, '../evil.png', Buffer.from('x'))).toThrow(/素材名/)
     expect(() => writeCoverAsset(pluginDir, 'notes.txt', Buffer.from('x'))).toThrow(/素材名/)
+    expect(() => writeCoverAsset(pluginDir, 'a/b.png', Buffer.from('x'))).toThrow(/素材名/)
+  })
+
+  it('accepts Chinese/space asset names, still rejects traversal (2026-11-02 放宽)', () => {
+    const pluginDir = tempRoot()
+    writeCoverAsset(pluginDir, '微信图片_20261102113546_96_194.png', Buffer.from('cn'))
+    expect(existsSync(join(pluginDir, 'dist', 'editor', '微信图片_20261102113546_96_194.png'))).toBe(true)
+    expect(() => writeCoverAsset(pluginDir, '..陷阱.png', Buffer.from('x'))).toThrow(/素材名/)
   })
 
   it('adopts images produced in the cover working dir', () => {

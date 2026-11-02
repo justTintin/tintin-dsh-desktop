@@ -2,7 +2,7 @@ import React from 'react'
 
 /** 封面技能管理弹窗(2026-10-30 用户裁决:形态=视频剪辑聊天里的 Skill 大居中弹窗——
  *  已安装/发现 两个 tab + ＋添加 skill + 搜索 + 我的/服务端 分区 + 行内详情展开;
- *  不是右下小弹层,也不是整页)。数据走 /tintin/ipc/cover:skills*(与安装落盘管线同一条):
+ *  不是右下小弹层,也不是整页)。数据走 /tintin/ipc/cover/skills*(与安装落盘管线同一条):
  *  registry=服务端注册表(中文名/版本/描述/执行方),installed=已安装装位(含描述)。
  *  版本徽标与更新判定同创作模式口径(分段数值,缺段=0,容忍 v 前缀;缺失/坏值不误报)。 */
 type RegistrySkill = { id: string; name: string; version: string; description: string; executor: string }
@@ -42,7 +42,7 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   const load = async (): Promise<void> => {
     try {
-      const r = await fetch('/tintin/ipc/cover:skills').then((x) => x.json())
+      const r = await fetch('/tintin/ipc/cover/skills').then((x) => x.json())
       if (r?.error) setServerError(String(r.error))
       else setServerError('')
       setRegistry(Array.isArray(r?.registry) ? r.registry : [])
@@ -60,7 +60,7 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     setBusy(id + action)
     setStatus(action === 'install' ? `安装「${id}」中…` : `删除「${id}」中…`)
     try {
-      const r = await fetch(`/tintin/ipc/cover:skills/${action}`, {
+      const r = await fetch(`/tintin/ipc/cover/skills/${action}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id }),
       }).then((x) => x.json())
       if (!r?.ok) throw new Error(r?.error || `HTTP 失败`)

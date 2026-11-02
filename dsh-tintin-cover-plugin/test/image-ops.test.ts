@@ -1,8 +1,37 @@
 // 选中图片图层基本操作(2026-11-01 对齐 PhotoCraft)的纯逻辑与 store 动作回归面。
 import { beforeEach, describe, expect, it } from 'vitest'
-import { arrangeOrder, clampScale, cloneLayer, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
+import { arrangeOrder, clampScale, cloneLayer, cornerResize, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
 import { effectiveOrder, useEditor } from '../src/editor/store'
 import { backdropStyle, lookBlend, lookOpacity, lookTransform } from '../templates/image-style'
+
+describe('cornerResize (PhotoCraft 四角柄,2026-11-02)', () => {
+  const box = { left: 100, top: 200, w: 300, h: 200 }
+  it('SE 角拖大:对角(左上)为锚,x/y 不动', () => {
+    const f = Math.hypot(500, 350) / Math.hypot(300, 150)
+    const r = cornerResize(box, 'se', Math.hypot(500, 350), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: 200 })
+    expect(r.x).toBe(100)
+    expect(r.y).toBe(200)
+    expect(r.width).toBe(Math.round(300 * f))
+  })
+  it('NW 角向左上拖:对角(右下)为锚,x/y 随锚补正', () => {
+    const f = Math.hypot(150, 250) / Math.hypot(300, 150)
+    const r = cornerResize(box, 'nw', Math.hypot(150, 250), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: 200 })
+    expect(r.x).toBe(400 - r.width)
+    expect(r.y).toBe(400 - (r.height ?? 0))
+    expect(r.width).toBe(Math.round(300 * f))
+  })
+  it('显式高同比缩放;未显式高返回 null(随原图比例)', () => {
+    const fh = Math.hypot(450, 300) / Math.hypot(300, 150)
+    const withH = cornerResize(box, 'se', Math.hypot(450, 300), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: 200 })
+    expect(withH.height).toBe(Math.round(200 * fh))
+    const noH = cornerResize(box, 'se', Math.hypot(450, 300), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: null })
+    expect(noH.height).toBeNull()
+  })
+  it('最小值钳制 20px', () => {
+    const r = cornerResize(box, 'se', Math.hypot(12, 12), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: 200 })
+    expect(r.width).toBe(20)
+  })
+})
 
 describe('arrangeOrder (Layer › Arrange)', () => {
   const order = ['a', 'b', 'c', 'd']

@@ -2,8 +2,8 @@ import React from 'react'
 
 /** 服务设置弹层(2026-10-29 用户裁决:封面工作本内可配服务端地址+MCP 自动发现)。
  *  地址=共享单一事实源 tintin/config.json server.url(视频剪辑/总助手同源,后端路由
- *  /tintin/ipc/cover:server-config 读写);「获取 MCP 服务」对 <地址>/mcp 走
- *  initialize+tools/list 自动发现并列出服务端货架(/tintin/ipc/cover:mcp/discover)。
+ *  /tintin/ipc/cover/server-config 读写);「获取 MCP 服务」对 <地址>/mcp 走
+ *  initialize+tools/list 自动发现并列出服务端货架(/tintin/ipc/cover/mcp/discover)。
  *  MCP 挂载本身仍在封面/剪辑会话创建时自动完成,此处是可视与验货,不是第二份配置。
  *  2026-10-29 二次裁决:①重开弹层要回显已保存的地址与 MCP 清单(发现成功后端缓存
  *  mcp-discover-cache.json,GET server-config 带回;打开时静默自动刷新一次,失败留缓存)
@@ -20,7 +20,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
 
   const discoverInto = (target: string, quiet: boolean): Promise<void> =>
     new Promise((resolve) => {
-      fetch('/tintin/ipc/cover:mcp/discover', {
+      fetch('/tintin/ipc/cover/mcp/discover', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ serverUrl: target }),
       })
         .then((r) => r.json())
@@ -45,7 +45,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
     })
 
   React.useEffect(() => {
-    void fetch('/tintin/ipc/cover:server-config')
+    void fetch('/tintin/ipc/cover/server-config')
       .then((r) => r.json())
       .then((j) => {
         if (j?.ok) {
@@ -70,7 +70,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
 
   const save = (): void => {
     setBusy('save'); setMessage('')
-    fetch('/tintin/ipc/cover:server-config', {
+    fetch('/tintin/ipc/cover/server-config', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ serverUrl: url }),
     })
       .then((r) => r.json())

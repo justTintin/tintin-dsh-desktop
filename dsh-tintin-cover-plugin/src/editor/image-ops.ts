@@ -64,3 +64,31 @@ export function lockedOf(props: Record<string, unknown>, id: string | null | und
   }
   return (props.styles as Record<string, { locked?: unknown } | undefined> | undefined)?.[id]?.locked === true
 }
+
+export type Corner = 'nw' | 'ne' | 'sw' | 'se'
+
+/** 四角缩放(PhotoCraft Free Transform 角柄语义,2026-11-02 用户裁决「对齐 PhotoCraft」):
+ *  对角为不动锚,拖拽距离比例驱动等比缩放;显式高度同比,未显式高则只提交宽(高随原图比例)。
+ *  box=起始视觉包围盒(画布 px);dist/startDist=指针到锚的当前/起始距离;h 为 null=随比例。
+ *  旋转/翻转层的视觉框为 AABB,缩放按 AABB 近似(与对齐/微调同一口径)。 */
+export function cornerResize(
+  box: { left: number; top: number; w: number; h: number },
+  corner: Corner,
+  dist: number,
+  startDist: number,
+  cur: { x: number; y: number; w: number; h: number | null },
+  min = 20,
+): { x: number; y: number; width: number; height: number | null } {
+  const anchorX = corner === 'nw' || corner === 'sw' ? box.left + box.w : box.left
+  const anchorY = corner === 'nw' || corner === 'ne' ? box.top + box.h : box.top
+  const f = Math.max(8, dist) / Math.max(8, startDist)
+  const width = Math.max(min, Math.round(cur.w * f))
+  const height = cur.h === null ? null : Math.max(min, Math.round(cur.h * f))
+  const hVis = Math.round(box.h * f)
+  return {
+    x: Math.round(anchorX + (corner === 'nw' || corner === 'sw' ? -width : 0)),
+    y: Math.round(anchorY + (corner === 'nw' || corner === 'ne' ? -(height ?? hVis) : 0)),
+    width,
+    height,
+  }
+}

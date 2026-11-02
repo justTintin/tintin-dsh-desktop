@@ -7,9 +7,9 @@
 import React from 'react'
 import { Img, staticFile, useRemotionEnvironment } from 'remotion'
 
-/** 素材名口径同宿主 lib/cover-asset.js 的 ASSET_NAME_RE(只有裸文件名进得了素材位);
- *  '..' 开头另拒(staticFile 按相对路径抛错) */
-const ASSET_NAME_RE = /^[A-Za-z0-9._-]{1,120}$/
+/** 素材名口径同宿主 lib/cover-asset.js 的 ASSET_NAME_RE(2026-11-02 放宽:拒绝
+ *  路径分隔符/Windows 非法字符/控制符/任何 "..",中文/空格放行)——两处必须同步改 */
+const ASSET_NAME_RE = /^(?!.*\.\.)[^\\/:*?"<>|\u0000-\u001f]{1,120}$/
 
 export type ImageNameKind = 'unset' | 'invalid' | 'ok'
 

@@ -21,7 +21,7 @@ function CustomLayerEditor({ layer, project }: { layer: CustomLayer; project: st
     void (async () => {
       try {
         if (!selectedAsset.startsWith('public/')) {
-          await fetch('/tintin/ipc/cover:acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selectedAsset }) })
+          await fetch('/tintin/ipc/cover/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selectedAsset }) })
         }
         setCustomLayer(layer.id, { image: selectedAsset.replace(/^public\//, '') })
       } catch { /* 同步失败静默(同画布口径) */ }
@@ -31,7 +31,7 @@ function CustomLayerEditor({ layer, project }: { layer: CustomLayer; project: st
     setMatting({ busy: true, msg: '', ok: true })
     void (async () => {
       try {
-        const r = await fetch('/tintin/ipc/cover:matting', {
+        const r = await fetch('/tintin/ipc/cover/matting', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: layer.image, project }),
         }).then((x) => x.json()) as { ok?: boolean; name?: string; error?: string }
         if (!r.ok) throw new Error(r.error || '抠图失败')
@@ -192,7 +192,7 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
     void (async () => {
       try {
         if (!selectedAsset.startsWith('public/')) {
-          await fetch('/tintin/ipc/cover:acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selectedAsset }) })
+          await fetch('/tintin/ipc/cover/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selectedAsset }) })
         }
         setProp(propKey, selectedAsset.replace(/^public\//, ''))
       } catch { /* 同步失败静默(同画布口径) */ }
@@ -204,7 +204,7 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
     setState({ busy: true, msg: '', ok: true })
     void (async () => {
       try {
-        const r = await fetch('/tintin/ipc/cover:matting', {
+        const r = await fetch('/tintin/ipc/cover/matting', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, project }),
         }).then((x) => x.json()) as { ok?: boolean; name?: string; error?: string }
         if (!r.ok) throw new Error(r.error || '抠图失败')
@@ -217,7 +217,7 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
   const generateBg = (): void => {
     if (!bgPrompt.trim()) { setState({ busy: false, msg: '先描述画面(不含文字)', ok: false }); return }
     setState({ busy: true, msg: 'AI 生成底图中…(分钟级,勿关页面)', ok: true })
-    void fetch('/tintin/ipc/cover:generate-background', {
+    void fetch('/tintin/ipc/cover/generate-background', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ prompt: bgPrompt.trim(), aspect: getTemplate(tplForAspect).orientation === 'portrait' ? '9:16' : '16:9', engine: genEngine }),

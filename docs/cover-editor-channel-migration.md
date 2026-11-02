@@ -27,7 +27,7 @@
 - 侧栏 chrome 解除 cover 的 iframe 特例（dsh-tintin-bundle/client.js:249 一带）。
 - 验收：jsdom 装载冒烟（Loader 桩+模块注册+视图 mount）+ 真机：三栏/画布/素材/导出/会话 iframe 全功能；素材条 3 秒轮询与项目切换照旧。
 
-### B2 传输换桥（✅已实施 2026-11-02：host=lib/cover-plugin-route.js 收集器+「/tintin/ipc/cover:」前缀路由（宿主最长前缀胜，重写 url 转发原处理器，门禁语义不变）；编辑器 39 个调用点换频道；HTTP 面收缩留待 B3 后清理）
+### B2 传输换桥（✅已实施 2026-11-02：host=lib/cover-plugin-route.js 收集器+「/tintin/ipc/cover/」前缀路由；**上游 matcher 规则=前缀命中要求余量以「/」开头且「最长前缀胜」——带尾斜杠或冒号结尾的前缀永不命中**（首版冒号形状被 bundle /tintin/ipc 抢走=项目/导入全失效的事故根因，经真实 WebServer.match 实测钉死）；重写 url 转发原处理器，门禁语义不变；编辑器 39 个调用点换频道；HTTP 面收缩留待 B3 后清理）
 - host：`/tintin/ipc/cover:<name>` 频道族注册（进程内直调现有 lib 处理函数，不经 HTTP）。
 - 编辑器：传输包装 `coverApi(name, payload)`＝桥可用走桥、不可用回退 fetch（开发态 serve.mjs 兼容）；约 20 个调用点替换。
 - HTTP 面收缩：编辑器业务路由退役；保留 GET 静态/缩略图 + agent 令牌路由。

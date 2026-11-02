@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { agentToken } from './cover-acp-bridge.js'
-import { projectsRootOf } from './cover-asset.js'
+import { ASSET_NAME_RE, projectsRootOf } from './cover-asset.js'
 
 const ACP = '/tintin/cover/api/acp'
 
@@ -459,7 +459,7 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
     }
     const raw = String(new URL(req.url, 'http://localhost').searchParams.get('name') || '')
     const name = raw.replace(/^public\//, '')
-    if (!/^[A-Za-z0-9._-]{1,120}$/.test(name) || !/\.(jpe?g|png|webp)$/i.test(name)) {
+    if (!ASSET_NAME_RE.test(name) || !/\.(jpe?g|png|webp)$/i.test(name)) {
       sendJson(res, 400, { ok: false, error: '素材名不合法' })
       return
     }
@@ -482,7 +482,7 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
     if (req.method !== 'POST' || !guard(req, res, true)) return
     const p = await readBodyJson(req)
     const name = String(p.name || '')
-    if (!/^[A-Za-z0-9._-]{1,120}$/.test(name) || !/\.(jpe?g|png|webp)$/i.test(name)) {
+    if (!ASSET_NAME_RE.test(name) || !/\.(jpe?g|png|webp)$/i.test(name)) {
       sendJson(res, 400, { ok: false, error: '素材名不合法' })
       return
     }

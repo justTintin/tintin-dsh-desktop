@@ -1,5 +1,5 @@
 // 字体选择(2026-11-02 用户裁决:对齐 PhotoCraft——全量枚举本机已装字体,可搜索,
-// 中文名显示,最近使用置顶;另配「字体样式」下拉=字面/字重)。数据源=/tintin/ipc/cover:fonts。
+// 中文名显示,最近使用置顶;另配「字体样式」下拉=字面/字重)。数据源=/tintin/ipc/cover/fonts。
 import React from 'react'
 
 export interface FontStyleInfo { name: string; label?: string; weight: number; italic: boolean }
@@ -12,7 +12,7 @@ let pending: Promise<FontFamilyInfo[]> | null = null
 function loadFonts(): Promise<FontFamilyInfo[]> {
   if (cache) return Promise.resolve(cache)
   if (!pending) {
-    pending = fetch('/tintin/ipc/cover:fonts')
+    pending = fetch('/tintin/ipc/cover/fonts')
       .then((r) => r.json())
       .then((j) => {
         const list: FontFamilyInfo[] = Array.isArray(j?.families) ? j.families : []

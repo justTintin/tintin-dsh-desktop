@@ -51,6 +51,10 @@ describe('client.js 页内模块装载(B1)', () => {
       throw new Error(`unexpected require ${id}`)
     }
     registrations[0]!.factory(hostRequire)
+    // 真实 loader 契约(2026-11-02 启动事故):factory 返回值=cordis 插件面,必须含 apply——
+    // 返回 undefined 会被 cordis "invalid plugin" 拒掉并进恢复模式。
+    const face = registrations[0]!.factory(hostRequire) as { apply?: unknown }
+    expect(face).toEqual(expect.objectContaining({ apply: expect.any(Function) }))
     const views = (dom.window as unknown as { __tintinViews?: { providers: Map<string, unknown> } }).__tintinViews
     expect(views?.providers.has('cover')).toBe(true)
   })
@@ -81,5 +85,13 @@ describe('client.js 页内模块装载(B1)', () => {
     expect((dom.window as unknown as { remotion_staticBase: string }).remotion_staticBase).toBe('/tintin/cover/editor')
     // 图层点选豁免样式已注入
     expect(dom.window.document.querySelector('style[data-plugin="dsh-tintin-cover-plugin"]')).not.toBeNull()
+    // 布局结构锁(2026-11-02 B1 布局事故回归):预览列(含素材条)与图层列(260px)必须是
+    // 同一行的横向兄弟——jsdom 无布局引擎测不出 flex 方向,结构在这里锁死
+    const layersCol = [...viewRoot.querySelectorAll('div')].find((d) => d.style.width === '260px')
+    expect(layersCol).toBeDefined()
+    const previewCol = layersCol!.previousElementSibling as HTMLElement | null
+    expect(previewCol?.textContent).toContain('素材')
+    expect(previewCol?.querySelector('iframe[src="/tintin/cover/chat"]')).toBeNull()
+    expect(layersCol!.parentElement).toBe(previewCol!.parentElement)
   })
 })

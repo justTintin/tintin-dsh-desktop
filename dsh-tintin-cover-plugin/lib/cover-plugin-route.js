@@ -89,7 +89,11 @@ const MIME = {
  *  无性能顾虑,直接禁存。 */
 function serveStatic(root, prefix, indexFile) {
   return async (req, res) => {
-    let rel = req.url.split('?')[0].slice(prefix.length)
+    // 浏览器对非 ASCII 文件名发来的是百分号编码(2026-11-02 中文素材名事故):
+    // 必须解码后再落盘查找,否则中文名素材 404;解码失败(坏编码)按 404 走。
+    let pathname = req.url.split('?')[0].slice(prefix.length)
+    try { pathname = decodeURIComponent(pathname) } catch { /* 坏编码 → 404 */ }
+    let rel = pathname
     if (!rel || rel === '/' || rel === '') rel = `/${indexFile}`
     const file = normalize(join(root, rel))
     if (!file.startsWith(normalize(root)) || !existsSync(file) || !statSync(file).isFile()) {
@@ -108,7 +112,7 @@ function serveStatic(root, prefix, indexFile) {
 
 export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson, httpRequest, getServerUrl }) {
   // 编辑器业务通道收集(2026-11-02 方案 B B2):所有 /tintin/cover/api/** 注册的处理器
-  // 同步登记进这张表,由尾部 /tintin/ipc/cover:<name> 前缀路由按原名派发——编辑器
+  // 同步登记进这张表,由尾部 /tintin/ipc/cover/<name> 前缀路由按原名派发——编辑器
   // (B1 起为页内模块)不再直接吃自有 REST 面,业务调用走通用桥通道形状。
   const ipcEditorChannels = new Map()
   const registeringWebServer = {
@@ -871,17 +875,17 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     resolvePluginDir,
   })
 
-  // 编辑器业务通道(方案 B B2,2026-11-02 用户裁决):/tintin/ipc/cover:<name> 前缀路由——
+  // 编辑器业务通道(方案 B B2,2026-11-02 用户裁决):/tintin/ipc/cover/<name> 前缀路由——
   // 与 bundle 的 /tintin/ipc 长前缀竞争(宿主=最长前缀胜),按收集表把请求原样转发给
   // 同一处理器(重写 url 为原 REST 形态,query 保留;方法与信任判定仍由各处理器自守)。
   // 门禁语义不变:此处不再加闸,外层 permits 与各处理器的 isTrustedRequest/令牌判定照旧。
   const disposeEditorIpc = webServer.register({
     kind: 'prefix',
-    path: '/tintin/ipc/cover:',
+    path: '/tintin/ipc/cover',
     handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
-      const channel = url.pathname.startsWith('/tintin/ipc/cover:')
-        ? decodeURIComponent(url.pathname.slice('/tintin/ipc/cover:'.length))
+      const channel = url.pathname.startsWith('/tintin/ipc/cover/')
+        ? decodeURIComponent(url.pathname.slice('/tintin/ipc/cover'.length + 1))
         : ''
       const handler = ipcEditorChannels.get(channel)
       if (!handler) {

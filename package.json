@@ -24,7 +24,7 @@
     "dsh-plugin-desktop-tintin"
   ],
   "resolutions": {
-    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.1.0-desktop.c7e614976836a.r2e406d2a.tgz",
+    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.1.0-desktop.cbbfb64c1ae89.r2e406d2a.tgz",
     "open@npm:11.0.1": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
     "open@npm:^11.0.0": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
     "open@npm:^11.0.2": "patch:open@npm%3A11.0.4#./patches/open@11.0.4.patch",
