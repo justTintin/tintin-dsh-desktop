@@ -7,12 +7,19 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import {
+  advanceToolCallGuard,
   ensureFilmAgentPatch,
+  extractAsyncTaskIds,
   FILM_AGENT_MODELS,
+  FILM_AGENT_WORK_RULES,
   FILM_TINTIN_AGENT_MODELS,
   FILM_TINTIN_AGENT_PERSONA,
   filmAgentPatchFile,
   filmAgentPatchText,
+  isAsyncCreateTool,
+  isPollingToolCall,
+  isSettledTaskText,
+  TOOL_CALL_GUARD,
 } from '../src/tintin/film-acp.ts'
 
 const dirs: string[] = []
@@ -73,9 +80,61 @@ describe('filmAgentPatchText', () => {
     expect((personaRow?.config?.personaPrefix as string).split('\n').length).toBe(FILM_TINTIN_AGENT_PERSONA.split('\n').length)
   })
 
-  it('人设缺省(编导角色)不产出 system-prompt 行', () => {
-    const text = filmAgentPatchText('http://a:1')
-    expect(text).not.toContain('system-prompt')
+  it('编导角色(deepseek,默认):产出编排工作纪律(生成唯一出口=服务端工具+轮询/重试上限),不含 TinTin智能体人设身份', () => {
+    /* 2026-11-01 用户裁决:防空转护栏第一步 —— deepseek 默认角色也带 system-prompt
+       (此前人设纪律只随已禁用的 TinTin智能体存在, 默认反转后一度消失) */
+    const text = filmAgentPatchText('http://a:1', FILM_AGENT_MODELS, FILM_AGENT_WORK_RULES)
+    expect(text).toContain('- id: system-prompt')
+    expect(text).toContain('唯一出口')
+    expect(text).toContain('task_status_unified')
+    expect(text).toContain('预算 30 分钟')
+    expect(text).toContain('重试最多 2 次')
+    expect(text).not.toContain('{{')
+    expect(text).not.toContain('「TinTin智能体」')
+    /* 整份补丁仍是合法 YAML,纪律多行块按行保留 */
+    const doc = parse(text) as Array<{ id: string; config?: Record<string, unknown> }>
+    const personaRow = doc.find((row) => row.id === 'system-prompt')
+    expect(String(personaRow?.config?.personaPrefix ?? '')).toContain('唯一出口')
+  })
+})
+
+describe('回合工具调用护栏(2026-11-01 防空转第 2 步)', () => {
+  it('阈值=告警 40/硬中止 60(实测正常回合 32 次的校准, 见 pipeline 文档 §6)', () => {
+    expect(TOOL_CALL_GUARD.warn).toBe(40)
+    expect(TOOL_CALL_GUARD.stop).toBe(60)
+  })
+
+  it('轮询类工具(task_status_unified)不计入:按 ACP 投影的 title 识别', () => {
+    expect(isPollingToolCall('mcp__tintin-server__task_status_unified')).toBe(true)
+    expect(isPollingToolCall('mcp__tintin-server__create_image')).toBe(false)
+    expect(isPollingToolCall('pwsh')).toBe(false)
+    expect(isPollingToolCall(undefined)).toBe(false)
+    expect(isPollingToolCall(123)).toBe(false)
+  })
+
+  it('advanceToolCallGuard:39 步无声,40 步告警一次,后续无声,60 步中止', () => {
+    const g = { count: 0, warned: false }
+    for (let i = 0; i < 39; i++) expect(advanceToolCallGuard(g)).toBe('none')
+    expect(g.count).toBe(39)
+    expect(advanceToolCallGuard(g)).toBe('warn')
+    expect(advanceToolCallGuard(g)).toBe('none') /* 告警只发一次 */
+    g.count = TOOL_CALL_GUARD.stop - 1
+    expect(advanceToolCallGuard(g)).toBe('stop')
+    expect(g.count).toBe(TOOL_CALL_GUARD.stop)
+  })
+
+  it('任务层兜底(第 3 步):登记面=异步 create_*;task_id 提取(显式/裸 id);终态词结算', () => {
+    expect(isAsyncCreateTool('mcp__tintin-server__create_image')).toBe(true)
+    expect(isAsyncCreateTool('mcp__tintin-server__create_video')).toBe(true)
+    expect(isAsyncCreateTool('mcp__tintin-server__create_music')).toBe(false) /* 同步类不登记 */
+    expect(isAsyncCreateTool(undefined)).toBe(false)
+    expect(extractAsyncTaskIds('{"task_id":"c_06070add-2","status":"queued"}')).toContain('c_06070add-2')
+    expect(extractAsyncTaskIds('任务 c_5ce35516 已排队')).toContain('c_5ce35516')
+    expect(extractAsyncTaskIds('产物 essence-bg-c_5ce35516-0.png')).toContain('c_5ce35516-0')
+    /* 产物命名用连字符前缀(bgm-1730456789), 不落裸 id 误报面 */
+    expect(extractAsyncTaskIds('bgm-1730456789.wav sfx-a1b2c3d4.wav')).toEqual([])
+    expect(isSettledTaskText('{"status":"completed","task_id":"c_06070add-2"}')).toBe(true)
+    expect(isSettledTaskText('{"status":"running"}')).toBe(false)
   })
 })
 
@@ -86,14 +145,16 @@ describe('ensureFilmAgentPatch', () => {
     const first = ensureFilmAgentPatch(home, 'http://a:1')
     expect(existsSync(first)).toBe(true)
     expect(readFileSync(first, 'utf8')).toContain('baseURL: http://a:1/llm')
+    /* deepseek 默认角色 → 补丁带编排工作纪律(2026-11-01) */
+    expect(readFileSync(first, 'utf8')).toContain('唯一出口')
     expect(ensureFilmAgentPatch(home, 'http://a:1')).toBe(first)
-    expect(readFileSync(first, 'utf8')).toBe(filmAgentPatchText('http://a:1'))
+    expect(readFileSync(first, 'utf8')).toBe(filmAgentPatchText('http://a:1', FILM_AGENT_MODELS, FILM_AGENT_WORK_RULES))
     ensureFilmAgentPatch(home, 'http://b:2')
     expect(readFileSync(first, 'utf8')).toContain('baseURL: http://b:2/llm')
     expect(first.startsWith(join(home, 'tintin'))).toBe(true)
   })
 
-  it('按角色分文件:TinTin智能体补丁带人设,编导补丁无人设,互不覆盖', () => {
+  it('按角色分文件:TinTin智能体补丁带角色人设,编导补丁带编排工作纪律(2026-11-01 起),互不覆盖', () => {
     const home = mkdtempSync(join(tmpdir(), 'film-acp-'))
     dirs.push(home)
     expect(filmAgentPatchFile('tintin-agent')).toBe('film-tintin-agent.patch.yml')
@@ -103,7 +164,9 @@ describe('ensureFilmAgentPatch', () => {
     expect(tintin).not.toBe(plain)
     expect(readFileSync(tintin, 'utf8')).toBe(filmAgentPatchText('http://a:1', FILM_TINTIN_AGENT_MODELS, FILM_TINTIN_AGENT_PERSONA))
     expect(readFileSync(tintin, 'utf8')).toContain('personaPrefix: |-')
-    expect(readFileSync(plain, 'utf8')).not.toContain('system-prompt')
+    /* 编导(deepseek)补丁 = 工作纪律(防空转护栏), 不是 TinTin智能体角色人设 */
+    expect(readFileSync(plain, 'utf8')).toBe(filmAgentPatchText('http://a:1', FILM_AGENT_MODELS, FILM_AGENT_WORK_RULES))
+    expect(readFileSync(plain, 'utf8')).not.toContain('「TinTin智能体」')
     /* 幂等 */
     expect(ensureFilmAgentPatch(home, 'http://a:1', undefined, 'tintin-agent')).toBe(tintin)
   })

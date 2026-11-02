@@ -57,10 +57,74 @@ export const FILM_TINTIN_AGENT_PERSONA = [
   '回复用简短中文, 汇报每次调用的子智能体、参数与结果路径。',
 ].join('\n')
 
+/** deepseek(编导,默认角色)的编排工作纪律(2026-11-01 用户裁决:防空转/费用护栏第一步)。
+ *  与角色人设不同:这是编排纪律不是身份描述 —— 生成唯一出口=服务端 MCP 工具、异步必轮询
+ *  且有上限、失败重试封顶、禁本地自制生成物。TinTin智能体(禁用中)的人设已含同款纪律;
+ *  默认反转到 deepseek 后该约束曾随人设一起消失,本常量把它补回每轮可见的 system-prompt。 */
+export const FILM_AGENT_WORK_RULES = [
+  '你是 TinTin 视频剪辑工作台的编导智能体。编排工作纪律(每轮遵守):',
+  '1. 生成视频/图片/音乐/音频(音效、口播)/数字人, 唯一出口是服务端 MCP 工具 create_video / create_image / create_music / create_audio / create_digital_human; 禁止用代码、HTML/canvas、写文件等本地方式自制这些生成物。',
+  '2. 异步工具(返回 task_id)必须用 task_status_unified 轮询到终态: 两次轮询间隔 ≥5 秒; 视频与数字人任务预算 30 分钟, 到终态或超预算即停, 超时如实报告 task_id 供续查; 终态 failed 时把服务端错误原样转告并给一条修改建议, 同一任务重试最多 2 次, 禁止无限重试。',
+  '3. 同步工具(音乐/音效/口播)直接使用返回的 URL; 需要进影片的产物下载保存进项目 assets/tintin/(vid-/img-/bgm-/sfx-/vo- 前缀), 回复里报告保存路径。',
+  '4. 剪辑与项目操作遵循已注入的 openfilm 技能文档(openfilm CLI); 需求缺关键要素(主体/风格/时长/画幅/音色)先问清再动手。',
+  '5. 与当前能力无关的请求如实说明, 不虚构能力; 始终用简短中文回复。',
+].join('\n')
+
 /** 未显式传角色时的兜底。 */
 export function filmAgentPersona(value: unknown): FilmAgentPersona {
   return value === 'tintin-agent' ? 'tintin-agent' : 'deepseek'
 }
+
+/** 回合工具调用护栏(2026-11-01 防空转第 2 步;校准依据 docs/tintin-agent-pipeline.md §6):
+ *  实测正常多产物回合 32 次 → 上界约 40;硬限=上界×1.5=60(失控模式 360 次量级,间隔一个数量级)。
+ *  触发行为:40 告警事件 / 60 中止本回合(session/cancel, 进程与会话保留, 可续)——不是静默死路。 */
+export const TOOL_CALL_GUARD = { warn: 40, stop: 60 } as const
+
+/** 轮询类工具(task_status_unified)按任务预算时长管理(工作纪律第 2 条), 不计入护栏计数。
+ *  ACP 投影里工具名在 update.title(MCP 公开名 mcp__tintin-server__<raw>)。 */
+export function isPollingToolCall(title: unknown): boolean {
+  return typeof title === 'string' && /__task_status_unified$/.test(title)
+}
+
+export type ToolCallGuardState = { count: number; warned: boolean }
+
+/** 纯函数: 计一步并裁决动作(warn 只发一次, stop 一次到位)。 */
+export function advanceToolCallGuard(g: ToolCallGuardState): 'none' | 'warn' | 'stop' {
+  g.count += 1
+  if (g.count >= TOOL_CALL_GUARD.stop) return 'stop'
+  if (g.count >= TOOL_CALL_GUARD.warn && !g.warned) { g.warned = true; return 'warn' }
+  return 'none'
+}
+
+/** 第 3 步任务层兜底(2026-11-01 防空转):桥登记 create_* 异步任务的 task_id 并看门狗提醒——
+ *  模型放弃轮询或会话中断后任务不再失踪;提醒事件进事件流与日志(聊天 UI 呈现后续接)。 */
+export const ASYNC_TASK_BUDGET_MINUTES = 30
+const ASYNC_CREATE_TOOL_SUFFIXES = ['create_video', 'create_image', 'create_digital_human']
+
+/** 返回 task_id 需轮询的 create_*(同步类 create_music/create_audio 不登记)。 */
+export function isAsyncCreateTool(title: unknown): boolean {
+  return typeof title === 'string' && ASYNC_CREATE_TOOL_SUFFIXES.some((s) => title.endsWith(s))
+}
+
+/** 从工具结果文本提取服务端任务 id:优先 task_id 相邻形态,兜底裸任务 id 形态
+ *  (服务端任务 id=<1-3 小写字母>_+8 位十六进制,可带 -序号,如 c_5ce35516-0;产物命名 bgm-/img- 等用连字符不会误中)。 */
+export function extractAsyncTaskIds(text: string): string[] {
+  const ids = new Set<string>()
+  const explicit = /task_id["'\s:=]+([A-Za-z0-9_-]{6,})/g
+  for (let m = explicit.exec(text); m; m = explicit.exec(text)) ids.add(m[1]!)
+  const bare = /\b[a-z]{1,3}_[0-9a-f]{8}(?:-[0-9A-Za-z]+)?\b/g
+  for (let m = bare.exec(text); m; m = bare.exec(text)) ids.add(m[0]!)
+  return [...ids]
+}
+
+const TASK_SETTLED_RE = /(completed|succeeded|failed|cancelled|done\b)/i
+
+/** 轮询结果文本出现任务 id + 终态词 = 该任务已结算(不再提醒)。 */
+export function isSettledTaskText(text: string): boolean {
+  return TASK_SETTLED_RE.test(text)
+}
+
+export type AsyncTaskEntry = { project: string; tool: string; createdAt: number; settled: boolean; reminded: boolean }
 
 /** 一个角色的模型路由补丁文件名(按角色分文件, 角色切换=会话重建). */
 export function filmAgentPatchFile(persona: FilmAgentPersona): string {
@@ -126,7 +190,7 @@ export function ensureFilmAgentPatch(channelHome: string, serverUrl: string, mod
   const text = filmAgentPatchText(
     serverUrl,
     models ?? (persona === 'tintin-agent' ? FILM_TINTIN_AGENT_MODELS : FILM_AGENT_MODELS),
-    persona === 'tintin-agent' ? FILM_TINTIN_AGENT_PERSONA : '',
+    persona === 'tintin-agent' ? FILM_TINTIN_AGENT_PERSONA : FILM_AGENT_WORK_RULES,
   )
   if (!existsSync(path) || readFileSync(path, 'utf8') !== text) writeFileSync(path, text, 'utf8')
   return path
@@ -235,7 +299,9 @@ export type FilmAgentEvent =
   | { key: string; kind: 'permission'; requestId: string; params: { toolCall?: { title?: string }; options: Array<{ optionId: string; name: string; kind: string }> } }
   | { key: string; kind: 'question'; requestId: string; message: string; toolCallId: string | null; questions: Array<{ id: string; question: string; header: string | null; options: Array<{ label: string; description?: string }>; customId: string | null; multi: boolean }> }
   | { key: string; kind: 'exit'; code: number | null; stderr: string }
-  | { key: string; kind: 'done'; ok: boolean; stopReason?: string; error?: string }
+  | { key: string; kind: 'done'; ok: boolean; stopReason?: string; error?: string; toolCalls?: number }
+  | { key: string; kind: 'limit'; level: 'warn' | 'stop'; toolCalls: number; limit: number }
+  | { key: string; kind: 'task-stale'; taskId: string; tool: string; ageMinutes: number }
 
 export interface FilmAgentState {
   id: 'deepseek'
@@ -306,20 +372,25 @@ export class FilmAgentManager {
     const entry = this.turns.get(project)!
     const agent = await handle.agent
     appendFileSync(logFile, `${JSON.stringify({ t: Date.now(), kind: 'prompt', text })}\n`, 'utf8')
+    /* 回合护栏计数清零(每回合一个作用域;轮询类工具不计,见 advanceToolCallGuard) */
+    this.turnGuard.set(project, { count: 0, warned: false })
     try {
       const result = await agent.prompt(text, images)
       entry.done = { ok: true, stopReason: result.stopReason }
-      appendFileSync(logFile, `${JSON.stringify({ t: Date.now(), kind: 'done', ok: true, stopReason: result.stopReason })}\n`, 'utf8')
-      this.emit(project, { key: project, kind: 'done', ok: true, stopReason: result.stopReason })
+      const toolCalls = this.turnGuard.get(project)?.count ?? 0
+      appendFileSync(logFile, `${JSON.stringify({ t: Date.now(), kind: 'done', ok: true, stopReason: result.stopReason, toolCalls })}\n`, 'utf8')
+      this.emit(project, { key: project, kind: 'done', ok: true, stopReason: result.stopReason, toolCalls })
       return result
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       entry.done = { ok: false, error: message }
-      appendFileSync(logFile, `${JSON.stringify({ t: Date.now(), kind: 'done', ok: false, error: message })}\n`, 'utf8')
-      this.emit(project, { key: project, kind: 'done', ok: false, error: message })
+      const toolCalls = this.turnGuard.get(project)?.count ?? 0
+      appendFileSync(logFile, `${JSON.stringify({ t: Date.now(), kind: 'done', ok: false, error: message, toolCalls })}\n`, 'utf8')
+      this.emit(project, { key: project, kind: 'done', ok: false, error: message, toolCalls })
       throw error
     } finally {
       this.activeLogs.delete(project)
+      this.turnGuard.delete(project)
     }
   }
 
@@ -438,12 +509,62 @@ export class FilmAgentManager {
   }
 
   dispose(): void {
+    clearInterval(this.taskWatchdog)
     for (const project of [...this.handles.keys()]) this.stop(project)
   }
 
   // ── 内部 ────────────────────────────────────────────────────────────────
 
   private activeLogs = new Map<string, string>()
+
+  /** 回合工具调用护栏状态(prompt 建立作用域, done 后清除; 见 advanceToolCallGuard). */
+  private turnGuard = new Map<string, ToolCallGuardState>()
+
+  /** 任务层兜底(第 3 步):callId→工具名(把结果关联回 create_* 调用)与异步任务登记表。 */
+  private toolNames = new Map<string, string>()
+  private asyncTasks = new Map<string, AsyncTaskEntry>()
+
+  /** 从 tool_call_update 观察异步任务: create_* 结果提取 task_id 登记; 终态词+id 同现=结算。 */
+  private noteAsyncTask(project: string, update: unknown): void {
+    const u = update as { sessionUpdate?: string; toolCallId?: unknown; content?: unknown } | null
+    if (!u || u.sessionUpdate !== 'tool_call_update') return
+    const text = typeof u.content === 'string' ? u.content : JSON.stringify(u.content ?? '')
+    const title = this.toolNames.get(String(u.toolCallId ?? '')) ?? ''
+    if (isAsyncCreateTool(title)) {
+      for (const id of extractAsyncTaskIds(text)) {
+        if (!this.asyncTasks.has(id)) this.asyncTasks.set(id, { project, tool: title, createdAt: Date.now(), settled: false, reminded: false })
+      }
+    }
+    if (isSettledTaskText(text)) {
+      for (const [id, entry] of this.asyncTasks) if (!entry.settled && text.includes(id)) entry.settled = true
+    }
+  }
+
+  /** 看门狗: 登记任务超预算时长(30 分钟)未观察到终态 → task-stale 事件+日志, 只提醒一次。 */
+  private taskWatchdog: ReturnType<typeof setInterval> = setInterval(() => {
+    const now = Date.now()
+    for (const [id, entry] of this.asyncTasks) {
+      if (entry.settled || entry.reminded) continue
+      const ageMinutes = Math.round((now - entry.createdAt) / 60_000)
+      if (ageMinutes < ASYNC_TASK_BUDGET_MINUTES) continue
+      entry.reminded = true
+      this.log(`[task-stale] ${entry.tool} 任务 ${id} 超过 ${ASYNC_TASK_BUDGET_MINUTES} 分钟未观察到终态(已 ${ageMinutes} 分钟)`)
+      this.emit(entry.project, { key: entry.project, kind: 'task-stale', taskId: id, tool: entry.tool, ageMinutes })
+    }
+  }, 60_000)
+
+  /** 非轮询类 tool_call 计一步; 超阈值先告警后中止本回合(cancel 不杀进程, 会话可续). */
+  private bumpGuard(project: string): void {
+    const g = this.turnGuard.get(project)
+    if (!g) return
+    const action = advanceToolCallGuard(g)
+    if (action === 'warn') {
+      this.emit(project, { key: project, kind: 'limit', level: 'warn', toolCalls: g.count, limit: TOOL_CALL_GUARD.warn })
+    } else if (action === 'stop') {
+      this.emit(project, { key: project, kind: 'limit', level: 'stop', toolCalls: g.count, limit: TOOL_CALL_GUARD.stop })
+      void this.cancel(project)
+    }
+  }
 
   private emit(project: string, event: FilmAgentEvent): void {
     const entry = this.turns.get(project)
@@ -486,7 +607,10 @@ export class FilmAgentManager {
       }
     } catch { /* 技能同步失败不阻断启动 */ }
     const bin = resolveDshBin()
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_HOME: home, TINTIN_SERVER_API_KEY: 'sk-tintin-local',
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_HOME: home,
+      /* 2026-11-01 按入口分账:占位 key 按链路分值(服务端 /llm 无鉴权不校验值, 计量按 key 分账;
+         同族标记: 封面=sk-tintin-local--cover, 页面 REST=sk-tintin-local--rest, 见 pipeline §6.7) */
+      TINTIN_SERVER_API_KEY: 'sk-tintin-local--film',
       /* 2026-10-29 用户裁决:TinTin 智能体=完全权限——基础补丁按此 env 映射 沙箱 danger-full-access + 审批 never;
          缺它则落回 workspace-write+ask,审批卡链路一旦没接住就是「仍在处理」永挂(当晚实锤) */
       DSH_PERMISSION_MODE: 'danger-full-access' }
@@ -515,7 +639,14 @@ export class FilmAgentManager {
       conn: null, init: null, session: null, steering: false,
     }
     const forward = (update: unknown) => {
-      const u = update as { sessionUpdate?: string } | null
+      const u = update as { sessionUpdate?: string; title?: unknown; toolCallId?: unknown } | null
+      /* 回合护栏: 逐次计非轮询类工具调用(2026-11-01 防空转第 2 步) */
+      if (u?.sessionUpdate === 'tool_call') {
+        this.toolNames.set(String(u.toolCallId ?? ''), String(u.title ?? ''))
+        if (!isPollingToolCall(u.title)) this.bumpGuard(project)
+      }
+      /* 任务层兜底: create_* 的 task_id 登记/结算观察(第 3 步) */
+      this.noteAsyncTask(project, update)
       this.emit(project, { key: project, kind: 'update', update: { sessionUpdate: String(u?.sessionUpdate ?? 'unknown'), ...(update as Record<string, unknown>) } })
     }
 

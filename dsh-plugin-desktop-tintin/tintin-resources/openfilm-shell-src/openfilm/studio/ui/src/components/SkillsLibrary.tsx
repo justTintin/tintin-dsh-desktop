@@ -79,6 +79,8 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
   const [serverFailed, setServerFailed] = React.useState(false);
   /** the server skill whose detail page is open (TinTin 2026-10-31: click a card for its full information) */
   const [serverOpened, setServerOpened] = React.useState<ServerSkill | null>(null);
+  /** the server skill awaiting its removal confirm (TinTin 2026-10-31 用户裁决: 服务端卡片加删除按钮) */
+  const [removingServer, setRemovingServer] = React.useState<ServerSkill | null>(null);
   const reloadServer = React.useCallback(() => {
     const list = (window as unknown as {
       openfilmNative?: { skills?: { list?: () => Promise<{ openfilm?: Array<{ name?: unknown; description?: unknown; source?: unknown; installed?: unknown }> }> } };
@@ -104,6 +106,23 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
     void install(skill.name).then((r) => {
       if (r?.ok) setServerSkills((list) => list.map((s) => (s.name === skill.name ? { ...s, installed: true } : s)));
       else setServerFailed(true);
+    }).catch(() => setServerFailed(true))
+      .finally(() => setServerBusy(null));
+  };
+  /** remove the installed copy from the film agent's home (2026-10-31 用户裁决: 删除按钮). The server keeps
+      its registration — the skill falls back to the catalog as not installed, ready to install again. */
+  const removeServer = (skill: ServerSkill) => {
+    const remove = (window as unknown as {
+      openfilmNative?: { skills?: { remove?: (name: string) => Promise<{ ok?: boolean }> } };
+    }).openfilmNative?.skills?.remove;
+    if (!remove || serverBusy) return;
+    setServerBusy(skill.name);
+    setServerFailed(false);
+    void remove(skill.name).then((r) => {
+      if (r?.ok) {
+        setServerSkills((list) => list.map((s) => (s.name === skill.name ? { ...s, installed: false } : s)));
+        if (serverOpened?.name === skill.name) setServerOpened(null);
+      } else setServerFailed(true);
     }).catch(() => setServerFailed(true))
       .finally(() => setServerBusy(null));
   };
@@ -157,6 +176,18 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
         if (opened?.name === skill.name) onBack();
         setSkills((list) => list.filter((k) => !(k.source === skill.source && k.name === skill.name)));
         void sourcesApi.removeSkill(skill.name, projectId).finally(reload);
+      }} />
+  );
+  /* server skills remove differently (only the installed copy goes; the server keeps its registration) */
+  const confirmServer = (
+    <ConfirmDialog open={removingServer != null} danger
+      title={t('gallery.serverRemoveTitle').replace('{name}', removingServer?.name ?? '')}
+      description={t('gallery.serverRemoveHint')} confirmLabel={t('gallery.serverRemove')}
+      onCancel={() => setRemovingServer(null)}
+      onConfirm={() => {
+        const skill = removingServer;
+        setRemovingServer(null);
+        if (skill) removeServer(skill);
       }} />
   );
 
@@ -230,7 +261,7 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
               <section>
                 <GroupHead label={t('gallery.server')} hint={t('gallery.serverHint')} />
                 {serverInstalled.filter((s) => !q || [s.name, s.description].some((w) => w.toLowerCase().includes(q)))
-                  .map((s) => <ServerSkillRow key={s.name} skill={s} />)}
+                  .map((s) => <ServerSkillRow key={s.name} skill={s} onOpen={() => setServerOpened(s)} onRemove={() => setRemovingServer(s)} />)}
               </section>
             ) : null}
           </div>
@@ -238,12 +269,13 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
           /* same full-width container as the official catalog (2026-10-31 用户裁决: 服务端卡片与其它同大小, 一行 4 个) */
           serverOpened ? (
             <ServerDetail skill={serverSkills.find((s) => s.name === serverOpened.name) ?? serverOpened}
-              busy={serverBusy === serverOpened.name} onBack={() => setServerOpened(null)} onInstall={() => installServer(serverOpened)} />
+              busy={serverBusy === serverOpened.name} onBack={() => setServerOpened(null)} onInstall={() => installServer(serverOpened)}
+              onRemove={() => setRemovingServer(serverOpened)} />
           ) : (
             <>
               {serverCatalog.length ? (
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-x-6 gap-y-8">
-                  {serverCatalog.map((s) => <ServerCard key={s.name} skill={s} busy={serverBusy === s.name} onOpen={() => setServerOpened(s)} onInstall={() => installServer(s)} />)}
+                  {serverCatalog.map((s) => <ServerCard key={s.name} skill={s} busy={serverBusy === s.name} onOpen={() => setServerOpened(s)} onInstall={() => installServer(s)} onRemove={() => setRemovingServer(s)} />)}
                 </div>
               ) : <p className="py-14 text-center text-[13px] text-[var(--text-muted)]">{t('gallery.serverNone')}</p>}
               {serverFailed ? <p role="alert" className="mt-4 text-center text-[12px] text-[var(--warn)]">{t('gallery.serverInstallFail')}</p> : null}
@@ -258,6 +290,7 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
 
     </div>
     {confirm}
+    {confirmServer}
     </>
   );
 
@@ -342,9 +375,10 @@ function AgentSkillRow({ skill, onTurn }: { skill: AgentSkill; onTurn: (on: bool
   );
 }
 
-/** One of the TinTin server's installed skills in the installed view: its name and description, read-only
-    (it lives in the film agent's home, so there is no per-skill switch to turn it off). */
-function ServerSkillRow({ skill }: { skill: ServerSkill }) {
+/** One of the TinTin server's installed skills in the installed view: its name and description (it lives in the
+    film agent's home, so there is no per-skill switch), plus its detail page and removal (2026-10-31 用户裁决). */
+function ServerSkillRow({ skill, onOpen, onRemove }: { skill: ServerSkill; onOpen: () => void; onRemove: () => void }) {
+  const t = useT();
   return (
     <div className="flex items-center gap-3.5 rounded-[10px] px-2 py-2">
       <div className="flex h-[46px] w-[82px] shrink-0 items-center justify-center rounded-[7px] bg-[var(--surface-2)] text-[var(--text-faint)] ring-1 ring-[var(--border)]">
@@ -354,14 +388,21 @@ function ServerSkillRow({ skill }: { skill: ServerSkill }) {
         <div className="truncate text-[13.5px] font-medium text-[var(--text)]">{skill.name}</div>
         {skill.description ? <div className="truncate text-[12px] text-[var(--text-muted)]" title={skill.description}>{skill.description}</div> : null}
       </div>
+      <span className="flex shrink-0 items-center gap-1">
+        <button type="button" onClick={onOpen}
+          className="flex h-7 items-center rounded-[8px] border border-[var(--border)] px-2.5 text-[12px] text-[var(--text)] transition hover:bg-[var(--bg-hover)]">{t('gallery.details')}</button>
+        <button type="button" onClick={onRemove}
+          className="flex h-7 items-center rounded-[8px] px-2.5 text-[12px] text-[var(--text-muted)] transition hover:bg-[color-mix(in_srgb,var(--err)_12%,transparent)] hover:text-[var(--err)]">{t('gallery.serverRemove')}</button>
+      </span>
     </div>
   );
 }
 
 /** One of the TinTin server's skills in the 服务端 tab: the catalog card's look and size (click for its detail
-    page), with the bridge as its installer. Uninstalling a server skill means removing it on the server, which is
-    not this dialog's business — so installed shows as a state, with no switch or menu. */
-function ServerCard({ skill, busy, onOpen, onInstall }: { skill: ServerSkill; busy: boolean; onOpen: () => void; onInstall: () => void }) {
+    page), with the bridge as its installer. Installed shows the state, an explicit 详情 button (2026-10-31 用户
+    裁决: 对齐封面技能管理的显式详情入口, 不只靠整卡点击) and 删除 (only the installed copy goes; the server
+    keeps its registration, so the skill falls back to the catalog as not installed). */
+function ServerCard({ skill, busy, onOpen, onInstall, onRemove }: { skill: ServerSkill; busy: boolean; onOpen: () => void; onInstall: () => void; onRemove: () => void }) {
   const t = useT();
   return (
     <div className="flex min-w-0 flex-col">
@@ -376,7 +417,15 @@ function ServerCard({ skill, busy, onOpen, onInstall }: { skill: ServerSkill; bu
           {skill.description ? <div className="mt-1 line-clamp-2 text-[12.5px] leading-[18px] text-[var(--text-muted)]">{skill.description}</div> : null}
         </button>
         {skill.installed ? (
-          <span className="flex h-8 shrink-0 items-center gap-1 px-1 text-[12.5px] text-[var(--text-faint)]"><Check size={13} />{t('gallery.installedOne')}</span>
+          <div className="flex shrink-0 flex-col items-end gap-1.5">
+            <span className="flex h-8 items-center gap-1 px-1 text-[12.5px] text-[var(--text-faint)]"><Check size={13} />{t('gallery.installedOne')}</span>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={onOpen}
+                className="flex h-7 items-center rounded-[8px] border border-[var(--border)] px-2.5 text-[12px] text-[var(--text)] transition hover:bg-[var(--bg-hover)]">{t('gallery.details')}</button>
+              <button type="button" onClick={onRemove} disabled={busy}
+                className="flex h-7 items-center rounded-[8px] px-2.5 text-[12px] text-[var(--text-muted)] transition hover:bg-[color-mix(in_srgb,var(--err)_12%,transparent)] hover:text-[var(--err)] disabled:opacity-50">{t('gallery.serverRemove')}</button>
+            </div>
+          </div>
         ) : (
           <button type="button" onClick={onInstall} disabled={busy}
             className="h-8 shrink-0 rounded-[8px] border border-[var(--border)] px-3 text-[12.5px] font-medium text-[var(--text)] transition hover:bg-[var(--bg-hover)] disabled:opacity-50">{t('gallery.install')}</button>
@@ -389,7 +438,7 @@ function ServerCard({ skill, busy, onOpen, onInstall }: { skill: ServerSkill; bu
 /** A server skill's detail page, in place of the list (its Back returns to it as it was): the catalog page's
     layout, with every field the server knows (version, executor, tags, who registered it and when) and the
     skill's full instruction text, then installing it (2026-10-31 用户裁决: 对齐封面技能管理的详情弹窗字段). */
-function ServerDetail({ skill, busy, onBack, onInstall }: { skill: ServerSkill; busy: boolean; onBack: () => void; onInstall: () => void }) {
+function ServerDetail({ skill, busy, onBack, onInstall, onRemove }: { skill: ServerSkill; busy: boolean; onBack: () => void; onInstall: () => void; onRemove: () => void }) {
   const t = useT();
   const d = skill.detail ?? {};
   const instruction = String(d.instruction ?? '');
@@ -442,7 +491,10 @@ function ServerDetail({ skill, busy, onBack, onInstall }: { skill: ServerSkill; 
           {!skill.installed ? (
             <button type="button" onClick={onInstall} disabled={busy}
               className="mt-1 flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-[var(--text)] text-[14px] font-medium text-[var(--bg)] transition hover:opacity-90 disabled:opacity-40"><Plus size={15} />{t('gallery.install')}</button>
-          ) : null}
+          ) : (
+            <button type="button" onClick={onRemove} disabled={busy}
+              className="mt-1 flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] text-[13px] text-[var(--text-muted)] transition hover:bg-[color-mix(in_srgb,var(--err)_12%,transparent)] hover:text-[var(--err)] disabled:opacity-50"><Trash2 size={14} />{t('gallery.serverRemove')}</button>
+          )}
           {busy ? <p className="text-center text-[12px] text-[var(--text-muted)]">{t('gallery.installedOne')}…</p> : null}
         </div>
       </div>

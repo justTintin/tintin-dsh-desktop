@@ -102,6 +102,7 @@ const skills = {
   texts: (project: string, agent: string, names: string[]): Promise<unknown> =>
     nativeInvoke('openfilm:native:skills-texts', { project, agent, names }),
   install: (name: string): Promise<unknown> => nativeInvoke('openfilm:skills:install', { name }),
+  remove: (name: string): Promise<unknown> => nativeInvoke('openfilm:skills:remove', { name }),
   allow: async (): Promise<{ ok: boolean }> => ({ ok: true }),
   changed: async (): Promise<{ ok: boolean }> => ({ ok: true }),
   preview: async (): Promise<{ ok: false; error: string }> => ({ ok: false, error: '暂不支持从地址安装技能' }),

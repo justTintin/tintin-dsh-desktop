@@ -27,6 +27,11 @@ export interface RosterAgent {
   setupRequired?: string | null;
   error?: string;
   /**
+   * TinTin(2026-11-01): 行保留但不可选(服务端智能体观察期)。true=仅禁用;字符串=禁用并显示该理由。
+   * 与 status 正交:status 描述安装态,disabled 描述产品裁决;禁用行不作为 currentAgent 候选。
+   */
+  disabled?: boolean | string;
+  /**
    * The own key's models, each set up on its own (its name, its service, the model asked for there), with the reasoning
    * efforts it offers and the one it starts on (apps/desktop src/pi-config.mjs EFFORTS); the first one to begin with.
    */

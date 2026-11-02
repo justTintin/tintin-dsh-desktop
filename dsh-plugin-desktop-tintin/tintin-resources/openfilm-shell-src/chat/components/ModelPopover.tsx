@@ -100,7 +100,7 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
   React.useEffect(() => {
     if (!open) return;
     void refresh().then(() => {
-      for (const a of shownAgents(useLocalAgents.getState().roster)) if (a.status === 'ready') void ensureOptions(a.id, { retry: true });
+      for (const a of shownAgents(useLocalAgents.getState().roster)) if (a.status === 'ready' && !a.disabled) void ensureOptions(a.id, { retry: true });
     });
   }, [open, refresh, ensureOptions]);
 
@@ -125,12 +125,15 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
   };
   const chooseAgent = (a: RosterAgent) => {
     setSide(null);
+    if (a.disabled) return; /* TinTin(2026-11-01): 禁用行(服务端智能体观察期)不可选 */
     if (a.status === 'ready') { la.pick(a.id); return; }
     if (a.status === 'checking' || a.status === 'waiting') return;
     /* not connected, signed out, not found, no key: set up in Settings → Agents, where connecting and signing in are */
     setOpen(false);
     desktopBridge()?.openSettings?.('agents');
   };
+  /* a disabled row's own note, shown where a status would be (the row stays listed, greyed, not clickable) */
+  const disabledNote = (a: RosterAgent): string | null => (typeof a.disabled === 'string' && a.disabled ? a.disabled : null);
   const openSettings = () => { setOpen(false); desktopBridge()?.openSettings?.('agents'); };
   const current = shown.find((a) => a.id === agent);
   const choosing = side ? rows.find((o) => o.id === side) : undefined;
@@ -230,11 +233,14 @@ export function ModelPopover({ placement = 'bottom', align = 'start' }: { placem
               <>
                 {shown.map((a) => {
                   const status = statusOf(a);
+                  const note = disabledNote(a);
                   return (
-                    <button key={a.id} type="button" onMouseDown={keepFocus} onMouseEnter={hideSideSoon} onClick={() => chooseAgent(a)} className={ROW}>
-                      <span className={`flex w-4 shrink-0 justify-center ${status ? 'text-[var(--text-faint)]' : 'text-[var(--text)]'}`}><ChatAgentIcon id={a.id} /></span>
-                      <span className={`min-w-0 flex-1 truncate ${status ? 'text-[var(--text-muted)]' : 'text-[var(--text)]'}`}>{nameOf(a)}</span>
-                      {agent === a.id && !status ? <Check size={13} className="shrink-0 text-[var(--text)]" />
+                    <button key={a.id} type="button" disabled={!!a.disabled} onMouseDown={keepFocus} onMouseEnter={hideSideSoon} onClick={() => chooseAgent(a)}
+                      className={a.disabled ? `${ROW_BASE} cursor-not-allowed opacity-55` : ROW}>
+                      <span className={`flex w-4 shrink-0 justify-center ${status || a.disabled ? 'text-[var(--text-faint)]' : 'text-[var(--text)]'}`}><ChatAgentIcon id={a.id} /></span>
+                      <span className={`min-w-0 flex-1 truncate ${status || a.disabled ? 'text-[var(--text-muted)]' : 'text-[var(--text)]'}`}>{nameOf(a)}</span>
+                      {agent === a.id && !status && !a.disabled ? <Check size={13} className="shrink-0 text-[var(--text)]" />
+                        : note ? <span className="min-w-0 max-w-[55%] truncate text-[11.5px] text-[var(--text-faint)]" title={note}>{note}</span>
                         : status ? <span className="min-w-0 max-w-[55%] truncate text-[11.5px] text-[var(--text-faint)]" title={status}>{status}</span> : null}
                     </button>
                   );

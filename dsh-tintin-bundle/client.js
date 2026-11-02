@@ -243,10 +243,10 @@ const tintinClient = (() => {
         overlay.style.display = 'block'; let el = viewEls.get(activeId)
         if (!el) {
           el = document.createElement('div')
-          // 封面制作/视频剪辑免入场动画（2026-10-30 用户裁决）：两视图=满屏编辑器 iframe，
-          // 切换是 display:none 切换 → CSS 动画每次重放（tintin-view-in 12px 上滑），
-          // 在密集编辑器上读感是「加载界面抖一次」；卡片列表视图的同一动画保留。
-          if (activeId !== 'cover' && activeId !== 'openfilm') el.className = 'tintin-view-el'
+          // 视频剪辑免入场动画（2026-10-30 用户裁决）：满屏 iframe，切换是 display:none
+          // 切换 → CSS 动画每次重放，在密集编辑器上读感是「加载界面抖一次」。
+          // 封面制作 2026-11-02 方案 B 页内化后与卡片视图同为页内挂载，动画恢复。
+          if (activeId !== 'openfilm') el.className = 'tintin-view-el'
           el.style.cssText = 'width:100%;min-height:100%;box-sizing:border-box;'
           container.appendChild(el); viewEls.set(activeId, el)
           const provider = registry.providers.get(activeId); if (provider) {
@@ -767,14 +767,15 @@ const tintinClient = (() => {
       return j?.result?.value
     })
 
-    // ── 服务端自动注册(2026-09-30 用户裁决:服务菜单方向)─────────────────
+    // ── 服务端地址登记与存量清理(2026-11-01 用户裁决:DSH 模型回归 api-key 自配)──
     // 旧版在 Electron main 经 token→cookie 换会话走公开 RPC;宿主插件拿不到 web
-    // token,而本 chrome 每次加载都带会话 cookie 且 settingsRpc 在位——自愈移到
+    // token,而本 chrome 每次加载都带会话 cookie 且 settingsRpc 在位——移到
     // 这里,每次页面加载幂等执行:
-    //   server.url 已配置时:缺失则注册 tintin-server provider(模型列表经宿主
-    //   probe 拉全量)、凭据占位补齐、默认工作区登记;默认模型仅在用户尚未
-    //   改动系统默认(deepseek-official)时接管。
-    function installTintinProvisioning() {
+    //   2026-09-30~10-31 形态曾在此自动注册 tintin-server provider(模型走服务端
+    //   /llm)+接管默认模型+补占位凭据;2026-11-01 用户裁决客户端 DSH 模型改回
+    //   用户自配 api-key(设置→模型),不再使用服务端 /llm —— 自动注册整段撤除,
+    //   改为清理存量(provider/默认模型指向/占位凭据);默认工作区登记保留。
+    function installTinTinProvisioning() {
       const rpc = (method, args) => fetch(`/api/${method}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -785,6 +786,37 @@ const tintinClient = (() => {
         return j?.result?.value
       })
       const ensure = async () => {
+        const log = (what) => console.info(`[tintin] provisioning: ${what}`)
+
+        // 存量清理:一次性拆除旧形态写进 profile 的 tintin-server provider、默认
+        // 模型指向与占位凭据。用户此后自配的模型(provider 已非 tintin-server)不动。
+        try {
+          const describe = await settingsRpc('settings/describe', {})
+          const nsValue = (name) => describe?.namespaces?.find?.((n) => n?.ns === name)?.value
+          if (nsValue('llm-pi-ai')?.providers?.['tintin-server'] !== undefined) {
+            await settingsRpc('settings/mutate', {
+              ns: 'llm-pi-ai',
+              ops: [{ op: 'unset', path: ['providers', 'tintin-server'] }],
+            })
+            log('legacy tintin-server provider removed (DSH model now user-configured)')
+          }
+          if (nsValue('agent-default-model')?.provider === 'tintin-server') {
+            // unset 整条 → 回落基础补丁默认(deepseek-official)
+            await settingsRpc('settings/mutate', {
+              ns: 'agent-default-model',
+              ops: [{ op: 'unset', path: [] }],
+            })
+            log('default model reset (was tintin-server)')
+          }
+          try {
+            const cred = await rpc('credentials/describe', { refs: ['TINTIN_SERVER_API_KEY'] })
+            if (cred?.TINTIN_SERVER_API_KEY?.configured === true) {
+              await rpc('credentials/unset', { ref: 'TINTIN_SERVER_API_KEY' })
+              log('legacy TINTIN_SERVER_API_KEY placeholder removed')
+            }
+          } catch { /* credentials RPC unavailable — 忽略 */ }
+        } catch { /* describe 失败 → 下次加载重试 */ }
+
         let serverUrl = ''
         try {
           const cfg = await window.tintin?.config?.get?.()
@@ -792,54 +824,6 @@ const tintinClient = (() => {
           if (typeof raw === 'string' && raw.length > 0) serverUrl = raw.replace(/\/+$/u, '')
         } catch { /* store read failure → treat as unconfigured */ }
         if (serverUrl.length === 0) return // 未配置——等首启向导或设置卡
-        const describe = await settingsRpc('settings/describe', {})
-        const nsValue = (name) => describe?.namespaces?.find?.((n) => n?.ns === name)?.value
-        const log = (what) => console.info(`[tintin] provisioning: ${what}`)
-
-        // Provider half (缺失才注册;probe 失败降级占位模型,下次加载重试)
-        if (nsValue('llm-pi-ai')?.providers?.['tintin-server'] === undefined) {
-          let models = [{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }]
-          let preferred = models[0]
-          try {
-            const r = await fetch('/tintin/setup/probe', {
-              method: 'POST', headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ url: serverUrl }),
-            })
-            const j = await r.json().catch(() => ({}))
-            if (r.ok && Array.isArray(j?.result?.models) && j.result.models.length > 0) {
-              models = j.result.models
-              preferred = j.result.preferred ?? models.find((m) => m.default) ?? models[0]
-            }
-          } catch { /* server offline — placeholder provider, self-heals next load */ }
-          await settingsRpc('settings/mutate', {
-            ns: 'llm-pi-ai',
-            ops: [{
-              op: 'set', path: ['providers', 'tintin-server'], value: {
-                displayName: 'TinTin', apiKeyEnv: 'TINTIN_SERVER_API_KEY', api: 'openai-completions',
-                baseURL: `${serverUrl}/llm`, models: models.map((m) => ({ id: m.id, name: m.name })),
-              },
-            }],
-          })
-          log(`tintin-server provider registered from ${serverUrl} (${String(models.length)} models)`)
-          // 默认模型:仅当仍是系统默认时接管(用户自选的不动)
-          const adm = nsValue('agent-default-model')
-          if ((adm?.provider ?? 'deepseek-official') === 'deepseek-official' && preferred?.id) {
-            await settingsRpc('settings/mutate', {
-              ns: 'agent-default-model',
-              ops: [{ op: 'set', path: [], value: { provider: 'tintin-server', model: preferred.id } }],
-            })
-            log(`default model -> tintin-server/${String(preferred.id)}`)
-          }
-        }
-
-        // Credential half(占位 key;服务端无鉴权,用户后配的真实值优先)
-        try {
-          const cred = await rpc('credentials/describe', { refs: ['TINTIN_SERVER_API_KEY'] })
-          if (cred?.TINTIN_SERVER_API_KEY?.configured !== true) {
-            await rpc('credentials/set', { ref: 'TINTIN_SERVER_API_KEY', value: 'sk-tintin-local' })
-            log('tintin-server credential restored (placeholder)')
-          }
-        } catch { /* credentials RPC unavailable — provider apiKeyRef 缺失时模型页会提示 */ }
 
         // Workspace half(宿主先 mkdir,再走公开幂等 RPC)
         try {
@@ -859,7 +843,7 @@ const tintinClient = (() => {
     // 按功能测试连接 lives in the dsh-tintin-client-ui client plugin.
     installTintinChrome()
     installTintinBridge()
-    installTintinProvisioning()
+    installTinTinProvisioning()
 
     return { settingsRpc }
   })()
@@ -1082,7 +1066,7 @@ async function maybeShowSetupWizard() {
   el.innerHTML = [
     '<div style="width:min(460px,92vw);padding:28px;border-radius:16px;background:var(--dsw-alias-bg-layer-2,#1e1e20);color:var(--dsw-alias-label-primary,#e8e8e6);box-shadow:0 12px 40px rgba(0,0,0,.4);font-family:inherit">',
     '  <div style="font-size:20px;font-weight:700;margin-bottom:6px">欢迎使用 TinTin</div>',
-    '  <div style="font-size:13px;color:var(--dsw-alias-label-tertiary,#8b8b88);margin-bottom:18px">配置 TinTin 服务端地址（AI 推理服务，含端口），将自动拉取可用模型。</div>',
+    '  <div style="font-size:13px;color:var(--dsw-alias-label-tertiary,#8b8b88);margin-bottom:18px">配置 TinTin 服务端地址（AI 能力服务，含端口）。聊天模型请在「设置 → 模型」里用 api-key 自行配置。</div>',
     '  <input id="tintin-setup-url" style="width:100%;box-sizing:border-box;height:40px;padding:0 14px;font:inherit;font-size:14px;border:.5px solid var(--dsw-alias-border-l4,#555);border-radius:10px;background:var(--dsw-alias-bg-layer-3,transparent);color:inherit" placeholder="http://192.168.0.10:8000" />',
     '  <div id="tintin-setup-status" style="min-height:20px;margin-top:10px;font-size:12.5px;color:var(--dsw-alias-label-tertiary,#8b8b88)"></div>',
     '  <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">',
@@ -1106,24 +1090,11 @@ async function maybeShowSetupWizard() {
     status.textContent = text ?? ''
     status.style.color = isError ? '#f87171' : (text && text.includes('✓') ? '#4ade80' : 'var(--dsw-alias-label-tertiary,#8b8b88)')
   }
-  const finish = async (url, models, preferred) => {
-    // TinTin 自有段写自有存储（设置服务拒写宿主插件条目）；provider 与默认
-    // 模型是 profile 层条目（llm-pi-ai / agent-default-model），设置服务可写，
-    // 仍走 settings/mutate。
+  const finish = async (url) => {
+    // 2026-11-01 用户裁决:DSH 模型回归 api-key 自配 —— 向导只登记服务端地址
+    // (素材创作/封面/视频剪辑/技能市场等能力面使用),不再写 provider/默认模型;
+    // 聊天模型由用户在 设置→模型 自行配置。
     await window.tintin?.config?.merge?.({ server: { url, provisioned: true } })
-    await tintinClient.settingsRpc('settings/mutate', {
-      ns: 'llm-pi-ai',
-      ops: [{
-        op: 'set', path: ['providers', 'tintin-server'], value: {
-          displayName: 'TinTin', apiKeyEnv: 'TINTIN_SERVER_API_KEY', api: 'openai-completions',
-          baseURL: `${url}/llm`, models: models.map((m) => ({ id: m.id, name: m.name })),
-        },
-      }],
-    })
-    await tintinClient.settingsRpc('settings/mutate', {
-      ns: 'agent-default-model',
-      ops: [{ op: 'set', path: [], value: { provider: 'tintin-server', model: preferred.id } }],
-    })
   }
 
   skip.onclick = async () => {
@@ -1141,10 +1112,9 @@ async function maybeShowSetupWizard() {
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) throw new Error(j.error ?? `HTTP ${String(r.status)}`)
-      const { models, preferred } = j.result
-      setBusy(true, `✓ 连接成功，发现 ${String(models.length)} 个模型，正在配置…`)
-      await finish(url, models, preferred)
-      status.textContent = `✓ 配置完成（默认模型 ${preferred.name}），即将刷新…`
+      setBusy(true, '✓ 连接成功，正在保存服务端地址…')
+      await finish(url)
+      status.textContent = '✓ 配置完成，即将刷新…'
       status.style.color = '#4ade80'
       setTimeout(() => location.reload(), 900)
     } catch (e) {

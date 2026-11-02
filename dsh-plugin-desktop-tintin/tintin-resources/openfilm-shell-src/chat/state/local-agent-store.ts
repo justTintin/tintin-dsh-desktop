@@ -58,14 +58,19 @@ const askedThisLaunch = new Set<LocalAgentId>();
    (首个 ready 行=默认), 旧 v2 里点过的 deepseek 不再当作默认; 用户可再选并会记住。 */
 const KEY = 'openfilm.local-agents.v3';
 
+/* TinTin(2026-11-01): TinTin智能体行禁用(服务端智能体观察期, 默认角色改回 deepseek) ——
+   存量 picked 仍指向 tintin-agent 的, 读入时回落 deepseek, 免得 roster 到达前的首帧拿它起会话。 */
+const DISABLED_FALLBACK: Partial<Record<LocalAgentId, LocalAgentId>> = { 'tintin-agent': 'deepseek' };
+
 function load(): Persisted {
   const empty: Persisted = { picked: 'claude', prefs: {}, options: {} };
   if (typeof window === 'undefined') return empty;
   try {
     const raw = JSON.parse(window.localStorage.getItem(KEY) ?? window.localStorage.getItem('openfilm.local-agents.v1') ?? 'null') as Partial<Persisted> | null;
     if (!raw) return empty;
+    const picked = isAgent(raw.picked) ? raw.picked : 'claude';
     return {
-      picked: isAgent(raw.picked) ? raw.picked : 'claude',
+      picked: DISABLED_FALLBACK[picked] ?? picked,
       prefs: raw.prefs && typeof raw.prefs === 'object' ? raw.prefs : {},
       options: raw.options && typeof raw.options === 'object' ? raw.options : {},
     };
@@ -136,17 +141,19 @@ export function offeredChoices<T extends { value: unknown }>(agent: LocalAgentId
   return choices.filter((choice, i) => i < CLAUDE_MODELS_OFFERED || choice.value === chosen);
 }
 
-/** The agents the menu lists: the ones switched on in Settings, in the roster's order. */
+/** The agents the menu lists: the ones switched on in Settings, in the roster's order (a disabled one still listed, greyed). */
 export function shownAgents(roster: RosterAgent[] | null): RosterAgent[] {
   return (roster ?? []).filter((a) => a.shown);
 }
 
-/** The agent the chat uses: the one picked while it is shown and ready, else the first shown one that is ready. */
+/** The agent the chat uses: the one picked while it is shown, ready and not disabled, else the first such row.
+ *  TinTin(2026-11-01): 禁用行不作为候选(行仍显示), 否则置首禁用行会一直被选中。 */
 export function currentAgent(state: Pick<LocalAgentStore, 'picked' | 'roster'>): LocalAgentId {
   const shown = shownAgents(state.roster);
-  const picked = shown.find((a) => a.id === state.picked);
+  const pickable = shown.filter((a) => !a.disabled);
+  const picked = pickable.find((a) => a.id === state.picked);
   if (picked?.status === 'ready' || !state.roster) return state.picked;
-  return shown.find((a) => a.status === 'ready')?.id ?? picked?.id ?? shown[0]?.id ?? state.picked;
+  return pickable.find((a) => a.status === 'ready')?.id ?? picked?.id ?? pickable[0]?.id ?? state.picked;
 }
 
 let listening = false;

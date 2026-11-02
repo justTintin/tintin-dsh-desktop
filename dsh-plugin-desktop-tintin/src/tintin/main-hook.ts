@@ -600,14 +600,14 @@ export function installTinTinMainHook(): void {
     }
   })
 
-  // Settings → Agents(阶段 2; 2026-10-30 用户裁决: 新增「TinTin智能体」行并置首 ——
-  // 选择器的默认=首个 ready 行, 因此默认角色=TinTin智能体(调度服务端子智能体:
-  // 视频/图片/音乐/音频/口播/数字人生成); deepseek(编导)保留可手选)。
-  // 注册表来自宿主, dsh CLI 在即 ready。
+  // Settings → Agents(阶段 2; 2026-10-30 新增「TinTin智能体」行并置首)。
+  // 2026-11-01 用户裁决: TinTin智能体定位=服务端编排智能体, 服务端该功能尚在观察期 ——
+  // 行禁用不可选(行保留, 恢复时去掉 disabled 即可); 默认角色改回 deepseek(客户端 dsh
+  // 智能体) —— deepseek 置首, 选择器的默认=首个可选 ready 行。
   let filmAgentsShown = true
   const filmAgentRows = (): Array<Record<string, unknown>> => [
-    { id: 'tintin-agent', name: 'TinTin智能体', shown: filmAgentsShown, status: dshBinExists() ? 'ready' : 'missing', install: null },
     { id: 'deepseek', name: 'DeepSeek Harness', shown: filmAgentsShown, status: dshBinExists() ? 'ready' : 'missing', install: 'https://github.com/deepseek-ai/deepseek-harness' },
+    { id: 'tintin-agent', name: 'TinTin智能体', shown: filmAgentsShown, status: dshBinExists() ? 'ready' : 'missing', install: null, disabled: '服务端智能体观察期,暂不可用' },
   ]
   const notifyFilmAgents = (): void => {
     try { studioView?.webContents.send(OPENFILM_AGENT_CHANGED, filmAgentRows()) } catch { /* 视图未开 */ }
@@ -732,6 +732,20 @@ export function installTinTinMainHook(): void {
          新装的技能立刻可引用, 无需重进视频剪辑。 */
       try { await studioView?.webContents.executeJavaScript("window.dispatchEvent(new Event('openfilm:skills-changed'))", true) } catch { /* 页面不在: 下次挂载自然刷新 */ }
       return { ok: true, path: target }
+    } catch (error) { return { error: error instanceof Error ? error.message : String(error) } }
+  })
+  /* 服务端技能删除(2026-10-31 用户裁决: 服务端 tab 卡片加删除按钮): 只删本机安装副本
+     (film-agent-home/skills/<净化名>, 与 install 同款净化防穿越), 不触服务端注册表——
+     删掉后 /skills 清单里它回到未安装态, 可再装。 */
+  ipcMain.handle('openfilm:skills:remove', async (_event, payload: unknown) => {
+    const name = String((payload as { name?: unknown } | null)?.name ?? '')
+    if (!name) return { error: '缺少技能名' }
+    const target = join(channelHome(), 'film-agent-home', 'skills', name.replace(/[/:*?"<>|]/g, '-'))
+    if (!existsSync(target)) return { error: `「${name}」尚未安装` }
+    try {
+      rmSync(target, { recursive: true, force: true })
+      try { await studioView?.webContents.executeJavaScript("window.dispatchEvent(new Event('openfilm:skills-changed'))", true) } catch { /* 页面不在: 下次挂载自然刷新 */ }
+      return { ok: true }
     } catch (error) { return { error: error instanceof Error ? error.message : String(error) } }
   })
   ipcMain.handle('openfilm:native:skills-texts', async (_event, payload: unknown) => {

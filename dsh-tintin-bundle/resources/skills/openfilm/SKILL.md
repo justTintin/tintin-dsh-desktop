@@ -15,6 +15,28 @@ editor, shows the person the film taking shape while you work, and they can chan
 voice-over, music, sound effects, transcripts, stock pictures and the LLM itself are the server's capabilities —
 never ask the person for an API key or send them to connect ElevenLabs/OpenAI/Google.
 
+## Channel map for THIS session (local skill vs server tools)
+
+This skill is **local** (the TinTin desktop injects it with the session home; it is not a server-side skill).
+In **this film-chat session** the server's capabilities are the **MCP tools** named `mcp__tintin-server__*`:
+
+| Capability | Use (this session) |
+|---|---|
+| text-to-image / cover image | `create_image` (mode=t2i / mode=cover) |
+| text-to-video | `create_video` (async → poll with `task_status_unified`) |
+| background music | `create_music` (sync, returns a URL) |
+| sound effects / voice-over | `create_audio` (kind=sfx / kind=tts; voices per the tool's own description) |
+| digital human | `create_digital_human` (async → poll) |
+| async task status | `task_status_unified` |
+| server health | `server_health` |
+
+The `tintin_*` DSH tools described later under "Server media tools" belong to the **workbench main-chat session**
+and **do not exist here** — never call them. Map instead: `tintin_generate_image/video → create_image/video`,
+`tintin_bgm/sfx/tts → create_music / create_audio`, `tintin_task_status → task_status_unified`. Capabilities with
+no MCP counterpart yet (asr transcripts, beatmap, stock search, voices list, comfyui) are not available in this
+session: use the `openfilm get call` fallback below while Studio runs, or say so plainly. Local channels
+(`openfilm` CLI for cut/look/render, film.html/pages, assets/) are yours to use directly.
+
 ## Environment (DSH desktop · Windows)
 
 - In a packaged TinTin, the `openfilm` command is on PATH (vendored runtime with its own Node, headless Chromium
@@ -70,7 +92,10 @@ and point that page's import map at the local files (every page carries its own 
 Never leave a CDN URL (jsDelivr, unpkg) in a film: open/look/render must work offline. When you reuse one of the
 official examples, rewrite every page's import map first and copy the library into the project.
 
-## Server media tools (preferred)
+## Server media tools (workbench main-chat shape — see the Channel map above for THIS session)
+
+> In this film-chat session these exist only as their MCP counterparts (`create_*`); the `tintin_*` names below
+> are kept for reference and belong to the main-chat session.
 
 The server's media capabilities are exposed as DSH tools. They normalize parameters, land generated files in the
 film project (default `assets/tintin/`), poll asynchronous jobs, and return `{ ok, error? }`. Prefer them over any
@@ -118,17 +143,15 @@ subtitles in a page; the `.vtt` beside the media is how OpenFilm shows them.
 ### Fallback (tools unavailable)
 
 The same capabilities are reachable through OpenFilm's custom service while Studio runs:
-`openfilm get call --service tintin --path <path> --method POST --json '<body>'`. Use it only when a tool above is missing.
+`openfilm get call --service tintin --path <path> --method POST --json '<body>'`. Use it **only for non-generating
+lookups** (stock search, voices list, capability discovery) when the matching MCP tool is missing.
+**Never use `openfilm get call`, curl, or any HTTP call to generate media** (image/video/music/audio/digital
+human) — in this session generation goes through the `create_*` MCP tools only; if one is missing, say so plainly
+instead of working around it.
 
 **Do not explore this command.** `openfilm get call --help` prints the generic `get` help, not `call`'s options —
 trying `--json` / `--body` / `--service=` variants burns a full model round trip each time (measured: 20+ wasted
-turns in one session). If the exact form above fails once, stop and use the `tintin_*` tool for that capability;
-only if that tool is missing too, call the server's HTTP API directly:
-
-    curl -s -m 30 -X POST "<TinTin server URL>/material/stock_search" \
-      -H "Content-Type: application/json" -d '{"query":"cinema","kind":"image"}'
-
-(The server URL is the one Settings → Server shows; the same one `tintin_capabilities` talks to.)
+turns in one session). If the exact form above fails once, stop and say so.
 
 ### Checking pictures: never `Read` an image
 
