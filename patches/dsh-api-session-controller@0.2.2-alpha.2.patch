@@ -754,9 +754,18 @@ index 0b97e99..8de9c5b 100644
              "name": "SessionEvent",
              "declaration": "export type SessionEvent<T extends SessionEventType = SessionEventType> = { [K in SessionEventType]: { type: K; seq: SessionSeq; time: number; data: SessionEventMap[K]; ignorable?: true; } & (K extends SurfaceEventType ? SurfaceIntent<K> : { surfaceOp?: never; sourceEventSeqs?: never; }) }[T];"
 diff --git a/lib/typert.remote-client.d.ts b/lib/typert.remote-client.d.ts
-index 11f61a6..a8ae7bd 100644
+index 11f61a6..e09ee7f 100644
 --- a/lib/typert.remote-client.d.ts
 +++ b/lib/typert.remote-client.d.ts
+@@ -5,7 +5,7 @@ import type {
+   TypertRemoteInfo,
+   TypertRemoteMethod,
+ } from '@deepseek-ai/dsh-typert-protocol'
+-import type { ModelCatalog, SessionAttachmentRequest, SessionAttachmentValue, SessionCancelRequest, SessionCancelValue, SessionControlFrame, SessionCreateRequest, SessionCreateValue, SessionEventFrame, SessionEventsPage, SessionFollowFrame, SessionFollowRequest, SessionForkRequest, SessionForkValue, SessionListRequest, SessionListValue, SessionObserveEventRequest, SessionOpenWorkspacePathRequest, SessionOpenWorkspacePathValue, SessionPageRequest, SessionProjectionFrame, SessionProjectionsRequest, SessionProjectionsValue, SessionPromptRequest, SessionPromptValue, SessionRenameRequest, SessionRenameValue, SessionSearchRequest, SessionSearchValue, SessionSelectModelRequest, SessionSelectModelValue, SessionState, SessionStateRequest, SessionUpdateQueueRequest, SessionUpdateQueueValue, SessionWaitRequest, SessionWaitValue, SessionWorkspacePathApplication, SkillListRequest, SkillListValue } from '@deepseek-ai/dsh-api-session-controller/types'
++import type { ModelCatalog, SessionAttachmentRequest, SessionAttachmentValue, SessionCancelRequest, SessionCancelValue, SessionControlFrame, SessionCreateRequest, SessionCreateValue, SessionDeleteRequest, SessionDeleteValue, SessionEventFrame, SessionEventsPage, SessionFollowFrame, SessionFollowRequest, SessionForkRequest, SessionForkValue, SessionListRequest, SessionListValue, SessionObserveEventRequest, SessionOpenWorkspacePathRequest, SessionOpenWorkspacePathValue, SessionPageRequest, SessionProjectionFrame, SessionProjectionsRequest, SessionProjectionsValue, SessionPromptRequest, SessionPromptValue, SessionRenameRequest, SessionRenameValue, SessionSearchRequest, SessionSearchValue, SessionSelectModelRequest, SessionSelectModelValue, SessionState, SessionStateRequest, SessionUpdateQueueRequest, SessionUpdateQueueValue, SessionWaitRequest, SessionWaitValue, SessionWorkspacePathApplication, SkillListRequest, SkillListValue } from '@deepseek-ai/dsh-api-session-controller/types'
+ import type { FileReferenceCandidate } from '@deepseek-ai/dsh-file-reference/types'
+ import type { SessionId } from '@deepseek-ai/dsh-session/types'
+ 
 @@ -19,6 +19,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
      canOpenWorkspacePath: () => Promise<RemoteResult<boolean>>
      control: (signal?: AbortSignal) => RemoteStreamHandle<SessionControlFrame, never>
