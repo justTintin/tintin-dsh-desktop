@@ -50,6 +50,7 @@ function bundle(name: string, overrides: Partial<BundleInfo> = {}): BundleInfo {
     official: false,
     availability: 'profile',
     version: '4.5.6',
+    updatable: false,
     enabled: true,
     installed: true,
     optional: false,

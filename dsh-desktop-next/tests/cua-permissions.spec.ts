@@ -43,7 +43,10 @@ async function mount() {
   return fiber
 }
 function execute(name = 'check_permissions', args: Record<string, unknown> = { prompt: false }) {
-  return ctx.tools.execute({ name: `cua_driver_native__${name}`, callId: ToolCallId('desktop-cua-test'), arguments: args, signal: new AbortController().signal })
+  return ctx.tools.execute({
+    calls: [{ type: 'tool-call', id: ToolCallId('desktop-cua-test'), name, arguments: JSON.stringify(args) }],
+    signal: new AbortController().signal,
+  }).then(batch => batch.results[0]!.result)
 }
 
 it('queries Desktop without prompting and preserves the driver permission result', async () => {
