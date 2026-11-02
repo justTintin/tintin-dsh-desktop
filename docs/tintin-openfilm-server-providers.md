@@ -60,6 +60,6 @@
 ## 6. 不做 / 风险
 
 - 不写 `keys.openai` 到任何 providers.json(env 注入 + 让位保护,见 §4.3)。
-- 不模拟 OpenAI chat/completions 给 agent(agent 是 DSH,模型由服务端下发,client.js 自动注册 `tintin-server` provider)。
+- 不模拟 OpenAI chat/completions 给 agent(agent 是 DSH;封面/视频剪辑子进程的模型由各自补丁路由到服务端 `/llm`。**2026-11-01 起主聊天不再自动注册 `tintin-server` provider**——客户端 DSH 模型回归用户自配 api-key,见 [tintin-agent-pipeline.md](tintin-agent-pipeline.md))。
 - 25 MB 上限是 OpenFilm 客户端硬编码(`openai.mjs:34`),长片先切段。
 - `/v2/*` 不接入;若未来要在 Studio 内直连服务端视频生成,须先核对 fal/google provider 的形状或另立 provider(上游议题)。

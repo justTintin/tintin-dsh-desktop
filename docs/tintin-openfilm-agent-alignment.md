@@ -5,6 +5,8 @@
 - 原版源码依据：`D:\Project\dsh-openfilm`（openfilm/openfilm fork，界面与智能体层）
 - 移植版源码依据：本仓 `dsh-tintin-client-ui/client.js`（聊天壳）、`dsh-tintin-bundle/`（宿主通道与工具）、`dsh-plugin-desktop-tintin/`（原生视图）
 - 状态：随实现演进更新；本文所引行号为撰写时快照
+- **已集成冻结(2026-11-01)**:本文的现行结论(对接面纪律、四问速答现行版、服务端核查口径)已并入 [tintin-agent-pipeline.md](tintin-agent-pipeline.md)(智能体链路唯一现行权威源,含 2026-11-01 服务端完成情况实测);本文保留作 10-19 对齐快照与源码依据索引,不再随实现更新。
+- **快照过时提示(2026-11-01)**:本文 §0 结论 1-3 与 §2.2/§2.3 描述的是 10-19 的 A 方案形态(client-ui 聊天壳 + DSH 服务端会话)。**2026-10-23 第三行裁决后现行形态=官方聊天 UI + 每影片一个本地 `dsh --profile acp` 子进程**(`film-acp.ts` FilmAgentManager,会话持久在角色隔离 home,模型经补丁路由服务端 `/llm`,工具经 MCP `{server}/mcp`);A 方案列仅作 shell 接管失败时的兜底。§1(原版链路)、§2.4(能力层)、§2.5(职责与对接面纪律)、§3.1(服务端核查)仍有效。四条链路现行总览见 [tintin-agent-pipeline.md](tintin-agent-pipeline.md)。
 
 ---
 

@@ -188,6 +188,8 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 > - 聊天端: `tintin-resources/src/agent-definitions.mjs` 登记 `tintin-agent`(持久化选择合法); 选择器持久键升 `openfilm.local-agents.v3`(一次性重置旧默认, 用户可再选并记住); `optionLabel`/`agentModelSummary`/`rowChoices` 拍平 ACP 会话上报的 **provider 分组嵌套**模型选项(修根因: 显示名在嵌套层, 此前永远落空 → 按钮显示裸模型 id `deepseek-v4-flash`); `tintin-agent` 图标=lucide Bot, Studio 设置页未知 id 走字母方块兜底(原生已有);
 > - 服务端工具箱实证(2026-10-30 /mcp tools/list, **现为 7 工具**): create_video(comfygen t2v, 1~10s, 1080p 单卡独占)/create_image(t2i+cover)/create_music(MusicGen 同步)/create_audio(sfx|tts 同步)/create_digital_human(image|lipsync, base64)/task_status_unified/server_health; 影片会话经 mcpServers 声明已挂(2026-10-25 起)。
 
+> **观察期禁用(2026-11-01 用户裁决)**: TinTin智能体定位定稿=**服务端编排智能体**(编排在服务端, 客户端只做会话持续与渲染); 服务端该功能处于观察期 —— 名册行加 `disabled`(「服务端智能体观察期,暂不可用」, 菜单置灰不可点), **deepseek 行置首=默认**(退回客户端 dsh 智能体形态)。代码分支全部保留(`film-acp.ts` 人设/补丁/home 分键不动), 恢复=去掉 `disabled` 一行。禁用语义落在共享 chat 层(`RosterAgent.disabled`; `currentAgent` 跳过禁用行; `ensureOptions` 探测排除禁用行, 堵住开菜单即拉起禁用会话的旁路; `load()` 把存量 picked=tintin-agent 回落 deepseek)。封面同批同款。全链路总览见 [tintin-agent-pipeline.md](tintin-agent-pipeline.md)。
+
 - 角色 = TinTin 角色预设(`dsh-tintin-bundle/presets/`:tintin-assistant 总助手、tintin-director 编导、tintin-producer 制作、tintin-qc 质检、tintin-librarian 素材库),与主应用同源(每角色的 `preset.yml` 元数据 + `agent.cordis.yml` 组合,persona 前缀即角色人设);
 - 影片智能体按角色生成**分角色补丁**(`<channelHome>/tintin/film-agent-<role>.patch.yml`):模型路由 + **persona 前缀替换**(读取角色预设的 persona 块,原样进补丁,与主应用文本一致);无角色时用默认补丁;
 - 选择器:shell 页 composer 工具条内的「角色」下拉(官方同款样式, 注入式挂载)(`tintin-role.ts`,持久化 `tintin.role`)→ `window.__tintinRole` → studio-preload 的 `localAgents.start` 随 meta 送达 → 主进程 `begin(project, { tintinRole })`;(选择器位于聊天列 composer 正上方, 2026-10-24 用户裁决)
@@ -344,6 +346,16 @@ openfilm-shell 构建新增**第二入口** `cover-chat.html`(vite rollupOptions
 **双入口回归与修复(2026-10-28 无头浏览器实证, 存档)**: 分块后聊天树成为两入口的共享 chunk, `app-bridge.ts` 的 `export const app = window.openfilmDesktop` 在**模块求值时捕获**, 而共享 chunk 先于 shell bridge(在主 chunk 体内)执行 → `app` 恒 undefined → **影片会话框消失**(mountChat 崩)。修复: `app` 改惰性 Proxy(每次属性访问读 window, 函数绑定 this)——官方 preload 先行场景同样成立。同批修复: App.tsx 图层 provider 需展开进 providers 数组(整组数组会成为无 `items` 的 provider, 渲染即崩); App.tsx `coverLayers` 调用兜 `?? []`(影片桥无此方法)。验证: Playwright(headless shell) 同 dist 双页探针——影片页会话栏/输入框/starters 全挂载零 pageerror, 封面页 @ 菜单出「图层」组(编辑器 postMessage 实时图层), 编辑器图层行 @ 按钮 → 聊天输入框引用 pill。
 
 **加载卡死排障(2026-10-28 下午, 用户实报会话列空转)**: 修复版构建后页面零错误(统一日志 studio-renderer 管道全天仅 13:42 旧构建的 `app undefined` 两条), 会话列停在 Loader——排障发现 **`window.tintinFilmDir` 从未有任何赋值点**(bridge.ts/tintin-library.ts 只读不写, preload 只暴露在 openfilmNative 下) → bridge 的 follow() 永远提前返回, 项目解析只剩 Studio 事件流一条路。修复: studio-preload `contextBridge.exposeInMainWorld('tintinFilmDir', …)` 直挂同名键, follow() 按目录匹配 Studio 项目复活(独立于 Studio 内部事件的第二条项目解析路)。has-shell 探测同步加深(chatChildren/chatTextHead/helloProject/bootError, 日志条直接可见), shell 就绪但聊天列空(加载卡死)沿变化打 `chat-column-stuck` warn 进统一日志。
+
+## 16.6 技能弹窗服务端技能的详情入口与删除(2026-10-31, 用户报障「详情按钮为什么没有, 还有删除按钮」)
+
+SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡可点**进 ServerDetail 详情页(1031 批), 已安装行只读无出口——用户预期是显式按钮。本批三处补齐:
+
+- **显式详情按钮**: 服务端卡片(已安装态)与「已安装」视图的服务端行都加「详情」按钮, 与整卡点击同一条 `setServerOpened` 通路(入口冗余, 不改既有交互);
+- **删除按钮**: 已安装态卡片/行/详情页加「删除」, 走新 IPC 通道 `openfilm:skills:remove`(main-hook: 只删 `film-agent-home/skills/<净化名>` 安装副本, 与 install 同款字符净化防穿越, 不触服务端注册表; 删后广播 `openfilm:skills-changed` 供聊天清单自动刷新); UI 侧 ConfirmDialog 二次确认(独立文案: 只删本机副本、新会话不再携带、可重装), 删后该技能在服务端 tab 回到未安装态(可再安装);
+- **i18n**: `serverRemove/serverRemoveTitle/serverRemoveHint` 五语言(zh-CN/en/ja/ko/es)。
+
+设计语义(相对 1030 批注释的变更): 服务端技能的「卸载」不再视为纯服务端事务——本机安装副本的生命周期归弹窗管(装/删对称), 服务端注册表的增删仍不在此弹窗范围。
 
 ## 17. 已知缺口/非目标
 
