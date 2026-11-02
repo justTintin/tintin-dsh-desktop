@@ -177,9 +177,13 @@ function isLexicalProfileBoundary(
   if (candidate === undefined) return false
   const offset = relative(registration.profileDirectory, candidate)
   // The native Loader has used the directory URL, package.json, and cordis
-  // config files as its parentURL across supported Node releases. Restrict the
-  // bridge to that directory and its direct files, never another Profile.
-  return offset === '' || (!offset.includes(sep) && offset !== '..' && !isAbsolute(offset))
+  // config files as its parentURL across supported Node releases. Since the
+  // 0.2.2 loader it also imports mounted packages through the resolver helper
+  // it materializes under `<profile>/.cordis/`, so that helper file is the
+  // importing parent and must bridge to the Desktop installation. Anything
+  // else below the Profile stays outside: never another Profile.
+  if (offset === '' || (!offset.includes(sep) && offset !== '..' && !isAbsolute(offset))) return true
+  return offset === '.cordis' || offset.startsWith(`.cordis${sep}`)
 }
 
 function isCanonicalProfileBoundary(
@@ -189,7 +193,8 @@ function isCanonicalProfileBoundary(
   const candidate = filePath(canonicalUrl)
   if (candidate === undefined) return false
   const offset = relative(canonicalPath(registration, registration.profileDirectory), candidate)
-  return offset === '' || (!offset.includes(sep) && offset !== '..' && !isAbsolute(offset))
+  if (offset === '' || (!offset.includes(sep) && offset !== '..' && !isAbsolute(offset))) return true
+  return offset === '.cordis' || offset.startsWith(`.cordis${sep}`)
 }
 
 function isSharedFallbackPath(registration: ProfileResolverRegistration, candidate: string): boolean {
