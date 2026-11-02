@@ -33,6 +33,12 @@ console.log('[stage] 1/3 构建三件套…')
 run(['run', 'build:bundle'])
 run(['run', 'build:engine'])
 run(['run', 'build:editor'])
+// 页内模块(方案 B B1,2026-11-02 用户裁决):编辑器 React 应用经 factory(require)
+// 包装为包根 client.js(Loader 装载入口);打包链自动构建(打包不变量)。
+{
+  const r = spawnSync(process.execPath, [join('scripts', 'build-editor-bundle.mjs')], { cwd: pluginRoot, stdio: 'inherit', shell: true })
+  if (r.status !== 0) throw new Error(`editor-bundle 构建失败(${r.status})`)
+}
 console.log('[stage] 1b/3 构建会话页(chat-shell)…')
 {
   const r = spawnSync(process.execPath, [join(chatShell, 'build.mjs')], { stdio: 'inherit' })

@@ -3,10 +3,15 @@
 // 自定义图片层与产品图编辑卡(从素材替换/抠图直达——抠图结果=素材,2026-10-31 裁决)。
 import React from 'react'
 import { getTemplate, type LayerDef } from '../registry'
-import { FONT_WHITELIST } from '../../templates/text-style'
+import type { CustomLayer } from '../../templates/CustomLayers'
+import { FontFamilyPicker, FontStylePicker } from './font-picker'
+import { layerEl } from './canvas-geom'
+import { ImageLayerProps, numBox, type ImageTarget } from './image-props'
 import { useEditor } from './store'
 import { ghostBtn, headStyle, inputStyle } from './ui'
-function CustomLayerEditor({ layer, project }: { layer: { id: string; image: string; width: number; opacity?: number; rotate?: number }; project: string }): React.ReactElement {
+
+type ImageTargetLook = Extract<ImageTarget, { kind: 'slot' }>['look']
+function CustomLayerEditor({ layer, project }: { layer: CustomLayer; project: string }): React.ReactElement {
   const setCustomLayer = useEditor((s) => s.setCustomLayer)
   const selectedAsset = useEditor((s) => s.selectedAsset)
   const [matting, setMatting] = React.useState<{ busy: boolean; msg: string; ok: boolean }>({ busy: false, msg: '', ok: true })
@@ -16,7 +21,7 @@ function CustomLayerEditor({ layer, project }: { layer: { id: string; image: str
     void (async () => {
       try {
         if (!selectedAsset.startsWith('public/')) {
-          await fetch('/tintin/cover/api/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selectedAsset }) })
+          await fetch('/tintin/ipc/cover:acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selectedAsset }) })
         }
         setCustomLayer(layer.id, { image: selectedAsset.replace(/^public\//, '') })
       } catch { /* 同步失败静默(同画布口径) */ }
@@ -26,7 +31,7 @@ function CustomLayerEditor({ layer, project }: { layer: { id: string; image: str
     setMatting({ busy: true, msg: '', ok: true })
     void (async () => {
       try {
-        const r = await fetch('/tintin/cover/api/matting', {
+        const r = await fetch('/tintin/ipc/cover:matting', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: layer.image, project }),
         }).then((x) => x.json()) as { ok?: boolean; name?: string; error?: string }
         if (!r.ok) throw new Error(r.error || '抠图失败')
@@ -39,33 +44,7 @@ function CustomLayerEditor({ layer, project }: { layer: { id: string; image: str
   return (
     <div style={{ marginTop: 14 }}>
       <div style={headStyle}>编辑「{layer.image.split('/').pop()}」</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>宽度</span>
-        <PreviewSlider min={80} max={1280} step={10} value={layer.width}
-          preview={(v) => { const el = layerEl(layer.id); if (el) el.style.width = `${v}px` }}
-          commit={(v) => setCustomLayer(layer.id, { width: v })} />
-        <input type="number" min={20} max={4000} value={layer.width}
-          onChange={(e) => setCustomLayer(layer.id, { width: Math.max(20, Math.min(4000, Number(e.target.value) || 20)) })} style={numBox} />
-        <span style={{ fontSize: 10.5, color: '#8b8b88' }}>px</span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>不透明</span>
-        <PreviewSlider min={0.2} max={1} step={0.05} value={layer.opacity ?? 1}
-          preview={(v) => { const el = layerEl(layer.id); if (el) el.style.opacity = String(v) }}
-          commit={(v) => setCustomLayer(layer.id, { opacity: v })} />
-        <input type="number" min={20} max={100} value={Math.round((layer.opacity ?? 1) * 100)}
-          onChange={(e) => setCustomLayer(layer.id, { opacity: Math.max(20, Math.min(100, Number(e.target.value) || 100)) / 100 })} style={numBox} />
-        <span style={{ fontSize: 10.5, color: '#8b8b88' }}>%</span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>旋转</span>
-        <PreviewSlider min={-180} max={180} step={1} value={layer.rotate ?? 0}
-          preview={(v) => { const el = layerEl(layer.id); if (el) el.style.transform = `rotate(${v}deg)` }}
-          commit={(v) => setCustomLayer(layer.id, { rotate: v })} />
-        <input type="number" min={-180} max={180} value={layer.rotate ?? 0}
-          onChange={(e) => setCustomLayer(layer.id, { rotate: Math.max(-180, Math.min(180, Number(e.target.value) || 0)) })} style={numBox} />
-        <span style={{ fontSize: 10.5, color: '#8b8b88' }}>°</span>
-      </div>
+      <ImageLayerProps target={{ kind: 'custom', layer }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
         <button
           onClick={replaceFromAsset}
@@ -81,42 +60,16 @@ function CustomLayerEditor({ layer, project }: { layer: { id: string; image: str
         >{matting.busy ? '抠图中…' : '抠图去背景'}</button>
       </div>
       {matting.msg ? <div style={{ marginTop: 6, fontSize: 11, color: matting.ok ? '#7ee2a8' : '#f87171', wordBreak: 'break-all' }}>{matting.msg}</div> : null}
-      <div style={{ fontSize: 10.5, color: '#8b8b88', marginTop: 6 }}>画布拖动改位置 · 面板拖 ⠿ 调层级 · 选中后拖画布上方圆点旋转</div>
+      <div style={{ fontSize: 10.5, color: '#8b8b88', marginTop: 6 }}>画布拖动改位置 · 拖右下角柄改大小 · 拖上方圆点旋转 · Alt+拖动复制</div>
     </div>
   )
 }
 
 /** 图片图层编辑器(2026-10-29 用户裁决:去掉「上传图片」与「AI 重绘产品图」;
- *  底图保留 AI 生成;产品图来源=素材面板拖入/会话生成,恢复默认仍可用。
- *  2026-10-31 §2.5 P1:产品图补「用选中素材设为产品图」(素材区点选→一键设图)与「抠图去背景」) */
+ *  底图保留 AI 生成;产品图来源=素材面板拖入/会话生成。
+ *  2026-10-31 §2.5 P1:产品图补「用选中素材设为产品图」(素材区点选→一键设图)与「抠图去背景」;
+ *  2026-11-01 用户裁决:删除「恢复默认」;外观/变换/排列统一走 ImageLayerProps(对齐 PhotoCraft)) */
 const STYLE_COLORS = ['#ffffff', '#22d3ee', '#facc15', '#f97316', '#f87171', '#4ade80', '#93c5fd', '#0f172a']
-
-const numBox: React.CSSProperties = {
-  width: 56, background: '#101012', border: '1px solid #444', borderRadius: 6,
-  color: '#e8e8e6', fontSize: 11, padding: '3px 5px', outline: 'none',
-}
-
-/** 被拖/被调图层的 DOM 节点(滑条预览直写目标) */
-const layerEl = (id: string): HTMLElement | null => document.querySelector(`[data-cover-layer="${id}"]`) as HTMLElement | null
-
-/** 滑条预览-提交分离(方案 B §2.5 P0,与画布拖动同一管线):拖动中 input 事件只做 CSS 直写预览
- *  (Remotion 树零重渲染),松手/键盘抬起/失焦一次性提交 props。 */
-function PreviewSlider({ min, max, step, value, preview, commit }: {
-  min: number; max: number; step: number; value: number
-  preview: (v: number) => void
-  commit: (v: number) => void
-}): React.ReactElement {
-  return (
-    <input
-      type="range" min={min} max={max} step={step} value={value}
-      onChange={(e) => preview(Number(e.target.value))}
-      onPointerUp={(e) => commit(Number(e.currentTarget.value))}
-      onKeyUp={(e) => commit(Number(e.currentTarget.value))}
-      onBlur={(e) => commit(Number(e.currentTarget.value))}
-      style={{ flex: 1, accentColor: '#4f7cff' }}
-    />
-  )
-}
 
 /** 文本防抖提交(方案 B §2.5 P0):输入中只写本地态,停顿 250ms 或失焦才写 props——
  *  击键风暴合并为单次渲染。外部值变更(智能体/轮询)即时同步本地。 */
@@ -149,7 +102,7 @@ function DelayedTextEditor({ value, isArray, rows, onCommit }: {
 /** 文字样式(PhotoCraft 式,2026-10-28):字体 / 大小(px 绝对,基准字号×倍率换算)/
  *  位置(X·Y 数值输入+滑条)/ 颜色(色板+自由取色器)。存储契约不变(styles.scale 等)。 */
 function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontSize: number }): React.ReactElement {
-  const styles = useEditor((s) => (s.props.styles as Record<string, { scale?: number; color?: string; dx?: number; dy?: number; font?: string }> | undefined)?.[layerId])
+  const styles = useEditor((s) => (s.props.styles as Record<string, { scale?: number; color?: string; dx?: number; dy?: number; font?: string; weight?: number; italic?: boolean }> | undefined)?.[layerId])
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const scale = typeof styles?.scale === 'number' ? styles.scale : 1
   const px = Math.round(baseFontSize * scale)
@@ -163,15 +116,22 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
     <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(127,127,127,0.07)', border: '1px solid #2c2c30' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>字体</span>
-        <select
-          value={styles?.font ?? ''}
-          onChange={(e) => setLayerStyle(layerId, e.target.value ? { font: e.target.value } : { font: undefined })}
-          style={inputStyle({ flex: 1, height: 26, fontSize: 12 })}
-        >
-          <option value="">默认(黑体系)</option>
-          {FONT_WHITELIST.map((f) => <option key={f} value={f}>{f}</option>)}
-        </select>
+        <FontFamilyPicker
+          value={styles?.font}
+          onChange={(f) => setLayerStyle(layerId, { font: f, weight: undefined, italic: undefined })} // 换字体重置样式字面
+        />
       </div>
+      {styles?.font ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+          <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>样式</span>
+          <FontStylePicker
+            font={styles.font}
+            weight={typeof styles?.weight === 'number' ? styles.weight : undefined}
+            italic={styles?.italic === true}
+            onChange={(v) => setLayerStyle(layerId, v ? { weight: v.weight, italic: v.italic } : { weight: undefined, italic: undefined })}
+          />
+        </div>
+      ) : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
         <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>大小</span>
         <input
@@ -212,17 +172,15 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
           title="自由取色"
           style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }}
         />
-        {(styles?.scale !== undefined || styles?.color !== undefined || styles?.dx !== undefined || styles?.dy !== undefined) ? (
-          <button onClick={() => setLayerStyle(layerId, null)} style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 10.5, marginLeft: 'auto' }}>重置样式</button>
-        ) : null}
       </div>
     </div>
   )
 }
 
-function ImageLayerEditor({ layerLabel, propKey, project }: { layerLabel: string; propKey: string; project: string }): React.ReactElement {
+function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: string; layerLabel: string; propKey: string; project: string }): React.ReactElement {
   const setProp = useEditor((s) => s.setProp)
   const current = useEditor((s) => s.props[propKey])
+  const look = useEditor((s) => (s.props.styles as Record<string, ImageTargetLook> | undefined)?.[layerId])
   const selectedAsset = useEditor((s) => s.selectedAsset)
   const [state, setState] = React.useState<{ busy: boolean; msg: string; ok: boolean }>({ busy: false, msg: '', ok: true })
   const [bgPrompt, setBgPrompt] = React.useState('')
@@ -234,7 +192,7 @@ function ImageLayerEditor({ layerLabel, propKey, project }: { layerLabel: string
     void (async () => {
       try {
         if (!selectedAsset.startsWith('public/')) {
-          await fetch('/tintin/cover/api/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selectedAsset }) })
+          await fetch('/tintin/ipc/cover:acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: selectedAsset }) })
         }
         setProp(propKey, selectedAsset.replace(/^public\//, ''))
       } catch { /* 同步失败静默(同画布口径) */ }
@@ -246,7 +204,7 @@ function ImageLayerEditor({ layerLabel, propKey, project }: { layerLabel: string
     setState({ busy: true, msg: '', ok: true })
     void (async () => {
       try {
-        const r = await fetch('/tintin/cover/api/matting', {
+        const r = await fetch('/tintin/ipc/cover:matting', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, project }),
         }).then((x) => x.json()) as { ok?: boolean; name?: string; error?: string }
         if (!r.ok) throw new Error(r.error || '抠图失败')
@@ -259,7 +217,7 @@ function ImageLayerEditor({ layerLabel, propKey, project }: { layerLabel: string
   const generateBg = (): void => {
     if (!bgPrompt.trim()) { setState({ busy: false, msg: '先描述画面(不含文字)', ok: false }); return }
     setState({ busy: true, msg: 'AI 生成底图中…(分钟级,勿关页面)', ok: true })
-    void fetch('/tintin/cover/api/generate-background', {
+    void fetch('/tintin/ipc/cover:generate-background', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ prompt: bgPrompt.trim(), aspect: getTemplate(tplForAspect).orientation === 'portrait' ? '9:16' : '16:9', engine: genEngine }),
@@ -277,11 +235,9 @@ function ImageLayerEditor({ layerLabel, propKey, project }: { layerLabel: string
     <div style={{ marginTop: 14 }}>
       <div style={headStyle}>图片「{layerLabel}」</div>
       <div style={{ fontSize: 11, color: '#8b8b88', marginBottom: 8, wordBreak: 'break-all' }}>
-        当前:{typeof current === 'string' && current ? current : '(未设置,用模板默认)'}
+        当前:{typeof current === 'string' && current ? current : '(未设置)'}
       </div>
-      {current ? (
-        <button onClick={() => { setProp(propKey, undefined); setState({ busy: false, msg: '已恢复默认', ok: true }) }} style={ghostBtn}>恢复默认</button>
-      ) : null}
+      <ImageLayerProps target={{ kind: 'slot', id: layerId, look: look ?? {}, geometry: isProduct }} />
       {isProduct ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
           <button

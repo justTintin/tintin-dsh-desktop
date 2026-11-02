@@ -1,6 +1,8 @@
 // 视频封面(thumbnail)——点击向构图:深色戏剧光 + 超大钩子文案 + 产品打光(PoC 移植 + hiddenLayers)
 import React from 'react'
-import { AbsoluteFill, Img, staticFile } from 'remotion'
+import { AbsoluteFill } from 'remotion'
+import { CoverImg } from './CoverImg'
+import { lookBlend, lookOpacity, lookTransform } from './image-style'
 import { layerStyle, type StyleProps } from './text-style'
 import { CustomLayerOverlay, layerZ, type CustomLayer, type LayerOrder } from './CustomLayers'
 
@@ -19,9 +21,10 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, sub
   const hidden = (id: string): boolean => hiddenLayers.includes(id)
   const hookStyle = layerStyle({ styles }, 'title', { fontSize: 110, color: '#ffffff' })
   const subtitleStyle = layerStyle({ styles }, 'subtitle', { fontSize: 34, color: '#bfdbfe' })
-  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;translateY(-50%) 为原定位,叠加用户位移/旋转)
+  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;translateY(-50%) 为原定位,叠加用户位移/旋转;
+  // 2026-11-01 对齐 PhotoCraft:翻转/宽高缩放/不透明度/混合模式,见 image-style.ts)
   const productOverride = styles?.product
-  const productTransform = `translateY(-50%) translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) rotate(${productOverride?.rotate ?? 0}deg)`
+  const productTransform = `translateY(-50%) translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) ${lookTransform(productOverride)}`
   return (
     <AbsoluteFill style={{ background: '#070b18' }}>
       {!hidden('environment') && (
@@ -41,11 +44,10 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, sub
       )}
 
       {!hidden('product') && (
-        <div data-cover-layer="product" style={{ position: 'absolute', right: 30, top: '50%', transform: productTransform, width: 640, height: 640, zIndex: layerZ(layerOrder, 'product') }}>
+        <div data-cover-layer="product" style={{ position: 'absolute', right: 30, top: '50%', transform: productTransform, width: 640, height: 640, zIndex: layerZ(layerOrder, 'product'), opacity: lookOpacity(productOverride), mixBlendMode: lookBlend(productOverride) }}>
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)' }}>
-            <Img
-              draggable={false}
-              src={staticFile(image)}
+            <CoverImg
+              name={image}
               style={{
                 width: 560, height: 560, objectFit: 'contain',
                 WebkitMaskImage: 'radial-gradient(circle, black 52%, transparent 74%)',
@@ -64,7 +66,9 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, sub
               key={line}
               style={{
                 fontSize: i === hookLines.length - 1 ? Math.round(hookStyle.fontSize * 0.87) : hookStyle.fontSize,
-                fontWeight: 900,
+                fontFamily: hookStyle.fontFamily,
+                fontWeight: hookStyle.fontWeight ?? 900,
+                fontStyle: hookStyle.fontStyle,
                 lineHeight: 1.16,
                 color: hookStyle.color === '#ffffff' && i === hookLines.length - 1 ? '#22d3ee' : hookStyle.color,
                 textShadow: '0 6px 0 rgba(2,6,23,0.9), 0 14px 44px rgba(0,0,0,0.7)',
@@ -85,7 +89,7 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, sub
           data-cover-layer="subtitle"
           style={{
             position: 'absolute', left: 60, bottom: 112, maxWidth: 620, zIndex: layerZ(layerOrder, 'subtitle'),
-            ...subtitleStyle, fontWeight: 600, letterSpacing: 1,
+            ...subtitleStyle, fontWeight: subtitleStyle.fontWeight ?? 600, letterSpacing: 1,
             textShadow: '0 2px 12px rgba(2,6,23,0.85)',
             transform: subtitleStyle.translate || undefined,
           }}
@@ -97,7 +101,6 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, sub
       {!hidden('brand') && (
         <div style={{ position: 'absolute', left: 56, bottom: 44, display: 'flex', alignItems: 'center', gap: 16, zIndex: layerZ(layerOrder, 'brand') }}>
           <div style={{ padding: '7px 18px', borderRadius: 999, background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.3)', color: '#e2e8f0', fontSize: 20, fontWeight: 700 }}>{brand}</div>
-          <div style={{ color: 'rgba(226,232,240,0.5)', fontSize: 18 }}>remotion · renderStill</div>
         </div>
       )}
       <CustomLayerOverlay layers={customLayers} order={layerOrder} hidden={hidden} />

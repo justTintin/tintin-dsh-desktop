@@ -37,26 +37,37 @@ describe('模板注册表(2026-10-27 分类学裁决)', () => {
 })
 
 describe('validateProps(props 树校验)', () => {
-  it('缺省 props 可合并默认值通过', () => {
-    const r = validateProps('cover', { title: '新标题' })
+  it('缺省字段按空值合并(默认值不含演示内容,2026-11-01 裁决)', () => {
+    const r = validateProps('cover', { title: '新标题', subtitle: '副题' })
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.value.title).toBe('新标题')
-      expect(r.value.subtitle).toBe(TEMPLATES.cover?.defaultProps.subtitle)
+      expect(r.value.badge).toBe('')
+    }
+  })
+  it('六模板默认值全为空(只保留字段清单)', () => {
+    for (const tpl of Object.values(TEMPLATES)) {
+      for (const [key, value] of Object.entries(tpl.defaultProps as Record<string, unknown>)) {
+        expect(Array.isArray(value) ? value.length : value, `${tpl.id}.${key}`).toBe(Array.isArray(value) ? 0 : '')
+      }
     }
   })
   it('文本图层空串 → 显式报错', () => {
-    const r = validateProps('cover', { title: '   ' })
+    const r = validateProps('cover', { title: '   ', subtitle: '副题' })
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.error).toContain('主标题')
   })
-  it('数组文本(卖点/钩子)存在空行 → 显式报错', () => {
-    expect(validateProps('video', { hookLines: ['0.2ms', '  '] }).ok).toBe(false)
-    expect(validateProps('video', { hookLines: ['0.2ms', '光轴'] }).ok).toBe(true)
+  it('数组文本(卖点/钩子)为空或存在空行 → 显式报错', () => {
+    expect(validateProps('video', { hookLines: ['0.2ms', '  '], subtitle: 's' }).ok).toBe(false)
+    expect(validateProps('video', { hookLines: [], subtitle: 's' }).ok).toBe(false)
+    expect(validateProps('video', { hookLines: ['0.2ms', '光轴'], subtitle: 's' }).ok).toBe(true)
   })
-  it('hiddenLayers 透传不受校验影响', () => {
-    const r = validateProps('video', { hiddenLayers: ['brand'] })
-    expect(r.ok).toBe(true)
-    if (r.ok) expect(r.value.hiddenLayers).toEqual(['brand'])
+  it('隐藏的文本图层不参与校验(隐藏=不画出来);hiddenLayers 原样透传', () => {
+    const blank = validateProps('video', { hiddenLayers: ['title', 'subtitle'] })
+    expect(blank.ok).toBe(true)
+    if (blank.ok) expect(blank.value.hiddenLayers).toEqual(['title', 'subtitle'])
+    const r = validateProps('video', { hiddenLayers: ['title'] })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toContain('副标题')
   })
 })

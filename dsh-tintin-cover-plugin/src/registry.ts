@@ -39,8 +39,8 @@ const TEXT_LAYERS_COVER: LayerDef[] = [
   { id: 'title', label: '主标题', type: 'text', fontSize: 88 },
   { id: 'subtitle', label: '副标题', type: 'text', fontSize: 34 },
 ]
+/* 节目封面无品牌条:原品牌条=写死的 T 徽标+「TINTIN DESKTOP」(PoC 遗留),2026-11-01 用户裁决删除 */
 const GRAPHIC_LAYERS_COVER: LayerDef[] = [
-  { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
   { id: 'footer', label: '角标(装饰)', type: 'graphic' },
 ]
 
@@ -49,7 +49,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     id: 'cover', label: '节目封面·横屏', family: 'cover', orientation: 'landscape',
     width: 1280, height: 720,
     component: Cover as ComponentType<CoverProps>,
-    defaultProps: { title: '下载扩展链复活', subtitle: 'B站下载助手 · 抖音解析 · 媒体下载引擎 · 扩展管理', badge: '2026-10-26 已交付' },
+    defaultProps: { title: '', subtitle: '', badge: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment', propsKey: 'bgImage' },
       { id: 'grid', label: '网格纹理(装饰)', type: 'graphic' },
@@ -61,7 +61,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     id: 'cover-portrait', label: '节目封面·竖屏', family: 'cover', orientation: 'portrait',
     width: 1080, height: 1440,
     component: CoverPortrait as ComponentType<CoverProps>,
-    defaultProps: { title: '下载扩展链复活', subtitle: 'B站下载助手 · 抖音解析 · 媒体下载引擎', badge: '2026-10-26 已交付' },
+    defaultProps: { title: '', subtitle: '', badge: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment', propsKey: 'bgImage' },
       ...TEXT_LAYERS_COVER,
@@ -72,10 +72,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     id: 'product', label: '商品封面·横屏', family: 'product', orientation: 'landscape',
     width: 1280, height: 720,
     component: ProductCover as ComponentType<ProductCoverProps>,
-    defaultProps: {
-      brand: 'LOGITECH G', title: 'PRO X2 SUPERSTRIKE', subtitle: '旗舰电竞鼠标 · 光轴触发', badge: '现已上市',
-      features: ['混合光轴 · 0.2ms 触发', 'LIGHTSPEED 2K Hz 无线', '轻量人体工学 · 长续航'], image: 'mouse.jpg',
-    },
+    defaultProps: { brand: '', title: '', subtitle: '', badge: '', features: [], image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
@@ -90,10 +87,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     id: 'product-portrait', label: '商品封面·竖屏', family: 'product', orientation: 'portrait',
     width: 1080, height: 1440,
     component: ProductCoverPortrait as ComponentType<ProductCoverProps>,
-    defaultProps: {
-      brand: 'LOGITECH G', title: 'PRO X2 SUPERSTRIKE', subtitle: '旗舰电竞鼠标 · 光轴触发', badge: '现已上市',
-      features: ['混合光轴 · 0.2ms 触发', 'LIGHTSPEED 2K Hz 无线'], image: 'mouse.jpg',
-    },
+    defaultProps: { brand: '', title: '', subtitle: '', badge: '', features: [], image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
@@ -108,10 +102,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     id: 'video', label: '视频缩略图·横屏', family: 'video', orientation: 'landscape',
     width: 1280, height: 720,
     component: VideoCover as ComponentType<VideoCoverProps>,
-    defaultProps: {
-      hookLines: ['0.2ms', '光轴鼠标', '能有多快?'], subtitle: '混合光轴 · LIGHTSPEED 2K Hz 无线', subTag: '开箱实测',
-      brand: 'LOGITECH G · PRO X2 SUPERSTRIKE', image: 'mouse.jpg',
-    },
+    defaultProps: { hookLines: [], subtitle: '', subTag: '', brand: '', image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 110 },
@@ -125,10 +116,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     id: 'video-portrait', label: '视频缩略图·竖屏', family: 'video', orientation: 'portrait',
     width: 1080, height: 1440,
     component: VideoCoverPortrait as ComponentType<VideoCoverProps>,
-    defaultProps: {
-      hookLines: ['0.2ms', '光轴鼠标', '能有多快?'], subtitle: '混合光轴 · LIGHTSPEED 2K Hz 无线', subTag: '开箱实测',
-      brand: 'LOGITECH G · PRO X2 SUPERSTRIKE', image: 'mouse.jpg',
-    },
+    defaultProps: { hookLines: [], subtitle: '', subTag: '', brand: '', image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 104 },
@@ -158,15 +146,17 @@ export function templateOfOrientation(templateId: string, orientation: 'landscap
   return sibling ? sibling.id : templateId
 }
 
-/** props 校验(铁律 2:显式报错,不静默兜底):必含文本键非空 */
+/** props 校验(铁律 2:显式报错,不静默兜底):显示中的文本图层必须有字;隐藏的图层不会被画出来,不参与 */
 export function validateProps(templateId: string, props: Record<string, unknown>): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
   const tpl = getTemplate(templateId)
   const merged = { ...tpl.defaultProps, ...props }
+  const hidden = Array.isArray(merged.hiddenLayers) ? (merged.hiddenLayers as unknown[]) : []
   for (const [key, value] of Object.entries(merged)) {
     const def = tpl.layerDefs.find((l) => (l.propsKey ?? l.id) === key)
-    if (def && def.type === 'text') {
+    if (def && def.type === 'text' && !hidden.includes(def.id)) {
       if (typeof value === 'string' && !value.trim()) return { ok: false, error: `文本图层「${def.label}」(${key}) 不能为空` }
-      if (Array.isArray(value) && value.length > 0 && value.some((v) => typeof v === 'string' && !String(v).trim())) {
+      if (Array.isArray(value) && value.length === 0) return { ok: false, error: `文本图层「${def.label}」(${key}) 不能为空` }
+      if (Array.isArray(value) && value.some((v) => typeof v === 'string' && !String(v).trim())) {
         return { ok: false, error: `文本图层「${def.label}」(${key}) 存在空行` }
       }
     }

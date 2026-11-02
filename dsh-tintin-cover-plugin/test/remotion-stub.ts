@@ -15,3 +15,6 @@ export const Img = () => {
 export const staticFile = () => {
   throw new Error('remotion 运行时不应在单测中执行')
 }
+export const useRemotionEnvironment = () => {
+  throw new Error('remotion 运行时不应在单测中执行')
+}

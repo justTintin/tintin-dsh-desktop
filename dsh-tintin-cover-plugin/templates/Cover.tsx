@@ -2,7 +2,9 @@
 // 移植自 PoC D:\Project\cover-demo(2026-10-26 实测通过),新增 hiddenLayers 图层显隐
 // (§9.3 图层树=props 投影;编辑器/会话工具操作同一份 props)。
 import React from 'react'
-import { AbsoluteFill, Img, staticFile } from 'remotion'
+import { AbsoluteFill } from 'remotion'
+import { CoverImg } from './CoverImg'
+import { backdropStyle } from './image-style'
 import { layerStyle, type StyleProps } from './text-style'
 import { CustomLayerOverlay, layerZ, type CustomLayer, type LayerOrder } from './CustomLayers'
 
@@ -24,7 +26,7 @@ export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, h
     <AbsoluteFill style={{ background: '#0b1026' }}>
       {!hidden('environment') && (
         bgImage ? (
-          <Img draggable={false} src={staticFile(bgImage)} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.85 }} />
+          <CoverImg name={bgImage} style={backdropStyle(styles?.environment)} />
         ) : (
           <AbsoluteFill
             style={{
@@ -46,14 +48,8 @@ export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, h
       <div style={{ position: 'absolute', left: -80, bottom: -160, width: 380, height: 380, borderRadius: '50%', background: 'radial-gradient(circle, rgba(14,165,233,0.35), rgba(14,165,233,0) 70%)' }} />
 
       <div style={{ position: 'absolute', inset: 0, padding: '72px 84px', display: 'flex', flexDirection: 'column', justifyContent: 'center', zIndex: layerZ(layerOrder, 'title') }}>
-        {!hidden('brand') && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 34 }}>
-            <div style={{ width: 46, height: 46, borderRadius: 12, background: 'linear-gradient(135deg,#4f7cff,#22d3ee)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 800, color: '#fff', boxShadow: '0 8px 30px rgba(79,124,255,0.55)' }}>T</div>
-            <span style={{ fontSize: 26, fontWeight: 700, color: '#e2e8f0', letterSpacing: 2 }}>TINTIN DESKTOP</span>
-          </div>
-        )}
         {!hidden('title') && (
-          <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: 900, lineHeight: 1.12, textShadow: '0 10px 40px rgba(0,0,0,0.45)', maxWidth: 1000, transform: titleStyle.translate || undefined }}>
+          <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: 1.12, textShadow: '0 10px 40px rgba(0,0,0,0.45)', maxWidth: 1000, transform: titleStyle.translate || undefined }}>
             {title}
           </div>
         )}
@@ -66,7 +62,6 @@ export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, h
           <>
             <div style={{ position: 'absolute', left: 84, bottom: 64, display: 'flex', alignItems: 'center', gap: 16 }}>
               <span style={{ padding: '8px 22px', borderRadius: 999, background: 'rgba(79,124,255,0.22)', border: '1px solid rgba(147,197,253,0.45)', color: '#bfdbfe', fontSize: 22, fontWeight: 600 }}>{badge}</span>
-              <span style={{ color: 'rgba(226,232,240,0.55)', fontSize: 20 }}>remotion · renderStill</span>
             </div>
             <div style={{ position: 'absolute', right: 84, bottom: 64, width: 220, height: 4, borderRadius: 2, background: 'linear-gradient(90deg,#4f7cff,#22d3ee)' }} />
           </>

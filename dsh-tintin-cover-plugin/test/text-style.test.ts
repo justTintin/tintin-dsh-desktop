@@ -16,9 +16,16 @@ describe('layerStyle(§9.7-2 样式细调)', () => {
     expect(layerStyle({ styles: { title: { color: '#facc15' } } }, 'title', { fontSize: 88, color: '#fff' }).color).toBe('#facc15')
     expect(layerStyle({ styles: { title: { scale: 'big' as unknown as number } } }, 'title', { fontSize: 88, color: '#fff' }).fontSize).toBe(88)
   })
-  it('字体白名单外回退默认;白名单内生效', () => {
-    expect(layerStyle({ styles: { title: { font: 'Comic Sans MS' } } }, 'title', { fontSize: 88, color: '#fff' }).fontFamily).toBeUndefined()
-    expect(layerStyle({ styles: { title: { font: 'KaiTi' } } }, 'title', { fontSize: 88, color: '#fff' }).fontFamily).toBe('KaiTi')
+  it('字体=任意本机族名(2026-11-02 对齐 PhotoCraft,白名单已废):引号链回落雅黑', () => {
+    expect(layerStyle({ styles: { title: { font: 'KaiTi' } } }, 'title', { fontSize: 88, color: '#fff' }).fontFamily).toBe('"KaiTi", "Microsoft YaHei", sans-serif')
+    expect(layerStyle({ styles: { title: { font: 'Microsoft YaHei' } } }, 'title', { fontSize: 88, color: '#fff' }).fontWeight).toBeUndefined()
+  })
+  it('字重夹取 100..900,斜体透传', () => {
+    expect(layerStyle({ styles: { title: { font: 'Arial', weight: 700 } } }, 'title', { fontSize: 88, color: '#fff' }).fontWeight).toBe(700)
+    expect(layerStyle({ styles: { title: { font: 'Arial', weight: 5000 } } }, 'title', { fontSize: 88, color: '#fff' }).fontWeight).toBe(900)
+    expect(layerStyle({ styles: { title: { font: 'Arial', weight: 'x' as unknown as number } } }, 'title', { fontSize: 88, color: '#fff' }).fontWeight).toBeUndefined()
+    expect(layerStyle({ styles: { title: { font: 'Arial', italic: true } } }, 'title', { fontSize: 88, color: '#fff' }).fontStyle).toBe('italic')
+    expect(layerStyle({ styles: { title: { font: 'Arial' } } }, 'title', { fontSize: 88, color: '#fff' }).fontStyle).toBeUndefined()
   })
   it('位移 dx/dy → translate;夹取 ±1200;缺省空串', () => {
     expect(layerStyle({ styles: { title: { dx: 20, dy: -8 } } }, 'title', { fontSize: 88, color: '#fff' }).translate).toBe('translate(20px, -8px)')

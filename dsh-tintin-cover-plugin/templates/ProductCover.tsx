@@ -1,6 +1,8 @@
 // 产品封面——电商/发布向构图:左侧文案区 + 右侧白色产品卡片(PoC 移植 + hiddenLayers)
 import React from 'react'
-import { AbsoluteFill, Img, staticFile } from 'remotion'
+import { AbsoluteFill } from 'remotion'
+import { CoverImg } from './CoverImg'
+import { lookBlend, lookOpacity, lookTransform } from './image-style'
 import { layerStyle, type StyleProps } from './text-style'
 import { CustomLayerOverlay, layerZ, type CustomLayer, type LayerOrder } from './CustomLayers'
 
@@ -21,9 +23,10 @@ export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtit
   const titleStyle = layerStyle({ styles }, 'title', { fontSize: 76, color: '#0f172a' })
   const subStyle = layerStyle({ styles }, 'subtitle', { fontSize: 28, color: '#475569' })
   const featStyle = layerStyle({ styles }, 'features', { fontSize: 24, color: '#1e293b' })
-  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;styles.product dx/dy/rotate)
+  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;styles.product dx/dy/rotate;
+  // 2026-11-01 对齐 PhotoCraft:翻转/宽高缩放/不透明度/混合模式,见 image-style.ts)
   const productOverride = styles?.product
-  const productTransform = `translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) rotate(${productOverride?.rotate ?? 0}deg)`
+  const productTransform = `translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) ${lookTransform(productOverride)}`
   return (
     <AbsoluteFill style={{ background: '#eef1f7' }}>
       {!hidden('environment') && (
@@ -37,26 +40,28 @@ export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtit
         }}
       />
 
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', padding: '64px 76px', gap: 56, zIndex: layerZ(layerOrder, 'title') }}>
-        <div style={{ flex: '0 0 46%', display: 'flex', flexDirection: 'column' }}>
+      {/* 层级挂在两个 flex 子项上而非外层容器(2026-11-01):带 z-index 的容器自成层叠上下文,
+          产品卡的混合模式只能与透明容器混合(无效果)、排列也只能跟着文案走;flex 子项的 z-index
+          不需要定位即生效,且直接参与画布根层叠——布局与改前逐像素一致。 */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', padding: '64px 76px', gap: 56 }}>
+        <div style={{ flex: '0 0 46%', display: 'flex', flexDirection: 'column', zIndex: layerZ(layerOrder, 'title') }}>
           {!hidden('brand') && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 30 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: 'linear-gradient(135deg,#0f172a,#334155)', color: '#fff', fontWeight: 800, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>G</div>
               <span style={{ fontSize: 22, fontWeight: 800, letterSpacing: 3, color: '#0f172a' }}>{brand}</span>
             </div>
           )}
           {!hidden('title') && (
-            <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: 900, lineHeight: 1.05, letterSpacing: -1, transform: titleStyle.translate || undefined }}>{title}</div>
+            <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: 1.05, letterSpacing: -1, transform: titleStyle.translate || undefined }}>{title}</div>
           )}
           {!hidden('subtitle') && (
-            <div data-cover-layer="subtitle" style={{ ...subStyle, marginTop: 20, fontWeight: 600, transform: subStyle.translate || undefined }}>{subtitle}</div>
+            <div data-cover-layer="subtitle" style={{ ...subStyle, marginTop: 20, fontWeight: subStyle.fontWeight ?? 600, transform: subStyle.translate || undefined }}>{subtitle}</div>
           )}
           {!hidden('features') && (
             <div data-cover-layer="features" style={{ marginTop: 34, display: 'flex', flexDirection: 'column', gap: 14, transform: featStyle.translate || undefined }}>
               {features.map((f) => (
                 <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ width: 26, height: 26, borderRadius: 999, background: '#4f7cff', color: '#fff', fontSize: 15, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✓</div>
-                  <span style={{ ...featStyle, fontWeight: 600 }}>{f}</span>
+                  <span style={{ ...featStyle, fontWeight: featStyle.fontWeight ?? 600 }}>{f}</span>
                 </div>
               ))}
             </div>
@@ -64,15 +69,14 @@ export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtit
           {!hidden('badge') && (
             <div style={{ marginTop: 40, display: 'flex', alignItems: 'center', gap: 16 }}>
               <span style={{ padding: '9px 24px', borderRadius: 999, background: '#0f172a', color: '#fff', fontSize: 22, fontWeight: 700 }}>{badge}</span>
-              <span style={{ color: '#64748b', fontSize: 19 }}>remotion · renderStill</span>
             </div>
           )}
         </div>
 
         {!hidden('product') && (
           <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <div data-cover-layer="product" style={{ width: 560, height: 560, borderRadius: 32, background: '#ffffff', boxShadow: '0 30px 80px rgba(15,23,42,0.16), 0 4px 16px rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(15,23,42,0.06)', transform: productTransform }}>
-              <Img draggable={false} src={staticFile(image)} style={{ width: '92%', height: '92%', objectFit: 'contain' }} />
+            <div data-cover-layer="product" style={{ width: 560, height: 560, borderRadius: 32, background: '#ffffff', boxShadow: '0 30px 80px rgba(15,23,42,0.16), 0 4px 16px rgba(15,23,42,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', border: '1px solid rgba(15,23,42,0.06)', transform: productTransform, opacity: lookOpacity(productOverride), mixBlendMode: lookBlend(productOverride), zIndex: layerZ(layerOrder, 'product') }}>
+              <CoverImg name={image} style={{ width: '92%', height: '92%', objectFit: 'contain' }} />
             </div>
           </div>
         )}

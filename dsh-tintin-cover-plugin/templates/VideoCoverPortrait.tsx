@@ -2,7 +2,9 @@
 // 布局与横版(video)同语言:顶部栏目角标 → 上部钩子大字 → 中下部产品聚光 → 底部品牌条。
 // 文案与横版共用 VideoCoverProps(同一套 props 可在横竖版间切换)。
 import React from 'react'
-import { AbsoluteFill, Img, staticFile } from 'remotion'
+import { AbsoluteFill } from 'remotion'
+import { CoverImg } from './CoverImg'
+import { lookBlend, lookOpacity, lookTransform } from './image-style'
 import { layerStyle, type StyleProps } from './text-style'
 import type { VideoCoverProps } from './VideoCover'
 import { CustomLayerOverlay, layerZ } from './CustomLayers'
@@ -11,9 +13,10 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
   const hidden = (id: string): boolean => hiddenLayers.includes(id)
   const hookStyle = layerStyle({ styles }, 'title', { fontSize: 104, color: '#ffffff' })
   const subtitleStyle = layerStyle({ styles }, 'subtitle', { fontSize: 38, color: '#bfdbfe' })
-  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;translateX(-50%) 为原定位,叠加用户位移/旋转)
+  // 产品图槽位覆盖(2026-10-29:画布可选中拖动+旋转手柄;translateX(-50%) 为原定位,叠加用户位移/旋转;
+  // 2026-11-01 对齐 PhotoCraft:翻转/宽高缩放/不透明度/混合模式,见 image-style.ts)
   const productOverride = styles?.product
-  const productTransform = `translateX(-50%) translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) rotate(${productOverride?.rotate ?? 0}deg)`
+  const productTransform = `translateX(-50%) translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) ${lookTransform(productOverride)}`
   return (
     <AbsoluteFill style={{ background: '#070b18' }}>
       {!hidden('environment') && (
@@ -39,7 +42,9 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
               key={line}
               style={{
                 fontSize: i === hookLines.length - 1 ? Math.round(hookStyle.fontSize * 0.88) : hookStyle.fontSize,
-                fontWeight: 900,
+                fontFamily: hookStyle.fontFamily,
+                fontWeight: hookStyle.fontWeight ?? 900,
+                fontStyle: hookStyle.fontStyle,
                 lineHeight: 1.2,
                 color: hookStyle.color === '#ffffff' && i === hookLines.length - 1 ? '#22d3ee' : hookStyle.color,
                 textShadow: '0 6px 0 rgba(2,6,23,0.9), 0 14px 44px rgba(0,0,0,0.7)',
@@ -56,12 +61,11 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
       )}
 
       {!hidden('product') && (
-        <div data-cover-layer="product" style={{ position: 'absolute', left: '50%', bottom: 250, transform: productTransform, width: 620, height: 620, zIndex: layerZ(layerOrder, 'product') }}>
+        <div data-cover-layer="product" style={{ position: 'absolute', left: '50%', bottom: 250, transform: productTransform, width: 620, height: 620, zIndex: layerZ(layerOrder, 'product'), opacity: lookOpacity(productOverride), mixBlendMode: lookBlend(productOverride) }}>
           <div style={{ position: 'absolute', inset: 40, borderRadius: '50%', background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 42%, rgba(203,213,225,0) 72%)' }} />
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)' }}>
-            <Img
-              draggable={false}
-              src={staticFile(image)}
+            <CoverImg
+              name={image}
               style={{
                 width: 540, height: 540, objectFit: 'contain',
                 WebkitMaskImage: 'radial-gradient(circle, black 58%, transparent 76%)',
@@ -79,7 +83,7 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
           data-cover-layer="subtitle"
           style={{
             position: 'absolute', left: 60, bottom: 150, right: 60, maxWidth: 968, zIndex: layerZ(layerOrder, 'subtitle'),
-            ...subtitleStyle, fontWeight: 600, letterSpacing: 1,
+            ...subtitleStyle, fontWeight: subtitleStyle.fontWeight ?? 600, letterSpacing: 1,
             textShadow: '0 2px 12px rgba(2,6,23,0.85)',
             transform: subtitleStyle.translate || undefined,
           }}

@@ -107,6 +107,19 @@ function serveStatic(root, prefix, indexFile) {
 }
 
 export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson, httpRequest, getServerUrl }) {
+  // 编辑器业务通道收集(2026-11-02 方案 B B2):所有 /tintin/cover/api/** 注册的处理器
+  // 同步登记进这张表,由尾部 /tintin/ipc/cover:<name> 前缀路由按原名派发——编辑器
+  // (B1 起为页内模块)不再直接吃自有 REST 面,业务调用走通用桥通道形状。
+  const ipcEditorChannels = new Map()
+  const registeringWebServer = {
+    register: (spec) => {
+      const dispose = webServer.register(spec)
+      if (typeof spec.path === 'string' && spec.path.startsWith('/tintin/cover/api/')) {
+        ipcEditorChannels.set(spec.path.slice('/tintin/cover/api/'.length), spec.handler)
+      }
+      return dispose
+    },
+  }
   const editorRoot = () => {
     const dir = resolvePluginDir()
     return dir ? join(dir, 'dist', 'editor') : null
@@ -119,7 +132,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     return req.headers['x-tintin-cover-agent'] === agentToken || isTrustedRequest(req, true)
   }
 
-  const disposeEditor = webServer.register({
+  const disposeEditor = registeringWebServer.register({
     kind: 'prefix',
     path: '/tintin/cover/editor',
     handler: async (req, res) => {
@@ -137,7 +150,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   })
 
   // 会话页(OpenFilm 官方聊天组件;编辑器右栏 iframe 承载,同源 loopback)
-  const disposeChatPage = webServer.register({
+  const disposeChatPage = registeringWebServer.register({
     kind: 'prefix',
     path: '/tintin/cover/chat',
     handler: async (req, res) => {
@@ -154,7 +167,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     },
   })
 
-  const disposeTemplates = webServer.register({
+  const disposeTemplates = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/templates',
     handler: async (req, res) => {
@@ -171,7 +184,26 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     },
   })
 
-  const disposeRender = webServer.register({
+  // 已装字体枚举(2026-11-02 用户裁决:对齐 PhotoCraft——全量+搜索+最近使用+中文名+样式,废除 7 种白名单):
+  // 编辑器字体下拉数据源;族名=英文(nameID16/1),local=中文名,styles=字面(字重/斜体)。
+  const disposeFonts = registeringWebServer.register({
+    kind: 'exact',
+    path: '/tintin/cover/api/fonts',
+    handler: async (req, res) => {
+      if (req.method !== 'GET' || !isTrustedRequest(req)) {
+        sendJson(res, 403, { error: 'Request rejected.' })
+        return
+      }
+      try {
+        const { listFontFamiliesCached } = await import('./cover-fonts.js')
+        sendJson(res, 200, { ok: true, families: listFontFamiliesCached() })
+      } catch (err) {
+        sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  })
+
+  const disposeRender = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/render',
     handler: async (req, res) => {
@@ -188,9 +220,12 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
           // outDir(2026-10-29 方案 1 用户裁决:导出弹「另存为」逐张选位置):须已存在的目录,
           // 否则回退默认 cover 目录(引擎同口径)。
           const outDir = typeof p.outDir === 'string' && p.outDir && existsSync(p.outDir) && statSync(p.outDir).isDirectory() ? p.outDir : undefined
+          // 图层显隐在编辑器里与 props 分开存放,导出请求单独带上来;模板按 props.hiddenLayers 隐藏图层
+          const props = { ...(p.props && typeof p.props === 'object' ? p.props : {}) }
+          if (Array.isArray(p.hiddenLayers)) props.hiddenLayers = p.hiddenLayers
           const result = await engine.renderCover({
             templateId: String(p.templateId || ''),
-            props: p.props,
+            props,
             fileName: p.fileName,
             outDir,
           })
@@ -206,8 +241,8 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   // 清单=服务端注册表(GET /skills,经注入的 httpRequest/getServerUrl)+已安装装位
   // (<渠道主目录>/cover-skills 扫描,与 cover-acp-routes 的 / 菜单双目录解析同源——装完菜单
   // 即可引用);安装=宿主桥 skills-install 落盘管线(下载解压 /skills/<id>/,带回 SKILL.md
-  // 正文),与创作模式技能管理同一条;删除=按目录 id 整目录移除(守卫:仅装位一层,拒绝
-  // 路径分隔符与相对段)。
+  // 正文),与创作模式技能管理同一条;删除=按目录 id 整目录移除,并连根清历史通用装位
+  // skills/<id>(迁移拷贝源,不清则每次启动被 migrateCoverSkillsHome 复活)。
   // 装位收紧(2026-10-31 用户裁决:在封面安装的技能只有封面用)——专属目录 cover-skills,
   // 不再用历史通用名 skills;旧装位里的既有安装由 migrateCoverSkillsHome 幂等搬入。
   const coverSkillsBase = () => (process.env.TINTIN_COVER_AGENT_HOME || process.env.DSH_HOME || '')
@@ -236,7 +271,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
       return { id: e.name, name, version, description }
     })
   }
-  const disposeCoverSkills = webServer.register({
+  const disposeCoverSkills = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/skills',
     handler: async (req, res) => {
@@ -245,7 +280,9 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
         return
       }
       try {
-        const doc = await httpRequest('GET', '/skills')
+        /* httpRequest 成功返回信封 {data,status,headers}——响应体在 .data 里(与
+           cover-background 的既有解包同口径;直接读顶层 .skills 恒 undefined=发现恒空) */
+        const doc = (await httpRequest('GET', '/skills'))?.data
         const registry = (Array.isArray(doc?.skills) ? doc.skills : [])
           .filter((s) => s && typeof s === 'object' && String(s.id ?? '').trim() && String(s.name ?? '').trim())
           .map((s) => ({ id: String(s.id).trim(), name: String(s.name).trim(), version: String(s.version ?? '').trim(), description: String(s.description ?? '').trim() }))
@@ -256,7 +293,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
       }
     },
   })
-  const coverSkillAction = (action) => webServer.register({
+  const coverSkillAction = (action) => registeringWebServer.register({
     kind: 'exact',
     path: `/tintin/cover/api/skills/${action}`,
     handler: async (req, res) => {
@@ -279,6 +316,10 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
             const target = join(coverSkillsRoot(), id)
             if (!existsSync(target)) throw new Error('已安装目录不存在')
             rmSync(target, { recursive: true, force: true })
+            /* 连根删(2026-10-31 用户裁决「删除时连根」):历史通用装位 skills/<id> 是
+               migrateCoverSkillsHome 的拷贝源(源永不删),不清则每次启动把已删技能复活 */
+            const legacy = join(coverSkillsBase(), 'skills', id)
+            if (existsSync(legacy)) rmSync(legacy, { recursive: true, force: true })
             sendJson(res, 200, { ok: true })
           }
         } catch (err) {
@@ -292,7 +333,8 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
 
   // ── 图片生成直连模式已删除(2026-10-30 用户裁决:模式芯片与 prompt 直连旁路移除),
   // bg-apply/ref-save 两个旁路路由一并下线(唯一消费方就是旁路);generate-background
-  // 保留(编辑器「AI 生成底图」在用),generate-product 保留(智能体技能的产品图重绘)。
+  // 保留(消费方=编辑器界面「AI 生成底图」按钮, 不经智能体),generate-product 保留(消费方
+  // =编辑器界面产品图重绘;2026-11-01 起会话内生成统一走 MCP create_image, 不再经此)。
 
   // 服务设置(2026-10-29 用户裁决:封面工作本内可配服务端地址+MCP 自动发现)。
   // 地址=共享单一事实源 <DSH_HOME>/tintin/config.json server.url(视频剪辑/总助手同源);
@@ -314,7 +356,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
       writeFileSync(mcpCacheFile(), JSON.stringify(doc, null, 2), 'utf8')
     } catch { /* 缓存失败不影响发现本身 */ }
   }
-  const disposeServerConfig = webServer.register({
+  const disposeServerConfig = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/server-config',
     handler: async (req, res) => {
@@ -350,7 +392,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
 
   // MCP 自动发现:对 <地址>/mcp 走 initialize→initialized→tools/list,返回货架清单。
   // body.serverUrl 可选覆盖(未保存前先验新地址);缺省用已配置地址。
-  const disposeMcpDiscover = webServer.register({
+  const disposeMcpDiscover = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/mcp/discover',
     handler: async (req, res) => {
@@ -404,7 +446,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   })
 
   // 图片上传(产品图/底图):三写(源/编辑器预览/导出 staticFile 根)——见 cover-asset.js
-  const disposeUpload = webServer.register({
+  const disposeUpload = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/upload-image',
     handler: (req, res) => {
@@ -461,7 +503,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
 
   // URL 拖入导入(2026-10-31 用户报障:从浏览器/网页拖图,载荷无 File 只有 URI):
   // 主进程侧 fetch 绕开页面 CORS,落盘与 upload-image 同口径(三写+项目对齐+留痕)。
-  const disposeUploadUrl = webServer.register({
+  const disposeUploadUrl = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/upload-url',
     handler: (req, res) => {
@@ -494,13 +536,15 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
           const name = `url-${Date.now()}.${ext}`
           const { writeCoverAsset } = await import('./cover-asset.js')
           writeCoverAsset(dir, name, bytes)
-          // 项目对齐(2026-10-30 用户裁决:素材跟项目;2026-11-01 补 URL 导入的项目落盘)
+          // 项目对齐(2026-10-30 用户裁决:素材跟项目;URL 导入同样落项目目录)
           try {
             const engine = await loadEngine()
             const coverDir = await engine.resolveCoverDir()
-            const projectsRoot = join(coverDir, '..', 'projects')
-            const finalDir = project ? join(projectsRoot, project) : coverDir
-            if (!finalDir.startsWith(projectsRoot)) throw new Error('非法项目名')
+            /* 项目根=projectsRootOf(与 upload-image 同口径;勿用旧口径 '..'+'projects'
+               ——resolveCoverDir 恒为 projects/<项目>,旧拼法=projects\projects 多一层) */
+            const projectsRoot = projectsRootOf(coverDir)
+            const finalDir = project && projectsRoot ? join(projectsRoot, project) : coverDir
+            if (projectsRoot && !finalDir.startsWith(projectsRoot)) throw new Error('非法项目名')
             mkdirSync(finalDir, { recursive: true })
             writeFileSync(join(finalDir, name), bytes)
           } catch { /* 落项目失败不阻断(三写位已有) */ }
@@ -519,7 +563,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   // 抠图直达(2026-10-31 §2.5 P1):页面同源代理服务端 /matting(绕 CORS),源图取项目目录
   // (缺省回退插件素材位),透明底 PNG 落三写+项目目录(matting-<ts>.png)。
   // 结果=素材(2026-10-31 用户裁决):不写 props、不自动上图,由用户决定用途。
-  const disposeMatting = webServer.register({
+  const disposeMatting = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/matting',
     handler: (req, res) => {
@@ -568,7 +612,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   })
 
   // AI 底图(编辑器右栏/图层面板触发;agent 侧同能力走令牌头;引擎在 cover-background.js)
-  const disposeBackground = webServer.register({
+  const disposeBackground = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/generate-background',
     handler: (req, res) => {
@@ -604,7 +648,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   })
 
   // 封面项目制(2026-10-30 用户裁决):tab=项目,切换=目录+会话跟随;素材/props/聊天记录随项目目录。
-  const projectAction = (path, run) => webServer.register({
+  const projectAction = (path, run) => registeringWebServer.register({
     kind: 'exact',
     path,
     handler: async (req, res) => {
@@ -642,7 +686,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   })
 
   // 打开产物目录(资源管理器;body 可带 {dir} 打开指定目录(须存在),缺省封面目录本身,防任意路径打开)
-  const disposeReveal = webServer.register({
+  const disposeReveal = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/reveal',
     handler: async (req, res) => {
@@ -689,7 +733,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
 
   // 素材删除(2026-10-31 素材右键菜单「删除」):只删封面项目目录内的裸文件名
   // (防穿越);三写位不动——public/ 跨项目共享,同名可能被模板/其它项目引用。
-  const disposeDeleteAsset = webServer.register({
+  const disposeDeleteAsset = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/delete-asset',
     handler: (req, res) => {
@@ -718,7 +762,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   })
 
   // 产品图图生图(即梦 image2image:当前产品图为参考换场景/风格)
-  const disposeGenProduct = webServer.register({
+  const disposeGenProduct = registeringWebServer.register({
     kind: 'exact',
     path: '/tintin/cover/api/generate-product',
     handler: (req, res) => {
@@ -756,7 +800,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   // ── PhotoCraft 为主(2026-10-27 15:09 裁决):原生 PS 式编辑器为画布,
   //    会话按图层引用操作;截图轮询即预览;导出走引擎 save。──
   const pcDisposes = []
-  const pcRoute = (sub, method, handler) => pcDisposes.push(webServer.register({
+  const pcRoute = (sub, method, handler) => pcDisposes.push(registeringWebServer.register({
     kind: 'exact', path: `/tintin/cover/api/pc/${sub}`,
     handler: async (req, res) => {
       if (req.method !== method || !isTrustedRequest(req, method !== 'GET')) {
@@ -822,15 +866,39 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
 
   // ── 会话路由族(/tintin/cover/api/acp/*;CA-2)──
   const disposeAcp = registerCoverAcpRoutes({
-    webServer, isTrustedRequest, sendJson, httpRequest, getServerUrl,
+    webServer: registeringWebServer, isTrustedRequest, sendJson, httpRequest, getServerUrl,
     resolveCoverDir: async () => (await loadEngine()).resolveCoverDir(),
     resolvePluginDir,
+  })
+
+  // 编辑器业务通道(方案 B B2,2026-11-02 用户裁决):/tintin/ipc/cover:<name> 前缀路由——
+  // 与 bundle 的 /tintin/ipc 长前缀竞争(宿主=最长前缀胜),按收集表把请求原样转发给
+  // 同一处理器(重写 url 为原 REST 形态,query 保留;方法与信任判定仍由各处理器自守)。
+  // 门禁语义不变:此处不再加闸,外层 permits 与各处理器的 isTrustedRequest/令牌判定照旧。
+  const disposeEditorIpc = webServer.register({
+    kind: 'prefix',
+    path: '/tintin/ipc/cover:',
+    handler: async (req, res) => {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const channel = url.pathname.startsWith('/tintin/ipc/cover:')
+        ? decodeURIComponent(url.pathname.slice('/tintin/ipc/cover:'.length))
+        : ''
+      const handler = ipcEditorChannels.get(channel)
+      if (!handler) {
+        sendJson(res, 404, { ok: false, error: `Unknown cover channel: ${channel}` })
+        return
+      }
+      req.url = `/tintin/cover/api/${channel}${url.search}`
+      await handler(req, res)
+    },
   })
 
   return () => {
     disposeEditor()
     disposeChatPage()
     disposeTemplates()
+    disposeFonts()
+    disposeEditorIpc()
     disposeRender()
     disposeUpload()
     disposeUploadUrl()

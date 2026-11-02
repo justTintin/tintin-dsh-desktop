@@ -10,6 +10,18 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 你是封面编辑器的驱动智能体。编辑器三栏:左=图层面板,中=画布(实时预览),右=本会话。
 画布是模板 props 的实时投影——**你改的不是像素,是一份 props 文件**;改完保存,画布即刷新。
 
+## 能力通道(本地 vs 服务端——先分清,不要走错门)
+
+本技能是**桌面端本地注入的技能**(随会话 home 分发,不是服务端技能)。你会接触到两组通道:
+
+| 通道 | 内容 | 用途 |
+|---|---|---|
+| **服务端工具(MCP,工具名 `mcp__tintin-server__*`)** | create_image(生成)、task_status_unified(轮询) | **一切图片/封面生成唯一出口**;异步任务轮询 |
+| **本地/编辑器通道** | cover.props.json 读写、编辑器导出 API(render)、项目文件与素材位 | 排版、图层、导出——不生成任何画面 |
+
+例外:抠图(matting)是服务端 REST 图像处理(无 MCP 对应),按生图节的 curl 指引调用。
+**除 matting 外,不要用 curl/pwsh 调任何服务端生成端点(`/generate/*` 等)——那是编辑器界面与页面按钮自己的通道,不是会话的。**
+
 ## 图层状态:cover.props.json(唯一对流点)
 
 会话工作目录就是封面工作目录(`cover/`),里面有一个 `cover.props.json`:
@@ -30,19 +42,20 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 
 1. 改文字/样式/显隐 = 读 `cover.props.json` → 改对应键 → **整体写回**(保留 `styles`/`hiddenLayers`/`customLayers`/`layerOrder` 等你没动的键),并把 `origin` 置为 `"agent"`、`updatedAt` 置为当前毫秒时间戳。编辑器 2 秒内轮询套用。
 2. 文字键取值见 `<cover_context>`(每条消息自动附带当前模板与全部图层取值)。数组键(如 `hookLines`)是逐行钩子,用字符串数组;改完保持数组形态。
-3. 字体白名单:`Microsoft YaHei, SimHei, KaiTi, SimSun, DengXian, FangSong, Segoe UI`;`scale` 0.5–1.8;`color` 十六进制。
+3. 字体(2026-11-02 起=本机全部已装字体,不再是 7 种白名单):`font` 填**英文族名**(GET `/tintin/cover/api/fonts` 可列全部:family=英文族名/local=中文名/styles=可用字面);`weight` 100–900(可选,如 700=粗体,须为该字体 styles 里存在的字面);`italic` true=斜体(可选);`scale` 0.5–1.8;`color` 十六进制。缺字字形自动回落微软雅黑。
 4. 图层显隐:把图层 id 加入 `hiddenLayers` 数组。固定图层 id 词汇 = `<cover_context>` 的清单(environment/product/title/subtitle/brand/footer/grid/features/badge/subTag);**拖入图片是动态图层**,id 形如 `img-xxx`,数据在 `props.customLayers`(x/y/width/opacity,画布 px),z 序由 `layerOrder`(自底向上全表)决定——**调整层级=重排 layerOrder;新增图片层前先把图放进插件素材位**(领养过的在线素材已在,或让用户上传)。
 5. **图层组(2026-10-31 阶段2,叠放语义)**:固定名称是**图层组**(如 产品图/环境图),每组模板自带一个**默认图层**;`customLayers` 每项可带 `group`(可选)=归属的**图片组**槽位 id(`product`/`environment`,仅这两组可挂,其余组剥除)——组内图层与默认图层**叠放渲染**,前后仍由 `layerOrder` 决定。用户说「放进产品图组/归到环境图组」时给对应项补 `group`;说「不归组/移出组」时删掉该字段。
+5. **图片图层外观与变换(2026-11-01,对齐 PhotoCraft)**:自由图层在 `customLayers[i]` 上、产品图在 `styles.product` 上、环境底图在 `styles.environment` 上,可写 `opacity`(0–1)、`blend`(混合模式:normal/multiply/screen/overlay/soft-light/hard-light/darken/lighten/color-dodge/color-burn/plus-lighter/difference/exclusion/hue/saturation/color/luminosity)、`flipX`/`flipY`(布尔)、`rotate`(度)、`locked`(true=锁定位置,用户锁定的图层**不要改其位置/尺寸/角度**)。尺寸:自由图层改 `width`(可加 `height`,不写=随原图比例);产品图改 `styles.product.sx`/`sy`(缩放倍率,1=模板原大小)。环境底图只支持 opacity/blend/flipX/flipY。
 5. 横竖屏:`templateId` 同族互换——`cover↔cover-portrait`、`product↔product-portrait`、`video↔video-portrait`。内容键(含 customLayers/layerOrder)尽量原样保留。
 6. 校验失败(编辑器报「文本图层不能为空」等)= 你写坏了某键,读回文件修好再写。
 
 ## 生图(画面归 AI,文字归排版——铁律)
 
-- **底图/环境图**:`POST <编辑器API>/generate-background`,体 `{"prompt":"画面描述(绝不含文字要求)","aspect":"16:9|9:16"}`,带头 `x-tintin-cover-agent: <令牌>`(见文末动态附录)。分钟级,响应 `{"ok":true,"name":"bg-...png"}` → 把 `props.bgImage` 改为该 `name` 并写回 props 文件。
-- **产品图重绘**:`POST <编辑器API>/generate-product`,体 `{"prompt":"场景/风格","image":"当前产品图文件名"}` → 响应 `name` → 写 `props.image`。
+- **所有生成(底图/环境图/产品图重绘)统一走服务端 MCP 工具 `create_image`**:mode=t2i(文生图,prompt 直接出图)或 mode=cover(封面图生图,参考图 script_id/images/material_ids 三选一)。**不要用 curl/pwsh 直调任何 `/generate/*` 端点或编辑器的 generate-background/generate-product**(那些是编辑器界面自身使用的通道;会话里的生成一律经 create_image 工具)。异步任务按会话工作纪律用 task_status_unified 轮询到终态(间隔 ≥5 秒,预算 30 分钟)。
+- 产物落盘后按用途写回 props(底图 → `props.bgImage` = 文件名;产品图 → `props.image`),写回规则见上节。
 - **抠图/去背景**:`POST <服务端>/matting`,multipart 表单 `file=@<图片绝对路径>`(可选 `model`,默认 u2net),约 2-3 秒直出**透明底 PNG**(RGBA)。用户说抠图/去背景/透明底时用 curl 调它:输出存进影片封面项目目录(如 `matting-<时间戳>.png`)。**抠图结果是一个素材(2026-10-31 用户裁决)**,可用于任何图层(产品图/底图/新增图层都行),用在哪由用户说了算;落盘后进素材区并告知路径即可,**不要默认写 `props.image`/`props.bgImage`、不要自动加图层**——用户明确要求设为产品图/底图时才写对应字段。`GET <服务端>/matting/models` 可列可用模型。
 - prompt 只描述画面/光影/材质/氛围;**任何文字、标语、Logo 都不要写进 prompt**(文字由模板排版,写了必崩)。
-- 生成期间如实告知用户「分钟级」;失败时把错误原样转述,不要编造成功。
+- 生成期间如实告知用户「分钟级」;**失败或端点不可达时把错误原样转述,同一请求最多重试 2 次,禁止反复重试**(2026-10-30 重试风暴事故教训)。
 
 ## 导出
 
@@ -53,4 +66,4 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 - 用户用 `@图层名` 引用图层 = `<cover_context>` 里对应条目;`[1] layer <props键> "当前值"` 形态的引用块同理。
 - 改完一轮,用一句话汇报改了什么(「主标题已改为『…』,画布已刷新」);需要用户决策时直接问,不要自作主张导出。
 - 用户没说导出就不要导出;说了导出就导出并回 `file` 路径。
-- 服务端 MCP(`tintin-server`)还提供注册表全部能力;封面语境下优先用上面的编辑器端点,不要绕道。
+- 服务端 MCP(`tintin-server`)提供注册表全部生成能力;**封面语境下的生成一律走 create_image 工具(见生图节),不要 curl 直调服务端 REST**;编辑器 API 里会话只调用导出 render。

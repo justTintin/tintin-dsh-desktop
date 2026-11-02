@@ -4,6 +4,9 @@ import { temporal } from 'zundo'
 import { create } from 'zustand'
 import { getTemplate, templateOfOrientation, validateProps, type LayerDef } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
+import type { ImageLook } from '../../templates/image-style'
+import type { TextStyleOverride } from '../../templates/text-style'
+import { arrangeOrder, cloneLayer, type Arrange } from './image-ops'
 
 /** 图层组归属净化(2026-10-31 阶段2):只认模板存在的图片组槽位(product/bgImage),
     其余(未知槽位/文字组/装饰组)剥除——组里只能放对应类型的图层。 */
@@ -32,7 +35,7 @@ export interface EditorState {
   /** 横竖屏切换(2026-10-27 裁决):同族变体切换,内容 props 尽量保留 */
   setOrientation: (orientation: 'landscape' | 'portrait') => void
   setProp: (key: string, value: unknown) => void
-  setLayerStyle: (layerId: string, patch: { scale?: number; color?: string; dx?: number; dy?: number; font?: string; rotate?: number } | null) => void
+  setLayerStyle: (layerId: string, patch: TextStyleOverride & ImageLook) => void
   toggleLayer: (id: string) => void
   selectLayer: (id: string | null) => void
   setSelectedAsset: (name: string | null) => void
@@ -49,6 +52,10 @@ export interface EditorState {
   moveLayer: (id: string, dir: 'up' | 'down') => void
   /** 拖拽排序(2026-10-29 用户裁决:图层面板拖 ⠿ 调序):active 移到 over 所在位置 */
   reorderLayer: (activeId: string, overId: string) => void
+  /** 图层›排列(2026-11-01 对齐 PhotoCraft):置顶/上移一层/下移一层/置底 */
+  arrangeLayer: (id: string, how: Arrange) => void
+  /** 复制图层(PhotoCraft Ctrl+J):整层属性照搬,副本紧贴原层之上并选中;返回新 id */
+  duplicateCustomLayer: (id: string, offset?: number) => string | null
   /** 预览显示开关(2026-10-28:仅编辑器视觉辅助,不进 props、不影响导出) */
   guides: boolean
   canvasGrid: boolean
@@ -107,12 +114,9 @@ export const useEditor = create<EditorState>()(
       setProp: (key, value) => set((s) => ({ props: { ...s.props, [key]: value } })),
       setLayerStyle: (layerId, patch) =>
         set((s) => {
-          const styles = { ...(s.props.styles as Record<string, { scale?: number; color?: string; dx?: number; dy?: number; font?: string; rotate?: number }> | undefined) }
-          if (patch === null) delete styles[layerId]
-          else styles[layerId] = { ...styles[layerId], ...patch }
-          const next = { ...s.props, styles }
-          if (Object.keys(styles).length === 0) delete (next as Record<string, unknown>).styles
-          return { props: next }
+          const styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
+          styles[layerId] = { ...styles[layerId], ...patch }
+          return { props: { ...s.props, styles } }
         }),
       toggleLayer: (id) =>
         set((s) => ({
@@ -179,6 +183,29 @@ export const useEditor = create<EditorState>()(
           order.splice(to, 0, activeId)
           return withOrder(s, order)
         }),
+      arrangeLayer: (id, how) =>
+        set((s) => {
+          const order = effectiveOrder(s)
+          const next = arrangeOrder(order, id, how)
+          return next.join('|') === order.join('|') ? {} : withOrder(s, next)
+        }),
+      duplicateCustomLayer: (id, offset = 0) => {
+        const nid = `img-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+        let done = false
+        set((s) => {
+          const layers = Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []
+          const src = layers.find((l) => l.id === id)
+          if (!src) return {}
+          done = true
+          const order = effectiveOrder(s)
+          const at = order.indexOf(id)
+          return {
+            props: { ...s.props, customLayers: [...layers, cloneLayer(src, nid, offset)], layerOrder: [...order.slice(0, at + 1), nid, ...order.slice(at + 1)] },
+            selectedLayer: nid,
+          }
+        })
+        return done ? nid : null
+      },
     }),
     { limit: 50 },
   ),
@@ -207,6 +234,6 @@ export function currentLayers(): LayerDef[] {
 
 export function checkCurrent(): { ok: true } | { ok: false; error: string } {
   const s = useEditor.getState()
-  const r = validateProps(s.templateId, s.props)
+  const r = validateProps(s.templateId, { ...s.props, hiddenLayers: s.hiddenLayers })
   return r.ok ? { ok: true } : { ok: false, error: r.error }
 }

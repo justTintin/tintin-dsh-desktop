@@ -26,7 +26,7 @@ function pushChatContextNow(): void {
  *  画布/图层停留在旧项目内容(实撞:切到新建项目画布还是上一张的图)。 */
 async function reloadProjectState(): Promise<void> {
   try {
-    const r = await fetch('/tintin/cover/api/acp/props').then((x) => x.json())
+    const r = await fetch('/tintin/ipc/cover:acp/props').then((x) => x.json())
     const record = r?.record as { templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
     const tid = useEditor.getState().templateId
     if (record && typeof record.templateId === 'string' && record.templateId && record.props && typeof record.props === 'object') {
@@ -105,7 +105,7 @@ function useAgentPropsSync(isBusy: () => boolean): void {
     let pushing = false
     const tick = async (): Promise<void> => {
       try {
-        const r = await fetch('/tintin/cover/api/acp/props').then((x) => x.json())
+        const r = await fetch('/tintin/ipc/cover:acp/props').then((x) => x.json())
         if (stop) return
         const record = r?.record as { origin?: string; updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
         if (record && record.origin === 'agent' && typeof record.updatedAt === 'number'
@@ -116,17 +116,9 @@ function useAgentPropsSync(isBusy: () => boolean): void {
             if (typeof record.templateId === 'string' && record.templateId && record.templateId !== useEditor.getState().templateId) {
               useEditor.getState().setTemplate(record.templateId)
             }
-            // 套用时并入模板默认值:agent 的旧快照缺新图层键(如后加的 subtitle)不致空白(同 setOrientation 合并语义)
+            // 套用时并入模板默认值:agent 的旧快照缺新图层键(如后加的 subtitle)不致空白(同 setOrientation 合并语义)。
+            // agent 自下载的图片只落 cover 目录——收进素材位由服务端在本次 GET 返回前完成(ensureCoverAssets)。
             if (record.props && typeof record.props === 'object') {
-              // agent 自下载的新图片只落 cover 目录,staticFile 解析不到——先补三写完成再套用,
-              // 否则 Img 按 404 渲染且不再重试(2026-10-28 探针实测)
-              const custom = Array.isArray(record.props.customLayers) ? record.props.customLayers : []
-              const unsynced = custom
-                .map((layer) => String(layer?.image ?? ''))
-                .filter((image) => image && !image.startsWith('public/'))
-              await Promise.all(unsynced.map((image) =>
-                fetch('/tintin/cover/api/acp/asset-sync', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: image }) }).catch(() => {}),
-              ))
               const defaults = getTemplate(useEditor.getState().templateId).defaultProps
               const merged = { ...defaults, ...record.props }
               // 组归属净化(2026-10-31 阶段2):智能体写的 customLayers[].group 只认图片组槽位
@@ -150,7 +142,7 @@ function useAgentPropsSync(isBusy: () => boolean): void {
         const s = useEditor.getState()
         lastOwnWrite = Date.now()
         pushing = true
-        void fetch('/tintin/cover/api/acp/props', {
+        void fetch('/tintin/ipc/cover:acp/props', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ templateId: s.templateId, props: s.props, hiddenLayers: s.hiddenLayers }),

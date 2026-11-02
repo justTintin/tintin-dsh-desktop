@@ -16,7 +16,7 @@ describe('buildLayeredDraft + exportPngFromDraft', () => {
 
   it('底稿 .pcraft 产出(图层全保留,非 PNG)', async () => {
     process.env.TINTIN_COVER_DIR = dir()
-    const r = await buildLayeredDraft({ templateId: 'video', props: { hookLinesText: '冒烟' }, fileName: 't' })
+    const r = await buildLayeredDraft({ templateId: 'video', props: { hookLines: ['冒烟'], subtitle: '副题', hookLinesText: '冒烟' }, fileName: 't' })
     expect(r.ok).toBe(true)
     expect(r.file).toContain('.pcraft')
   })

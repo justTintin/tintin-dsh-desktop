@@ -58,6 +58,74 @@ const COVER_AGENT_FALLBACK_MODELS = [
   { id: 'deepseek-v4-pro', name: 'deepseek-v4-pro' },
 ]
 
+/** 回合工具调用护栏(2026-11-01 防空转第 2 步;与影片侧 film-acp.ts 的 TOOL_CALL_GUARD
+ *  同款同值——校准依据 docs/tintin-agent-pipeline.md §6: 实测正常回合 32 次 → 上界约 40,
+ *  硬限=×1.5=60;轮询类(task_status_unified)按任务预算管理不计入。40 告警/60 中止本回合。 */
+const TOOL_CALL_GUARD = { warn: 40, stop: 60 }
+const isPollingToolCall = (title) => typeof title === 'string' && /__task_status_unified$/.test(title)
+
+/** 计一步并裁决动作;状态挂在 state.guard(prompt 建立、done 清除)。 */
+function bumpGuard() {
+  const g = state.guard
+  if (!g) return
+  g.count += 1
+  if (g.count >= TOOL_CALL_GUARD.stop) {
+    emit({ key: 'cover', kind: 'limit', level: 'stop', toolCalls: g.count, limit: TOOL_CALL_GUARD.stop })
+    cancel().catch(() => { /* 会话已死则无事可做 */ })
+    return
+  }
+  if (g.count >= TOOL_CALL_GUARD.warn && !g.warned) {
+    g.warned = true
+    emit({ key: 'cover', kind: 'limit', level: 'warn', toolCalls: g.count, limit: TOOL_CALL_GUARD.warn })
+  }
+}
+
+/** 任务层兜底(2026-11-01 防空转第 3 步, 与影片侧 film-acp.ts 同款):桥登记 create_* 异步
+ *  任务的 task_id 并看门狗提醒——模型放弃轮询或会话中断后任务不再失踪。 */
+const ASYNC_TASK_BUDGET_MINUTES = 30
+const ASYNC_CREATE_TOOL_SUFFIXES = ['create_video', 'create_image', 'create_digital_human']
+const isAsyncCreateTool = (title) => typeof title === 'string' && ASYNC_CREATE_TOOL_SUFFIXES.some((s) => title.endsWith(s))
+
+/** 服务端任务 id=<1-3 小写字母>_+8 位十六进制(可带 -序号, 如 c_5ce35516-0;产物命名 bgm-/img- 等用连字符不会误中)。 */
+function extractAsyncTaskIds(text) {
+  const ids = new Set()
+  const explicit = /task_id["'\s:=]+([A-Za-z0-9_-]{6,})/g
+  for (let m = explicit.exec(text); m; m = explicit.exec(text)) ids.add(m[1])
+  const bare = /\b[a-z]{1,3}_[0-9a-f]{8}(?:-[0-9A-Za-z]+)?\b/g
+  for (let m = bare.exec(text); m; m = bare.exec(text)) ids.add(m[0])
+  return [...ids]
+}
+
+const TASK_SETTLED_RE = /(completed|succeeded|failed|cancelled|done\b)/i
+
+/** 从 tool_call_update 观察异步任务: create_* 结果提取 task_id 登记; 终态词+id 同现=结算。 */
+function noteAsyncTask(update) {
+  if (!update || update.sessionUpdate !== 'tool_call_update') return
+  const text = typeof update.content === 'string' ? update.content : JSON.stringify(update.content ?? '')
+  const title = state.toolNames.get(String(update.toolCallId ?? '')) ?? ''
+  if (isAsyncCreateTool(title)) {
+    for (const id of extractAsyncTaskIds(text)) {
+      if (!state.asyncTasks.has(id)) state.asyncTasks.set(id, { tool: title, createdAt: Date.now(), settled: false, reminded: false })
+    }
+  }
+  if (TASK_SETTLED_RE.test(text)) {
+    for (const [id, entry] of state.asyncTasks) if (!entry.settled && text.includes(id)) entry.settled = true
+  }
+}
+
+/* 看门狗: 超预算未观察到终态 → task-stale 事件+日志, 只提醒一次。 */
+setInterval(() => {
+  const now = Date.now()
+  for (const [id, entry] of state.asyncTasks) {
+    if (entry.settled || entry.reminded) continue
+    const ageMinutes = Math.round((now - entry.createdAt) / 60000)
+    if (ageMinutes < ASYNC_TASK_BUDGET_MINUTES) continue
+    entry.reminded = true
+    console.warn(`[cover-agent][task-stale] ${entry.tool} 任务 ${id} 超过 ${ASYNC_TASK_BUDGET_MINUTES} 分钟未观察到终态(已 ${ageMinutes} 分钟)`)
+    emit({ key: 'cover', kind: 'task-stale', taskId: id, tool: entry.tool, ageMinutes })
+  }
+}, 60_000)
+
 /** 标准模型列表(2026-10-29 用户裁决:模型列表唯一接口=服务端标准 GET /v1/models;
  *  /llm/models 等遗留接口退役。失败返回 null,调用方用兜底清单) */
 async function fetchStandardModels(serverUrl) {
@@ -72,10 +140,22 @@ async function fetchStandardModels(serverUrl) {
   } catch { return null }
 }
 
+/** 编排工作纪律(2026-11-01 用户裁决:防空转/费用护栏第一步, 与影片侧 FILM_AGENT_WORK_RULES 同款)。
+ *  生成唯一出口=服务端 MCP 工具、异步必轮询且有上限、失败重试封顶、禁本地自制生成物 ——
+ *  进补丁 system-prompt.personaPrefix, 每轮可见(技能文档是按需引用, 约束力不如 system-prompt)。 */
+const COVER_AGENT_WORK_RULES = [
+  '你是 TinTin 封面工作台的编排智能体。工作纪律(每轮遵守):',
+  '1. 生成图片/封面唯一出口是服务端 MCP 工具 create_image(mode=t2i 文生图 / mode=cover 封面图生图); 禁止用 curl/pwsh 直调服务端 /generate/* 端点, 也禁止用代码、HTML/canvas、写文件等本地方式自制生成物(2026-11-01 端到端验收实录: 模型曾按技能文档旧端点指引绕行 REST, 生成仍在服务端但工具面失控——历史 REST 端点指引一律以本条为准)。',
+  '2. 异步任务(返回 task_id)必须用 task_status_unified 轮询到终态: 两次轮询间隔 ≥5 秒; 任务预算 30 分钟, 到终态或超预算即停, 超时如实报告 task_id 供续查; 终态 failed 时把服务端错误原样转告并给一条修改建议, 同一任务重试最多 2 次, 禁止无限重试。',
+  '3. 修改封面一律写 cover.props.json(origin=agent), 图层协议遵循 cover 技能文档; 调用编辑器 API 必须带 x-tintin-cover-agent 令牌头, 基址以技能文档动态附录为准(带 /tintin/cover/api 前缀, 裸 origin 全部 404)。',
+  '4. 需求缺关键要素(主体/风格/画幅/文案)先问清再生成; 与封面无关的请求如实说明, 不虚构能力。',
+  '5. 始终用简短中文回复。',
+].join('\n')
+
 /** 模型路由补丁(与 film 同源:服务端 openai-completions;权限全放行走聊天卡之外的兜底)。
  *  按智能体分文件(2026-10-31 用户裁决:名册双智能体):tintin-agent=首个模型显示名
  *  品牌化为「TinTin智能体」;deepseek=原生模型名(不品牌化)。 */
-function writePatch(state, models, agent = 'tintin-agent') {
+function writePatch(state, models, agent = 'deepseek') {
   const dir = join(state.channelHome, 'tintin')
   mkdirSync(dir, { recursive: true })
   const path = join(dir, agent === 'deepseek' ? 'cover-deepseek-agent.patch.yml' : 'cover-agent.patch.yml')
@@ -84,17 +164,29 @@ function writePatch(state, models, agent = 'tintin-agent') {
   const rows = models
     .map((m, i) => `          - id: ${m.id}\n            name: ${agent === 'tintin-agent' && i === 0 ? 'TinTin智能体' : m.name}`)
     .join('\n')
+  /* 工作纪律进 system-prompt(与 film-acp.ts personaLines 同格式) */
+  const personaLines = [
+    '- id: system-prompt',
+    '  config:',
+    '    personaPrefix: |-',
+    ...COVER_AGENT_WORK_RULES.split('\n').map((line) => `      ${line}`),
+  ]
   const text = [
     '# TinTin 封面智能体: 模型路由到 TinTin 服务端(openai-completions)',
     '# 由桌面端生成; 手改会被下次启动覆盖.',
     '# 服务端 MCP 工具箱(rc.2 会话参数挂载失效, 补丁行挂载; 工具名 mcp__tintin-server__*):',
-    "- id: mcp-tintin-server",
-    "  name: '@deepseek-ai/dsh-mcp-client'",
-    '  config:',
-    '    serverName: tintin-server',
-    '    transport: streamable-http',
-    `    url: ${state.serverUrl.replace(/\/+$/, '')}/mcp`,
-    '    failOnStartupError: true',
+    ...personaLines,
+    /* 2026-11-01 端到端验收实锤:新行必须 insert: 包裹(顶层 - id: =更新已存在条目语义,
+       mcp-tintin-server 在 base 不存在=整行被静默忽略——10-31 重构丢 insert 后封面 MCP
+       一直没挂上, 模型无 create_image 可用只能 curl 绕行;照 film-acp.ts 补回) */
+    '- insert:',
+    '    - id: mcp-tintin-server',
+    "      name: '@deepseek-ai/dsh-mcp-client'",
+    '      config:',
+    '        serverName: tintin-server',
+    '        transport: streamable-http',
+    `        url: ${state.serverUrl.replace(/\/+$/, '')}/mcp`,
+    '        failOnStartupError: true',
     '- id: llm-pi-ai',
     '  config:',
     '    providers:',
@@ -133,7 +225,8 @@ function syncUserSkills(state, homeName = 'cover-agent-home') {
 }
 
 /** 技能注入:skills/cover/SKILL.md → agent home;动态附录(服务端/编辑器 API/令牌)拼在文末。
- *  仅 TinTin智能体 注入(deepseek=原生编码智能体,无封面技能)。 */
+ *  2026-11-01 用户裁决:封面协议技能随场景走 —— 默认角色 deepseek 同样注入(没有它任何
+ *  角色都不知道 cover.props.json 图层协议与编辑器 API,封面会话退化为裸编码智能体)。 */
 function ensureCoverSkill(state, homeName = 'cover-agent-home') {  const sources = [
     join(here, '..', '..', 'dsh-tintin-cover-plugin', 'skills', 'cover', 'SKILL.md'),
     join(process.resourcesPath ?? '', 'skills', 'cover', 'SKILL.md'),
@@ -147,8 +240,9 @@ function ensureCoverSkill(state, homeName = 'cover-agent-home') {  const sources
     '<!-- tintin-cover-bridge: 动态环境(每次会话启动重写) -->',
     `- TinTin 服务端: ${state.serverUrl}(API key 环境变量 TINTIN_SERVER_API_KEY)`,
     /* 2026-10-30 用户报障「一次请求烧几块钱 token」:基址必须带 /tintin/cover/api
-       前缀(裸 origin 全部 404→模型重试 360 次×全上下文计费);并明示 TINTIN_COVER_API。 */
-    `- 编辑器 API 基址: ${state.apiOrigin ? `${state.apiOrigin}/tintin/cover/api` : '(未知,即环境变量 TINTIN_COVER_API)'}(POST 需带头 x-tintin-cover-agent: ${agentToken};此基址与环境变量 TINTIN_COVER_API 相同)`,
+       前缀(裸 origin 全部 404→模型重试 360 次×全上下文计费);并明示 TINTIN_COVER_API。
+       2026-11-01 会话生成统一走 MCP create_image 后, 此基址的会话用途只剩导出 render。 */
+    `- 编辑器 API 基址(仅用于导出 render, 不要用它生成任何图片): ${state.apiOrigin ? `${state.apiOrigin}/tintin/cover/api` : '(未知,即环境变量 TINTIN_COVER_API)'}(POST 需带头 x-tintin-cover-agent: ${agentToken};此基址与环境变量 TINTIN_COVER_API 相同)`,
     `- 会话工作目录 = 封面工作目录(cover/);图层状态读 cover.props.json`,
     '',
   ].join('\n')
@@ -215,8 +309,8 @@ const state = {
   child: null,
   conn: null,
   sessionId: null,
-  /** 当前会话的智能体(选择器 id;2026-10-31 名册双智能体) */
-  agentId: 'tintin-agent',
+  /** 当前会话的智能体(选择器 id;2026-10-31 名册双智能体;2026-11-01 默认改 deepseek) */
+  agentId: 'deepseek',
   cwd: null,
   serverUrl: '',
   channelHome: '',
@@ -234,6 +328,11 @@ const state = {
   /* 轮次缓存(页面重载恢复;聊天 ack 后清除) */
   turns: new Map(),
   currentTurnId: null,
+  /* 回合工具调用护栏状态(prompt 建立, done 清除;见 bumpGuard) */
+  guard: null,
+  /* 任务层兜底(第 3 步):callId→工具名 与 异步任务登记表(见 noteAsyncTask) */
+  toolNames: new Map(),
+  asyncTasks: new Map(),
   stderr: '',
 }
 
@@ -274,13 +373,14 @@ export function lastEventSeq() {
 // ── 会话生命周期 ─────────────────────────────────────────────────────────
 
 /**
- * 启动(或续接)封面会话。agent=选择器里的智能体(2026-10-31 用户裁决:
- * TinTin智能体 默认 + DeepSeek Harness 可选 —— 两个身份,补丁/home/会话各自独立:
- * deepseek=原生编码智能体(模型名不品牌化、不注入封面技能),tintin-agent=封面助手)。
+ * 启动(或续接)封面会话。agent=选择器里的智能体。
+ * 2026-10-31 双智能体;2026-11-01 用户裁决:TinTin智能体=服务端编排智能体,服务端该功能
+ * 观察期 —— 归一化只保留 deepseek(tintin-agent 请求统一落到 deepseek,人设/补丁分支保留,
+ * 服务端就绪后放开)。补丁/home/会话仍按 id 分键。
  * @returns {Promise<{ok:true,key:string,info:object}|{ok:false,error:string}>}
  */
-export async function startSession({ cwd, serverUrl, channelHome, agent = 'tintin-agent' }) {
-  const agentId = agent === 'deepseek' ? 'deepseek' : 'tintin-agent'
+export async function startSession({ cwd, serverUrl, channelHome, agent = 'deepseek' }) {
+  const agentId = 'deepseek'
   const homeName = agentId === 'deepseek' ? 'cover-deepseek-agent-home' : 'cover-agent-home'
   if (isRunning() && state.cwd === cwd && state.agentId === agentId) return { ok: true, key: 'cover', info: sessionInfo() }
   /* 跨智能体切换=人设不同,不续接对方会话;同智能体按内存会话续接 */
@@ -299,14 +399,16 @@ export async function startSession({ cwd, serverUrl, channelHome, agent = 'tinti
   const patch = writePatch(state, models, agentId)
   mkdirSync(join(state.channelHome, homeName), { recursive: true })
   syncUserSkills(state, homeName)
-  if (agentId === 'tintin-agent') ensureCoverSkill(state, homeName)
+  ensureCoverSkill(state, homeName)
   const env = {
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
     /* 2026-10-29 用户裁决:完全权限——基础补丁按此 env 映射 沙箱 danger-full-access + 审批 never(缺它=每次会话重新要权限,审批卡没接住即永挂) */
     DSH_PERMISSION_MODE: 'danger-full-access',
     DSH_HOME: join(state.channelHome, homeName),
-    TINTIN_SERVER_API_KEY: 'sk-tintin-local',
+    /* 2026-11-01 按入口分账:占位 key 按链路分值(服务端 /llm 无鉴权不校验值, 计量按 key 分账;
+       同族标记: 影片=sk-tintin-local--film, 页面 REST=sk-tintin-local--rest, 见 pipeline §6.7) */
+    TINTIN_SERVER_API_KEY: 'sk-tintin-local--cover',
     TINTIN_SERVER_URL: state.serverUrl,
     ...(state.apiOrigin ? { TINTIN_COVER_API: `${state.apiOrigin}/tintin/cover/api` } : {}),
     TINTIN_COVER_AGENT_TOKEN: agentToken,
@@ -382,6 +484,14 @@ export async function startSession({ cwd, serverUrl, channelHome, agent = 'tinti
     .onRequest(sdk_.methods.client.fs.readTextFile, () => ({ content: '' }))
     .onNotification(sdk_.methods.client.session.update, (ctx) => {
       const update = ctx.params.update
+      /* 回合护栏(2026-11-01 防空转第 2 步, 与影片侧 film-acp.ts 同款): 逐次计非轮询类
+         工具调用, 40 告警 / 60 中止本回合(cancel 不杀进程, 会话可续)。 */
+      if (update?.sessionUpdate === 'tool_call') {
+        state.toolNames.set(String(update.toolCallId ?? ''), String(update.title ?? ''))
+        if (!isPollingToolCall(update.title)) bumpGuard()
+      }
+      /* 任务层兜底(第 3 步): create_* 的 task_id 登记/结算观察 */
+      noteAsyncTask(update)
       emit({ key: 'cover', kind: 'update', update: { sessionUpdate: String(update?.sessionUpdate ?? 'unknown'), ...update } })
     })
     .connect(stream)
@@ -453,7 +563,9 @@ export async function prompt(text, meta, images) {
     /* 自愈(2026-10-30 用户报障:会话死亡后首轮「正在处理」死路)——agent 进程死亡后
        不再返回死路错误,而是用保留的启动参数自动重启一次并继续本条消息。 */
     console.warn('[cover-agent] prompt 时会话未就绪,自动重启…')
-    const restarted = await startSession({ cwd: state.cwd, serverUrl: state.serverUrl, channelHome: state.channelHome })
+    /* 带 state.agentId 重启(2026-11-01):不传会回落默认角色,deepseek 会话死亡自愈
+       会被重启成别的角色人设(角色与默认不一致时 = 换人设续会话)。 */
+    const restarted = await startSession({ cwd: state.cwd, serverUrl: state.serverUrl, channelHome: state.channelHome, agent: state.agentId })
     if (!restarted.ok) return { ok: false, error: `ACP 会话未启动(自动重启失败):${restarted.error}` }
     /* 重启后二次校验(2026-11-01 用户报障 Cannot read properties of null):startSession 返回 ok
        与实际发 prompt 之间存在竞态窗口——agent 进程可能在握手完成后立即退出(exit 看门狗置
@@ -469,10 +581,12 @@ export async function prompt(text, meta, images) {
   const sdk_ = acpSdk()
   const turnId = typeof meta?.turnId === 'string' && meta.turnId ? meta.turnId : randomUUID()
   const turn = state.turns.get(turnId) ?? {
-    key: 'cover', agent: 'deepseek', cwd: state.cwd, meta: meta ?? null, done: null, events: [],
+    key: 'cover', agent: state.agentId, cwd: state.cwd, meta: meta ?? null, done: null, events: [],
   }
   state.turns.set(turnId, turn)
   state.currentTurnId = turnId
+  /* 回合护栏计数清零(每回合一个作用域;轮询类工具不计) */
+  state.guard = { count: 0, warned: false }
   try {
     const blocks = [{ type: 'text', text }, ...((images ?? []).map((i) => ({ type: 'image', data: i.data, mimeType: i.mimeType })))]
     const result = await Promise.race([
@@ -485,15 +599,16 @@ export async function prompt(text, meta, images) {
     ])
     const stopReason = String(result?.stopReason ?? 'end_turn')
     turn.done = { ok: true, stopReason }
-    emit({ key: 'cover', kind: 'done', turnId, ok: true, stopReason })
+    emit({ key: 'cover', kind: 'done', turnId, ok: true, stopReason, toolCalls: state.guard.count })
     return { ok: true, stopReason }
   } catch (e) {
     const message = errText(e)
     turn.done = { ok: false, error: message }
-    emit({ key: 'cover', kind: 'done', turnId, ok: false, error: message })
+    emit({ key: 'cover', kind: 'done', turnId, ok: false, error: message, toolCalls: state.guard?.count ?? 0 })
     return { ok: false, error: message }
   } finally {
     state.currentTurnId = null
+    state.guard = null
   }
 }
 

@@ -144,23 +144,25 @@ async function helloMeta(): Promise<{ coverDir: string; dshBin: boolean }> {
   return cachedHello;
 }
 
-const rosterAgent = async (): Promise<RosterAgent> => {
+/* 双智能体(2026-10-31 用户裁决:与视频剪辑同款)。
+   2026-11-01 用户裁决:TinTin智能体=服务端编排智能体,服务端该功能观察期 —— 行禁用不可选
+   (行保留,恢复时去掉 disabled 即可),默认改回 deepseek(客户端 dsh 智能体)置首。 */
+const rosterAgents = async (): Promise<RosterAgent[]> => {
   const meta = await helloMeta().catch(() => ({ coverDir: '', dshBin: false }));
-  /* id=tintin-agent(2026-10-30 用户裁决:选择器要机器人图标+「TinTin智能体」,不要 deepseek
-     鲸鱼标——id 落在聊天壳已登记的 tintin-agent 上,ChatAgentIcon 即映射 Bot 图标;
-     驱动=ACP(dsh CLI)+模型=TinTin 服务端,会话协议与 id 无关 */
-  return { id: 'tintin-agent' as LocalAgentId, name: 'TinTin智能体', shown: true, status: meta.dshBin ? 'ready' : 'missing', install: null };
+  const status = meta.dshBin ? 'ready' as const : 'missing' as const;
+  return [
+    { id: 'deepseek' as LocalAgentId, name: 'DeepSeek Harness', shown: true, status, install: 'https://github.com/deepseek-ai/deepseek-harness' },
+    { id: 'tintin-agent' as LocalAgentId, name: 'TinTin智能体', shown: true, status, install: null, disabled: '服务端智能体观察期,暂不可用' },
+  ];
 };
 
-const agentState = async (): Promise<LocalAgentState> => {
+const agentStates = async (): Promise<LocalAgentState[]> => {
   const meta = await helloMeta().catch(() => ({ coverDir: '', dshBin: false }));
-  return {
-    id: 'tintin-agent',
-    label: 'TinTin智能体',
-    cli: meta.dshBin ? { path: 'dsh', source: 'app' } : null,
-    signedIn: true,
-    install: 'https://github.com/deepseek-ai/deepseek-harness',
-  };
+  const cli = meta.dshBin ? { path: 'dsh', source: 'app' as const } : null;
+  return [
+    { id: 'tintin-agent', label: 'TinTin智能体', cli, signedIn: true, install: null },
+    { id: 'deepseek', label: 'DeepSeek Harness', cli, signedIn: true, install: 'https://github.com/deepseek-ai/deepseek-harness' },
+  ];
 };
 
 const sessionInfoOf = (info: Record<string, unknown>): LocalAgentSessionInfo => ({
@@ -176,15 +178,17 @@ const sessionInfoOf = (info: Record<string, unknown>): LocalAgentSessionInfo => 
 });
 
 const localAgents = {
-  list: async (): Promise<LocalAgentState[]> => [await agentState()],
+  list: async (): Promise<LocalAgentState[]> => agentStates(),
   disconnect: async (): Promise<{ ok: boolean }> => postJson('close', {}),
-  signIn: async (): Promise<{ ok: false; error: string }> => ({ ok: false, error: 'TinTin智能体无需登录: 模型由 TinTin 服务端提供' }),
-  probe: async (): Promise<{ ok: true; info: LocalAgentSessionInfo } | { ok: false; error: string; code?: string }> => {
-    const r = await postJson('start', {}) as { ok: boolean; info?: Record<string, unknown>; error?: string };
+  signIn: async (): Promise<{ ok: false; error: string }> => ({ ok: false, error: '无需登录: 模型由 TinTin 服务端提供' }),
+  probe: async (agent: LocalAgentId): Promise<{ ok: true; info: LocalAgentSessionInfo } | { ok: false; error: string; code?: string }> => {
+    /* probe 按所选拉起临时会话取模型清单(主进程按 agent 分补丁) */
+    const r = await postJson('start', { agent }) as { ok: boolean; info?: Record<string, unknown>; error?: string };
     return r.ok && r.info ? { ok: true, info: sessionInfoOf(r.info) } : { ok: false, error: String(r.error ?? '会话启动失败') };
   },
-  start: async (_agent: LocalAgentId, cwd: string, _resume?: string | null, _meta?: LocalAgentTurnMeta) => {
-    const r = await postJson('start', { cwd }) as { ok: boolean; key?: string; info?: Record<string, unknown>; error?: string };
+  start: async (agent: LocalAgentId, cwd: string, _resume?: string | null, _meta?: LocalAgentTurnMeta) => {
+    /* agent 透传(2026-10-31 名册双智能体):主进程按 id 分补丁/home/会话 */
+    const r = await postJson('start', { cwd, agent }) as { ok: boolean; key?: string; info?: Record<string, unknown>; error?: string };
     return r.ok && r.info
       ? { ok: true as const, key: String(r.key ?? 'cover'), info: sessionInfoOf(r.info) }
       : { ok: false as const, error: String(r.error ?? '会话启动失败') };
@@ -384,10 +388,10 @@ function setLibraryDrawer(open: boolean): void {
   },
   chooseFolder: async (): Promise<string | null> => null,
   agents: {
-    list: async (): Promise<RosterAgent[]> => [await rosterAgent()],
+    list: async (): Promise<RosterAgent[]> => rosterAgents(),
     connect: async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true }),
     onChange(listener: (agents: RosterAgent[]) => void): () => void {
-      void rosterAgent().then((agent) => listener([agent])).catch(() => {});
+      void rosterAgents().then((agents) => listener(agents)).catch(() => {});
       return noopStop();
     },
   },

@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { agentToken } from './cover-acp-bridge.js'
+import { projectsRootOf } from './cover-asset.js'
 
 const ACP = '/tintin/cover/api/acp'
 
@@ -114,6 +115,9 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
         cwd: typeof p.cwd === 'string' && p.cwd ? p.cwd : await coverDir(),
         serverUrl: getServerUrl(),
         channelHome,
+        /* 智能体选择(2026-10-31 双智能体;2026-11-01 用户裁决:TinTin智能体观察期禁用,
+           缺省与归一化都落 deepseek —— 主进程侧 tintin-agent 请求也统一落到 deepseek) */
+        agent: typeof p.agent === 'string' && p.agent ? p.agent : 'deepseek',
       })
       sendJson(res, result.ok ? 200 : 500, result)
     } catch (err) {
@@ -402,8 +406,9 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
     const dir = await coverDir()
     const qProject = String(new URL(req.url, 'http://localhost').searchParams.get('project') || '').trim()
     let listDir = dir
-    if (qProject && !/[\\/]/.test(qProject) && qProject !== '.' && qProject !== '..') {
-      const candidate = join(dir, '..', 'projects', qProject)
+    const projectsRoot = projectsRootOf(dir)
+    if (qProject && projectsRoot && !/[\\/]/.test(qProject) && qProject !== '.' && qProject !== '..') {
+      const candidate = join(projectsRoot, qProject)
       if (existsSync(candidate)) listDir = candidate
     }
     const files = []
