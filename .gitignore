@@ -38,3 +38,21 @@ dsh-plugin-desktop-beta/.desktop-build/
 dsh-desktop-next/.desktop-build/
 dsh-plugin-desktop/.desktop-build/
 dsh-plugin-desktop-beta/.desktop-build/
+dsh-plugin-desktop-tintin/.desktop-build/
+
+# TinTin staged cover-plugin payload (derived by dsh-tintin-cover-plugin/scripts/stage.mjs, ~360MB — never commit)
+dsh-plugin-desktop-tintin/tintin-resources/cover-plugin/
+
+# PhotoCraft external app payload (installed out-of-band, ~190MB — never commit)
+dsh-plugin-desktop-tintin/tintin-resources/photocraft/
+
+# Cover plugin build outputs and local debris
+dsh-tintin-cover-plugin/dist/
+dsh-tintin-cover-plugin/chat-shell/dist/
+dsh-tintin-cover-plugin/.tmp/
+dsh-tintin-cover-plugin/chat-shell/.tmp/
+dsh-tintin-cover-plugin/undefined/
+debug.log
+
+# Stray tooling debris
+dsh-plugin-desktop-tintin/dsh python venv */
