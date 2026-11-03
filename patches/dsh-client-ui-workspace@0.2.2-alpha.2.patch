@@ -1,5 +1,5 @@
 diff --git a/lib/client.js b/lib/client.js
-index bc5c383..86d0f2f 100644
+index bc5c383..815e42a 100644
 --- a/lib/client.js
 +++ b/lib/client.js
 @@ -1259,10 +1259,18 @@ window.__ModuleLoader__.load({
@@ -112,6 +112,15 @@ index bc5c383..86d0f2f 100644
  			async pinSession(sessionId) {
  				await this.workspaces.pinSession(sessionId);
  				const { items, pinnedSessionIds, archivedSessionIds } = this.workspaces.list.getSnapshot();
+@@ -3006,7 +3067,7 @@ window.__ModuleLoader__.load({
+ 			});
+ 		}
+ 		/** The scrolling session tree; unmounting drops the sessions subscription and the session watermarks. */
+-		function SessionTree({ list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds, rowState, onLeaveArchivedOnly, workspaceReady, animationResetKey, usePanelInfo, useRemoteAccess, useSessionAccess, useWorkspaceAccess, onRenameRequest, onDeleteRequest, onSessionRenameRequest, renderSlot, insertWorkspaceBefore, nestWorkspaces, groupExpansion, setGroupExpanded, setSessionOrder, home, t, revealSessionId, onSessionRevealed, shortcuts }) {
++		function SessionTree({ list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds, rowState, onLeaveArchivedOnly, workspaceReady, animationResetKey, usePanelInfo, useRemoteAccess, useSessionAccess, useWorkspaceAccess, onRenameRequest, onDeleteRequest, onSessionRenameRequest, renderSlot, insertWorkspaceBefore, nestWorkspaces, groupExpansion, setGroupExpanded, setSessionOrder, home, t, revealSessionId, onSessionRevealed, shortcuts, unreadSessionIds, onUnreadChange }) {
+ 			const panelActive = usePanelInfo((info) => info.activePanelId !== null);
+ 			const statuses = useSessionStatus((s) => s);
+ 			const current = panelActive ? void 0 : Object.values(list.byId).find((session) => (session.retainedBy.mainView ?? 0) > 0)?.id;
 @@ -3286,6 +3347,8 @@ window.__ModuleLoader__.load({
  								onOpen: open,
  								onRenameRequest: onSessionRenameRequest,
@@ -151,7 +160,16 @@ index bc5c383..86d0f2f 100644
  							onLeaveArchivedOnly: leaveArchivedOnly,
  							workspaceReady,
  							animationResetKey: `${groupBy}/${orderBy}/${archivedFilter}`,
-@@ -4019,6 +4091,8 @@ window.__ModuleLoader__.load({
+@@ -4007,6 +4079,8 @@ window.__ModuleLoader__.load({
+ 							usePanelInfo,
+ 							list,
+ 							shortcuts,
++							unreadSessionIds,
++							onUnreadChange,
+ 							useSessionStatus,
+ 							onSessionRenameRequest: requestSessionRename,
+ 							renderSlot,
+@@ -4019,6 +4093,8 @@ window.__ModuleLoader__.load({
  							setGroupExpanded: actions.setGroupExpanded,
  							setSessionOrder: saveSessionOrder,
  							rowState,
@@ -160,7 +178,7 @@ index bc5c383..86d0f2f 100644
  							onLeaveArchivedOnly: leaveArchivedOnly,
  							startSession,
  							open: guardedOpen,
-@@ -4879,6 +4953,7 @@ window.__ModuleLoader__.load({
+@@ -4879,6 +4955,7 @@ window.__ModuleLoader__.load({
  			"status.compact.planReview": "计划待审",
  			"status.compact.answer": "待回答",
  			"status.completed": "已完成",
@@ -168,7 +186,7 @@ index bc5c383..86d0f2f 100644
  			"hover.created": "创建于 {time}",
  			"hover.copied": "已复制",
  			"date.ymd": "{y}年{m}月{d}日",
-@@ -5001,6 +5076,7 @@ window.__ModuleLoader__.load({
+@@ -5001,6 +5078,7 @@ window.__ModuleLoader__.load({
  			"status.compact.planReview": "Plan review",
  			"status.compact.answer": "Answer",
  			"status.completed": "Completed",
