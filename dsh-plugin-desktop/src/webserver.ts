@@ -79,6 +79,10 @@ export class DesktopWebServer extends WebServer {
   }
 
   override register(route: WebRoute): () => void {
+    // 0.2.2 routes may carry a `resource` instead of a `handler` (WebResourceRoute);
+    // the host dispatches those with its own resource pipeline, so only wrap real
+    // handler routes and pass anything else straight through.
+    if (typeof route.handler !== 'function') return super.register(route)
     return super.register({
       ...route,
       handler: this.traceHttp(String(route.path), async (req, res) => {
@@ -89,6 +93,9 @@ export class DesktopWebServer extends WebServer {
   }
 
   override registerFallback(handler: WebRoute['handler']): () => void {
+    // 0.2.2 的 fallback 同时接受处理器函数与 `{ resource }` 对象两种形态；
+    // 对象形态走宿主自己的资源管线，只包函数形态。
+    if (typeof handler !== 'function') return super.registerFallback(handler as never)
     return super.registerFallback(this.traceHttp('fallback', async (req, res) => {
       if (!this.permits(req)) return rejectBrowserRequest(res)
       await handler(req, res)

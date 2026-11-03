@@ -287,9 +287,16 @@ export async function apply(ctx, config) {
       return undefined
     }
     for (const definition of definitions) {
-      agentPresets.register(definition).catch((error) => {
-        ctx.logger.warn('tintin-bundle: preset %s registration failed: %s', definition.id, error?.message ?? error)
-      })
+      // cordis 4.0.6 守卫下服务代理的属性取用可能在注册表就绪前抛错（0.2.2 实测
+      // "cannot get property register without inject"）——单预设隔离且不致命：
+      // 抛错视为该预设本轮不可注册，插件保持激活（详见启动事故 1102 晚）。
+      try {
+        agentPresets.register(definition).catch((error) => {
+          ctx.logger.warn('tintin-bundle: preset %s registration failed: %s', definition.id, error?.message ?? error)
+        })
+      } catch (error) {
+        ctx.logger.warn('tintin-bundle: preset %s registration unavailable: %s', definition.id, error?.message ?? error)
+      }
     }
     // 实测锚点（2026-10-21）：45/45 会话回落 standard、无任何日志——注册成功要留痕
     ctx.logger.info('tintin-bundle: role presets registered: %s', definitions.map((definition) => definition.id).join(','))
