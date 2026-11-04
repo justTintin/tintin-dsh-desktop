@@ -19,7 +19,8 @@ export interface PlatformDef {
 // C14 接口一致性：平台组 5 个 = 抖音/视频号/快手/小红书/B站；
 // 另含 web/youtube/jimeng 扩展位 + fxg 抖店分区（仅自动上架使用，不进平台组）。
 export const PLATFORM_DEFS: Record<string, PlatformDef> = {
-  web: { name: '网页浏览器', partition: 'persist:tintin-web', seedUrl: 'https://www.pinterest.com/', extractor: null },
+  // web 起始页（2026-11-04 收藏语义批，用户裁决）：pinterest 国内不可达、首开必白屏，换国内可达起始页
+  web: { name: '网页浏览器', partition: 'persist:tintin-web', seedUrl: 'https://www.baidu.com/', extractor: null },
   douyin: { name: '抖音', partition: 'persist:tintin-douyin', seedUrl: 'https://www.douyin.com', extractor: 'extractors/douyin.ts' },
   weixin: { name: '视频号', partition: 'persist:tintin-weixin', seedUrl: 'https://channels.weixin.qq.com', extractor: 'extractors/weixin.ts' },
   kuaishou: { name: '快手', partition: 'persist:tintin-kuaishou', seedUrl: 'https://www.kuaishou.com', extractor: 'extractors/kuaishou.ts' },
@@ -99,4 +100,19 @@ export function isDetailPage(url: string, platformId: string | null): boolean {
   const patterns = platformId ? PLATFORM_DETAIL_PATTERNS[platformId] : undefined
   if (!patterns) return false
   return patterns.some((p) => p.test(url))
+}
+
+// ── 内嵌浏览器吞掉的 App 深链协议（2026-11-04 用户裁决「按推荐处理」）──
+// 命中即拦截/空响应，不转交系统：防 Windows「获取打开此'xxx'链接的应用」弹窗与
+// 甩出产品唤起本机 App。名单=各平台域的已知唤起协议（广告位深链重灾区=字节系）；
+// 新平台出现新协议时在此补行。bytedance=字节通用唤起协议（B站广告实测）；
+// snssdk<number>=字节各 App id（1128 抖音 / 1233 抖音极速版·TikTok / 13 今日头条）。
+export const PLATFORM_DEEP_LINK_SCHEMES: readonly string[] = [
+  'bytedance', 'snssdk1128', 'snssdk1233', 'snssdk13', 'douyin', 'douyinlite', 'toutiao', 'ixigua',
+  'bilibili', 'biliintl', 'xhsdiscover', 'kuaishou', 'kwai', 'ksnebula', 'weixin',
+]
+
+/** 协议名（不带冒号，大小写不敏感）是否为会被吞掉的 App 深链 */
+export function isDeepLinkScheme(scheme: string): boolean {
+  return PLATFORM_DEEP_LINK_SCHEMES.includes(scheme.toLowerCase())
 }

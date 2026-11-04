@@ -73,4 +73,31 @@ describe('media sniffer engine (webRequest equivalent)', () => {
     sniffer.clear('douyin')
     expect(sniffer.items('douyin')).toEqual([])
   })
+
+  it('gates capture on the SRC detail-page whitelist when a pageUrl provider is given', () => {
+    const { session, handlers } = fakeSession()
+    const sniffer = createMediaSniffer()
+    let page = 'https://www.douyin.com/discover'
+    sniffer.attach(session, 'douyin', () => page)
+    const h = handlers[0]!
+    const cb = () => {}
+    // feed 页（非详情页）：媒体请求不收 —— SRC 白名单防相邻视频预加载刷屏
+    h({ url: 'https://v.douyin.com/x.mp4', resourceType: 'media' }, cb)
+    expect(sniffer.items('douyin')).toEqual([])
+    // 详情页：收
+    page = 'https://www.douyin.com/video/741'
+    h({ url: 'https://v.douyin.com/y.mp4', resourceType: 'media' }, cb)
+    expect(sniffer.items('douyin')).toHaveLength(1)
+    // web 分区口径：页面命中任何平台详情页即可收
+    const { session: sWeb, handlers: hsWeb } = fakeSession()
+    let webPage = 'https://www.bilibili.com/video/BV1abc'
+    sniffer.attach(sWeb, 'web', () => webPage)
+    hsWeb[0]!({ url: 'https://x.com/z.mp4', resourceType: 'media' }, cb)
+    expect(sniffer.items('web')).toHaveLength(1)
+    // 无 pageUrl 供应方 = 不门控（旧调用面兼容）
+    const { session: s2, handlers: hs2 } = fakeSession()
+    sniffer.attach(s2, 'kuaishou')
+    hs2[0]!({ url: 'https://x.com/a.mp4', resourceType: 'media' }, cb)
+    expect(sniffer.items('kuaishou')).toHaveLength(1)
+  })
 })

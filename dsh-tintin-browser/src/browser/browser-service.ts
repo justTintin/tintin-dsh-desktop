@@ -22,17 +22,20 @@ import {
   PLATFORM_COOKIE_DOMAINS,
   PLATFORM_DEFS,
   PLATFORM_IDS,
+  detectPlatformFromUrl,
+  isDeepLinkScheme,
   type PlatformDef,
 } from './platform-meta.ts'
 import { formatNetscapeCookies } from './netscape-cookies.ts'
+import { buildExtractorScript, extractionError, extractorScriptDir } from './extract-script.ts'
 import { createExtensionManager, platformSessions, findDouyinHelperDir, type ExtensionManager } from './ext-manager.ts'
 import { bilibiliHelperInstalled, findBilibiliHelperDir, injectBilibiliHelper } from './bilibili-ext.ts'
 import { createDownloadManager, type DownloadManager } from './download-manager.ts'
 import { createMediaStorage, type MediaStorage } from './media-storage.ts'
 import { captureHotspots } from './hotspot-capture.ts'
 import { startLoopbackService, type LoopbackService } from './loopback-service.ts'
-import { scanDailyAssets, resolveDailyAssetDirs } from './daily-assets-logic.ts'
 import { createMediaSniffer, type MediaSniffer } from './media-sniffer.ts'
+import { registerDeepLinkSwallow } from './deep-link-guard.ts'
 import { createCreatorsStoreIpc } from './creators-store.ts'
 // 下载扩展链复活（2026-10-26；SRC thick-shell-viewpool.js / media-downloader.js / douyin-parse-logic.js）
 import { attachBiliDlConsoleCapture, startBiliExtPolling } from './bili-ext-dl.ts'
@@ -51,35 +54,6 @@ function ctxLog(msg: string): void {
 /** cookies 交接目录：与 harness 子进程的 DSH_HOME 同源（<userData>/harness） */
 export function browserCookiesDir(): string {
   return join(app.getPath('userData'), 'harness', 'tintin', 'browser', 'cookies')
-}
-
-/** 抽取器脚本目录：打包=resources/extractors；开发=仓库 build/extractors（SRC thickShell 同形态） */
-export function extractorScriptDir(): string {
-  return app.isPackaged
-    ? join(process.resourcesPath, 'extractors')
-    : join(app.getAppPath(), 'build', 'extractors')
-}
-
-/** E3 结构化错误（SRC offline-page.js extractionError 1:1） */
-export function extractionError(type: string, message: string, hint = '') {
-  return { ok: false, error: { type: type || 'EXTRACTOR_ERROR', message: message || '抽取失败', hint: hint || '' } }
-}
-
-/**
- * 抽取脚本拼接（SRC thickShell-ipc browser:extractDOM wrapper 1:1）：
- * _common（公共契约挂 window.__TIN_EX_COMMON__）前置 + 平台脚本，wrapper 显式
- * return __TIN_EXTRACT_RESULT__（否则 IIFE 返回值被丢弃 → undefined）。
- * 执行期异常折叠为结构化 DOM_MISMATCH，主进程不崩。
- */
-export function buildExtractorScript(commonScript: string, platformScript: string): string {
-  const combined = commonScript + '\n' + platformScript
-  return `(function(){
-  var __TIN_EXTRACT_RESULT__;
-  try { ${combined} }
-  catch(e){ return { ok:false, error:{type:'DOM_MISMATCH', message:String(e.message||e), hint:'平台DOM可能已变更'} } }
-  return (typeof __TIN_EXTRACT_RESULT__ !== 'undefined') ? __TIN_EXTRACT_RESULT__
-    : { ok:false, error:{type:'DOM_MISMATCH', message:'抽取脚本未返回结果', hint:'平台脚本结构需升级'} }
-})()`
 }
 
 interface ElectronCookie {
@@ -209,6 +183,7 @@ let embedPageView: WebContentsView | null = null
 let embedActive = false
 let embedOuterRect = { x: 0, y: 0, width: 0, height: 0 }
 let pagePreloadPath: string | null = null
+let serverUrlResolver: (() => string) | null = null
 
 export interface EmbedRect { x: number; y: number; width: number; height: number }
 
@@ -326,9 +301,25 @@ function ensureBrowserView(platform: string): WebContentsView {
   })
   view.setBackgroundColor('#ffffff')
   view.webContents.setWindowOpenHandler(({ url }) => {
-    // C7 通用浏览器红线：外链一律交系统浏览器（SRC browser-window.js 同款）
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
+    // 2026-11-04 限制清除批（用户裁决）：弹窗/新页语义回归普通浏览器 —— http(s) 就地
+    // 在本分区视图打开（弹窗式 OAuth 登录态因此落进本分区，cookie 导出链可达）；
+    // 其余协议一律拒绝，不再外投系统浏览器（原 SRC C7「外链交系统浏览器」红线退役）。
+    if (/^https?:\/\//i.test(url)) {
+      try { view.webContents.loadURL(url).catch(() => { /* 页面自显示错误 */ }) } catch { /* 视图销毁竞态 */ }
+    }
     return { action: 'deny' }
+  })
+  // App 深链拦截（2026-11-04 用户裁决「按推荐处理」）：外部协议导航不再转交系统 ——
+  // 防 Windows「获取打开此'bytedance'链接的应用」弹窗与甩出产品。主帧（点击/页面跳转）
+  // 命中名单协议直接取消，页面停在原地；子帧与残余路径由分区协议吞掉（registerDeepLinkSwallow）。
+  view.webContents.on('will-navigate', (event, url) => {
+    try {
+      const scheme = new URL(url).protocol.replace(/:$/, '')
+      if (isDeepLinkScheme(scheme)) {
+        event.preventDefault()
+        ctxLog(`deep link blocked (main frame): ${scheme}://`)
+      }
+    } catch { /* 非法 URL 不拦 */ }
   })
   // 登录态落盘：导航稳定后延迟导出（避免每帧请求写盘）；导航态同步推页面工具条
   let exportTimer: NodeJS.Timeout | null = null
@@ -391,14 +382,34 @@ function attachToWindow(): void {
   pushPageState()
 }
 
-async function navigateTo(platform: string): Promise<{ ok: boolean; error?: string }> {
-  const def = platformOf(platform)
-  if (!def) return { ok: false, error: `未知平台: ${platform}` }
+/** 激活平台视图（ensure + 挂主窗 + 切其余平台下幕），不导航 —— 平台行/地址栏直达共用的
+ *  「切到该站」本体。2026-11-04 限制清除批（用户裁决）：独立窗形态缺宿主时先 ensure。 */
+function activatePlatformView(platform: string): { ok: boolean; error?: string } {
+  if (!platformOf(platform)) return { ok: false, error: `未知平台: ${platform}` }
+  if (!embedActive && (!browserWindow || browserWindow.isDestroyed()) && mainWindowRef && !mainWindowRef.isDestroyed()) {
+    ensureBrowserWindow(mainWindowRef)
+  }
   currentPlatform = platform
   ensureBrowserView(platform)
   attachToWindow()
+  return { ok: true }
+}
+
+// 已首载过种子页的平台（2026-11-04 收藏语义，用户裁决）：点击平台行=切到该站现场，
+// 不再强制重载种子页（原行为=每次点击回种子页，浏览到一半误点即丢现场）。
+const seededPlatforms = new Set<string>()
+
+/** 导航到平台：targetUrl 给定则直载；否则仅首次激活时载种子页，其后保留现场。 */
+function navigateTo(platform: string, targetUrl?: string): { ok: boolean; error?: string } {
+  const def = platformOf(platform)
+  if (!def) return { ok: false, error: `未知平台: ${platform}` }
+  const activated = activatePlatformView(platform)
+  if (!activated.ok) return activated
+  const url = targetUrl ?? (seededPlatforms.has(platform) ? undefined : def.seedUrl)
+  if (!url) return { ok: true }
+  seededPlatforms.add(platform)
   const view = activeView()
-  if (view) view.webContents.loadURL(def.seedUrl).catch(() => { /* 加载失败页面自显示错误 */ })
+  if (view) view.webContents.loadURL(url).catch(() => { /* 加载失败页面自显示错误 */ })
   return { ok: true }
 }
 
@@ -612,19 +623,39 @@ export function embedClose(): void {
 
 export function registerBrowserService(
   mainWindow: BrowserWindow,
-  options: { pagePreloadPath?: string } = {},
+  options: { pagePreloadPath?: string; resolveServerUrl?: () => string } = {},
 ): void {
   mainWindowRef = mainWindow
   pagePreloadPath = options.pagePreloadPath ?? null
-  // 登录即同步：所有平台分区的 cookie 变化 → 防抖自动导出（网页/独立窗口两形态通用）
+  // 「服务端」按钮的地址来源（2026-11-04 限制清除批收尾）：通道 home 的 tintin/config.json
+  // 归宿主解析（dsh-tintin-browser 不依赖通道目录约定），注入回调取值
+  serverUrlResolver = options.resolveServerUrl ?? null
+  // App 深链吞掉注册（进程内一次；registerBrowserService 只在首窗创建时进一次）
+  registerDeepLinkSwallow(ctxLog)
+  // 媒体嗅探先于挂接创建（2026-11-04 修复：原创建语句在挂接循环之后约 200 行，
+  // 可选链在 null 上静默吞掉 → 嗅探器从未挂上 session，功能自移植起不可用）
+  const sniffer = createMediaSniffer()
+  mediaSniffer = sniffer
+  // 登录即同步：cookie 变化防抖自动导出（网页/独立窗口两形态通用）；嗅探挂接覆盖全部
+  // 平台分区（含 web/jimeng——原循环骑在 cookie 域名单上漏了 web，网页浏览器分区的
+  // 媒体永远嗅不到）；pageUrl 供应方=该平台当前页 URL（详情页白名单门，见 sniffer attach）
   if (!cookieWatchInstalled) {
     cookieWatchInstalled = true
     for (const platform of Object.keys(PLATFORM_COOKIE_DOMAINS)) {
       try {
         session.fromPartition(PLATFORM_DEFS[platform]!.partition).cookies.on('changed', () => scheduleCookieSync(platform))
-        mediaSniffer?.attach(session.fromPartition(PLATFORM_DEFS[platform]!.partition), platform)
       } catch (err) {
         ctxLog(`cookie watch failed for ${platform}: ${err instanceof Error ? err.message : err}`)
+      }
+    }
+    for (const platform of PLATFORM_IDS) {
+      try {
+        sniffer.attach(session.fromPartition(PLATFORM_DEFS[platform]!.partition), platform, () => {
+          const view = browserViews.get(platform)
+          return view && !view.webContents.isDestroyed() ? view.webContents.getURL() ?? '' : ''
+        })
+      } catch (err) {
+        ctxLog(`media sniffer attach failed for ${platform}: ${err instanceof Error ? err.message : err}`)
       }
     }
   }
@@ -647,22 +678,33 @@ export function registerBrowserService(
   })
   ipcMain.handle('tintin-browser-page:action', (_e, payload: unknown) => {
     const a = (payload || {}) as { type?: unknown; url?: unknown }
+    const type = String(a.type || '')
+    // 地址栏直达（2026-11-04 限制清除批，用户裁决）：无活跃视图也照跳，并按域名路由
+    // 平台分区 —— 已知平台网址落自己的分区（登录态进导出链读的 cookie jar），其余落 web。
+    if (type === 'go' && a.url) {
+      const routed = detectPlatformFromUrl(String(a.url)) ?? 'web'
+      return navigateTo(routed, String(a.url))
+    }
+    if (type === 'home') {
+      const target = activeView() && currentPlatform ? currentPlatform : 'web'
+      const seed = platformOf(target)?.seedUrl || PLATFORM_DEFS.web!.seedUrl
+      return navigateTo(target, seed)
+    }
+    // 「服务端」按钮落地（2026-11-04 收尾，原=只返回错误文案的死端）：按按钮标题语义
+    // 打开主窗口设置里配置的服务端地址（web 分区承载）；未配置时错误文案由页面上屏
+    if (type === 'server') {
+      const url = (serverUrlResolver?.() || '').replace(/\/+$/, '')
+      if (!url) return { ok: false, error: '尚未配置服务端地址（主窗口设置 → 模型服务商）' }
+      return navigateTo('web', url)
+    }
     const wc = activeView()?.webContents
     if (!wc) return { ok: false, error: '尚未打开任何平台页面' }
     try {
-      const type = String(a.type || '')
       if (type === 'back' && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack()
       else if (type === 'forward' && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward()
       else if (type === 'reload') wc.reload()
       else if (type === 'stop') wc.stop()
-      else if (type === 'home') {
-        const seed = platformOf(currentPlatform)?.seedUrl || PLATFORM_DEFS.web!.seedUrl
-        void wc.loadURL(seed).catch(() => { /* 页面自显示错误 */ })
-      } else if (type === 'go' && a.url) {
-        void wc.loadURL(String(a.url)).catch(() => { /* 页面自显示错误 */ })
-      } else if (type === 'server') {
-        return { ok: false, error: '请在主窗口设置的模型服务商中配置服务端地址' }
-      } else {
+      else {
         return { ok: false, error: '未知动作' }
       }
       return { ok: true }
@@ -790,21 +832,9 @@ export function registerBrowserService(
     },
   })
 
-  // browser:getDailyAssets/revealFile/openFilePath — 每日素材（B9，SRC daily-assets.js
-  // 移植；扫描下载目录按日期分组；预览/筛选在页面完成）。目录集=工作区 materials 根 +
-  // 系统下载目录（download-manager 落盘根与 SRC store/downloadDir 同源口径）。
-  ipcMain.handle('browser:getDailyAssets', async () => {
-    try {
-      const groups = scanDailyAssets(resolveDailyAssetDirs({
-        configured: workspaceDir(),
-        downloadDir: join(workspaceDir(), 'materials'),
-        systemDownloads: app.getPath('downloads'),
-      }))
-      return { success: true, data: groups }
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : String(err) }
-    }
-  })
+  // browser:revealDailyAsset — 历史视图「定位」（每日素材视图已按 2026-11-04 用户裁决移除，
+  // getDailyAssets/openDailyAsset 两个 handler 随之删除；扫描逻辑 daily-assets-logic 保留
+  // （纯函数+单测在册），loopback 的热点采集路径不受影响）
   ipcMain.handle('browser:revealDailyAsset', (_e, p: unknown) => {
     const path = String(p || '')
     try {
@@ -814,8 +844,7 @@ export function registerBrowserService(
     } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) } }
   })
   // browser:sniffList/sniffClear/sniffDownload — 媒体嗅探（SRC SniffTab 数据面；
-  // 壳侧 webRequest 采集，attach 覆盖平台分区 session 与独立窗口 view）
-  mediaSniffer = createMediaSniffer()
+  // 壳侧 webRequest 采集。嗅探器创建已上移到挂接循环之前——2026-11-04 顺序修复）
   ipcMain.handle('browser:sniffList', (_e, platform: unknown) => {
     return { success: true, data: mediaSniffer!.items(String(platform || '')) }
   })
@@ -846,33 +875,6 @@ export function registerBrowserService(
 
   createCreatorsStoreIpc(ipcMain, { app, getBrowserWindow: () => browserWindow })
 
-  ipcMain.handle('browser:openDailyAsset', async (_e, p: unknown) => {
-    const path = String(p || '')
-    try {
-      if (!path) return { success: false, error: '路径为空' }
-      const err = await shell.openPath(path)
-      return err ? { success: false, error: err } : { success: true }
-    } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) } }
-  })
-
-  // browser:captureHotspots — 手动触发今日热点采集（SRC scheduled:captureHotspots
-  // 的浏览器域面；进度经 browser:hotspot-progress 广播，定时任务集成随 P2 local-scheduler）
-  let hotspotRunning = false
-  ipcMain.handle('browser:captureHotspots', async () => {
-    if (hotspotRunning) return [false, '热点采集中，请稍后再试']
-    hotspotRunning = true
-    try {
-      const [ok, data] = await captureHotspots({
-        userDataDir: app.getPath('userData'),
-        onProgress: (p) => {
-          try {
-            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('browser:hotspot-progress', p)
-          } catch { /* 窗口已销毁 */ }
-        },
-      })
-      return [ok, data]
-    } finally { hotspotRunning = false }
-  })
   ipcMain.handle('browser:extensionList', () => {
     try { return { success: true, data: extManager?.list() } } catch (err) {
       return { success: true, data: { installed: false, extensions: [] } }

@@ -4,6 +4,7 @@
 // 纯判定逻辑在 media-sniffer-logic.ts（单测下沉）；本文件只做会话挂接与去重广播。
 import type { Session } from 'electron'
 import { isMediaUrl, mediaTypeFromUrl } from './media-sniffer-logic.ts'
+import { isDetailPage } from './platform-meta.ts'
 
 export interface SniffedMedia {
   url: string
@@ -14,8 +15,8 @@ export interface SniffedMedia {
 }
 
 export interface MediaSniffer {
-  /** 挂到分区 session（幂等：每 session 只挂一次） */
-  attach: (session: Session, platform: string) => void
+  /** 挂到分区 session（幂等：每 session 只挂一次）；pageUrl 给定时按 SRC 详情页白名单门控捕获 */
+  attach: (session: Session, platform: string, pageUrl?: () => string) => void
   /** 订阅嗅探结果（返回退订函数） */
   onMedia: (cb: (m: SniffedMedia) => void) => () => void
   /** 当前缓冲（按 platform 过滤；调用方负责条数上限） */
@@ -37,7 +38,7 @@ export function createMediaSniffer(opts: { maxPerPlatform?: number } = {}): Medi
   }
 
   return {
-    attach(session, platform) {
+    attach(session, platform, pageUrl) {
       if (!session || attached.has(session)) return
       attached.add(session)
       // will-attach 只看资源加载；webRequest 对主文档与子资源统一触发，
@@ -49,7 +50,10 @@ export function createMediaSniffer(opts: { maxPerPlatform?: number } = {}): Medi
             return
           }
           const url = String(details.url || '')
-          if (isMediaUrl(url)) {
+          // SRC 详情页白名单门（2026-11-04 接线，原移植漏挂）：仅当前平台页命中详情页
+          // 模式才收 —— 防 feed 页预加载相邻视频刷屏（SRC 2026-09-02 用户反馈的事故）；
+          // 无 pageUrl 供应方时不门控（旧调用面兼容）
+          if (isMediaUrl(url) && !(pageUrl && !isDetailPage(pageUrl(), platform))) {
             const list = buffer.get(platform) ?? []
             if (!list.some((x) => x.url === url)) {
               const m: SniffedMedia = { url, type: mediaTypeFromUrl(url), platform, at: Date.now() }

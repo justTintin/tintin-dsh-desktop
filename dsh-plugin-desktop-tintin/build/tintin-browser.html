@@ -69,16 +69,7 @@
     .dl.done .fill { background: var(--ok); } .dl.done .meta { color: var(--ok); }
     .dl.error .fill { background: var(--bad); } .dl.error .meta { color: var(--bad); }
     .dl .meta { flex-shrink: 0; min-width: 110px; text-align: right; color: var(--muted); }
-    /* ── 每日素材 ── */
-    .da-group { margin-bottom: 14px; }
-    .da-date { font-size: 12px; font-weight: 700; color: var(--muted); margin: 10px 0 6px; }
-    .da-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
-    .da-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--surface); cursor: pointer; }
-    .da-card:hover { border-color: var(--primary); }
-    .da-name { font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .da-meta { font-size: 11px; color: var(--muted); margin-top: 3px; display: flex; gap: 6px; align-items: center; }
-    .da-badge { padding: 1px 6px; border-radius: 4px; font-size: 10px; border: 0.5px solid var(--line); color: var(--muted); }
-    .da-actions { margin-top: 6px; display: flex; gap: 6px; }
+    /* ── 小按钮（历史/扩展管理等视图行内按钮；da- 前缀源自已删除的每日素材视图）── */
     .da-btn { height: 22px; padding: 0 8px; border: 0.5px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); font: inherit; font-size: 11px; cursor: pointer; }
     .da-btn:hover { border-color: var(--primary); color: var(--primary); }
     /* ── 自动上架 ── */
@@ -110,6 +101,9 @@
     .sn-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
     .sn-badge { padding: 1px 6px; border-radius: 4px; font-size: 10px; border: 0.5px solid var(--line); color: var(--muted); flex-shrink: 0; }
     .sn-btn { margin-left: auto; height: 20px; padding: 0 8px; border: 0; border-radius: 5px; background: var(--primary); color: #fff; font: inherit; font-size: 11px; cursor: pointer; }
+    /* ── 提示条（2026-11-04 限制清除批：动作错误不再静默丢弃）── */
+    #toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(8px); max-width: 72%; padding: 6px 14px; border-radius: 8px; background: rgba(20,20,22,.92); color: #fff; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease; z-index: 9; }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   </style>
 </head>
 <body>
@@ -161,51 +155,10 @@
         </div>
         <div id="hsList" style="display:flex;flex-direction:column;gap:6px;"></div>
       </section>
-      <section class="view" id="view-favorites">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-          <span style="font-weight:700;">网页收藏</span>
-          <span id="fvCount" style="color:var(--muted);font-size:12px;"></span>
-        </div>
-        <div id="fvList" style="display:flex;flex-direction:column;gap:6px;"></div>
-      </section>
-      <section class="view" id="view-creators">
-        <div style="display:flex;align-items:center;gap:0;margin-bottom:10px;border-bottom:1px solid var(--line);">
-          <button id="crTabCreators" class="cr-tab active">达人库</button>
-          <button id="crTabCollected" class="cr-tab">素材采集</button>
-          <span style="flex:1 1 auto;"></span>
-          <button id="crAdd" class="da-btn" style="height:26px;">新增达人</button>
-        </div>
-        <div id="crCreatorsPane">
-          <div id="crList" style="display:flex;flex-direction:column;gap:6px;"></div>
-        </div>
-        <div id="crCollectedPane" style="display:none;">
-          <div id="clList" style="display:flex;flex-direction:column;gap:6px;"></div>
-        </div>
-      </section>
-      <section class="view" id="view-dailyassets">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-          <span style="font-weight:700;">每日素材</span>
-          <select id="daDate" style="height:26px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit;font-size:12px;"><option value="">全部日期</option></select>
-          <select id="daType" style="height:26px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit;font-size:12px;">
-            <option value="">全部类型</option><option value="video">视频</option><option value="image">图片</option><option value="text">文本</option><option value="file">文件</option>
-          </select>
-          <input id="daQuery" placeholder="搜索文件名" style="height:26px;width:180px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit;font-size:12px;outline:none;user-select:text;" />
-          <select id="daSort" style="height:26px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit;font-size:12px;">
-            <option value="">默认排序</option><option value="size">按大小</option><option value="name">按名称</option>
-          </select>
-          <span id="daCount" style="color:var(--muted);font-size:12px;"></span>
-          <span style="flex:1 1 auto"></span>
-          <button id="daRefresh" style="height:26px;padding:0 12px;border:0.5px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);font:inherit;font-size:12px;cursor:pointer;">刷新</button>
-          <button id="daCapture" style="height:26px;padding:0 12px;border:0;border-radius:6px;background:var(--primary);color:#fff;font:inherit;font-size:12px;font-weight:600;cursor:pointer;">采集今日热点</button>
-        </div>
-        <div id="daList"></div>
-      </section>
       <section class="view" id="view-collect">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
           <span style="font-weight:700;">素材采集清单</span>
           <span id="clCount2" style="color:var(--muted);font-size:12px;"></span>
-          <span style="flex:1 1 auto;"></span>
-          <button id="clJump" class="da-btn" style="height:26px;">到达人库发起采集</button>
         </div>
         <div id="clList2" style="display:flex;flex-direction:column;gap:6px;"></div>
       </section>
@@ -237,6 +190,7 @@
     </aside>
   </div>
   <div id="shelf"></div>
+  <div id="toast"></div>
 <script>
 (function () {
   var bridge = window.dshDesktopBrowser || null
@@ -260,16 +214,39 @@
     $('hostTip').textContent = (st.platform && (names[st.platform] || st.platform)) || '浏览器'
   }
 
-  function nav(type, url) { if (page) page.action({ type: type, url: url }) }
+  // 提示条（2026-11-04 限制清除批）：动作失败不再静默——错误/提示统一上屏
+  var toastTimer = null
+  function toast(msg) {
+    var t = $('toast')
+    t.textContent = msg
+    t.classList.add('show')
+    if (toastTimer) clearTimeout(toastTimer)
+    toastTimer = setTimeout(function () { t.classList.remove('show') }, 3200)
+  }
+  function nav(type, url) {
+    if (!page) { toast('浏览器桥未接通（页面桥缺失），请重启应用'); return }
+    page.action({ type: type, url: url }).then(function (r) {
+      if (r && r.ok === false) toast(r.error || '操作失败')
+    }).catch(function (e) { toast('操作失败：' + ((e && e.message) || e)) })
+  }
 
   $('b-back').onclick = function () { nav('back') }
   $('b-fwd').onclick = function () { nav('forward') }
   $('b-rel').onclick = function () { nav(relState === 'loading' ? 'stop' : 'reload') }
   $('b-home').onclick = function () { nav('home') }
+  // 地址栏归一（2026-11-04 限制清除批）：显式 http(s) 直过；域名/IP/localhost 补协议；
+  // 其余输入不再硬拼 https://（无效主机白屏），按关键词走搜索兜底。
+  function normalizeAddress(v) {
+    if (/^https?:\/\//i.test(v)) return v
+    if (/^localhost(:\d+)?([/?#].*)?$/i.test(v)) return 'http://' + v
+    if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?([/?#].*)?$/.test(v)) return 'http://' + v
+    if (/^[^\s/?#]+\.[^\s/?#]+(:\d+)?([/?#].*)?$/.test(v)) return 'https://' + v
+    return 'https://www.baidu.com/s?wd=' + encodeURIComponent(v)
+  }
   $('addr').addEventListener('keydown', function (e) {
     if (e.key !== 'Enter') return
     var v = this.value.trim()
-    if (v) nav('go', /^https?:\/\//i.test(v) ? v : 'https://' + v)
+    if (v) nav('go', normalizeAddress(v))
     this.blur()
   })
   var relState = ''
@@ -277,9 +254,6 @@
   // ── 左栏：平台 + 功能扩展 ──
   var EXT_ITEMS = [
     { id: 'autolisting', name: '自动上架', badge: '⬆' },
-    { id: 'favorites', name: '网页收藏', badge: '📑' },
-    { id: 'dailyassets', name: '每日素材', badge: '📅' },
-    { id: 'creators', name: '达人库', badge: '👤' },
     { id: 'collect', name: '素材采集', badge: '🧺' },
     { id: 'extensions', name: '扩展管理', badge: '🧩' },
   ]
@@ -295,8 +269,12 @@
       var st = b.querySelector('.plat-state')
       var n = (window.__loginCounts || {})[p.id] || 0
       st.textContent = n > 0 ? '已登录' : '未登录'
-      b.onclick = function () { switchView('browser'); if (page) page.open({ platform: p.id }) }
+      b.onclick = function () {
+        switchView('browser')
+        // 嗅探目标跟随当前平台（2026-11-04 修复：原调用误在构建循环里执行，恒锁最后一个平台）
         sniffWatch(p.id)
+        if (page) page.open({ platform: p.id })
+      }
       list.appendChild(b)
     })
     var ext = $('extList')
@@ -316,15 +294,15 @@
     document.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name) })
     paintSidebar()
     sendBounds()
-    if (name === 'favorites') fvLoad()
-    else if (name === 'creators' || name === 'collect') crLoad()
+    if (name === 'collect') clLoad()
     else if (name === 'history') hsLoad()
     else if (name === 'extensions') extMgrLoad()
   }
 
   $('serverBtn').onclick = function () {
-    // 与 SRC 一致：打开服务端设置（shell 设置页由宿主窗口承载，这里打开系外浏览器提示位）
-    if (page) page.action({ type: 'server' })
+    // 2026-11-04 收尾：按按钮标题语义打开配置的服务端地址（壳侧 web 分区承载）；未配置时壳侧
+    // 返回错误文案，经 nav 统一上屏。原 SRC「系外浏览器提示位」死端退役。
+    nav('server')
   }
 
   // ── 登录态 ──
@@ -384,101 +362,6 @@
 
   // ── 主进程状态推送 ──
   if (page) page.onState(function (st) { relState = st.loading ? 'loading' : ''; paintBar(st) })
-
-  // ── 每日素材（B9，SRC DailyAssetsView 移植；数据源 browser:getDailyAssets）──
-  var daGroups = []
-  var daFilter = { date: '', type: '', query: '', sort: '' }
-  var TYPE_NAMES = { video: '视频', image: '图片', text: '文本', file: '文件' }
-  function daFmt(n) {
-    if (n < 1024) return n + ' B'
-    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB'
-    if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB'
-    return (n / 1073741824).toFixed(2) + ' GB'
-  }
-  function daLoad() {
-    if (!bridge) { daRender([]); return }
-    bridge.getDailyAssets().then(function (r) {
-      daGroups = (r && r.success && Array.isArray(r.data)) ? r.data : []
-      // 日期下拉只增不减（保留当前选择）
-      var sel = document.getElementById('daDate')
-      var cur = sel.value
-      sel.textContent = ''
-      var optAll = document.createElement('option'); optAll.value = ''; optAll.textContent = '全部日期'; sel.appendChild(optAll)
-      daGroups.forEach(function (g) { var o = document.createElement('option'); o.value = g.date; o.textContent = g.date; sel.appendChild(o) })
-      sel.value = cur
-      daRender()
-    }).catch(function () { daRender([]) })
-  }
-  function daApply() {
-    var q = daFilter.query.trim().toLowerCase()
-    return daGroups
-      .filter(function (g) { return !daFilter.date || g.date === daFilter.date })
-      .map(function (g) {
-        var files = g.files
-        if (daFilter.type) files = files.filter(function (x) { return x.type === daFilter.type })
-        if (q) files = files.filter(function (x) { return x.name.toLowerCase().indexOf(q) >= 0 })
-        files = files.slice()
-        if (daFilter.sort === 'size') files.sort(function (a, b) { return b.size - a.size })
-        else if (daFilter.sort === 'name') files.sort(function (a, b) { return a.name < b.name ? -1 : 1 })
-        return { date: g.date, files: files }
-      })
-      .filter(function (g) { return g.files.length > 0 })
-  }
-  function daRender() {
-    var list = document.getElementById('daList')
-    list.textContent = ''
-    var groups = daApply()
-    var total = 0
-    groups.forEach(function (g) { total += g.files.length })
-    document.getElementById('daCount').textContent = total + ' 个文件'
-    if (!groups.length) {
-      var empty = document.createElement('div')
-      empty.className = 'placeholder'
-      empty.innerHTML = '<div>暂无素材。下载素材（平台嗅探/参考视频下载）后按日期目录归档，这里自动汇总。</div>'
-      list.appendChild(empty)
-      return
-    }
-    groups.forEach(function (g) {
-      var wrap = document.createElement('div'); wrap.className = 'da-group'
-      var head = document.createElement('div'); head.className = 'da-date'; head.textContent = g.date + '（' + g.files.length + '）'
-      var grid = document.createElement('div'); grid.className = 'da-grid'
-      g.files.forEach(function (f) {
-        var card = document.createElement('div'); card.className = 'da-card'
-        var nm = document.createElement('div'); nm.className = 'da-name'; nm.textContent = f.name; nm.title = f.path
-        var meta = document.createElement('div'); meta.className = 'da-meta'
-        var badge = document.createElement('span'); badge.className = 'da-badge'; badge.textContent = TYPE_NAMES[f.type] || f.type
-        var sz = document.createElement('span'); sz.textContent = daFmt(f.size)
-        meta.append(badge, sz)
-        var act = document.createElement('div'); act.className = 'da-actions'
-        var loc = document.createElement('button'); loc.className = 'da-btn'; loc.textContent = '定位'
-        loc.onclick = function (e) { e.stopPropagation(); if (bridge) bridge.revealDailyAsset(f.path) }
-        var open = document.createElement('button'); open.className = 'da-btn'; open.textContent = '打开'
-        open.onclick = function (e) { e.stopPropagation(); if (bridge) bridge.openDailyAsset(f.path) }
-        act.append(loc, open)
-        card.append(nm, meta, act)
-        card.ondblclick = function () { if (bridge) bridge.openDailyAsset(f.path) }
-        grid.appendChild(card)
-      })
-      wrap.append(head, grid)
-      list.appendChild(wrap)
-    })
-  }
-  document.getElementById('daDate').onchange = function () { daFilter.date = this.value; daRender() }
-  document.getElementById('daType').onchange = function () { daFilter.type = this.value; daRender() }
-  document.getElementById('daSort').onchange = function () { daFilter.sort = this.value; daRender() }
-  document.getElementById('daQuery').addEventListener('input', function () { daFilter.query = this.value; daRender() })
-  document.getElementById('daRefresh').onclick = function () { daLoad() }
-  document.getElementById('daCapture').onclick = function () {
-    if (!bridge) return
-    var b = document.getElementById('daCapture')
-    b.disabled = true; b.textContent = '采集中…'
-    bridge.captureHotspots().then(function (r) {
-      b.disabled = false; b.textContent = '采集今日热点'
-      refreshLogin() // 复用轻刷新触发界面反馈
-      daLoad()
-    }).catch(function () { b.disabled = false; b.textContent = '采集今日热点' })
-  }
-  daLoad()
 
   // ── 媒体嗅探（SRC SniffTab；壳侧 webRequest 采集，按当前平台拉取）──
   var sniffPlatform = ''
@@ -656,119 +539,30 @@
     bridge.onExtensionsChanged(function () { extMgrLoad() })
   }
 
-  // ── 自动上架进度日志（2026-09-29 裁决：操作面板已移至「运营工具 → 自动上架」卡片，
-  // 浏览器页不再承载面板与 autoListing:* 通道接线；本函数仅供页内进度订阅复用
-  // （达人采集进度），alLog 元素已随面板移除，缺失时安全降级为无操作。
-  // 2026-10-26 修复：此前脚本仍无条件给已删除的 al* 元素绑 onclick/取 disabled，
-  // 顶层 TypeError 使整个页面脚本崩死（左栏平台/功能扩展全空、主区空白）──
-  function alLogLine(stage, message, ts) {
-    var el = document.getElementById('alLog')
-    if (!el) return
-    var line = document.createElement('div')
-    line.textContent = '[' + new Date(ts || Date.now()).toTimeString().slice(0, 8) + '][' + (stage || '…') + '] ' + (message || '')
-    el.appendChild(line)
-    el.scrollTop = el.scrollHeight
-  }
-
-  // ── 网页收藏（SRC FavoritesView；mediaStorageGetFavorites 三通道）──
-  var fvItems = []
-  function fvLoad() {
-    if (!bridge) { fvRender(); return }
-    bridge.mediaStorageGetFavorites().then(function (r) {
-      fvItems = (r && r.success && Array.isArray(r.data)) ? r.data : []
-      fvRender()
-    }).catch(function () { fvRender() })
-  }
-  function fvRender() {
-    document.getElementById('fvCount').textContent = fvItems.length + ' 条'
-    var list = document.getElementById('fvList')
-    list.textContent = ''
-    if (!fvItems.length) { list.appendChild(mkEmpty('暂无收藏。在平台浏览时对媒体点击收藏即可汇总到这里。')); return }
-    fvItems.forEach(function (it) {
-      list.appendChild(liCard({
-        name: it.name || it.url, sub: it.url,
-        badge: it.type === 'audio' ? '音频' : it.type === 'image' ? '图片' : '视频',
-        actions: [
-          { label: '打开', on: function () { if (page) page.action({ type: 'go', url: it.url }) } },
-          { label: '删除', danger: true, on: function () { if (bridge) bridge.mediaStorageRemoveFavorite(it.url).then(fvLoad) } },
-        ],
-      }))
-    })
-  }
-
-  // ── 达人库/素材采集（SRC CreatorsView/useBrowserCreators；creators:* 五通道）──
-  var crTab = 'creators'
-  var crItems = []
+  // ── 素材采集清单（creators:getCollected；达人库已按 2026-11-04 用户裁决移除，
+  // 清单保留为既有采集记录的查看面）──
   var clItems = []
-  function crSwitch(tab) {
-    crTab = tab
-    document.getElementById('crTabCreators').classList.toggle('active', tab === 'creators')
-    document.getElementById('crTabCollected').classList.toggle('active', tab === 'collected')
-    document.getElementById('crCreatorsPane').style.display = tab === 'creators' ? '' : 'none'
-    document.getElementById('crCollectedPane').style.display = tab === 'collected' ? '' : 'none'
-  }
-  function crLoad() {
+  function clLoad() {
     if (!bridge) return
-    bridge.creatorsGetCreators().then(function (r) { crItems = (r && r.data) || []; crRenderCreators() }).catch(function () {})
     bridge.creatorsGetCollected().then(function (r) { clItems = (r && r.data) || []; clRender() }).catch(function () {})
-  }
-  function crRenderCreators() {
-    var list = document.getElementById('crList')
-    list.textContent = ''
-    if (!crItems.length) { list.appendChild(mkEmpty('暂无达人。点「新增达人」录入（名称+平台），或从采集清单反查。')); return }
-    crItems.forEach(function (c) {
-      list.appendChild(liCard({
-        name: c.name, sub: (c.platform || '') + (c.homepageUrl ? ' · ' + c.homepageUrl : ''),
-        badge: c.platform,
-        actions: [
-          { label: '采集', on: function () {
-            if (!bridge) return
-            var card = this
-            bridge.creatorsCollectFromCreator(c).then(function (r) {
-              clLoad()
-              window.alert((r && r.success) ? ('采集完成：' + ((r.data && r.data.count) || 0) + ' 条素材入清单') : ('采集失败：' + ((r && r.error) || '?')))
-            }).catch(function (e) { window.alert('采集失败：' + (e.message || e)) })
-          } },
-          { label: '删除', danger: true, on: function () { if (bridge) bridge.creatorsDeleteCreator({ id: c.id, platform: c.platform }).then(crLoad) } },
-        ],
-      }))
-    })
   }
   function clRender() {
     document.getElementById('clCount2').textContent = clItems.length + ' 条'
-    document.getElementById('clCount2').parentElement && 0
-    var lists = [['clList', crTab === 'collected'], ['clList2', true]]
-    for (const [id] of lists) {
-      var list = document.getElementById(id)
-      if (!list) continue
-      list.textContent = ''
-      if (!clItems.length) { list.appendChild(mkEmpty('采集清单为空。到「达人库」对达人点「采集」，主页素材自动入清单。')); continue }
-      clItems.slice().reverse().slice(0, 200).forEach(function (it) {
-        list.appendChild(liCard({
-          name: it.title || it.url, sub: it.creatorName + ' · ' + it.date,
-          badge: it.platform,
-          actions: [
-            { label: '打开', on: function () { if (page) page.action({ type: 'go', url: it.url }) } },
-          ],
-        }))
-      })
-    }
+    var list = document.getElementById('clList2')
+    if (!list) return
+    list.textContent = ''
+    if (!clItems.length) { list.appendChild(mkEmpty('采集清单为空。')); return }
+    clItems.slice().reverse().slice(0, 200).forEach(function (it) {
+      list.appendChild(liCard({
+        name: it.title || it.url, sub: it.creatorName + ' · ' + it.date,
+        badge: it.platform,
+        actions: [
+          { label: '打开', on: function () { if (page) page.action({ type: 'go', url: it.url }) } },
+        ],
+      }))
+    })
   }
-  document.getElementById('crTabCreators').onclick = function () { crSwitch('creators') }
-  document.getElementById('crTabCollected').onclick = function () { crSwitch('collected') }
-  document.getElementById('clJump').onclick = function () { switchView('creators'); crSwitch('creators') }
-  document.getElementById('crAdd').onclick = function () {
-    if (!bridge) return
-    var name = window.prompt('达人名称：')
-    if (!name) return
-    var platform = window.prompt('平台（douyin/bilibili/kuaishou/xiaohongshu/weixin/youtube）：', 'douyin')
-    if (!platform) return
-    bridge.creatorsAddCreator({ id: name + '_' + platform, platform: platform, name: name }).then(crLoad).catch(function (e) { window.alert('新增失败：' + (e.message || e)) })
-  }
-  if (bridge && bridge.onCreatorsProgress) {
-    bridge.onCreatorsProgress(function (p) { alLogLine('采集', p.phase) })
-  }
-  crLoad()
+  clLoad()
 
   // ── 历史（SRC 历史面板；media:storage 下载+嗅探记录）──
   function mkEmpty(text) {
@@ -821,7 +615,6 @@
   }
   document.getElementById('hsRefresh').onclick = function () { hsLoad() }
   hsLoad()
-  fvLoad()
 
   // ── 启动 ──
   if (bridge) {

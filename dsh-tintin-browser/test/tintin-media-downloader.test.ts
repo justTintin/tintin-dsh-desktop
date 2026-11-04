@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanMediaUrl, createMediaDownloaderIpc } from '../src/browser/media-downloader.ts'
+import { cleanMediaUrl, createMediaDownloaderIpc, partitionForPlatform } from '../src/browser/media-downloader.ts'
 
 describe('cleanMediaUrl（SRC _cleanMediaUrl 1:1）', () => {
   it('youtube/googlevideo 分块参数清洗 + range 全量', () => {
@@ -19,6 +19,16 @@ describe('cleanMediaUrl（SRC _cleanMediaUrl 1:1）', () => {
   it('非 googlevideo URL 原样；坏 URL 原样返回', () => {
     expect(cleanMediaUrl('https://example.com/a.mp4?x=1')).toBe('https://example.com/a.mp4?x=1')
     expect(cleanMediaUrl('not a url')).toBe('not a url')
+  })
+})
+
+describe('partitionForPlatform（2026-11-04 cookie 注入分区修复）', () => {
+  it('别名分区解析到真实 jar（bili/xhs），直名平台与缺省原样', () => {
+    expect(partitionForPlatform('bilibili')).toBe('persist:tintin-bili')
+    expect(partitionForPlatform('xiaohongshu')).toBe('persist:tintin-xhs')
+    expect(partitionForPlatform('douyin')).toBe('persist:tintin-douyin')
+    expect(partitionForPlatform('web')).toBe('persist:tintin-web')
+    expect(partitionForPlatform(undefined)).toBe('persist:tintin-browser')
   })
 })
 
@@ -85,6 +95,45 @@ describe('createMediaDownloaderIpc：单流直链下载（本地 server 实测�
     const second = (await handlers.get('browser:downloadMediaStart')!(null, { url, filename: 'same.mp4' })) as { path: string }
     expect(first.path).not.toBe(second.path)
     expect(second.path.endsWith('same_1.mp4')).toBe(true)
+  })
+
+  it('cookie 注入读真实分区（bilibili→persist:tintin-bili），请求带 Cookie/Referer 头', async () => {
+    let seenHeaders: Record<string, string | string[] | undefined> = {}
+    let seenPartition = ''
+    server.close()
+    server = createServer((req, res) => {
+      seenHeaders = req.headers
+      res.writeHead(200, { 'content-length': String(body.length) })
+      res.end(body)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const addr = server.address()
+    const port = typeof addr === 'object' && addr ? addr.port : 0
+    url = `http://127.0.0.1:${port}/b.mp4`
+    const handlers = new Map<string, (e: unknown, payload: unknown) => Promise<unknown>>()
+    const svc = createMediaDownloaderIpc({
+      ipcMain: { handle: (name: string, fn: (e: unknown, payload: unknown) => Promise<unknown>) => { handlers.set(name, fn) } },
+      appLike: { isPackaged: false, getPath: () => dir },
+      sessionFromPartition: (partition) => {
+        seenPartition = partition
+        return { cookies: { get: async () => [{ name: 'SESSDATA', value: 'abc', domain: '.bilibili.com', path: '/' }] } }
+      },
+      emit: () => {},
+      downloadDir: () => dir,
+      log: () => {},
+    })
+    void svc
+    const r = (await handlers.get('browser:downloadMediaStart')!(null, {
+      url,
+      filename: 'b.mp4',
+      referer: 'https://www.bilibili.com/video/BV1x',
+      platformId: 'bilibili',
+      useYtdlp: false,
+    })) as { success: boolean }
+    expect(r.success).toBe(true)
+    expect(seenPartition).toBe('persist:tintin-bili')
+    expect(String(seenHeaders.cookie)).toContain('SESSDATA=abc')
+    expect(seenHeaders.referer).toBe('https://www.bilibili.com/video/BV1x')
   })
 
   it('参数缺失 url → 显式报错（铁律 2）', async () => {

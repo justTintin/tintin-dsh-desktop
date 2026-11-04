@@ -7,6 +7,7 @@ import {
   PLATFORM_COOKIE_DOMAINS,
   PLATFORM_DEFS,
   detectPlatformFromUrl,
+  isDeepLinkScheme,
   isDetailPage,
 } from '../src/browser/platform-meta'
 import { formatNetscapeCookie, formatNetscapeCookies } from '../src/browser/netscape-cookies'
@@ -44,6 +45,21 @@ describe('browser platform meta (SRC platform-meta 1:1)', () => {
     }
     // fxg 抖店分区存在但不进浏览器面板（browser:platforms 过滤，引擎侧约定）
     expect(PLATFORM_DEFS.fxg?.partition).toBe('persist:tintin-fxg')
+  })
+})
+
+describe('deep link swallow list (2026-11-04 user ruling 「按推荐处理」)', () => {
+  it('covers the reported bytedance scheme and every platform family', () => {
+    for (const scheme of ['bytedance', 'snssdk1128', 'snssdk1233', 'douyin', 'bilibili', 'xhsdiscover', 'kuaishou', 'weixin']) {
+      expect(isDeepLinkScheme(scheme)).toBe(true)
+    }
+  })
+
+  it('matches case-insensitively and leaves web/mail schemes alone', () => {
+    expect(isDeepLinkScheme('ByteDance')).toBe(true)
+    expect(isDeepLinkScheme('https')).toBe(false)
+    expect(isDeepLinkScheme('http')).toBe(false)
+    expect(isDeepLinkScheme('mailto')).toBe(false)
   })
 })
 

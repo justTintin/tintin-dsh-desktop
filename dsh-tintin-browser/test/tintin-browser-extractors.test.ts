@@ -7,7 +7,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { buildExtractorScript, extractionError } from '../src/browser/browser-service'
+import { buildExtractorScript, extractionError } from '../src/browser/extract-script'
 import { PLATFORM_DEFS } from '../src/browser/platform-meta'
 
 const EXTRACTOR_DIR = join(import.meta.dirname, '..', 'extractors')

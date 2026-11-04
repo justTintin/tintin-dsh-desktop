@@ -26,9 +26,7 @@ const BILI_EXT_DL = 'browser:bili-ext-dl'
 const DOWNLOAD_PROGRESS = 'downloads:progress'
 const DOWNLOAD_DONE = 'downloads:done'
 const DOWNLOAD_ERROR = 'downloads:error'
-const HOTSPOT_PROGRESS = 'browser:hotspot-progress'
 const AUTO_LISTING_PROGRESS = 'autoListing:onProgress'
-const CREATORS_PROGRESS = 'creators:collect-progress'
 
 const desktopBrowser = {
   // 平台/登录态/开窗（独立窗口路径仍由主进程 browser:open 承载；位置参数=平台 id）
@@ -37,11 +35,9 @@ const desktopBrowser = {
   open: (platform: string) => invoke('browser:open', String(platform || '')),
   extractDOM: (payload: unknown) => invoke('browser:extractDOM', payload),
   exportCookies: (payload?: unknown) => invoke('browser:exportCookies', payload),
-  // 每日素材/热榜/嗅探/下载
-  getDailyAssets: () => invoke('browser:getDailyAssets'),
+  // 嗅探/下载（每日素材视图已按 2026-11-04 用户裁决移除，getDailyAssets/openDailyAsset/
+  // captureHotspots/onHotspotProgress 通道暴露点随之删除；revealDailyAsset 保留=历史视图「定位」在用）
   revealDailyAsset: (payload: unknown) => invoke('browser:revealDailyAsset', payload),
-  openDailyAsset: (payload: unknown) => invoke('browser:openDailyAsset', payload),
-  captureHotspots: (payload?: unknown) => invoke('browser:captureHotspots', payload),
   sniffList: (payload?: unknown) => invoke('browser:sniffList', payload),
   sniffClear: (payload?: unknown) => invoke('browser:sniffClear', payload),
   sniffDownload: (payload: unknown) => invoke('browser:sniffDownload', payload),
@@ -68,20 +64,12 @@ const desktopBrowser = {
   autoListingStatus: (payload?: unknown) => invoke('autoListing:status', payload),
   autoListingOpenResultDir: (payload: unknown) => invoke('autoListing:openResultDir', payload),
   onAutoListingProgress: (listener: (payload: unknown) => void) => on(AUTO_LISTING_PROGRESS, listener),
-  // 达人采集
-  creatorsGetCreators: (payload?: unknown) => invoke('creators:getCreators', payload),
-  creatorsAddCreator: (payload: unknown) => invoke('creators:addCreator', payload),
-  creatorsDeleteCreator: (payload: unknown) => invoke('creators:deleteCreator', payload),
+  // 素材采集清单（达人库 UI 已按 2026-11-04 用户裁决移除，本通道是清单页唯一数据源）
   creatorsGetCollected: (payload: unknown) => invoke('creators:getCollected', payload),
-  creatorsCollectFromCreator: (payload: unknown) => invoke('creators:collectFromCreator', payload),
-  onCreatorsProgress: (listener: (payload: unknown) => void) => on(CREATORS_PROGRESS, listener),
-  // 素材库（下载/嗅探记录/收藏）
+  // 素材库（下载/嗅探记录；收藏三通道随网页收藏视图删除，历史视图只读下载+嗅探两记录）
   mediaStorageGetDownloads: (payload?: unknown) => invoke('media:storageGetDownloads', payload),
   mediaStorageGetSniffed: (payload?: unknown) => invoke('media:storageGetSniffed', payload),
   mediaStorageClearHistory: (payload: unknown) => invoke('media:storageClearHistory', payload),
-  mediaStorageGetFavorites: (payload?: unknown) => invoke('media:storageGetFavorites', payload),
-  mediaStorageAddFavorite: (payload: unknown) => invoke('media:storageAddFavorite', payload),
-  mediaStorageRemoveFavorite: (payload: unknown) => invoke('media:storageRemoveFavorite', payload),
   // 下载进度事件（页面下载栏）
   onDownloadEvent: (listeners: { progress?: (payload: unknown) => void; done?: (payload: unknown) => void; error?: (payload: unknown) => void }) => {
     const offs = [
@@ -91,7 +79,6 @@ const desktopBrowser = {
     ].filter((v): v is () => void => v !== null)
     return () => { for (const off of offs) off() }
   },
-  onHotspotProgress: (listener: (payload: unknown) => void) => on(HOTSPOT_PROGRESS, listener),
 }
 
 const tintinBrowserPage = {

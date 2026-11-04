@@ -27,7 +27,7 @@ import {
   extractDouyinVideoIdFromUrl,
   validateDouyinParseResponse,
 } from './douyin-parse-logic.ts'
-import { detectPlatformFromUrl, PLATFORM_COOKIE_DOMAINS } from './platform-meta.ts'
+import { detectPlatformFromUrl, PLATFORM_COOKIE_DOMAINS, PLATFORM_DEFS } from './platform-meta.ts'
 
 /** 会话内最小 cookie 形状（Electron Cookie 的子集） */
 interface CookieLike {
@@ -60,6 +60,14 @@ export interface MediaDownloaderDeps {
 
 /** 老平台兼容：iqiyi/youku/mgtv/weibo 未纳入 platform-meta 平台体系，仍按视频页走 yt-dlp */
 const LEGACY_VIDEO_PAGE_HOSTS = ['iqiyi.com', 'youku.com', 'mgtv.com', 'weibo.com']
+
+/** platformId → 分区名（2026-11-04 修复：原拼 `persist:tintin-${platformId}`，而
+ *  bilibili/xiaohongshu 的真实分区是别名 bili/xhs —— 拼出不存在分区，cookie 注入
+ *  拿到空 jar，B站高画质/小红书登录态流匿名下载失败降级）。未知名表平台回落原拼接。 */
+export function partitionForPlatform(platformId: string | undefined): string {
+  if (!platformId) return 'persist:tintin-browser'
+  return PLATFORM_DEFS[platformId]?.partition ?? `persist:tintin-${platformId}`
+}
 
 function isValidVideoPageUrl(url: string): boolean {
   if (!url) return false
@@ -346,7 +354,7 @@ export function createMediaDownloaderIpc(deps: MediaDownloaderDeps) {
     const { url, audioUrl, filename, title, referer, subDir, useYtdlp, platformId } = params || {}
     if (!url) return { success: false, error: '参数缺失：url' }
     const taskId = String(params.taskId || genTaskId('mdl'))
-    const partition = platformId ? `persist:tintin-${platformId}` : 'persist:tintin-browser'
+    const partition = partitionForPlatform(platformId)
 
     let dir = downloadDir()
     try {
