@@ -21,6 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { projectsRootOf } from './cover-asset.js'
 import { connectControl, launchApp } from './photocraft.js'
 import { registerCoverAcpRoutes } from './cover-acp-routes.js'
+import { registerCoverToolsMcp } from './cover-tools-mcp.js'
 // 配置仓/技能落盘管线=宿主公共设施(dsh-tintin-shared 叶子包,2026-10-31 抽共享包
 // 裁决);bundle 侧 channel-table/machine-id-store 同用。
 import { mergeTintinConfigStore } from 'dsh-tintin-shared/lib/tintin-config-store.js'
@@ -875,6 +876,13 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     resolvePluginDir,
   })
 
+  // ── 本地工具 MCP(/tintin/cover/api/tools-mcp;2026-11-04 感知闭环+工具收敛立项)──
+  // 渲染回看/看图/抠图链三个工具的 streamable-http 端点; 会话侧经补丁行
+  // mcp-cover-tools 挂载(cover-acp-bridge.js writePatch, url=apiOrigin+本路径)。
+  const disposeToolsMcp = registerCoverToolsMcp({
+    webServer: registeringWebServer, isTrustedRequest, sendJson, getServerUrl, loadEngine, resolvePluginDir,
+  })
+
   // 编辑器业务通道(方案 B B2,2026-11-02 用户裁决):/tintin/ipc/cover/<name> 前缀路由——
   // 与 bundle 的 /tintin/ipc 长前缀竞争(宿主=最长前缀胜),按收集表把请求原样转发给
   // 同一处理器(重写 url 为原 REST 形态,query 保留;方法与信任判定仍由各处理器自守)。
@@ -916,5 +924,6 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     disposeCoverSkillsRemove()
     for (const d of pcDisposes) { try { d() } catch { /* ignore */ } }
     disposeAcp()
+    disposeToolsMcp()
   }
 }

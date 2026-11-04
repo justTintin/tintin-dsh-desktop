@@ -108,6 +108,7 @@
 | 2026-11-01(第 2 步收尾+第 4 步) | **四链路身份区分落地**(--film/--cover/--rest 占位 key 分值+REST 面 Authorization,§6.7);**端到端验收两链路 PASS 并揪出存量 bug**:封面补丁 MCP 行缺 `- insert:` 包裹(10-31 重构起封面会话一直无 MCP 工具、模型被迫 curl 绕行)已修;cover SKILL 生图节与工作纪律对齐(生成统一 create_image,禁 curl 直调 REST;matting 保留);film BGM 全链 97s/13 次、cover 底图全链 536s/21 次调用(护栏精确豁免轮询 9 次) | 本文 §6.7/§7 |
 | 2026-11-01(第 3 步+技能通道区分) | **任务层兜底落地**:两桥登记 create_* 异步 task_id(tool_call_update 观察),60s 看门狗,超 30 分钟未终态→task-stale 事件+日志(只提一次),提取/结算纯函数含单测;**两份本地技能加「本地 vs 服务端」通道分类**(用户指令:本地技能必须与服务端明确区别)——cover SKILL 加能力通道表,openfilm SKILL 加 Channel map(纠正其 tintin_* 工具节=主聊天形态、film 会话不存在的错位,给出 MCP 映射与无对应能力清单) | 本文 §5;film-acp.spec.ts 任务兜底用例 |
 | 2026-11-01(历史残留清扫) | **会话侧 REST 生成教学全部退役**(用户指令:走 MCP,清除历史设计残留)——openfilm SKILL Fallback 节收窄(仅查询类可 `openfilm get call`/curl;生成类一律 MCP,缺工具如实说明,删除了 curl 直调服务端示例);cover 桥动态附录标注编辑器 API 会话用途只剩导出 render;cover-plugin-route 注释口径更正(generate-background/product 消费方=编辑器界面按钮,不再服务会话);全仓扫描确认会话侧无 REST 生成教学残留(curl/端点出现处全为禁令或 matting 例外) | cover-acp-bridge.js、cover-plugin-route.js、两份 SKILL |
+| 2026-11-04 | 感知闭环批:模型行声明 input:[text,image](用户图过协议闸)+封面本地工具 MCP mcp-cover-tools(渲染回看/看图/抠图链)+SKILL 渲染回看完成判据 | [tintin-openfilm-port.md](tintin-openfilm-port.md) §16.13、[cover-generation-requirements.md](cover-generation-requirements.md) §十四 |
 
 ---
 

@@ -150,6 +150,8 @@ const COVER_AGENT_WORK_RULES = [
   '3. 修改封面一律写 cover.props.json(origin=agent), 图层协议遵循 cover 技能文档; 调用编辑器 API 必须带 x-tintin-cover-agent 令牌头, 基址以技能文档动态附录为准(带 /tintin/cover/api 前缀, 裸 origin 全部 404)。',
   '4. 需求缺关键要素(主体/风格/画幅/文案)先问清再生成; 与封面无关的请求如实说明, 不虚构能力。',
   '5. 始终用简短中文回复。',
+  '6. 完成判据(2026-11-04 感知闭环): 凡改动 cover.props.json 或产出/落位图片, 必须先 mcp__cover-tools__render_preview 渲染并查看预览图, 确认文字不溢出/图层位置符合要求/画面成立后才向用户报告完成; 禁止不看结果就宣称完成(2026-11-04 事故: 无看图通道时模型自创像素扫描死循环 43 连)。',
+  '7. 多步任务(生成/抠图/改版式/导出)动手前先用一句话列出计划(用哪个模板、几步); 中途变更计划要说明。',
 ].join('\n')
 
 /** 模型路由补丁(与 film 同源:服务端 openai-completions;权限全放行走聊天卡之外的兜底)。
@@ -160,9 +162,13 @@ function writePatch(state, models, agent = 'deepseek') {
   mkdirSync(dir, { recursive: true })
   const path = join(dir, agent === 'deepseek' ? 'cover-deepseek-agent.patch.yml' : 'cover-agent.patch.yml')
   /* 2026-10-30 用户裁决:默认(首个)模型显示名=TinTin智能体 —— 选择器按钮与模型行
-     显示角色名而不是裸模型 id(同影片侧做法);deepseek 角色保持原生名。 */
+     显示角色名而不是裸模型 id(同影片侧做法);deepseek 角色保持原生名。
+     2026-11-04 感知闭环:模型行声明 input:[text,image](llm-pi-ai schema=config.ts
+     `input`)——缺省=纯文本,会话不广播 inline image prompts,用户附图在 ACP 协议层
+     被「inline image prompts were not advertised」拒绝(1104 事故总根因:智能体从未
+     见过用户图)。服务端 /llm 已 caption-then-main,声明即真。 */
   const rows = models
-    .map((m, i) => `          - id: ${m.id}\n            name: ${agent === 'tintin-agent' && i === 0 ? 'TinTin智能体' : m.name}`)
+    .map((m, i) => `          - id: ${m.id}\n            name: ${agent === 'tintin-agent' && i === 0 ? 'TinTin智能体' : m.name}\n            input: [text, image]`)
     .join('\n')
   /* 工作纪律进 system-prompt(与 film-acp.ts personaLines 同格式) */
   const personaLines = [
@@ -187,6 +193,19 @@ function writePatch(state, models, agent = 'deepseek') {
     '        transport: streamable-http',
     `        url: ${state.serverUrl.replace(/\/+$/, '')}/mcp`,
     '        failOnStartupError: true',
+    /* 本地工具 MCP(2026-11-04 感知闭环+工具收敛立项): 渲染回看/看图/抠图链,
+       端点在封面 webServer(lib/cover-tools-mcp.js); url 用 apiOrigin(会话 start
+       时按请求 host 捕获)——未捕获时跳过该行, 智能体仍有服务端工具可用。
+       两行共用同一个 insert 块(补丁合并器对多行子项的语义=逐行插入)。 */
+    ...(state.apiOrigin ? [
+      '    - id: mcp-cover-tools',
+      "      name: '@deepseek-ai/dsh-mcp-client'",
+      '      config:',
+      '        serverName: cover-tools',
+      '        transport: streamable-http',
+      `        url: ${state.apiOrigin}/tintin/cover/api/tools-mcp`,
+      '        failOnStartupError: false',
+    ] : []),
     '- id: llm-pi-ai',
     '  config:',
     '    providers:',

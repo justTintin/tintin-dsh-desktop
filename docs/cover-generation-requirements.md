@@ -509,3 +509,17 @@ POST /tintin/cover/api/acp/chat-sessions|chat-turn|chat-attachment|chat-ref-imag
 22. **首版无依据功能清理(2026-11-01 用户裁决)**:盘点 10-28 首版(0dd1bc8b3a)引入、在本文档裁决/代码裁决注释/PhotoCraft 中均找不到依据的功能,删除六项——①三个模板印进封面的「remotion · renderStill」字样(节目封面底栏、商品封面角标旁、视频封面品牌条旁);②节目封面写死的 T 徽标+「TINTIN DESKTOP」(横竖两版,品牌条随之从节目封面图层清单移除);③商品封面品牌行写死的「G」图标(横竖两版);④导出弹窗「方屏 1080×1080」(并无方屏模板,实际导出 1280×720);⑤画布底部开发提示「模板快出模式 · 点选文字可直接拖动 · 导出走 renderStill」;⑥文字图层「重置样式」(PhotoCraft 无对应)。第七项「示例内容做默认值」的改法待裁决。同日更早已删「恢复默认」(见 cover-editor-optimization.md)。
 23. **示例默认值清除与导出两处缺陷(2026-11-01 用户裁决「按建议改」)**:①六个模板的默认值改为空(只保留字段清单:文字为空串、列表为空、图片为空),打开项目、智能体回写缺字段、横竖屏切换、切模板、编辑器初始状态都不再带入示例内容;示例图 `mouse.jpg` 文件保留(已有项目把它当产品图引用),只是不再当默认值。②导出路由此前只把 props 交给引擎、丢掉单独上送的 `hiddenLayers`,图层面板里隐藏的图层导出时照样印出来(首版起如此;10-31 请求里补发了 hiddenLayers 但路由没读),现并入 props 交给引擎。③导出校验此前检查全部文字图层、不看是否隐藏,10-30 裁决形态的空白项目(文字置空、固定图层全隐藏)三族模板都导不出;现只检查显示中的文字图层,显示着却为空(含空列表)仍拦下提醒;PhotoCraft 启动请求同步带上隐藏图层,校验口径一致。
 24. **字体对齐 PhotoCraft(2026-11-02 用户裁决「对齐 PhotoCraft」)**:废除首版 7 种字体白名单(`FONT_WHITELIST`),改为运行时枚举本机全部已装字体——宿主新模块 `lib/cover-fonts.js` 扫描系统+用户字体目录(递归 ttf/otf/ttc/otc),解析 sfnt name/OS-2 表(族名=nameID16/1,中文名=lang 0x804,样式=17/2,字重=usWeightClass;**TTC 子字面的表偏移按文件绝对值**),经 `GET /tintin/cover/api/fonts` 提供编辑器。编辑器字体下拉=可搜索全量列表(中文名主显+英文副显)+「最近使用」置顶(localStorage,10 条)+首项「默认(黑体系)」;新增「样式」下拉=该字体的字面(常规/字重/斜体,存 `styles.<层>.weight`(100–900)与 `italic`)。族名消毒防 CSS 注入;渲染 fontFamily=`"<族名>", "Microsoft YaHei", sans-serif`(缺字回落雅黑),渲染机即本机,画布与导出同源。顺带修一个既有缺陷:模板此前把 `fontWeight: 900/600` 写死在 layerStyle 展开之后(字重选择从不生效),两个视频模板的钩子大字更是整段没接 fontFamily(字体选择对其无效)——现用户设置优先,未设置保持模板原设计。智能体词汇同步(SKILL.md:font=任意已装英文族名,可 GET fonts 列表)。
+
+## 十四、感知闭环+工具收敛(2026-11-04 用户立项并实施,1104 事故驱动)
+
+依据:«字节跳动 Agent 实践手册»对照审计([tintin-agent-dev-standards.md](tintin-agent-dev-standards.md) T1/T3/T4/T7;源参考 [agent-practice-manual.md](agent-practice-manual.md) §2.1.3/§5.2.2)发现封面智能体**三层缺陷**,且端到端探针挖出**协议层总根因**:llm-pi-ai 模型行缺省 `input` 为纯文本→会话不广播 inline image prompts→用户附图在 ACP 协议层被拒(`inline image prompts were not advertised`)→智能体从未见过用户图。修复=封面(cover-acp-bridge.js writePatch)+影片(film-acp.ts)模型行声明 `input: [text, image]`(服务端 caption-then-main 已部署生效,探针 A/B/C 三绿,声明即真);联动解锁 harness 原生 read-image 工具与 MCP 工具图片块回传。
+
+发现封面智能体**三层缺陷**:①感知层缺失——只读 props 文本,看不见画布/产物,1104 被逼出像素扫描死循环;②关键动作走裸 curl/pwsh 无校验(假 PNG 事故);③模型/工具无 fallback。本批落地客户端侧(服务端视觉修复 caption-then-main 另见 [tintin-server-llm-vision-routing.md](tintin-server-llm-vision-routing.md),待 .31 部署):
+
+1. **渲染回看闭环(完成判据)**:新增本地工具 `render_preview`(渲染当前 cover.props.json → 预览 PNG 以图片块回给模型);SKILL 与 system-prompt 工作纪律各加一条「改完/落位图必须渲染回看,确认文字不溢出/图层位置对/画面成立才报告完成;禁止盲交付」。
+2. **看图通道**:新增 `read_image`(项目目录+素材位,魔数+8MB 校验)——生成结果/素材/导出图可看,像素扫描禁令有替代物。
+3. **抠图工具收敛**:新增 `matting`(内置健康模型链 isnet-general-use→u2net→isnet-anime——1104 实测 bria-rmbg/silueta 服务端 ONNX 崩溃禁用;HTTP 状态+PNG 魔数双校验;失败错误原文上返;产物落素材三写位+项目目录),替代裸 curl。
+4. **接线**:三工具以最小 streamable-http MCP 端点挂封面 webServer(`/tintin/cover/api/tools-mcp`,lib/cover-tools-mcp.js);会话侧经 writePatch 补丁行 `mcp-cover-tools`(与 mcp-tintin-server 同一 insert 块,url=apiOrigin+本路径,apiOrigin 会话 start 时已捕获)进程级挂载,工具名 `mcp__cover-tools__*`。failOnStartupError=false(端点缺失不杀会话,只少工具)。
+5. **SKILL/工作纪律增补**:计划先行(多步任务先一句话列计划);反循环/落盘校验守规保留;能力通道表加本地工具行。
+6. **验证**:cover vitest 99/99 绿(新增 4 用例:协议面/read_image 越界拒绝/matting 模型链换备选+双写落盘+全败原文/render_preview 判据文案+无 props 报错);check:tintin 全绿(84 锚点+载荷新鲜);热同步随批。生效=重启应用+新建封面会话。
+7. **待裁决**(不在本批):封面会话默认模型是否升级 v4-pro(成本);T7 封面冒烟用例集脚本化;服务端 matting 坏模型(bria-rmbg/silueta)修复/下线。

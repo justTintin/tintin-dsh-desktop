@@ -415,6 +415,10 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 
 `startMedia` 用 `persist:tintin-${platformId}` 现拼分区名, 而 bilibili/xiaohongshu 的真实分区是**别名** `persist:tintin-bili`/`persist:tintin-xhs`(platform-meta)——拼出**不存在的分区**, `sessionFromPartition` 拿到空 jar: yt-dlp 路线的临时 Netscape 与流式路线的 Cookie 头**全部匿名**, B站高画质流(扩展助手双流合并那链)/小红书登录态流下载失败降级。修复: 新增 `partitionForPlatform`(media-downloader, 导出供单测)——`PLATFORM_DEFS[platformId]?.partition ?? 'persist:tintin-' + platformId`(未知名表平台回落原拼接, 缺省保持 `persist:tintin-browser`); startMedia 改走该映射。验证: 新增纯函数映射用例 + 本地 http server 端到端用例(platformId=bilibili 实测请求分区=persist:tintin-bili、请求头带 Cookie=SESSDATA 与 Referer), tintin-browser 13 文件用例全绿, check:tintin + 包 build 绿。抖音/快手/视频号/YouTube/web 直名分区原拼接本就对, 行为不变。
 
+## 16.13 影片/封面会话图片输入声明修复(2026-11-04,1104 事故总根因,用户立项「感知闭环」批)
+
+**总根因实锤**:封面会话带图 QA 的一切怪象(「读取中」无结果/智能体没见过图/像素扫描死循环)的协议层根因=`llm-pi-ai` 的模型行**缺省 `input` 为纯文本**——会话不广播 inline image prompts,用户附图在 ACP 协议层即被拒(`Invalid params: inline image prompts were not advertised`),智能体从未见过用户图,「查看这张图片」全是无图瞎猜。修复=影片(film-acp.ts `filmAgentPatchText`)+封面(cover-acp-bridge.js `writePatch`)模型行统一声明 `input: [text, image]`(服务端 /llm 已 caption-then-main 部署生效,A/B/C 探针三绿,声明即真)。联动解锁:①harness 原生 read-image 工具(模型声明 image 输入后自动可用,1104 探针实证智能体用它看图);②MCP 工具图片块结果可回传(mcp-cover-tools 的 render_preview/read_image 依赖此闸)。端到端探针(.tmp-cover-probe-image2.mjs):带图 prompt 被接受,智能体读图后输出计划先行文本(「计划:①…②用 matting 抠图,把鼠标主体…」),多步工具连跑健康。双文档同步=本文+cover-generation-requirements.md §十四。
+
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 
 > 依据:«字节跳动 Agent 实践手册»§4.3.1 创作辅助四段形态(创意方案→素材推荐→拍摄建议→**剪辑建议**)对照——前三段我们已有且更深,第四段(有人看节奏/转场/字幕落点并给建议)完全空白;用户裁决立项补齐,并追加「根据素材自动粗剪」。源参考:[agent-practice-manual.md](agent-practice-manual.md) §4.3.1/§5.2/§8.2.3;开发标准条款:[tintin-agent-dev-standards.md](tintin-agent-dev-standards.md) T1/T2/T4/T7。**本文只立项不定实现;动代码前先过 §17.4 的验收判据与 §17.2 的 spike 门。**

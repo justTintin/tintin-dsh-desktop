@@ -144,7 +144,11 @@ export function filmAgentHomeDir(persona: FilmAgentPersona): string {
     无视 session/new 的 mcpServers 参数(坏 URL 也不报错、子进程零连接, 当日探针),
     会话参数挂载失效;补丁行按官方 README 最小配置进程级挂载, 工具名 mcp__tintin-server__*。 */
 export function filmAgentPatchText(serverUrl: string, models: FilmAgentModels[] = FILM_AGENT_MODELS, personaPrefix = ''): string {
-  const rows = models.map((m) => `          - id: ${m.id}\n            name: ${m.name}`).join('\n')
+  /* 2026-11-04 感知闭环:模型行声明 input:[text,image](llm-pi-ai schema `input`)——
+     缺省=纯文本,会话不广播 inline image prompts,用户附图在协议层被拒
+     (「inline image prompts were not advertised」,1104 事故同根因,与封面侧同修)。
+     服务端 /llm 已 caption-then-main,声明即真。 */
+  const rows = models.map((m) => `          - id: ${m.id}\n            name: ${m.name}\n            input: [text, image]`).join('\n')
   const personaLines = personaPrefix
     ? ['- id: system-prompt', '  config:', '    personaPrefix: |-',
       ...personaPrefix.split('\n').map((line) => `      ${line}`)]
