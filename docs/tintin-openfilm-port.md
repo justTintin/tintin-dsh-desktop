@@ -357,8 +357,103 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 
 设计语义(相对 1030 批注释的变更): 服务端技能的「卸载」不再视为纯服务端事务——本机安装副本的生命周期归弹窗管(装/删对称), 服务端注册表的增删仍不在此弹窗范围。
 
-## 17. 已知缺口/非目标
+## 16.7 浏览器域：达人库移除(2026-11-04, 用户裁决「删除达人库」)
+
+浏览器页(`build/tintin-browser.html`)功能扩展行的「达人库」入口按用户裁决整体移除:
+
+- **UI**: 功能扩展行删 `creators` 项; `#view-creators` 视图(达人库 tab + 新增达人 + 页内素材采集副视图)整段删除; `#view-collect` 的「到达人库发起采集」跳转按钮随迁删除(目标视图不存在);
+- **页面脚本**: 达人库逻辑(crSwitch/crLoad/crRenderCreators/crAdd/采集进度订阅)删除; 素材采集清单保留为独立查看面——`clLoad/clRender` 瘦身为只读 `creators:getCollected`(不再引用已删的 crTab 双列表); 仅服务于达人采集进度的 `alLogLine` 一并删除(零调用方);
+- **preload**(`browser-page-preload.ts`): 只保留 `creatorsGetCollected`(素材采集清单唯一数据源), `creators:*` 其余四通道与 `onCreatorsProgress` 暴露点删除; 壳侧 `creators-store.ts` 与五通道 IPC 原样保留(锚点不要求动, `appendCollected` 现无 UI 写入方——清单成为既有记录的存档视图);
+- 验证: 页面脚本 `node --check` + jsdom 装载冒烟(无桥启动零异常、功能扩展行五项、素材采集切换与视图元素齐全) + `check:tintin` 绿。
+
+## 16.8 浏览器域：使用性限制清除批(2026-11-04, 用户裁决「限制删除；登录态与下载链路保留；平台退化为正常收藏」)
+
+限制盘点(同日审计)分层 A-E 共 11 项, 本批清除使用面四项, **下载扩展/登录态/下载链路机制一件未动**(分区 jar/cookie 导出/嗅探/B站与抖音下载助手/media-downloader 全保留):
+
+- **地址栏直达(A1)**: `tintin-browser-page:action` 的 `go`/`home` 不再要求「先有活跃平台视图」——无视图时自动落分区承载输入; 原「尚未打开任何平台页面」静默拒载(且页面丢弃返回结果)退役;
+- **域名路由分区(B5)**: 输入网址按 `detectPlatformFromUrl` 路由——已知平台落自己分区(登录态进导出链读的 cookie jar), 其余落 web 分区; 原行为=永远留在当前分区, 跨站登录态断;
+- **种子页只首载(B6, 收藏语义)**: `navigateTo(platform, targetUrl?)` + `seededPlatforms` —— 平台行=收藏语义「切到该站现场」, 首次激活才载种子页, 再次点击保留现场不重载; 原行为=每次点击强制回种子页;
+- **弹窗就地打开(B3)**: `setWindowOpenHandler` 的 http(s) 新页/弹窗改为在当前分区视图就地打开(弹窗式 OAuth 登录态因此落进本分区, cookie 导出链可达), 非 http 协议拒绝; 原 SRC C7「外链一律交系统浏览器」红线按本裁决退役;
+- **搜索兜底(B4, 页面)**: 地址栏非网址输入(无点分域名形态)不再硬拼 `https://`(无效主机白屏), 按关键词走百度搜索; 域名/IP/localhost 自动补协议;
+- **web 起始页(A2)**: pinterest.com(国内不可达, 首开必白屏)→ baidu.com;
+- 实现位置: browser-service.ts(activatePlatformView 提取 + navigateTo 签名扩展 + action 分派重排 + window-open 重写)/platform-meta.ts(种子)/tintin-browser.html(normalizeAddress); 千行红线付账: 抽取脚本三件套(extractorScriptDir/extractionError/buildExtractorScript)提取 `extract-script.ts`, browser-service 980 行; 保留项: 登录徽标/分区隔离/全部下载面; 未清除: 代理支持(需先有代理来源设置面)、密码保存(Electron 分区无此机制)、「服务端」死端按钮(E10, 待产品裁决)。
+
+**收尾批(同日)**: E10「服务端」死端按钮按其标题语义落地 —— 壳侧新增 `resolveServerUrl` 注入(main-hook 用通道 home `tintin/config.json` 的 `server.url` 供值, dsh-tintin-browser 不依赖通道目录约定), `server` 动作改为 navigateTo('web', 服务端地址), 未配置返回人话错误; 页面新增 `#toast` 提示条, `nav()` 统一出口把全部动作的 `ok:false`/异常上屏(消灭本批根因同类的「静默失败」类), `serverBtn` 改走 nav。
+
+## 16.9 浏览器域：网页收藏与每日素材移除(2026-11-04, 用户裁决「每日素材，素材收藏 删除」)
+
+功能扩展行(红框两项)整删, 行剩 3 项(自动上架/素材采集/扩展管理):
+
+- **UI**: `#view-favorites`(网页收藏)与 `#view-dailyassets`(每日素材, 含日期/类型/搜索/排序筛选与「采集今日热点」按钮)两视图 + EXT_ITEMS 两项 + 页面脚本(fv 三件/da 全家含绑定与启动拉取)删除; `.da-*` 卡片 CSS 随删(`.da-btn` 保留——历史「刷新」/扩展「安装」行内按钮仍在用, 注释改小按钮语义);
+- **preload**: `getDailyAssets/openDailyAsset/captureHotspots/onHotspotProgress` 与收藏三通道(`mediaStorageGetFavorites/AddFavorite/RemoveFavorite`)暴露点删除; **保留** `revealDailyAsset`(历史视图「定位」在用)与 `mediaStorageGetDownloads/GetSniffed`(历史视图数据源); `mediaStorageClearHistory` 本就无调用方, 未动(非本批后果);
+- **壳层**: `browser:getDailyAssets/openDailyAsset/captureHotspots` 三个 handler 删除(唯一消费方=被删视图); 扫描逻辑 `daily-assets-logic.ts` 与热点采集 `hotspot-capture.ts` **原样保留**(纯函数+单测在册; 热点采集经 loopback 门面对 agent 的通路不受影响); media-storage 工厂不动(锚点+下载/嗅探记录仍被历史消费);
+- 边界澄清: 媒体包 `global.d.ts` 的浏览器桥段是 **SRC 源项目 `window.tintinBrowser` 契约的只读参考类型**(媒体包零调用), 与现行 `dshDesktopBrowser` 面无关, 不随本批改;
+- 后果备注: 「采集今日热点」的 UI 入口随视图消失, agent 侧 loopback `captureHotspots` 仍在; 验证: 页面语法+jsdom 冒烟(功能扩展 3 项/两视图元素不存在/历史与扩展视图切换完好)+tintin-browser 87 用例+check:tintin+包 build 全绿。
+
+## 16.10 浏览器域：App 深链吞掉(2026-11-04, 用户报障「获取打开此'bytedance'链接的应用」弹窗, 裁决「按推荐处理」)
+
+现象=集成浏览器里点 B站页面(广告位)的 `bytedance://` 深链, Windows 弹「获取打开此链接的应用」。根因两层: ①Electron 壳对外部协议**无询问直接转交系统**(`shell.openExternal`), 没有 Chrome 的三道前置防线(用户手势校验/沙盒 iframe 静默拦截/自家确认气泡)——系统查无处理程序即弹; ②B3 批「弹窗就地打开」后, 广告落地页在我们的分区视图里触发深链, 弹窗从系统浏览器转移到产品内。实现:
+
+- **名单**: `PLATFORM_DEEP_LINK_SCHEMES`(platform-meta, 15 项: bytedance/snssdk1128/snssdk1233/snssdk13/douyin/douyinlite/toutiao/ixigua/bilibili/biliintl/xhsdiscover/kuaishou/kwai/ksnebula/weixin) + 纯函数 `isDeepLinkScheme`(大小写不敏感);
+- **主帧拦截**: `ensureBrowserView` 的 `will-navigate` 命中名单 → `preventDefault`(页面停在原地) + 打点 `deep link blocked (main frame)`;
+- **子帧/兜底**: `registerDeepLinkSwallow` 给 9 个平台分区 session 注册空响应协议处理器(204 + 打点 `deep link swallowed`)——协议处理器存在后 Chromium 不再走外部协议链路, iframe 深链页内消化主页面无损; 注册失败打点;
+- **名单外协议不拦**(mailto/tel/淘宝 tbopen 等维持系统行为, 与裁决范围一致, 名单可扩); 登录态/下载链路不受影响(纯导航层拦截);
+- 验证: platform-meta 新增两组单例(名单覆盖/大小写与无关协议), tintin-browser 13 文件用例全绿, check:tintin + 包 build 绿。
+
+## 16.11 浏览器域：媒体嗅探三处缺陷修复(2026-11-04, 用户报障「抖音播放嗅探不到视频下载地址」, 裁决「实施」)
+
+嗅探链路(壳侧 webRequest 采集→分区缓冲→页面轮询)自 Phase 3 移植(50124521d8)起**从未端到端工作过**, 三处缺陷:
+
+- **A 壳侧(致命)**: `createMediaSniffer()` 创建语句在 attach 循环之后约 200 行, `mediaSniffer?.attach` 可选链在 null 上静默吞掉 → webRequest 监听从未注册; 循环一次性门(cookieWatchInstalled)使它永远补不上 → **修复=创建上移到挂接之前**(本地 `sniffer` 常量挂接, 免可选链)。
+- **B 页面侧**: 平台按钮构建循环里混入缩进异常的 `sniffWatch(p.id)`(合并残留), 在**构建时**逐个执行 → `sniffPlatform` 恒锁平台列表最后一个(即梦AI), 面板每 2s 轮询的永远是即梦的空缓冲 → **修复=移进 onclick**, 点谁嗅探谁。
+- **C 挂接面缺口**: attach 循环骑在 `PLATFORM_COOKIE_DOMAINS`(6 下载平台)上, **web/即梦分区从未挂嗅探**——网页浏览器分区的媒体永远嗅不到 → **修复=独立循环覆盖 `PLATFORM_IDS` 全部 9 分区**。
+- **顺带接线(裁决内)**: SRC 详情页白名单门——`attach` 增加可选 `pageUrl` 供应方(壳侧供该平台当前页 URL), 页面不在详情页模式白名单内不收; 防 feed 页预加载相邻视频刷屏(SRC 2026-09-02 用户反馈事故, platform-meta 白名单表移植了但从未接线); 无供应方时兼容旧调用面不门控。
+- 千行红线付账: `registerDeepLinkSwallow` 提取 `deep-link-guard.ts`(browser-service 988 行时点回撤)。
+- 验证: sniffer 新增门控用例(feed 不收/详情收/web 分区口径/旧面兼容), tintin-browser 13 文件用例全绿, check:tintin + 包 build 绿; URL 规则本身对抖音覆盖(`.douyinvod.com`/`video/tos`/`.mp4`/`.m3u8`), 非规则问题。
+
+## 16.12 浏览器域：下载引擎 cookie 分区名修复(2026-11-04, 下载链路审计发现, 裁决「修复」)
+
+`startMedia` 用 `persist:tintin-${platformId}` 现拼分区名, 而 bilibili/xiaohongshu 的真实分区是**别名** `persist:tintin-bili`/`persist:tintin-xhs`(platform-meta)——拼出**不存在的分区**, `sessionFromPartition` 拿到空 jar: yt-dlp 路线的临时 Netscape 与流式路线的 Cookie 头**全部匿名**, B站高画质流(扩展助手双流合并那链)/小红书登录态流下载失败降级。修复: 新增 `partitionForPlatform`(media-downloader, 导出供单测)——`PLATFORM_DEFS[platformId]?.partition ?? 'persist:tintin-' + platformId`(未知名表平台回落原拼接, 缺省保持 `persist:tintin-browser`); startMedia 改走该映射。验证: 新增纯函数映射用例 + 本地 http server 端到端用例(platformId=bilibili 实测请求分区=persist:tintin-bili、请求头带 Cookie=SESSDATA 与 Referer), tintin-browser 13 文件用例全绿, check:tintin + 包 build 绿。抖音/快手/视频号/YouTube/web 直名分区原拼接本就对, 行为不变。
+
+## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
+
+> 依据:«字节跳动 Agent 实践手册»§4.3.1 创作辅助四段形态(创意方案→素材推荐→拍摄建议→**剪辑建议**)对照——前三段我们已有且更深,第四段(有人看节奏/转场/字幕落点并给建议)完全空白;用户裁决立项补齐,并追加「根据素材自动粗剪」。源参考:[agent-practice-manual.md](agent-practice-manual.md) §4.3.1/§5.2/§8.2.3;开发标准条款:[tintin-agent-dev-standards.md](tintin-agent-dev-standards.md) T1/T2/T4/T7。**本文只立项不定实现;动代码前先过 §17.4 的验收判据与 §17.2 的 spike 门。**
+
+### 17.1 现状盘点(为什么是缺口)
+
+现有影片智能体是**「生成编排」型**:拆解→脚本→分镜→`create_*` 服务端生成→交付(§16 时序);素材侧已有素材抽屉(§10 在线素材+下载落项目+@引用)、项目制素材区、口播逐词时间戳(ASR provider,`mode=raw`)、剪映草稿导出链(dsh-tintin-bundle `lib/jianying/`,轨道/花字/字体/模板)。**成片进入时间线/草稿之后,智能体不再参与**——没有节奏审视、没有转场/字幕落点建议、没有「把一堆素材自动拼成一条可精剪的粗剪」的能力。用户拿到素材仍需手工完成最耗时的粗剪。
+
+### 17.2 立项 A:根据素材自动粗剪
+
+- **定义**:输入=项目素材(视频片段若干 + 可选口播音频/文案脚本 + 时长目标)→ 输出=一条**可继续精剪的粗剪**(素材选段、掐头去尾、按口播/脚本对齐排序、基础转场、字幕轨挂旁白)。粗剪=建议产物,不自动定稿——人审确认后才算交付(交互纪律:不自作主张)。
+- **两条落地路径(spike 定夺)**:
+  - **A1 剪映草稿直出**:复用既有剪映导出链,粗剪=自动生成剪映草稿工程(素材已在项目目录)。优点:链路本地已验证、不依赖壳能力;缺点:精剪离开 OpenFilm 画布。
+  - **A2 OpenFilm 时间线直写**:经壳桥把粗剪时间线写进 Studio。优点:产品体验闭环;缺点:依赖官方 0.2.7 壳是否暴露时间线写面/工程文件形态——**HARD-GATE:先测壳,测不出即 A1**。
+- **粗剪算法骨架(混合决策,标准 T1)**:①素材分析:黑帧/静音/过曝/抖动检测=**规则活**,本地或服务端跑,不进大模型;语义排序/选段=大模型活,走影片会话编排(旗舰模型)。②主轴对齐:有口播→按逐词时间戳排画面(ASR provider 已有);无口播→按脚本分镜+素材语义排序。③选段掐尾:每段取有效区间,默认掐首尾 0.3-0.5s。④装配:基础硬切/叠化,字幕轨挂旁白。⑤人审位:粗剪结果进确认卡,用户点头才落时间线/草稿。
+- **分期**:M1 spike(双路径可行性+A2 壳能力探测,产出契约文档=T10)→ M2 口播驱动粗剪(最窄价值闭环:口播+素材→粗剪)→ M3 脚本/分镜驱动+转场/字幕轨 → M4 与仿爆款六步向导的分镜确认步打通(是否打通待裁决)。
+
+### 17.3 立项 B:剪辑辅助回路(手册第四段落地)
+
+- **定义**:智能体读取当前时间线/草稿状态 → 输出结构化「剪辑体检」建议卡:**节奏**(镜长分布/超长镜)、**转场缺口**(硬切连打)、**字幕覆盖缺口**(有声无字幕段)、**静音/黑场段**。只说不动手——不改时间线,用户按建议自行调整(「一键采纳」留后续期,待裁决)。
+- **依赖**:与立项 A 共享同一「时间线读取面」(A1 路径读剪映草稿 JSON / A2 路径读 Studio 工程)——两立项共用 M1 spike。
+- **形态**:影片会话内用户说「帮我看看这条片子」或工具卡入口 → agent 拉时间线数据 → 建议卡上屏;分析以规则统计为主(镜长/覆盖率是算术),语义判断(这条镜该不该留)才进模型。
+
+### 17.4 验收判据(T7 口径,先立判据再写码)
+
+- **粗剪**:给定 5 段素材+1 条口播(逐词时间戳),产出粗剪工程:口画对齐误差≤0.5s、无黑帧/静音残留段、字幕轨全覆盖口播句;同输入重复生成结果确定性(同素材同脚本=同粗剪)。
+- **剪辑辅助**:含 3 类典型问题(超长镜≥5s×2、连续硬切无转场、口播句无字幕)的样片,建议卡全部命中;无问题样片零误报。
+- **门禁**:实现文件过千行红线先解耦;SKILL/桥改动过会话冒烟用例(标准 T7)。
+
+### 17.5 待裁决点
+
+1. A1/A2 路径(M1 spike 后定,倾向 A1 先行);
+2. 素材语义分析放服务端(GPU,与 comfygen 同机争抢——需排队策略)还是本地(纯规则先行,语义后补);
+3. 粗剪是否接入仿爆款六步向导(分镜确认步复用);
+4. 剪辑辅助的「一键采纳」是否做(涉及写时间线,交互风险高)。
+
+## 18. 已知缺口/非目标
 
 - 角色名册(§11)实现中;上游 feature:custom 服务作内建 provider、子树归组(远期);
 - Studio 顶栏多窗口/tabs 桩(单视图壳);应用内更新走 TinTin 自身通道;
-- 转写请求明细(calls)暂空(仅 ACP 事件日志)。
+- 转写请求明细(calls)暂空(仅 ACP 事件日志);
+- 剪辑辅助/自动粗剪(§17 立项)在 M1 spike 前不排产——本节所列缺口的立项化解。
