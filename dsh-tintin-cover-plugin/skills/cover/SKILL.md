@@ -42,7 +42,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 
 1. 改文字/样式/显隐 = 读 `cover.props.json` → 改对应键 → **整体写回**(保留 `styles`/`hiddenLayers`/`customLayers`/`layerOrder` 等你没动的键),并把 `origin` 置为 `"agent"`、`updatedAt` 置为当前毫秒时间戳。编辑器 2 秒内轮询套用。
 2. 文字键取值见 `<cover_context>`(每条消息自动附带当前模板与全部图层取值)。数组键(如 `hookLines`)是逐行钩子,用字符串数组;改完保持数组形态。
-3. 字体(2026-11-02 起=本机全部已装字体,不再是 7 种白名单):`font` 填**英文族名**(GET `/tintin/cover/api/fonts` 可列全部:family=英文族名/local=中文名/styles=可用字面);`weight` 100–900(可选,如 700=粗体,须为该字体 styles 里存在的字面);`italic` true=斜体(可选);`scale` 0.5–1.8;`color` 十六进制。缺字字形自动回落微软雅黑。
+3. 字体(2026-11-02 起=本机全部已装字体,不再是 7 种白名单):`font` 填**英文族名**(GET `/tintin/cover/api/fonts` 可列全部:family=英文族名/local=中文名/styles=可用字面);`weight` 100–900(可选,如 700=粗体,须为该字体 styles 里存在的字面);`italic` true=斜体(可选);`shadow` = { dx, dy, blur, color } 投影对象(可选,设置后覆盖模板硬编码阴影;删除字段=还原);`stroke` = { width, color } 描边(仅文字);`scale` 0.5–1.8;`color` 十六进制。缺字字形自动回落微软雅黑。
 4. 图层显隐:把图层 id 加入 `hiddenLayers` 数组。固定图层 id 词汇 = `<cover_context>` 的清单(environment/product/title/subtitle/brand/footer/grid/features/badge/subTag);**拖入图片是动态图层**,id 形如 `img-xxx`,数据在 `props.customLayers`(x/y/width/opacity,画布 px),z 序由 `layerOrder`(自底向上全表)决定——**调整层级=重排 layerOrder;新增图片层前先把图放进插件素材位**(领养过的在线素材已在,或让用户上传)。
 5. **图层组(2026-10-31 阶段2,叠放语义)**:固定名称是**图层组**(如 产品图/环境图),每组模板自带一个**默认图层**;`customLayers` 每项可带 `group`(可选)=归属的**图片组**槽位 id(`product`/`environment`,仅这两组可挂,其余组剥除)——组内图层与默认图层**叠放渲染**,前后仍由 `layerOrder` 决定。用户说「放进产品图组/归到环境图组」时给对应项补 `group`;说「不归组/移出组」时删掉该字段。
 5. **图片图层外观与变换(2026-11-01,对齐 PhotoCraft)**:自由图层在 `customLayers[i]` 上、产品图在 `styles.product` 上、环境底图在 `styles.environment` 上,可写 `opacity`(0–1)、`blend`(混合模式:normal/multiply/screen/overlay/soft-light/hard-light/darken/lighten/color-dodge/color-burn/plus-lighter/difference/exclusion/hue/saturation/color/luminosity)、`flipX`/`flipY`(布尔)、`rotate`(度)、`locked`(true=锁定位置,用户锁定的图层**不要改其位置/尺寸/角度**)。尺寸:自由图层改 `width`(可加 `height`,不写=随原图比例);产品图改 `styles.product.sx`/`sy`(缩放倍率,1=模板原大小)。环境底图只支持 opacity/blend/flipX/flipY。
@@ -55,6 +55,8 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 - **参考图必须是服务端可达的引用(2026-11-02 用户裁决:传给服务端的不是路径)**:`images`/`material_ids`/`script_id` 只认 material id、script、服务端可达 URL;**本机/客户端项目里的文件路径对服务端不可见**(生成服务跑在另一台 Linux 主机上),传本地路径必报「找不到」且重试无效。用户拿本机图当参考时:①该图已在服务端素材库→给 material_ids;②用户能提供图片 URL→直传 URL;③都没有→如实说明「本机文件需先上传到服务端素材库才能作为参考」,等用户提供,不要传本地路径。抠图例外:`/matting` 是 multipart 上传文件字节,本地图可直接用。
 - 产物落盘后按用途写回 props(底图 → `props.bgImage` = 文件名;产品图 → `props.image`),写回规则见上节。
 - **抠图/去背景**:`POST <服务端>/matting`,multipart 表单 `file=@<图片绝对路径>`(可选 `model`,默认 u2net),约 2-3 秒直出**透明底 PNG**(RGBA)。用户说抠图/去背景/透明底时用 curl 调它:输出存进影片封面项目目录(如 `matting-<时间戳>.png`)。**抠图结果是一个素材(2026-10-31 用户裁决)**,可用于任何图层(产品图/底图/新增图层都行),用在哪由用户说了算;落盘后进素材区并告知路径即可,**不要默认写 `props.image`/`props.bgImage`、不要自动加图层**——用户明确要求设为产品图/底图时才写对应字段。`GET <服务端>/matting/models` 可列可用模型。
+  - **落盘前必须验响应(2026-11-04 用户裁决,1104 事故)**:先看 HTTP 状态码,再验响应前 4 字节是 PNG 魔数(`\x89PNG`)才允许写盘——`curl -o` 会把服务端错误 JSON 存成假 PNG(227 字节破图就是这样进素材区的);非 200 或魔数不符一律**不落盘**,把服务端错误原文如实转述给用户。模型名照 `/matting/models` 原样填(如 `bria-rmbg`,不要自造缩写);某模型失败换备选时最多再试 2 个,每个只试 1 次。
+  - **抠图结果直接当素材用,禁止客户端逐像素扫描**(PowerShell GetPixel/边界计算等):产物已是透明底 PNG,主体裁剪/摆放由用户在编辑器里做;确实需要边界信息时如实说明并等用户指示,不要自行写扫描脚本(1104 事故:像素扫描 43 连调用死循环直到被手动停止)。
 - prompt 只描述画面/光影/材质/氛围;**任何文字、标语、Logo 都不要写进 prompt**(文字由模板排版,写了必崩)。
 - 生成期间如实告知用户「分钟级」;**失败或端点不可达时把错误原样转述,同一请求最多重试 2 次,禁止反复重试**(2026-10-30 重试风暴事故教训)。
 
@@ -64,6 +66,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 
 ## 交互
 
+- **反循环守规(2026-11-04 用户裁决)**:同一工具+同一意图连续 3 次得到相同/无进展结果=立即停手,如实汇报已试过什么、每次结果是什么、你的判断,等用户指示;禁止换个写法继续第 4 次。工具调用在聊天面对用户不可见——连续刷工具只表现为「长时间没反应」,宁可停下来问。
 - 用户用 `@图层名` 引用图层 = `<cover_context>` 里对应条目;`[1] layer <props键> "当前值"` 形态的引用块同理。
 - 改完一轮,用一句话汇报改了什么(「主标题已改为『…』,画布已刷新」);需要用户决策时直接问,不要自作主张导出。
 - 用户没说导出就不要导出;说了导出就导出并回 `file` 路径。

@@ -102,7 +102,7 @@ function DelayedTextEditor({ value, isArray, rows, onCommit }: {
 /** 文字样式(PhotoCraft 式,2026-10-28):字体 / 大小(px 绝对,基准字号×倍率换算)/
  *  位置(X·Y 数值输入+滑条)/ 颜色(色板+自由取色器)。存储契约不变(styles.scale 等)。 */
 function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontSize: number }): React.ReactElement {
-  const styles = useEditor((s) => (s.props.styles as Record<string, { scale?: number; color?: string; dx?: number; dy?: number; font?: string; weight?: number; italic?: boolean }> | undefined)?.[layerId])
+  const styles = useEditor((s) => (s.props.styles as Record<string, { scale?: number; color?: string; dx?: number; dy?: number; font?: string; weight?: number; italic?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }> | undefined)?.[layerId])
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const scale = typeof styles?.scale === 'number' ? styles.scale : 1
   const px = Math.round(baseFontSize * scale)
@@ -172,6 +172,37 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
           title="自由取色"
           style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }}
         />
+      </div>
+      {/* 投影/描边(2026-11-02 对齐 PhotoCraft 图层样式;设置后覆盖模板硬编码阴影) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>投影</span>
+        <button
+          onClick={() => setLayerStyle(layerId, styles?.shadow ? { shadow: undefined } : { shadow: { dx: 0, dy: 6, blur: 14, color: 'rgba(0,0,0,0.6)' } })}
+          title={styles?.shadow ? '关闭投影' : '开启投影'}
+          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 10.5, color: styles?.shadow ? '#4f7cff' : '#8b8b88', borderColor: styles?.shadow ? 'rgba(79,124,255,0.6)' : undefined }}
+        >{styles?.shadow ? '开' : '关'}</button>
+        {styles?.shadow ? (
+          <>
+            <span style={{ fontSize: 10.5, color: '#8b8b88' }}>大小</span>
+            <input type="number" min={0} max={60} value={styles.shadow.blur} onChange={(e) => setLayerStyle(layerId, { shadow: { ...styles.shadow!, blur: Math.max(0, Math.min(60, Number(e.target.value) || 0)) } })} style={numBox} />
+            <input type="color" value="#000000" onChange={(e) => setLayerStyle(layerId, { shadow: { ...styles.shadow!, color: e.target.value } })} title="投影颜色" style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }} />
+          </>
+        ) : null}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>描边</span>
+        <button
+          onClick={() => setLayerStyle(layerId, styles?.stroke ? { stroke: undefined } : { stroke: { width: 3, color: 'rgba(2,6,23,0.65)' } })}
+          title={styles?.stroke ? '关闭描边' : '开启描边'}
+          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 10.5, color: styles?.stroke ? '#4f7cff' : '#8b8b88', borderColor: styles?.stroke ? 'rgba(79,124,255,0.6)' : undefined }}
+        >{styles?.stroke ? '开' : '关'}</button>
+        {styles?.stroke ? (
+          <>
+            <span style={{ fontSize: 10.5, color: '#8b8b88' }}>宽</span>
+            <input type="number" min={0} max={12} value={styles.stroke.width} onChange={(e) => setLayerStyle(layerId, { stroke: { ...styles.stroke!, width: Math.max(0, Math.min(12, Number(e.target.value) || 0)) } })} style={numBox} />
+            <input type="color" value="#ffffff" onChange={(e) => setLayerStyle(layerId, { stroke: { ...styles.stroke!, color: e.target.value } })} title="描边颜色" style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }} />
+          </>
+        ) : null}
       </div>
     </div>
   )

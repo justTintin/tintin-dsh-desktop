@@ -27,6 +27,8 @@ export interface ImageLook {
   sy?: number
   /** 锁定位置(PhotoCraft Lock position):画布拖动/微调/变换手柄与面板几何编辑全部拒绝 */
   locked?: boolean
+  /** 投影(2026-11-02 对齐 PhotoCraft 图层样式;图片=drop-shadow 滤镜) */
+  shadow?: { dx: number; dy: number; blur: number; color: string }
 }
 
 const clampNum = (v: unknown, lo: number, hi: number, fallback: number): number =>
@@ -60,4 +62,14 @@ export function backdropStyle(look: ImageLook | undefined): React.CSSProperties 
     mixBlendMode: lookBlend(look),
     transform: look?.flipX || look?.flipY ? `scale(${look.flipX ? -1 : 1}, ${look.flipY ? -1 : 1})` : undefined,
   }
+}
+
+const clamp255 = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0)
+
+/** 图片投影滤镜(2026-11-02 对齐 PhotoCraft 图层样式):drop-shadow 组装;未设置=undefined */
+export function imgDropShadow(look: ImageLook | undefined): string | undefined {
+  const s = look?.shadow
+  if (!s || typeof s.blur !== 'number') return undefined
+  const color = typeof s.color === 'string' && s.color.trim() ? s.color.trim().replace(/[^#(),.%\sa-zA-Z0-9]/gu, '').slice(0, 40) : 'rgba(0,0,0,0.6)'
+  return `drop-shadow(${clamp255(s.dx)}px ${clamp255(s.dy)}px ${clamp255(s.blur)}px ${color})`
 }

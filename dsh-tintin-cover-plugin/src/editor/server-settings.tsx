@@ -7,7 +7,9 @@ import React from 'react'
  *  MCP 挂载本身仍在封面/剪辑会话创建时自动完成,此处是可视与验货,不是第二份配置。
  *  2026-10-29 二次裁决:①重开弹层要回显已保存的地址与 MCP 清单(发现成功后端缓存
  *  mcp-discover-cache.json,GET server-config 带回;打开时静默自动刷新一次,失败留缓存)
- *  ②左右布局=左表单右清单(同视频剪辑设置),整体限高,清单内部滚动不撑破弹层。 */
+ *  ②左右布局=左表单右清单(同视频剪辑设置),整体限高,清单内部滚动不撑破弹层。
+ *  2026-11-03 三次裁决:弹层尺寸=技能弹窗同款(min(1200px,100vw-64)×min(800px,100vh-80)),
+ *  标题行右上角关闭钮(✕ 同款);内容保持左右布局。 */
 export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [url, setUrl] = React.useState('')
   const [loaded, setLoaded] = React.useState(false)
@@ -101,11 +103,20 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={onClose}>
-      {/* 左右布局+整体限高(2026-10-29 二次裁决,同视频剪辑设置):左=地址表单,右=服务清单(内部滚动) */}
-      <div style={{ width: 840, maxWidth: '94vw', height: 560, maxHeight: '82vh', display: 'flex', background: '#1e1e20', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', overflow: 'hidden' }}
+      {/* 弹层尺寸=技能弹窗同款+右上角关闭钮(2026-11-03 三次裁决);内容保持左右布局
+          (2026-10-29 二次裁决):左=地址表单,右=服务清单(内部滚动不撑破弹层) */}
+      <div style={{ width: 'min(1200px, calc(100vw - 64px))', height: 'min(800px, calc(100vh - 80px))', display: 'flex', flexDirection: 'column', background: '#1e1e20', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', overflow: 'hidden' }}
         onClick={(e) => e.stopPropagation()}>
-        <div style={{ width: 300, flexShrink: 0, padding: 22, borderRight: '1px solid #2c2c30', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
-          <div style={{ fontSize: 15, fontWeight: 800, color: '#e8e8e6', marginBottom: 6 }}>服务设置</div>
+        {/* 头部: 标题行(右上角关闭钮=技能弹窗同款排版) */}
+        <div style={{ padding: '14px 18px 0', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 16, fontWeight: 800 }}>服务设置</span>
+            <span style={{ flex: 1 }} />
+            <button onClick={onClose} title="关闭" style={{ width: 28, height: 28, borderRadius: 8, fontSize: 14, lineHeight: 1, color: '#9a9ba1', background: 'transparent', border: 0, cursor: 'pointer' }}>✕</button>
+          </div>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+        <div style={{ width: 300, flexShrink: 0, padding: '12px 22px 22px', borderRight: '1px solid #2c2c30', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
           <div style={{ fontSize: 11, lineHeight: 1.6, color: '#8b8b88', marginBottom: 16 }}>服务端地址与视频剪辑/总助手共用一份配置；封面与剪辑会话的 MCP 工具在会话创建时按此地址自动挂载。</div>
           <div style={{ fontSize: 12, color: '#c8c8c6', fontWeight: 700, marginBottom: 6 }}>服务端地址</div>
           <input
@@ -125,7 +136,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
             </div>
           ) : null}
         </div>
-        <div style={{ flex: 1, minWidth: 0, padding: 22, display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, padding: '12px 22px 22px', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
           <div style={{ fontSize: 12, color: '#c8c8c6', fontWeight: 700, marginBottom: 8 }}>
             发现的 MCP 服务（{tools.length}）{refreshing ? <span style={{ color: '#8b8b88', fontWeight: 400 }}> · 正在刷新…</span> : null}
             {mcpUrl ? <span style={{ color: '#8b8b88', fontWeight: 400 }}> · {mcpUrl}</span> : null}
@@ -144,6 +155,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
               {loaded ? '还没有发现记录——填好服务端地址后点「获取 MCP 服务」。' : '正在加载…'}
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

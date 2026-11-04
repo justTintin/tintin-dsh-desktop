@@ -4,7 +4,7 @@
 import React from 'react'
 import { AbsoluteFill } from 'remotion'
 import { CoverImg } from './CoverImg'
-import { lookBlend, lookOpacity, lookTransform } from './image-style'
+import { imgDropShadow, lookBlend, lookOpacity, lookTransform } from './image-style'
 import { layerStyle, type StyleProps } from './text-style'
 import type { VideoCoverProps } from './VideoCover'
 import { CustomLayerOverlay, layerZ } from './CustomLayers'
@@ -47,8 +47,8 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
                 fontStyle: hookStyle.fontStyle,
                 lineHeight: 1.2,
                 color: hookStyle.color === '#ffffff' && i === hookLines.length - 1 ? '#22d3ee' : hookStyle.color,
-                textShadow: '0 6px 0 rgba(2,6,23,0.9), 0 14px 44px rgba(0,0,0,0.7)',
-                WebkitTextStroke: '2px rgba(2,6,23,0.65)',
+                textShadow: hookStyle.textShadow ?? '0 6px 0 rgba(2,6,23,0.9), 0 14px 44px rgba(0,0,0,0.7)',
+                WebkitTextStroke: hookStyle.strokeCss ?? '2px rgba(2,6,23,0.65)',
                 transform: 'skewX(-4deg)',
                 marginLeft: i % 2 === 1 ? 30 : 0,
               }}
@@ -70,7 +70,7 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
                 width: 540, height: 540, objectFit: 'contain',
                 WebkitMaskImage: 'radial-gradient(circle, black 58%, transparent 76%)',
                 maskImage: 'radial-gradient(circle, black 58%, transparent 76%)',
-                filter: 'drop-shadow(0 30px 50px rgba(0,0,0,0.55))',
+                filter: imgDropShadow(productOverride) ?? 'drop-shadow(0 30px 50px rgba(0,0,0,0.55))',
               }}
             />
           </div>

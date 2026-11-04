@@ -2,7 +2,7 @@
 import React from 'react'
 import { AbsoluteFill } from 'remotion'
 import { CoverImg } from './CoverImg'
-import { lookBlend, lookOpacity, lookTransform } from './image-style'
+import { imgDropShadow, lookBlend, lookOpacity, lookTransform } from './image-style'
 import { layerStyle, type StyleProps } from './text-style'
 import { CustomLayerOverlay, layerZ, type CustomLayer, type LayerOrder } from './CustomLayers'
 
@@ -52,7 +52,7 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, sub
                 width: 560, height: 560, objectFit: 'contain',
                 WebkitMaskImage: 'radial-gradient(circle, black 52%, transparent 74%)',
                 maskImage: 'radial-gradient(circle, black 52%, transparent 74%)',
-                filter: 'drop-shadow(0 20px 40px rgba(34,211,238,0.15))',
+                filter: imgDropShadow(productOverride) ?? 'drop-shadow(0 20px 40px rgba(34,211,238,0.15))',
               }}
             />
           </div>
@@ -71,8 +71,8 @@ export const VideoCover: React.FC<VideoCoverProps> = ({ hookLines, subtitle, sub
                 fontStyle: hookStyle.fontStyle,
                 lineHeight: 1.16,
                 color: hookStyle.color === '#ffffff' && i === hookLines.length - 1 ? '#22d3ee' : hookStyle.color,
-                textShadow: '0 6px 0 rgba(2,6,23,0.9), 0 14px 44px rgba(0,0,0,0.7)',
-                WebkitTextStroke: '2px rgba(2,6,23,0.65)',
+                textShadow: hookStyle.textShadow ?? '0 6px 0 rgba(2,6,23,0.9), 0 14px 44px rgba(0,0,0,0.7)',
+                WebkitTextStroke: hookStyle.strokeCss ?? '2px rgba(2,6,23,0.65)',
                 transform: 'skewX(-4deg) rotate(-2deg)',
                 marginLeft: i % 2 === 1 ? 26 : 0,
               }}

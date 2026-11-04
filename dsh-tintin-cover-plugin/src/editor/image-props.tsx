@@ -96,12 +96,35 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
   const duplicateCustomLayer = useEditor((s) => s.duplicateCustomLayer)
   const removeCustomLayer = useEditor((s) => s.removeCustomLayer)
   const templateId = useEditor((s) => s.templateId)
+  const allProps = useEditor((s) => s.props)
+  const customLayers = useEditor((s) => s.props.customLayers) as CustomLayer[] | undefined
   const [linked, setLinked] = React.useState(true)
+  const [exportMsg, setExportMsg] = React.useState('')
   const id = target.kind === 'custom' ? target.layer.id : target.id
   const look: ImageLook & { dx?: number; dy?: number } = target.kind === 'custom' ? target.layer : target.look
   const geometry = target.kind === 'custom' || target.geometry
   const locked = look.locked === true
   const metrics = useLayerMetrics(id, `${templateId}|${JSON.stringify(look)}`)
+
+  /** 单层导出(2026-11-02 对齐 PhotoCraft quick-export):隐藏其余全部图层后 render,
+   *  PNG 落项目目录。文字层隐藏=不参与校验(B2 语义),模板底图保留。 */
+  const exportThisLayer = async (): Promise<void> => {
+    const tpl = getTemplate(templateId)
+    const others = tpl.layerDefs.map((l) => l.id).filter((x) => x !== id)
+    const customOthers = ((allProps.customLayers as CustomLayer[] | undefined) ?? []).map((l) => l.id).filter((x) => x !== id)
+    const hidden = [...others, ...customOthers]
+    setExportMsg('渲染中…')
+    try {
+      const r = await fetch('/tintin/ipc/cover/render', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ templateId, props: { ...allProps, hiddenLayers: hidden }, fileName: `仅-${id}.png` }),
+      }).then((x) => x.json()) as { ok?: boolean; file?: string; error?: string }
+      if (!r.ok) throw new Error(r.error || '渲染失败')
+      setExportMsg(`✓ 已导出 ${r.file}`)
+    } catch (err) {
+      setExportMsg(`✗ ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
   const apply = (patch: ImageLook & { x?: number; y?: number; width?: number; height?: number; dx?: number; dy?: number }): void => {
     if (target.kind === 'custom') setCustomLayer(id, patch)
     else setLayerStyle(id, patch)
@@ -165,6 +188,22 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
         🔒 锁定位置{locked ? '(移动/变换已禁用)' : ''}
       </label>
 
+      {/* 投影(2026-11-02 对齐 PhotoCraft 图层样式):图片=drop-shadow 滤镜;开=默认黑投影,大小可调 */}
+      <div style={row}>
+        <span style={label}>投影</span>
+        <button
+          onClick={() => apply(look.shadow ? { shadow: undefined } : { shadow: { dx: 0, dy: 10, blur: 18, color: 'rgba(0,0,0,0.55)' } })}
+          title={look.shadow ? '关闭投影' : '开启投影'}
+          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 10.5, color: look.shadow ? '#4f7cff' : '#8b8b88', borderColor: look.shadow ? 'rgba(79,124,255,0.6)' : undefined }}
+        >{look.shadow ? '开' : '关'}</button>
+        {look.shadow ? (
+          <>
+            <span style={label}>大小</span>
+            <NumField value={Math.round(look.shadow.blur ?? 0)} min={0} max={80} title="投影大小(px)" onCommit={(v) => apply({ shadow: { ...(look.shadow ?? { dx: 0, dy: 10, color: 'rgba(0,0,0,0.55)' }), blur: v } })} />
+          </>
+        ) : null}
+      </div>
+
       {geometry ? (
         <>
           <div style={{ ...headStyle, margin: '10px 0 0' }}>变换</div>
@@ -214,6 +253,11 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
           <button onClick={() => removeCustomLayer(id)} title="删除图层(Delete)" style={{ ...chip(), color: '#f87171' }}>🗑 删除图层</button>
         </div>
       ) : null}
+      {/* 单层导出(2026-11-02 对齐 PhotoCraft quick-export):隐藏其余全部图层后 render */}
+      <div style={row}>
+        <button onClick={() => void exportThisLayer()} title="隐藏其余图层,只渲染本图层为 PNG(落项目目录)" style={{ ...chip(), color: '#93c5fd' }}>⬇ 仅显示此图层导出</button>
+        {exportMsg ? <span style={{ fontSize: 10.5, color: exportMsg.startsWith('✓') ? '#7ee2a8' : '#f87171', wordBreak: 'break-all' }}>{exportMsg}</span> : null}
+      </div>
     </div>
   )
 }

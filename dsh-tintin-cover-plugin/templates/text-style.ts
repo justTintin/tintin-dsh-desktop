@@ -12,12 +12,14 @@ export interface TextStyleOverride {
   dy?: number
   /** 字体族(系统字体名;缺省 = 模板默认黑体系) */
   font?: string
-  /** 旋转角度(度;2026-10-29 用户裁决:图片层可旋转;文字层暂不用) */
-  rotate?: number
   /** 字体粗细(100..900,对齐 PhotoCraft「字体样式」下拉;缺省=该字体默认字面;2026-11-02 用户裁决) */
   weight?: number
   /** 斜体(缺省=正体) */
   italic?: boolean
+  /** 投影(2026-11-02 对齐 PhotoCraft 图层样式;设置后覆盖模板硬编码阴影,删除字段=还原) */
+  shadow?: { dx: number; dy: number; blur: number; color: string }
+  /** 描边(仅文字;WebkitTextStroke 宽度 px + 颜色;设置后覆盖模板描边) */
+  stroke?: { width: number; color: string }
 }
 
 /** 图片槽位(产品图)的条目另带外观/变换字段(image-style.ts,2026-11-01 对齐 PhotoCraft) */
@@ -45,7 +47,16 @@ export function layerStyle(
   props: StyleProps | undefined,
   layerId: string,
   base: { fontSize: number; color: string },
-): { fontSize: number; color: string; translate: string; fontFamily?: string; fontWeight?: number; fontStyle?: 'italic' } {
+): {
+  fontSize: number
+  color: string
+  translate: string
+  fontFamily?: string
+  fontWeight?: number
+  fontStyle?: 'italic'
+  textShadow?: string
+  strokeCss?: string
+} {
   const s = props?.styles?.[layerId]
   const scale = typeof s?.scale === 'number' && Number.isFinite(s.scale) ? Math.min(3, Math.max(0.3, s.scale)) : 1
   const dx = clampOffset(s?.dx)
@@ -53,6 +64,17 @@ export function layerStyle(
   const translate = dx === undefined && dy === undefined ? '' : `translate(${dx ?? 0}px, ${dy ?? 0}px)`
   const font = sanitizeFontFamily(s?.font)
   const weight = clampWeight(s?.weight)
+  const shadow = s?.shadow && typeof s.shadow.blur === 'number' && typeof s.shadow.color === 'string'
+    ? {
+        dx: Number.isFinite(s.shadow.dx) ? Math.round(s.shadow.dx) : 0,
+        dy: Number.isFinite(s.shadow.dy) ? Math.round(s.shadow.dy) : 0,
+        blur: Math.max(0, Math.round(s.shadow.blur)),
+        color: sanitizeShadowColor(s.shadow.color),
+      }
+    : undefined
+  const stroke = s?.stroke && typeof s.stroke.width === 'number' && typeof s.stroke.color === 'string'
+    ? { width: Math.max(0, Math.round(s.stroke.width)), color: sanitizeShadowColor(s.stroke.color) }
+    : undefined
   return {
     fontSize: Math.round(base.fontSize * scale),
     color: s?.color ?? base.color,
@@ -60,5 +82,12 @@ export function layerStyle(
     fontFamily: font ? `"${font}", "Microsoft YaHei", sans-serif` : undefined,
     fontWeight: weight,
     fontStyle: s?.italic === true ? 'italic' : undefined,
+    textShadow: shadow ? `${shadow.dx}px ${shadow.dy}px ${shadow.blur}px ${shadow.color}` : undefined,
+    strokeCss: stroke ? `${stroke.width}px ${stroke.color}` : undefined,
   }
+}
+
+/** 阴影/描边颜色消毒(2026-11-02):只放行 CSS 颜色安全字符,防注入 */
+function sanitizeShadowColor(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/[^#(),.%\sa-zA-Z0-9]/gu, '').slice(0, 40) || 'rgba(0,0,0,0.6)' : 'rgba(0,0,0,0.6)'
 }

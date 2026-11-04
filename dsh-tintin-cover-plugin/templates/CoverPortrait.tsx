@@ -37,7 +37,7 @@ export const CoverPortrait: React.FC<CoverProps> = ({ title, subtitle, badge, bg
 
       <div style={{ position: 'absolute', inset: 0, padding: '84px 64px', display: 'flex', flexDirection: 'column', justifyContent: 'center', zIndex: layerZ(layerOrder, 'title') }}>
         {!hidden('title') && (
-          <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: 1.14, textShadow: '0 10px 40px rgba(0,0,0,0.45)', transform: titleStyle.translate || undefined }}>
+          <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: 1.14, textShadow: titleStyle.textShadow ?? '0 10px 40px rgba(0,0,0,0.45)', transform: titleStyle.translate || undefined }}>
             {title}
           </div>
         )}
