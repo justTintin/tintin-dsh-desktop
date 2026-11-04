@@ -21,14 +21,21 @@
      fields, keeps the keyboard in the chat (Space, Delete, ⌘A there never reach Studio). -->
 <div id="of-chat" class="of-chat" data-studio-host-panel tabindex="-1"></div>
 <div id="of-chat-layer" class="of-chat" data-studio-host-panel tabindex="-1"></div>
-<!-- 启动错误浮层(2026-10-23): 任何脚本错误直接上屏, 不再黑屏无声 -->
+<!-- 启动错误浮层(2026-10-23): 任何脚本错误直接上屏, 不再黑屏无声; 2026-11-04 过滤
+     浏览器良性通知(ResizeObserver 同帧回环, lineno=0 无错误对象, 不影响功能)不上屏 -->
 <div id="tintin-boot-error" style="position:fixed;inset:auto 0 0 0;z-index:2147483647;background:#3a1010;color:#ffd7d7;font:12px/1.6 monospace;padding:10px 14px;white-space:pre-wrap;display:none"></div>
 <script>
   (function () {
     var box = document.getElementById('tintin-boot-error');
     var lines = [];
     function show(message) { lines.push(String(message).slice(0, 400)); box.textContent = lines.join('\n'); box.style.display = 'block'; }
-    window.addEventListener('error', function (e) { show((e.message || '脚本错误') + (e.filename ? '\n  @' + e.filename + ':' + e.lineno : '')); });
+    /* 良性通知白名单: ResizeObserver 回环的两个已知文案(Chrome 新旧变体)。 */
+    var BENIGN = /^ResizeObserver loop (completed with undelivered notifications|limit exceeded)\.?$/;
+    window.addEventListener('error', function (e) {
+      var message = e.message || '脚本错误';
+      if (BENIGN.test(message)) return;
+      show(message + (e.filename ? '\n  @' + e.filename + ':' + e.lineno : ''));
+    });
     window.addEventListener('unhandledrejection', function (e) { show('未处理的 Promise 拒绝: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason))); });
     window.__tintinBootFail = show;
   })();

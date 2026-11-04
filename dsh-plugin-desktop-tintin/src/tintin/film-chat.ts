@@ -12,6 +12,11 @@ interface ProjectChat { sessions: unknown[]; last: string | null; turns: SavedTu
 const chatPath = (project: string): string => join(project, '.film', 'chat.json')
 const EMPTY = (): ProjectChat => ({ sessions: [], last: null, turns: [] })
 
+/* 非终态轮次(官方 local-agent-run 的 ACTIVE_STATUSES 口径): 应用被关闭在半路时落盘的状态。
+   零内容(未流出任何条目)的这类轮次读档只会显示一条红字「OpenFilm closed while the agent
+   was working on this.」, 是纯噪音 —— load 时丢弃, 不再回显(2026-11-04 用户裁决)。 */
+const ACTIVE_TURN_STATUSES = new Set(['generating', 'failing', 'canceling'])
+
 function readChat(project: string): ProjectChat {
   try {
     const parsed = JSON.parse(readFileSync(chatPath(project), 'utf8')) as Partial<ProjectChat>
@@ -23,6 +28,12 @@ function readChat(project: string): ProjectChat {
   } catch { return EMPTY() }
 }
 
+/** 读档视图: 丢弃零内容的非终态轮次(僵尸记录), 只影响读出, 不改写磁盘。 */
+function readableTurns(turns: SavedTurn[]): SavedTurn[] {
+  return turns.filter(({ turn, items }) =>
+    !(ACTIVE_TURN_STATUSES.has(String((turn as { status?: unknown }).status ?? '')) && Array.isArray(items) && items.length === 0))
+}
+
 function writeChat(project: string, chat: ProjectChat): void {
   mkdirSync(join(project, '.film'), { recursive: true })
   const temp = `${chatPath(project)}.${process.pid}.tmp`
@@ -32,7 +43,8 @@ function writeChat(project: string, chat: ProjectChat): void {
 
 export const filmChat = {
   load(project: string): ProjectChat {
-    return readChat(project)
+    const chat = readChat(project)
+    return { ...chat, turns: readableTurns(chat.turns) }
   },
   saveSessions(project: string, sessions: unknown[], last: string | null): void {
     const chat = readChat(project)
