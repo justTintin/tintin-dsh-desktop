@@ -193,17 +193,21 @@ function writePatch(state, models, agent = 'deepseek') {
     '        transport: streamable-http',
     `        url: ${state.serverUrl.replace(/\/+$/, '')}/mcp`,
     '        failOnStartupError: true',
-    /* 本地工具 MCP(2026-11-04 感知闭环+工具收敛立项): 渲染回看/看图/抠图链,
-       端点在封面 webServer(lib/cover-tools-mcp.js); url 用 apiOrigin(会话 start
-       时按请求 host 捕获)——未捕获时跳过该行, 智能体仍有服务端工具可用。
-       两行共用同一个 insert 块(补丁合并器对多行子项的语义=逐行插入)。 */
-    ...(state.apiOrigin ? [
+    /* 本地工具 MCP(2026-11-04 感知闭环+工具收敛立项;2026-11-05 改道独立监听):
+       渲染回看/看图/抠图链,端点=插件自起的随机 token 回环监听
+       (lib/cover-tools-mcp.js startCoverToolsServer,index.js 启动并 setCoverToolsEndpoint)。
+       不走 dsh webServer——其 POST 闸对非浏览器客户端 403(会话 cookie/CSRF 层,
+       MCP 子进程无 cookie,Origin 也不够,1105 实测)。headers=dsh-mcp-client
+       原生配置(z.dict(String)),随请求带令牌。监听未起时跳过该行,服务端工具仍可用。 */
+    ...(state.coverTools ? [
       '    - id: mcp-cover-tools',
       "      name: '@deepseek-ai/dsh-mcp-client'",
       '      config:',
       '        serverName: cover-tools',
       '        transport: streamable-http',
-      `        url: ${state.apiOrigin}/tintin/cover/api/tools-mcp`,
+      `        url: ${state.coverTools.url}`,
+      '        headers:',
+      `          x-tintin-cover-tools-token: ${state.coverTools.token}`,
       '        failOnStartupError: false',
     ] : []),
     '- id: llm-pi-ai',
@@ -261,7 +265,7 @@ function ensureCoverSkill(state, homeName = 'cover-agent-home') {  const sources
     /* 2026-10-30 用户报障「一次请求烧几块钱 token」:基址必须带 /tintin/cover/api
        前缀(裸 origin 全部 404→模型重试 360 次×全上下文计费);并明示 TINTIN_COVER_API。
        2026-11-01 会话生成统一走 MCP create_image 后, 此基址的会话用途只剩导出 render。 */
-    `- 编辑器 API 基址(仅用于导出 render, 不要用它生成任何图片): ${state.apiOrigin ? `${state.apiOrigin}/tintin/cover/api` : '(未知,即环境变量 TINTIN_COVER_API)'}(POST 需带头 x-tintin-cover-agent: ${agentToken};此基址与环境变量 TINTIN_COVER_API 相同)`,
+    `- 渲染/导出/看图一律走本地工具 MCP mcp__cover-tools__*(render_preview/read_image/matting);编辑器 HTTP API 对智能体已关闭(非浏览器 POST 一律 403,2026-11-05),不要用 curl 调它`,
     `- 会话工作目录 = 封面工作目录(cover/);图层状态读 cover.props.json`,
     '',
   ].join('\n')
@@ -328,6 +332,8 @@ const state = {
   child: null,
   conn: null,
   sessionId: null,
+  /** 本地工具 MCP 独立监听端点(setCoverToolsEndpoint;null=监听未起,补丁不含该行) */
+  coverTools: null,
   /** 当前会话的智能体(选择器 id;2026-10-31 名册双智能体;2026-11-01 默认改 deepseek) */
   agentId: 'deepseek',
   cwd: null,
@@ -362,6 +368,15 @@ export function isRunning() {
 /** 编辑器 API 基址(acp-start 路由从请求头捕获,进 agent 环境供 curl) */
 export function setApiOrigin(origin) {
   if (typeof origin === 'string' && origin) state.apiOrigin = origin.replace(/\/+$/, '')
+}
+
+/** 本地工具 MCP 独立监听端点(2026-11-04 感知闭环改道):dsh webServer 的 POST 闸
+ *  对非浏览器客户端 403(会话 cookie/CSRF 层,MCP 子进程无 cookie、Origin 不够——
+ *  1105 实测), 所以 cover-tools 用插件自起的随机 token 回环监听(index.js 启动,
+ *  lib/cover-tools-mcp.js startCoverToolsServer);writePatch 据此生成 mcp-cover-tools
+ *  行并经 dsh-mcp-client 的 headers 配置带令牌。 */
+export function setCoverToolsEndpoint(endpoint) {
+  state.coverTools = endpoint && endpoint.url && endpoint.token ? { url: endpoint.url, token: endpoint.token } : null
 }
 
 function emit(event) {

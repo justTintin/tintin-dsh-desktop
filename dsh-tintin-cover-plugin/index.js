@@ -17,6 +17,8 @@ import { createHttpRequest, createServerUrlResolver } from 'dsh-tintin-shared/li
 import { createMachineIdResolver } from 'dsh-tintin-shared/lib/machine-id-store.js'
 import { readTintinConfigStore } from 'dsh-tintin-shared/lib/tintin-config-store.js'
 import { loadCoverEngine, registerCoverPluginRoute, resolvePluginDir as resolveCoverPluginDir } from './lib/cover-plugin-route.js'
+import { startCoverToolsServer } from './lib/cover-tools-mcp.js'
+import { setCoverToolsEndpoint } from './lib/cover-acp-bridge.js'
 import { createCoverTools } from './lib/cover-tools.js'
 
 export const name = 'dsh-tintin-cover-plugin'
@@ -63,6 +65,19 @@ export async function apply(ctx) {
     })) {
       registerTool(def)
     }
+  })
+
+  // 本地工具 MCP 独立回环监听(2026-11-04 感知闭环;2026-11-05 改道):dsh webServer
+  // 的 POST 闸对非浏览器客户端 403(会话 cookie/CSRF 层,MCP 子进程无 cookie,
+  // Origin 也不够——1105 实测), 所以渲染回看/看图/抠图三个智能体工具用自带随机
+  // token 闸的独立回环监听承载(127.0.0.1 随机端口,进程生命周期=应用生命周期,
+  // 同 tintin-main startLoopbackService 先例);writePatch 生成 mcp-cover-tools 行
+  // 并经 dsh-mcp-client 的 headers 配置带令牌。
+  void startCoverToolsServer({ getServerUrl, loadEngine: loadCoverEngine, resolvePluginDir: resolveCoverPluginDir }).then((endpoint) => {
+    setCoverToolsEndpoint(endpoint)
+    ctx.logger.info('tintin-cover: tools mcp on %s', endpoint.url)
+  }).catch((error) => {
+    ctx.logger.error('tintin-cover: tools mcp 启动失败(智能体仅有服务端工具): %s', error?.message ?? error)
   })
 
   // 封面路由族:编辑器/会话页静态件+render/upload/reveal/PhotoCraft/ACP 会话

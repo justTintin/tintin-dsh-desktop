@@ -65,7 +65,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 
 ## 导出
 
-`POST <编辑器API>/render`,体 `{"templateId":"<当前 templateId>","props":<当前 props 全量>,"fileName":"可选.png"}` → `{"ok":true,"file":"<工作目录>/cover/xxx.png"}`。导出前先确保 props 文件已是用户要的最终态(先改字再导)。
+导出=渲染当前最终态 props 为 PNG,**走 `mcp__cover-tools__render_preview`(fileName=输出名)**——产物 PNG 落项目目录,把路径告知用户。导出前先确保 props 文件已是用户要的最终态(先改字再导)。**不要 POST 编辑器 render HTTP 接口**——编辑器 HTTP API 对智能体已关闭(非浏览器 POST 一律 403,2026-11-05),渲染/导出/看图统一走本地工具 MCP。
 
 ## 交互
 

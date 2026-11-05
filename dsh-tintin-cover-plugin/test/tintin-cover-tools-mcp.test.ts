@@ -144,4 +144,30 @@ describe('cover tools mcp endpoint', () => {
     expect(resultOf(missing).isError).toBe(true)
     expect(resultOf(missing).content[0].text).toContain('cover.props.json')
   })
+
+  it('独立监听: 无 token 401;带 token 全链(tools/list);export 语义=render_preview 落项目目录', async () => {
+    const coverDir = tempRoot()
+    const { startCoverToolsServer } = await import('../lib/cover-tools-mcp.js')
+    const server = await startCoverToolsServer({
+      getServerUrl: () => 'http://192.168.111.31:8000',
+      loadEngine: (async () => ({ resolveCoverDir: async () => coverDir })) as never,
+      resolvePluginDir: () => tempRoot(),
+    })
+    try {
+      expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/)
+      const noToken = await fetch(server.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rpc(1, 'initialize')) })
+      expect(noToken.status).toBe(401)
+      const h = { 'Content-Type': 'application/json', 'x-tintin-cover-tools-token': server.token }
+      const init = await fetch(server.url, { method: 'POST', headers: h, body: JSON.stringify(rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } })) })
+      expect(init.status).toBe(200)
+      const sid = init.headers.get('mcp-session-id')
+      expect(sid).toBeTruthy()
+      await fetch(server.url, { method: 'POST', headers: { ...h, 'mcp-session-id': sid! }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) })
+      const list = await fetch(server.url, { method: 'POST', headers: { ...h, 'mcp-session-id': sid! }, body: JSON.stringify(rpc(2, 'tools/list')) })
+      const names = ((await list.json()) as { result?: { tools?: Array<{ name: string }> } }).result?.tools?.map((t) => t.name)
+      expect(names).toEqual(['read_image', 'matting', 'render_preview'])
+    } finally {
+      await server.dispose()
+    }
+  })
 })

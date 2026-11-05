@@ -522,4 +522,5 @@ POST /tintin/cover/api/acp/chat-sessions|chat-turn|chat-attachment|chat-ref-imag
 4. **接线**:三工具以最小 streamable-http MCP 端点挂封面 webServer(`/tintin/cover/api/tools-mcp`,lib/cover-tools-mcp.js);会话侧经 writePatch 补丁行 `mcp-cover-tools`(与 mcp-tintin-server 同一 insert 块,url=apiOrigin+本路径,apiOrigin 会话 start 时已捕获)进程级挂载,工具名 `mcp__cover-tools__*`。failOnStartupError=false(端点缺失不杀会话,只少工具)。
 5. **SKILL/工作纪律增补**:计划先行(多步任务先一句话列计划);反循环/落盘校验守规保留;能力通道表加本地工具行。
 6. **验证**:cover vitest 99/99 绿(新增 4 用例:协议面/read_image 越界拒绝/matting 模型链换备选+双写落盘+全败原文/render_preview 判据文案+无 props 报错);check:tintin 全绿(84 锚点+载荷新鲜);热同步随批。生效=重启应用+新建封面会话。
-7. **待裁决**(不在本批):封面会话默认模型是否升级 v4-pro(成本);T7 封面冒烟用例集脚本化;服务端 matting 坏模型(bria-rmbg/silueta)修复/下线。
+7. **改道独立监听(2026-11-05 实测追加)**:工具端点挂 dsh webServer 的首版实测 403——其 POST 闸对非浏览器客户端拒绝(会话 cookie/CSRF 层,MCP 子进程无 cookie,Origin 头也不够)。改道=插件自起随机 token 回环监听(lib/cover-tools-mcp.js `startCoverToolsServer`,127.0.0.1 随机端口,进程生命周期),补丁行 mcp-cover-tools 经 dsh-mcp-client 原生 `headers` 配置带令牌;webServer 同名路由保留作页面侧可达面。导出语义并入 render_preview(fileName=输出名),SKILL 导出节同步(编辑器 HTTP API 对智能体视为关闭)。智能体侧 curl/POST 编辑器接口的旧指引全部作废。
+8. **待裁决**(不在本批):封面会话默认模型是否升级 v4-pro(成本);T7 封面冒烟用例集脚本化;服务端 matting 坏模型(bria-rmbg/silueta)修复/下线。
