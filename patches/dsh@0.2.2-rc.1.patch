@@ -1,0 +1,1380 @@
+diff --git a/lib/bin.js b/lib/bin.js
+index b9a2b8d..a8c03b9 100644
+--- a/lib/bin.js
++++ b/lib/bin.js
+@@ -1,254 +1,254 @@
+-#!/usr/bin/env node
+-import { StartupError, getDshRuntimeVersion, loadLayeredEnv } from "@deepseek-ai/dsh-app-boot";
+-import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
+-import { Command, CommanderError, InvalidArgumentError } from "commander";
+-import { randomUUID } from "node:crypto";
+-import { mkdir, writeFile } from "node:fs/promises";
+-import { join } from "node:path";
+-import { inspect } from "node:util";
+-//#region lib/types/args.js
+-/**
+-* Commander adapter for the `dsh` command line.
+-*
+-* The launcher parses only what it owns — which profile to boot, which extra
+-* patch overlays to apply, and the config dumps — and hands **everything after
+-* its own flags** to the booted tree verbatim, where injected app plugins parse
+-* their own flag families and print their own `--help` (see
+-* `@deepseek-ai/dsh-cmdline`). Launcher flags therefore come first: the first
+-* token this parser does not recognize starts the inner arguments, so
+-* `dsh --profile tui --resume abc` boots the tui profile with `--resume abc`,
+-* and `dsh --profile web -h` prints the web app's help, not this one's.
+-*
+-* `dsh <name>` abbreviates `dsh --profile <name>`; `plugin` manages a profile's
+-* plugin dependencies by forwarding to pnpm.
+-* @module @deepseek-ai/dsh/args
+-*/
+-/**
+-* Repeatable single-value collector: `--patch a.yml --patch b.yml`. Never
+-* variadic — a variadic `--patch` would swallow the inner arguments.
+-*/
+-const collect = (value, previous = []) => [...previous, value];
+-function selectProfile(value, previous) {
+-	if (previous !== void 0) throw new InvalidArgumentError("select a profile only once");
+-	return value;
+-}
+-function rejectElectronProfile(program, profile) {
+-	if (profile.toLowerCase() === "desktop") program.error("error: profile \"desktop\" is managed exclusively by the Electron application");
+-}
+-/** The launcher's own help text; each app prints its own. */
+-const HELP_EXAMPLES = `
+-Examples:
+-  dsh web                                   boot the web profile (same as: dsh --profile web)
+-  dsh rescue --from-default-profile web
+-                                            recreate rescue from the shipped web template, then boot it
+-  dsh headless "run the tests"              answer one task, print the result, and exit
+-  dsh tui --patch ./extra.yml               boot a custom profile with one extra overlay
+-  dsh tui --resume <session>                arguments after the launcher flags reach the app
+-  dsh web --help                            the web app's own flags and help
+-  dsh plugin --profile tui add <package>    install a plugin into the tui profile
+-`;
+-/**
+-* Resolve a boot or dump invocation from the launcher flags and the leftover
+-* inner arguments.
+-* @param program - the command whose options were parsed.
+-* @param profile - the profile these flags boot.
+-* @param options - the launcher flags commander collected.
+-* @param args - the leftover arguments, in argv order.
+-* @returns the resolved invocation.
+-*/
+-function resolveBoot(program, profile, options, args) {
+-	const patches = options.patch ?? [];
+-	if (patches.includes("")) program.error("error: --patch needs a path");
+-	if (options.fromDefaultProfile === "") program.error("error: --from-default-profile needs a name");
+-	const dumps = [
+-		options.dumpConfig,
+-		options.dumpDefaultConfig,
+-		options.dumpConfigSchema
+-	].filter(Boolean);
+-	if (dumps.length === 0) return {
+-		mode: "profile",
+-		profile,
+-		fromDefaultProfile: options.fromDefaultProfile,
+-		patches,
+-		args
+-	};
+-	if (dumps.length > 1) program.error("error: --dump-config, --dump-default-config, and --dump-config-schema are mutually exclusive");
+-	if (args.length > 0) program.error(`error: config dumps take no app arguments, got ${args.map((argument) => JSON.stringify(argument)).join(" ")}`);
+-	if (options.dumpConfigSchema === true) return {
+-		mode: "dump-config-schema",
+-		profile,
+-		fromDefaultProfile: options.fromDefaultProfile,
+-		patches
+-	};
+-	const defaultOnly = options.dumpDefaultConfig === true;
+-	if (defaultOnly && patches.length > 0) program.error("error: --dump-default-config prints the bundle layers and takes no --patch");
+-	return {
+-		mode: "dump-config",
+-		profile,
+-		fromDefaultProfile: options.fromDefaultProfile,
+-		defaultOnly,
+-		patches
+-	};
+-}
+-/**
+-* Resolve argv into one invocation, or print and exit for help, version, or an
+-* error.
+-* @param argv - arguments after the Node binary and script.
+-* @param version - version string printed by `--version`.
+-* @param manageDesktopProfile - permit Desktop's installed carrier to manage its reserved profile's plugins.
+-* @returns the resolved invocation.
+-*/
+-function parseDshArgs(argv, version, manageDesktopProfile = false) {
+-	const first = argv[0];
+-	let resolved;
+-	const program = new Command();
+-	program.name("dsh").version(version, "-V, --version", "output the version number").usage("[--profile] <name> [options] [app-args...]\n       dsh plugin --profile <name> <pnpm-args...>").description("dsh: boot a DeepSeek Harness profile — an ordered stack of plugin-bundle patch layers under your own overrides.").addHelpText("after", HELP_EXAMPLES).exitOverride().helpOption(false).helpCommand(false).allowUnknownOption().passThroughOptions().enablePositionalOptions().argument("[args...]", "arguments for the booted profile's app (see: dsh --profile <name> --help)").option("--profile <name>", "the profile under $DSH_HOME/profiles to boot", selectProfile).option("--from-default-profile <name>", "replace a custom profile with a fresh copy of a shipped profile template").option("--patch <path>", "extra patch-list overlay applied after the profile layer (repeatable)", collect).option("--dump-config", "print the composed profile tree and exit").option("--dump-config-schema", "print JSON Schema for profile entries and patches without mounting").option("--dump-default-config", "print the profile tree without its user layer or --patch overlays and exit").action((args, options) => {
+-		if (options.profile === void 0) {
+-			if (args.some((argument) => argument === "-h" || argument === "--help")) program.help();
+-			program.error("error: --profile <name> is required");
+-		}
+-		const profile = options.profile;
+-		if (profile === "") program.error("error: --profile needs a name");
+-		rejectElectronProfile(program, profile);
+-		resolved = resolveBoot(program, profile, options, args);
+-	});
+-	if (first === "plugin") {
+-		const plugin = program.command("plugin").description("manage a profile's plugins by forwarding the remaining arguments to pnpm in the profile directory");
+-		plugin.helpOption("-h, --help", "show this help").passThroughOptions().requiredOption("--profile <name>", "the profile whose plugins to manage (initialized on first use)", selectProfile).allowUnknownOption().argument("[args...]", "pnpm arguments, forwarded verbatim (add <pkg>, remove <pkg>, why <pkg>, ...)").action((args, options) => {
+-			if (options.profile === "") program.error("error: --profile needs a name");
+-			if (!manageDesktopProfile) rejectElectronProfile(plugin, options.profile);
+-			if (args.length === 0) program.error("error: plugin needs pnpm arguments to forward (e.g. add <package>)");
+-			resolved = {
+-				mode: "plugin",
+-				profile: options.profile.toLowerCase() === "desktop" ? "desktop" : options.profile,
+-				args
+-			};
+-		});
+-	}
+-	try {
+-		const expanded = first !== void 0 && !first.startsWith("-") && first !== "plugin" ? ["--profile", ...argv] : argv;
+-		program.parse(expanded, { from: "user" });
+-	} catch (error) {
+-		return process.exit(error instanceof CommanderError ? error.exitCode : 1);
+-	}
+-	/* v8 ignore next -- an action resolves or Commander throws */
+-	if (resolved === void 0) throw new Error("dsh: no invocation resolved");
+-	return resolved;
+-}
+-//#endregion
+-//#region lib/types/startup-diagnostics.js
+-/** Save original startup diagnostics while keeping the terminal report concise. */
+-/** Wait for stderr to finish the write before the failed process exits. */
+-function writeStderr(text) {
+-	return new Promise((resolve, reject) => {
+-		process.stderr.write(text, (error) => {
+-			if (error) reject(error);
+-			else resolve();
+-		});
+-	});
+-}
+-/**
+-* Print the startup summary and save a private, uniquely named report under DSH_HOME/logs.
+-* Failed writes print the complete report to stderr instead of claiming a saved path.
+-* @param error - startup audit failure retaining plugin metadata and original errors.
+-* @param context - resolved Harness home, application version, and selected profile.
+-* @param write - terminal output sink; awaited before returning, defaults to stderr.
+-* @returns after saving or printing the report and completing terminal writes.
+-*/
+-async function reportStartupFailure(error, context, write = writeStderr) {
+-	const now = (/* @__PURE__ */ new Date()).toISOString();
+-	const report = "WARNING: Raw diagnostics may contain configuration or credential values from plugin errors. Review before sharing.\n\n" + inspect({
+-		timestamp: now,
+-		dshVersion: context.version,
+-		nodeVersion: process.version,
+-		platform: process.platform,
+-		arch: process.arch,
+-		profile: context.profile,
+-		error
+-	}, {
+-		depth: null,
+-		maxArrayLength: null,
+-		maxStringLength: null,
+-		showHidden: true,
+-		customInspect: false,
+-		getters: false,
+-		colors: false
+-	}) + "\n";
+-	await write(`${error.message}\n`);
+-	const logDir = join(context.home, "logs");
+-	const logPath = join(logDir, `startup-${now.replaceAll(":", "-")}-${randomUUID()}.log`);
+-	try {
+-		await mkdir(logDir, {
+-			recursive: true,
+-			mode: 448
+-		});
+-		await writeFile(logPath, report, {
+-			flag: "wx",
+-			mode: 384
+-		});
+-	} catch (writeError) {
+-		await write(`\ndsh: warning: could not write startup diagnostics: ${String(writeError)}\nFull diagnostics:\n${report}`);
+-		return;
+-	}
+-	await write(`\nFull diagnostics: ${logPath}\n`);
+-}
+-//#endregion
+-//#region lib/types/bin.js
+-/**
+-* Command-line entry for dsh.
+-* @module @deepseek-ai/dsh/bin
+-*/
+-/* v8 ignore file -- built-bin acceptance exercises this self-executing dispatch. */
+-/**
+-* Run the public dsh command-line interface.
+-* @param options - Package runtime and Desktop profile access supplied by the installation.
+-* @returns a promise that settles when the selected command mode finishes.
+-*/
+-async function runCli(options = {}) {
+-	const version = getDshRuntimeVersion();
+-	const { manageDesktopProfile, ...profileOptions } = options;
+-	const invocation = parseDshArgs(process.argv.slice(2), version, manageDesktopProfile);
+-	switch (invocation.mode) {
+-		case "profile": {
+-			const { runProfile } = await import("./profile-boot.js");
+-			try {
+-				await runProfile({
+-					environment: loadLayeredEnv("dsh"),
+-					profile: invocation.profile,
+-					fromDefaultProfile: invocation.fromDefaultProfile,
+-					patchFiles: invocation.patches,
+-					args: invocation.args,
+-					...profileOptions
+-				});
+-			} catch (error) {
+-				if (!(error instanceof StartupError)) throw error;
+-				await reportStartupFailure(error, {
+-					home: resolveDshHome(),
+-					version,
+-					profile: invocation.profile
+-				});
+-				process.exit(1);
+-			}
+-			break;
+-		}
+-		case "plugin": {
+-			const { runPlugin } = await import("./plugin-DscIHF4k.js");
+-			process.exit(await runPlugin(invocation.profile, invocation.args, options.packageManager));
+-			break;
+-		}
+-		case "dump-config": {
+-			const { runDumpConfig } = await import("./dump-config-DuXZcU0e.js");
+-			runDumpConfig(invocation.profile, invocation.defaultOnly, invocation.patches, invocation.fromDefaultProfile);
+-			break;
+-		}
+-		case "dump-config-schema": {
+-			const { runDumpConfigSchema } = await import("./dump-config-schema-r4V15-lg.js");
+-			await runDumpConfigSchema(invocation.profile, invocation.patches, invocation.fromDefaultProfile);
+-			break;
+-		}
+-		default: throw new Error(`dsh: unhandled invocation mode ${JSON.stringify(invocation)}`);
+-	}
+-}
+-if (import.meta.main) await runCli();
+-//#endregion
+-export { runCli };
++#!/usr/bin/env node
++import { StartupError, getDshRuntimeVersion, loadLayeredEnv } from "@deepseek-ai/dsh-app-boot";
++import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
++import { Command, CommanderError, InvalidArgumentError } from "commander";
++import { randomUUID } from "node:crypto";
++import { mkdir, writeFile } from "node:fs/promises";
++import { join } from "node:path";
++import { inspect } from "node:util";
++//#region lib/types/args.js
++/**
++* Commander adapter for the `dsh` command line.
++*
++* The launcher parses only what it owns — which profile to boot, which extra
++* patch overlays to apply, and the config dumps — and hands **everything after
++* its own flags** to the booted tree verbatim, where injected app plugins parse
++* their own flag families and print their own `--help` (see
++* `@deepseek-ai/dsh-cmdline`). Launcher flags therefore come first: the first
++* token this parser does not recognize starts the inner arguments, so
++* `dsh --profile tui --resume abc` boots the tui profile with `--resume abc`,
++* and `dsh --profile web -h` prints the web app's help, not this one's.
++*
++* `dsh <name>` abbreviates `dsh --profile <name>`; `plugin` manages a profile's
++* plugin dependencies by forwarding to pnpm.
++* @module @deepseek-ai/dsh/args
++*/
++/**
++* Repeatable single-value collector: `--patch a.yml --patch b.yml`. Never
++* variadic — a variadic `--patch` would swallow the inner arguments.
++*/
++const collect = (value, previous = []) => [...previous, value];
++function selectProfile(value, previous) {
++	if (previous !== void 0) throw new InvalidArgumentError("select a profile only once");
++	return value;
++}
++function rejectElectronProfile(program, profile) {
++	if (profile.toLowerCase() === "desktop") program.error("error: profile \"desktop\" is managed exclusively by the Electron application");
++}
++/** The launcher's own help text; each app prints its own. */
++const HELP_EXAMPLES = `
++Examples:
++  dsh web                                   boot the web profile (same as: dsh --profile web)
++  dsh rescue --from-default-profile web
++                                            recreate rescue from the shipped web template, then boot it
++  dsh headless "run the tests"              answer one task, print the result, and exit
++  dsh tui --patch ./extra.yml               boot a custom profile with one extra overlay
++  dsh tui --resume <session>                arguments after the launcher flags reach the app
++  dsh web --help                            the web app's own flags and help
++  dsh plugin --profile tui add <package>    install a plugin into the tui profile
++`;
++/**
++* Resolve a boot or dump invocation from the launcher flags and the leftover
++* inner arguments.
++* @param program - the command whose options were parsed.
++* @param profile - the profile these flags boot.
++* @param options - the launcher flags commander collected.
++* @param args - the leftover arguments, in argv order.
++* @returns the resolved invocation.
++*/
++function resolveBoot(program, profile, options, args) {
++	const patches = options.patch ?? [];
++	if (patches.includes("")) program.error("error: --patch needs a path");
++	if (options.fromDefaultProfile === "") program.error("error: --from-default-profile needs a name");
++	const dumps = [
++		options.dumpConfig,
++		options.dumpDefaultConfig,
++		options.dumpConfigSchema
++	].filter(Boolean);
++	if (dumps.length === 0) return {
++		mode: "profile",
++		profile,
++		fromDefaultProfile: options.fromDefaultProfile,
++		patches,
++		args
++	};
++	if (dumps.length > 1) program.error("error: --dump-config, --dump-default-config, and --dump-config-schema are mutually exclusive");
++	if (args.length > 0) program.error(`error: config dumps take no app arguments, got ${args.map((argument) => JSON.stringify(argument)).join(" ")}`);
++	if (options.dumpConfigSchema === true) return {
++		mode: "dump-config-schema",
++		profile,
++		fromDefaultProfile: options.fromDefaultProfile,
++		patches
++	};
++	const defaultOnly = options.dumpDefaultConfig === true;
++	if (defaultOnly && patches.length > 0) program.error("error: --dump-default-config prints the bundle layers and takes no --patch");
++	return {
++		mode: "dump-config",
++		profile,
++		fromDefaultProfile: options.fromDefaultProfile,
++		defaultOnly,
++		patches
++	};
++}
++/**
++* Resolve argv into one invocation, or print and exit for help, version, or an
++* error.
++* @param argv - arguments after the Node binary and script.
++* @param version - version string printed by `--version`.
++* @param manageDesktopProfile - permit Desktop's installed carrier to manage its reserved profile's plugins.
++* @returns the resolved invocation.
++*/
++function parseDshArgs(argv, version, manageDesktopProfile = false) {
++	const first = argv[0];
++	let resolved;
++	const program = new Command();
++	program.name("dsh").version(version, "-V, --version", "output the version number").usage("[--profile] <name> [options] [app-args...]\n       dsh plugin --profile <name> <pnpm-args...>").description("dsh: boot a DeepSeek Harness profile — an ordered stack of plugin-bundle patch layers under your own overrides.").addHelpText("after", HELP_EXAMPLES).exitOverride().helpOption(false).helpCommand(false).allowUnknownOption().passThroughOptions().enablePositionalOptions().argument("[args...]", "arguments for the booted profile's app (see: dsh --profile <name> --help)").option("--profile <name>", "the profile under $DSH_HOME/profiles to boot", selectProfile).option("--from-default-profile <name>", "replace a custom profile with a fresh copy of a shipped profile template").option("--patch <path>", "extra patch-list overlay applied after the profile layer (repeatable)", collect).option("--dump-config", "print the composed profile tree and exit").option("--dump-config-schema", "print JSON Schema for profile entries and patches without mounting").option("--dump-default-config", "print the profile tree without its user layer or --patch overlays and exit").action((args, options) => {
++		if (options.profile === void 0) {
++			if (args.some((argument) => argument === "-h" || argument === "--help")) program.help();
++			program.error("error: --profile <name> is required");
++		}
++		const profile = options.profile;
++		if (profile === "") program.error("error: --profile needs a name");
++		if (!manageDesktopProfile) rejectElectronProfile(program, profile);
++		resolved = resolveBoot(program, profile, options, args);
++	});
++	if (first === "plugin") {
++		const plugin = program.command("plugin").description("manage a profile's plugins by forwarding the remaining arguments to pnpm in the profile directory");
++		plugin.helpOption("-h, --help", "show this help").passThroughOptions().requiredOption("--profile <name>", "the profile whose plugins to manage (initialized on first use)", selectProfile).allowUnknownOption().argument("[args...]", "pnpm arguments, forwarded verbatim (add <pkg>, remove <pkg>, why <pkg>, ...)").action((args, options) => {
++			if (options.profile === "") program.error("error: --profile needs a name");
++			if (!manageDesktopProfile) rejectElectronProfile(plugin, options.profile);
++			if (args.length === 0) program.error("error: plugin needs pnpm arguments to forward (e.g. add <package>)");
++			resolved = {
++				mode: "plugin",
++				profile: options.profile.toLowerCase() === "desktop" ? "desktop" : options.profile,
++				args
++			};
++		});
++	}
++	try {
++		const expanded = first !== void 0 && !first.startsWith("-") && first !== "plugin" ? ["--profile", ...argv] : argv;
++		program.parse(expanded, { from: "user" });
++	} catch (error) {
++		return process.exit(error instanceof CommanderError ? error.exitCode : 1);
++	}
++	/* v8 ignore next -- an action resolves or Commander throws */
++	if (resolved === void 0) throw new Error("dsh: no invocation resolved");
++	return resolved;
++}
++//#endregion
++//#region lib/types/startup-diagnostics.js
++/** Save original startup diagnostics while keeping the terminal report concise. */
++/** Wait for stderr to finish the write before the failed process exits. */
++function writeStderr(text) {
++	return new Promise((resolve, reject) => {
++		process.stderr.write(text, (error) => {
++			if (error) reject(error);
++			else resolve();
++		});
++	});
++}
++/**
++* Print the startup summary and save a private, uniquely named report under DSH_HOME/logs.
++* Failed writes print the complete report to stderr instead of claiming a saved path.
++* @param error - startup audit failure retaining plugin metadata and original errors.
++* @param context - resolved Harness home, application version, and selected profile.
++* @param write - terminal output sink; awaited before returning, defaults to stderr.
++* @returns after saving or printing the report and completing terminal writes.
++*/
++async function reportStartupFailure(error, context, write = writeStderr) {
++	const now = (/* @__PURE__ */ new Date()).toISOString();
++	const report = "WARNING: Raw diagnostics may contain configuration or credential values from plugin errors. Review before sharing.\n\n" + inspect({
++		timestamp: now,
++		dshVersion: context.version,
++		nodeVersion: process.version,
++		platform: process.platform,
++		arch: process.arch,
++		profile: context.profile,
++		error
++	}, {
++		depth: null,
++		maxArrayLength: null,
++		maxStringLength: null,
++		showHidden: true,
++		customInspect: false,
++		getters: false,
++		colors: false
++	}) + "\n";
++	await write(`${error.message}\n`);
++	const logDir = join(context.home, "logs");
++	const logPath = join(logDir, `startup-${now.replaceAll(":", "-")}-${randomUUID()}.log`);
++	try {
++		await mkdir(logDir, {
++			recursive: true,
++			mode: 448
++		});
++		await writeFile(logPath, report, {
++			flag: "wx",
++			mode: 384
++		});
++	} catch (writeError) {
++		await write(`\ndsh: warning: could not write startup diagnostics: ${String(writeError)}\nFull diagnostics:\n${report}`);
++		return;
++	}
++	await write(`\nFull diagnostics: ${logPath}\n`);
++}
++//#endregion
++//#region lib/types/bin.js
++/**
++* Command-line entry for dsh.
++* @module @deepseek-ai/dsh/bin
++*/
++/* v8 ignore file -- built-bin acceptance exercises this self-executing dispatch. */
++/**
++* Run the public dsh command-line interface.
++* @param options - Package runtime and Desktop profile access supplied by the installation.
++* @returns a promise that settles when the selected command mode finishes.
++*/
++async function runCli(options = {}) {
++	const version = getDshRuntimeVersion();
++	const { manageDesktopProfile, ...profileOptions } = options;
++	const invocation = parseDshArgs(process.argv.slice(2), version, manageDesktopProfile);
++	switch (invocation.mode) {
++		case "profile": {
++			const { runProfile } = await import("./profile-boot.js");
++			try {
++				await runProfile({
++					environment: loadLayeredEnv("dsh"),
++					profile: invocation.profile,
++					fromDefaultProfile: invocation.fromDefaultProfile,
++					patchFiles: invocation.patches,
++					args: invocation.args,
++					...profileOptions
++				});
++			} catch (error) {
++				if (!(error instanceof StartupError)) throw error;
++				await reportStartupFailure(error, {
++					home: resolveDshHome(),
++					version,
++					profile: invocation.profile
++				});
++				process.exit(1);
++			}
++			break;
++		}
++		case "plugin": {
++			const { runPlugin } = await import("./plugin-DscIHF4k.js");
++			process.exit(await runPlugin(invocation.profile, invocation.args, options.packageManager));
++			break;
++		}
++		case "dump-config": {
++			const { runDumpConfig } = await import("./dump-config-DuXZcU0e.js");
++			runDumpConfig(invocation.profile, invocation.defaultOnly, invocation.patches, invocation.fromDefaultProfile);
++			break;
++		}
++		case "dump-config-schema": {
++			const { runDumpConfigSchema } = await import("./dump-config-schema-r4V15-lg.js");
++			await runDumpConfigSchema(invocation.profile, invocation.patches, invocation.fromDefaultProfile);
++			break;
++		}
++		default: throw new Error(`dsh: unhandled invocation mode ${JSON.stringify(invocation)}`);
++	}
++}
++if (import.meta.main) await runCli();
++//#endregion
++export { runCli };
+diff --git a/lib/profile-boot-e2mS45fC.js b/lib/profile-boot-e2mS45fC.js
+index 3e3ac22..5636b4e 100644
+--- a/lib/profile-boot-e2mS45fC.js
++++ b/lib/profile-boot-e2mS45fC.js
+@@ -1,330 +1,331 @@
+-import { PROFILE_PATCH_FILENAME, PluginPackages, boot, createRuntimeResolution, initProfile, installFailLoud, loadOverlayPatches, loadProfile, readProfilePatches, reportSkippedBundles, resolveProfileDir } from "@deepseek-ai/dsh-app-boot";
+-import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
+-import { dirname, join, resolve } from "node:path";
+-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+-import { fileURLToPath } from "node:url";
+-import { PROFILE_TEMPLATES } from "@deepseek-ai/dsh-official-bundles";
+-import { installProxyFromEnvironment } from "@deepseek-ai/dsh-http-proxy";
+-import { DSH_LAUNCH_ENVIRONMENT_KEY } from "@deepseek-ai/dsh-launch-environment";
+-import { provideCmdline } from "@deepseek-ai/dsh-cmdline";
+-//#region lib/types/process-shutdown.js
+-/** Bounded, escalating process shutdown for the long-lived CLI surfaces. */
+-/** Maximum grace allowed for the application tree to dispose before process exit. */
+-const PROCESS_SHUTDOWN_TIMEOUT_MS = 5e3;
+-/**
+-* Create one process-exit controller around an application disposer.
+-* @param dispose - Whole-application teardown that resolves at quiescence.
+-* @param forceExit - Function that exits the process immediately, replaceable by tests.
+-* @param complete - Function that records the natural completion code, replaceable by tests.
+-* @param timeoutMs - Grace before forced exit, replaceable by tests.
+-* @returns A controller whose normal calls coalesce and whose repeated signal call escalates.
+-*/
+-function createProcessShutdown(dispose, forceExit = (code) => {
+-	process.exit(code);
+-}, complete = (code) => {
+-	process.exitCode = code;
+-}, timeoutMs = PROCESS_SHUTDOWN_TIMEOUT_MS) {
+-	let pending;
+-	let timeout;
+-	let completed = false;
+-	let forceExited = false;
+-	const clearExitTimeout = () => {
+-		/* v8 ignore else -- shutdown() arms the timer before any asynchronous exit path can run. */
+-		if (timeout !== void 0) clearTimeout(timeout);
+-	};
+-	const forceExitOnce = (code) => {
+-		if (forceExited) return;
+-		forceExited = true;
+-		clearExitTimeout();
+-		forceExit(code);
+-	};
+-	const completeOnce = (code) => {
+-		if (completed || forceExited) return;
+-		completed = true;
+-		clearExitTimeout();
+-		complete(code);
+-	};
+-	const start = (code, forceAfterDispose) => {
+-		if (pending !== void 0) return pending;
+-		timeout = setTimeout(() => {
+-			forceExitOnce(code);
+-		}, timeoutMs);
+-		pending = Promise.resolve().then(dispose).then(() => {
+-			if (forceAfterDispose) forceExitOnce(code);
+-			else completeOnce(code);
+-		}, () => {
+-			forceExitOnce(code);
+-		});
+-		return pending;
+-	};
+-	return {
+-		shutdown(code) {
+-			return start(code, false);
+-		},
+-		interrupt(code) {
+-			if (pending !== void 0) {
+-				forceExitOnce(code);
+-				return;
+-			}
+-			start(code, true);
+-		}
+-	};
+-}
+-//#endregion
+-//#region lib/types/profile-boot.js
+-/**
+-* Shared profile boot for every `dsh` surface: resolve the profile, stack its
+-* patch layers (bundle layers in `dsh.profile.bundles` order, the profile's
+-* own `cordis.patch.yml`, `--patch` overlays, the telemetry switch), mount the
+-* tree over the profile's empty root config, and wire fail-loud plus bounded shutdown.
+-*
+-* App flags are not the launcher's business: the invocation's inner arguments
+-* are provided to the tree through `ctx.cmdlineArgs`, where any injected app
+-* plugin may read the same immutable snapshot.
+-* @module @deepseek-ai/dsh/profile-boot
+-*/
+-const NAME = "dsh";
+-/** Launcher-owned readiness signal committed only after boot and host setup succeed. */
+-function createAppReady() {
+-	let ready = false;
+-	const listeners = /* @__PURE__ */ new Set();
+-	return {
+-		service: { onReady(listener) {
+-			if (ready) {
+-				listener();
+-				return () => {};
+-			}
+-			listeners.add(listener);
+-			return () => {
+-				listeners.delete(listener);
+-			};
+-		} },
+-		commit() {
+-			if (ready) return;
+-			ready = true;
+-			for (const listener of [...listeners]) listener();
+-			listeners.clear();
+-		}
+-	};
+-}
+-/**
+-* The home-level user patch layer (`$DSH_HOME/cordis.patch.yml`), applied
+-* over every profile's own layer. Resolved per call, not at module load:
+-* `$DSH_HOME` may be set by the test or launcher after import.
+-* @returns the absolute patch-file path.
+-*/
+-function homePatchPath() {
+-	return join(resolveDshHome(), PROFILE_PATCH_FILENAME);
+-}
+-/** Absolute path of this dsh installation's package.json (both anchors: src/ and lib/ sit one level under apps/cli). */
+-const INSTALL_ANCHOR = fileURLToPath(new URL("../package.json", import.meta.url));
+-/** The empty root entry list every profile tree patches over. */
+-const PROFILE_ROOT_CONFIG = `# dsh profile root — an empty entry list. The tree is composed as patches:
+-# each bundle in package.json's dsh.profile.bundles, then cordis.patch.yml, then any
+-# --patch overlays. Edit cordis.patch.yml, not this file.
+-[]
+-`;
+-/** Root config filename inside a profile directory. */
+-const PROFILE_ROOT_FILENAME = "cordis.yml";
+-/**
+-* Replace the named custom profile with a fresh copy of one shipped template.
+-* This copies only the template's bundle list; local state from the
+-* same-named shipped profile is not read, and no inheritance metadata is
+-* persisted. The new profile is assembled in a `.<name>.staging-*` directory
+-* under the profiles directory and moved into place; only then is any previous
+-* target directory, including its dependencies and user patch, deleted. A
+-* failed move restores the previous directory; when restoring also fails, it
+-* stays in the staging directory. Shipped profile names, compared without
+-* case, are reserved. Concurrent replacements leave one complete copy; each
+-* one either succeeds or reports the concurrent recreation.
+-* @param name - the profile name to create or replace.
+-* @param fromDefaultProfile - shipped profile template to copy.
+-* @param home - Harness home containing the profile directory.
+-* @throws when the template is unknown, the target name is shipped, another process recreates the target
+-*   between the two renames, or a file-system operation fails; a restore failure is an `AggregateError`
+-*   that names the staging path holding the previous profile.
+-*/
+-function initializeProfileFromDefault(name, fromDefaultProfile, home = resolveDshHome()) {
+-	const dir = resolveProfileDir(name, home);
+-	const template = Object.hasOwn(PROFILE_TEMPLATES, fromDefaultProfile) ? PROFILE_TEMPLATES[fromDefaultProfile] : void 0;
+-	if (template === void 0) {
+-		const expected = Object.keys(PROFILE_TEMPLATES).sort().map((value) => JSON.stringify(value)).join(", ");
+-		throw new Error(`${NAME}: unknown default profile ${JSON.stringify(fromDefaultProfile)}; expected one of ${expected}`);
+-	}
+-	const shipped = Object.keys(PROFILE_TEMPLATES).find((shippedName) => shippedName.toLowerCase() === name.toLowerCase());
+-	if (shipped !== void 0) throw new Error(`${NAME}: profile ${JSON.stringify(name)} names shipped profile ${JSON.stringify(shipped)} and cannot be a custom profile target; omit --from-default-profile to use it`);
+-	mkdirSync(dirname(dir), { recursive: true });
+-	const staging = mkdtempSync(join(dirname(dir), `.${name}.staging-`));
+-	const previous = join(staging, "previous");
+-	try {
+-		const fresh = join(staging, "new", name);
+-		initProfile(fresh, template.bundles);
+-		let moved = false;
+-		try {
+-			renameSync(dir, previous);
+-			moved = true;
+-		} catch (error) {
+-			if (error.code !== "ENOENT") throw error;
+-		}
+-		try {
+-			renameSync(fresh, dir);
+-		} catch (error) {
+-			if (existsSync(dir)) {
+-				rmSync(previous, {
+-					recursive: true,
+-					force: true
+-				});
+-				throw new Error(`${NAME}: profile ${JSON.stringify(name)} was recreated concurrently at ${dir}`, { cause: error });
+-			}
+-			if (moved) try {
+-				renameSync(previous, dir);
+-			} catch (restoreError) {
+-				throw new AggregateError([error, restoreError], `${NAME}: profile replacement failed and ${dir} could not be restored from ${previous}`);
+-			}
+-			throw error;
+-		}
+-	} catch (error) {
+-		if (!existsSync(previous)) rmSync(staging, {
+-			recursive: true,
+-			force: true
+-		});
+-		throw error;
+-	}
+-	try {
+-		rmSync(staging, {
+-			recursive: true,
+-			force: true
+-		});
+-	} catch (error) {
+-		process.stderr.write(`${NAME}: replaced profile ${JSON.stringify(name)} but could not remove ${staging}: ${String(error)}\n`);
+-	}
+-}
+-/**
+-* Load a resolved profile for `name` and (re)write the empty root config. The
+-* root is always rewritten: the whole composition is patch layers, and the
+-* vendored Loader's tree write-back (a plugin self-disposing persists the
+-* current tree) can bake composed rows into this file — which would duplicate
+-* every bundle insert on the next boot. The file exists on disk only because
+-* the Loader needs a real include root to anchor `baseUrl` at the profile
+-* directory (the config dump anchors on the same file, so both compose over
+-* the identical base).
+-* @param name - the profile name.
+-* @param userLayer - `false` skips parsing `cordis.patch.yml` (the default dump).
+-* @param fromDefaultProfile - shipped template that replaces the profile before loading it.
+-* @returns the loaded profile.
+-* @throws when explicit initialization names an unknown template or a shipped target.
+-*/
+-function prepareProfile(name, userLayer = true, fromDefaultProfile) {
+-	if (fromDefaultProfile !== void 0) initializeProfileFromDefault(name, fromDefaultProfile);
+-	const profile = loadProfile(NAME, name, INSTALL_ANCHOR, void 0, { userLayer });
+-	reportSkippedBundles(NAME, profile);
+-	writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG);
+-	return profile;
+-}
+-/**
+-* Load `name` and compose its effective patch stack: bundle layers in
+-* `dsh.profile.bundles` order (a base-backed profile gets the base bundle's
+-* platform-gated shell rows), the profile's user layer, the home-level user
+-* layer (`$DSH_HOME/cordis.patch.yml` — machine-local preferences that apply
+-* to every profile, so it outranks the per-profile layer), `--patch` overlays,
+-* then the telemetry switch.
+-* @param name - the profile name.
+-* @param patchFiles - `--patch` overlay paths, in argv order.
+-* @param fromDefaultProfile - shipped template that replaces the named profile.
+-* @param resolvedProfile - application-owned profile and installation.
+-* @returns the profile and its patch layers.
+-*/
+-async function composeProfile(name, patchFiles, fromDefaultProfile, resolvedProfile) {
+-	const profile = resolvedProfile?.profile ?? prepareProfile(name, true, fromDefaultProfile);
+-	if (resolvedProfile !== void 0) writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG);
+-	return {
+-		profile,
+-		resolution: await createRuntimeResolution({
+-			installAnchor: resolvedProfile?.installAnchor ?? INSTALL_ANCHOR,
+-			profile
+-		}),
+-		overlays: patchFiles.flatMap((file) => loadOverlayPatches(NAME, resolve(file)))
+-	};
+-}
+-/**
+-* Boot one profile invocation end to end and leave process lifetime to the
+-* mounted plugins (or to a one-shot runner the composition mounts).
+-* @param options - environment snapshot, profile name, overlays, and the booted app's own arguments.
+-* @returns the settled root context and the shutdown controller.
+-* @throws after disposing startup resources; cleanup failures retain the original error.
+-*/
+-async function runProfile(options) {
+-	const disposeProxy = await installProxyFromEnvironment(options.environment, (message) => {
+-		process.stderr.write(`${NAME}: ${message}\n`);
+-	});
+-	const app = {};
+-	let disposal;
+-	const dispose = () => disposal ??= (async () => {
+-		const failures = [];
+-		for (const release of [() => app.current?.fiber.dispose(), disposeProxy]) try {
+-			await release();
+-		} catch (error) {
+-			failures.push(error);
+-		}
+-		if (failures.length === 1) throw failures[0];
+-		if (failures.length > 1) throw new AggregateError(failures, "dsh: profile cleanup failed");
+-	})();
+-	try {
+-		const composed = await composeProfile(options.profile, options.patchFiles, options.fromDefaultProfile, options.resolvedProfile);
+-		const appReady = createAppReady();
+-		const shutdown = createProcessShutdown(dispose);
+-		const signalShutdown = new AbortController();
+-		const interrupt = (code) => {
+-			signalShutdown.abort();
+-			shutdown.interrupt(code);
+-		};
+-		process.on("SIGTERM", () => {
+-			interrupt(0);
+-		});
+-		process.on("SIGINT", () => {
+-			interrupt(130);
+-		});
+-		installFailLoud(NAME, process, async () => {
+-			await app.current?.fiber.dispose();
+-		});
+-		const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME);
+-		const profileContext = {
+-			name: options.profile,
+-			...options.packageManager === void 0 ? {} : { packageManager: options.packageManager },
+-			dir: composed.profile.dir,
+-			patchPath: composed.profile.patchPath,
+-			installAnchor: options.resolvedProfile?.installAnchor ?? INSTALL_ANCHOR,
+-			startedBundles: composed.profile.layers.map((layer) => layer.packageName),
+-			cwd: process.cwd(),
+-			home: resolveDshHome(),
+-			overlays: composed.overlays,
+-			telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED
+-		};
+-		const ctx = await boot(NAME, rootConfig, readProfilePatches(NAME, profileContext, composed.profile), async (hostCtx) => {
+-			app.current = hostCtx;
+-			hostCtx.provide("profileContext", profileContext);
+-			hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);
+-			await hostCtx.plugin(PluginPackages, { resolution: composed.resolution });
+-			provideCmdline(hostCtx, {
+-				args: options.args,
+-				exit: (code) => void shutdown.shutdown(code),
+-				ready: appReady.service
+-			});
+-		});
+-		app.current = ctx;
+-		if (!signalShutdown.signal.aborted && ctx.fiber.state === 2 && ctx.get("loader") !== void 0) appReady.commit();
+-		return {
+-			ctx,
+-			shutdown
+-		};
+-	} catch (error) {
+-		try {
+-			await dispose();
+-		} catch (cleanupError) {
+-			throw new AggregateError([error, cleanupError], "dsh: profile startup and cleanup failed");
+-		}
+-		throw error;
+-	}
+-}
+-//#endregion
+-export { prepareProfile as a, initializeProfileFromDefault as i, PROFILE_ROOT_FILENAME as n, runProfile as o, homePatchPath as r, INSTALL_ANCHOR as t };
++import { PROFILE_PATCH_FILENAME, PluginPackages, boot, createRuntimeResolution, initProfile, installFailLoud, loadOverlayPatches, loadProfile, readProfilePatches, reportSkippedBundles, resolveProfileDir } from "@deepseek-ai/dsh-app-boot";
++import { resolveDshHome } from "@deepseek-ai/dsh-home-paths";
++import { dirname, join, resolve } from "node:path";
++import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
++import { fileURLToPath } from "node:url";
++import { PROFILE_TEMPLATES } from "@deepseek-ai/dsh-official-bundles";
++import { installProxyFromEnvironment } from "@deepseek-ai/dsh-http-proxy";
++import { DSH_LAUNCH_ENVIRONMENT_KEY } from "@deepseek-ai/dsh-launch-environment";
++import { provideCmdline } from "@deepseek-ai/dsh-cmdline";
++//#region lib/types/process-shutdown.js
++/** Bounded, escalating process shutdown for the long-lived CLI surfaces. */
++/** Maximum grace allowed for the application tree to dispose before process exit. */
++const PROCESS_SHUTDOWN_TIMEOUT_MS = 5e3;
++/**
++* Create one process-exit controller around an application disposer.
++* @param dispose - Whole-application teardown that resolves at quiescence.
++* @param forceExit - Function that exits the process immediately, replaceable by tests.
++* @param complete - Function that records the natural completion code, replaceable by tests.
++* @param timeoutMs - Grace before forced exit, replaceable by tests.
++* @returns A controller whose normal calls coalesce and whose repeated signal call escalates.
++*/
++function createProcessShutdown(dispose, forceExit = (code) => {
++	process.exit(code);
++}, complete = (code) => {
++	process.exitCode = code;
++}, timeoutMs = PROCESS_SHUTDOWN_TIMEOUT_MS) {
++	let pending;
++	let timeout;
++	let completed = false;
++	let forceExited = false;
++	const clearExitTimeout = () => {
++		/* v8 ignore else -- shutdown() arms the timer before any asynchronous exit path can run. */
++		if (timeout !== void 0) clearTimeout(timeout);
++	};
++	const forceExitOnce = (code) => {
++		if (forceExited) return;
++		forceExited = true;
++		clearExitTimeout();
++		forceExit(code);
++	};
++	const completeOnce = (code) => {
++		if (completed || forceExited) return;
++		completed = true;
++		clearExitTimeout();
++		complete(code);
++	};
++	const start = (code, forceAfterDispose) => {
++		if (pending !== void 0) return pending;
++		timeout = setTimeout(() => {
++			forceExitOnce(code);
++		}, timeoutMs);
++		pending = Promise.resolve().then(dispose).then(() => {
++			if (forceAfterDispose) forceExitOnce(code);
++			else completeOnce(code);
++		}, () => {
++			forceExitOnce(code);
++		});
++		return pending;
++	};
++	return {
++		shutdown(code) {
++			return start(code, false);
++		},
++		interrupt(code) {
++			if (pending !== void 0) {
++				forceExitOnce(code);
++				return;
++			}
++			start(code, true);
++		}
++	};
++}
++//#endregion
++//#region lib/types/profile-boot.js
++/**
++* Shared profile boot for every `dsh` surface: resolve the profile, stack its
++* patch layers (bundle layers in `dsh.profile.bundles` order, the profile's
++* own `cordis.patch.yml`, `--patch` overlays, the telemetry switch), mount the
++* tree over the profile's empty root config, and wire fail-loud plus bounded shutdown.
++*
++* App flags are not the launcher's business: the invocation's inner arguments
++* are provided to the tree through `ctx.cmdlineArgs`, where any injected app
++* plugin may read the same immutable snapshot.
++* @module @deepseek-ai/dsh/profile-boot
++*/
++const NAME = "dsh";
++/** Launcher-owned readiness signal committed only after boot and host setup succeed. */
++function createAppReady() {
++	let ready = false;
++	const listeners = /* @__PURE__ */ new Set();
++	return {
++		service: { onReady(listener) {
++			if (ready) {
++				listener();
++				return () => {};
++			}
++			listeners.add(listener);
++			return () => {
++				listeners.delete(listener);
++			};
++		} },
++		commit() {
++			if (ready) return;
++			ready = true;
++			for (const listener of [...listeners]) listener();
++			listeners.clear();
++		}
++	};
++}
++/**
++* The home-level user patch layer (`$DSH_HOME/cordis.patch.yml`), applied
++* over every profile's own layer. Resolved per call, not at module load:
++* `$DSH_HOME` may be set by the test or launcher after import.
++* @returns the absolute patch-file path.
++*/
++function homePatchPath() {
++	return join(resolveDshHome(), PROFILE_PATCH_FILENAME);
++}
++/** Absolute path of this dsh installation's package.json (both anchors: src/ and lib/ sit one level under apps/cli). */
++const INSTALL_ANCHOR = fileURLToPath(new URL("../package.json", import.meta.url));
++/** The empty root entry list every profile tree patches over. */
++const PROFILE_ROOT_CONFIG = `# dsh profile root — an empty entry list. The tree is composed as patches:
++# each bundle in package.json's dsh.profile.bundles, then cordis.patch.yml, then any
++# --patch overlays. Edit cordis.patch.yml, not this file.
++[]
++`;
++/** Root config filename inside a profile directory. */
++const PROFILE_ROOT_FILENAME = "cordis.yml";
++/**
++* Replace the named custom profile with a fresh copy of one shipped template.
++* This copies only the template's bundle list; local state from the
++* same-named shipped profile is not read, and no inheritance metadata is
++* persisted. The new profile is assembled in a `.<name>.staging-*` directory
++* under the profiles directory and moved into place; only then is any previous
++* target directory, including its dependencies and user patch, deleted. A
++* failed move restores the previous directory; when restoring also fails, it
++* stays in the staging directory. Shipped profile names, compared without
++* case, are reserved. Concurrent replacements leave one complete copy; each
++* one either succeeds or reports the concurrent recreation.
++* @param name - the profile name to create or replace.
++* @param fromDefaultProfile - shipped profile template to copy.
++* @param home - Harness home containing the profile directory.
++* @throws when the template is unknown, the target name is shipped, another process recreates the target
++*   between the two renames, or a file-system operation fails; a restore failure is an `AggregateError`
++*   that names the staging path holding the previous profile.
++*/
++function initializeProfileFromDefault(name, fromDefaultProfile, home = resolveDshHome()) {
++	const dir = resolveProfileDir(name, home);
++	const template = Object.hasOwn(PROFILE_TEMPLATES, fromDefaultProfile) ? PROFILE_TEMPLATES[fromDefaultProfile] : void 0;
++	if (template === void 0) {
++		const expected = Object.keys(PROFILE_TEMPLATES).sort().map((value) => JSON.stringify(value)).join(", ");
++		throw new Error(`${NAME}: unknown default profile ${JSON.stringify(fromDefaultProfile)}; expected one of ${expected}`);
++	}
++	const shipped = Object.keys(PROFILE_TEMPLATES).find((shippedName) => shippedName.toLowerCase() === name.toLowerCase());
++	if (shipped !== void 0) throw new Error(`${NAME}: profile ${JSON.stringify(name)} names shipped profile ${JSON.stringify(shipped)} and cannot be a custom profile target; omit --from-default-profile to use it`);
++	mkdirSync(dirname(dir), { recursive: true });
++	const staging = mkdtempSync(join(dirname(dir), `.${name}.staging-`));
++	const previous = join(staging, "previous");
++	try {
++		const fresh = join(staging, "new", name);
++		initProfile(fresh, template.bundles);
++		let moved = false;
++		try {
++			renameSync(dir, previous);
++			moved = true;
++		} catch (error) {
++			if (error.code !== "ENOENT") throw error;
++		}
++		try {
++			renameSync(fresh, dir);
++		} catch (error) {
++			if (existsSync(dir)) {
++				rmSync(previous, {
++					recursive: true,
++					force: true
++				});
++				throw new Error(`${NAME}: profile ${JSON.stringify(name)} was recreated concurrently at ${dir}`, { cause: error });
++			}
++			if (moved) try {
++				renameSync(previous, dir);
++			} catch (restoreError) {
++				throw new AggregateError([error, restoreError], `${NAME}: profile replacement failed and ${dir} could not be restored from ${previous}`);
++			}
++			throw error;
++		}
++	} catch (error) {
++		if (!existsSync(previous)) rmSync(staging, {
++			recursive: true,
++			force: true
++		});
++		throw error;
++	}
++	try {
++		rmSync(staging, {
++			recursive: true,
++			force: true
++		});
++	} catch (error) {
++		process.stderr.write(`${NAME}: replaced profile ${JSON.stringify(name)} but could not remove ${staging}: ${String(error)}\n`);
++	}
++}
++/**
++* Load a resolved profile for `name` and (re)write the empty root config. The
++* root is always rewritten: the whole composition is patch layers, and the
++* vendored Loader's tree write-back (a plugin self-disposing persists the
++* current tree) can bake composed rows into this file — which would duplicate
++* every bundle insert on the next boot. The file exists on disk only because
++* the Loader needs a real include root to anchor `baseUrl` at the profile
++* directory (the config dump anchors on the same file, so both compose over
++* the identical base).
++* @param name - the profile name.
++* @param userLayer - `false` skips parsing `cordis.patch.yml` (the default dump).
++* @param fromDefaultProfile - shipped template that replaces the profile before loading it.
++* @returns the loaded profile.
++* @throws when explicit initialization names an unknown template or a shipped target.
++*/
++function prepareProfile(name, userLayer = true, fromDefaultProfile) {
++	if (fromDefaultProfile !== void 0) initializeProfileFromDefault(name, fromDefaultProfile);
++	const profile = loadProfile(NAME, name, INSTALL_ANCHOR, void 0, { userLayer });
++	reportSkippedBundles(NAME, profile);
++	writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG);
++	return profile;
++}
++/**
++* Load `name` and compose its effective patch stack: bundle layers in
++* `dsh.profile.bundles` order (a base-backed profile gets the base bundle's
++* platform-gated shell rows), the profile's user layer, the home-level user
++* layer (`$DSH_HOME/cordis.patch.yml` — machine-local preferences that apply
++* to every profile, so it outranks the per-profile layer), `--patch` overlays,
++* then the telemetry switch.
++* @param name - the profile name.
++* @param patchFiles - `--patch` overlay paths, in argv order.
++* @param fromDefaultProfile - shipped template that replaces the named profile.
++* @param resolvedProfile - application-owned profile and installation.
++* @returns the profile and its patch layers.
++*/
++async function composeProfile(name, patchFiles, fromDefaultProfile, resolvedProfile) {
++	const profile = resolvedProfile?.profile ?? prepareProfile(name, true, fromDefaultProfile);
++	if (resolvedProfile !== void 0) writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG);
++	return {
++		profile,
++		resolution: await createRuntimeResolution({
++			installAnchor: resolvedProfile?.installAnchor ?? INSTALL_ANCHOR,
++			profile
++		}),
++		overlays: patchFiles.flatMap((file) => loadOverlayPatches(NAME, resolve(file)))
++	};
++}
++/**
++* Boot one profile invocation end to end and leave process lifetime to the
++* mounted plugins (or to a one-shot runner the composition mounts).
++* @param options - environment snapshot, profile name, overlays, and the booted app's own arguments.
++* @returns the settled root context and the shutdown controller.
++* @throws after disposing startup resources; cleanup failures retain the original error.
++*/
++async function runProfile(options) {
++	const disposeProxy = await installProxyFromEnvironment(options.environment, (message) => {
++		process.stderr.write(`${NAME}: ${message}\n`);
++	});
++	const app = {};
++	let disposal;
++	const dispose = () => disposal ??= (async () => {
++		const failures = [];
++		for (const release of [() => app.current?.fiber.dispose(), disposeProxy]) try {
++			await release();
++		} catch (error) {
++			failures.push(error);
++		}
++		if (failures.length === 1) throw failures[0];
++		if (failures.length > 1) throw new AggregateError(failures, "dsh: profile cleanup failed");
++	})();
++	try {
++		const composed = await composeProfile(options.profile, options.patchFiles, options.fromDefaultProfile, options.resolvedProfile);
++		const appReady = createAppReady();
++		const shutdown = createProcessShutdown(dispose);
++		const signalShutdown = new AbortController();
++		const interrupt = (code) => {
++			signalShutdown.abort();
++			shutdown.interrupt(code);
++		};
++		process.on("SIGTERM", () => {
++			interrupt(0);
++		});
++		process.on("SIGINT", () => {
++			interrupt(130);
++		});
++		installFailLoud(NAME, process, async () => {
++			await app.current?.fiber.dispose();
++		});
++		const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME);
++		const profileContext = {
++			name: options.profile,
++			...options.packageManager === void 0 ? {} : { packageManager: options.packageManager },
++			...options.resolvedProfile?.readPatches === void 0 ? {} : { readPatches: options.resolvedProfile.readPatches },
++			dir: composed.profile.dir,
++			patchPath: composed.profile.patchPath,
++			installAnchor: options.resolvedProfile?.installAnchor ?? INSTALL_ANCHOR,
++			startedBundles: composed.profile.layers.map((layer) => layer.packageName),
++			cwd: process.cwd(),
++			home: resolveDshHome(),
++			overlays: composed.overlays,
++			telemetryDisabledEnv: process.env.DSH_TELEMETRY_DISABLED
++		};
++		const ctx = await boot(NAME, rootConfig, readProfilePatches(NAME, profileContext, composed.profile), async (hostCtx) => {
++			app.current = hostCtx;
++			hostCtx.provide("profileContext", profileContext);
++			hostCtx.provide(DSH_LAUNCH_ENVIRONMENT_KEY, options.environment);
++			await hostCtx.plugin(PluginPackages, { resolution: composed.resolution });
++			provideCmdline(hostCtx, {
++				args: options.args,
++				exit: (code) => void shutdown.shutdown(code),
++				ready: appReady.service
++			});
++		});
++		app.current = ctx;
++		if (!signalShutdown.signal.aborted && ctx.fiber.state === 2 && ctx.get("loader") !== void 0) appReady.commit();
++		return {
++			ctx,
++			shutdown
++		};
++	} catch (error) {
++		try {
++			await dispose();
++		} catch (cleanupError) {
++			throw new AggregateError([error, cleanupError], "dsh: profile startup and cleanup failed");
++		}
++		throw error;
++	}
++}
++//#endregion
++export { prepareProfile as a, initializeProfileFromDefault as i, PROFILE_ROOT_FILENAME as n, runProfile as o, homePatchPath as r, INSTALL_ANCHOR as t };
+diff --git a/lib/types/profile-boot.d.ts b/lib/types/profile-boot.d.ts
+index aaccfb3..ebd9a8f 100644
+--- a/lib/types/profile-boot.d.ts
++++ b/lib/types/profile-boot.d.ts
+@@ -1,97 +1,99 @@
+-/**
+- * Shared profile boot for every `dsh` surface: resolve the profile, stack its
+- * patch layers (bundle layers in `dsh.profile.bundles` order, the profile's
+- * own `cordis.patch.yml`, `--patch` overlays, the telemetry switch), mount the
+- * tree over the profile's empty root config, and wire fail-loud plus bounded shutdown.
+- *
+- * App flags are not the launcher's business: the invocation's inner arguments
+- * are provided to the tree through `ctx.cmdlineArgs`, where any injected app
+- * plugin may read the same immutable snapshot.
+- * @module @deepseek-ai/dsh/profile-boot
+- */
+-import { type Context } from '@deepseek-ai/cordis';
+-import { type ProfileContext, type Profile } from '@deepseek-ai/dsh-app-boot';
+-import { type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment';
+-import { type ProcessShutdown } from './process-shutdown.ts';
+-/**
+- * The home-level user patch layer (`$DSH_HOME/cordis.patch.yml`), applied
+- * over every profile's own layer. Resolved per call, not at module load:
+- * `$DSH_HOME` may be set by the test or launcher after import.
+- * @returns the absolute patch-file path.
+- */
+-export declare function homePatchPath(): string;
+-/** Absolute path of this dsh installation's package.json (both anchors: src/ and lib/ sit one level under apps/cli). */
+-export declare const INSTALL_ANCHOR: string;
+-/** Root config filename inside a profile directory. */
+-export declare const PROFILE_ROOT_FILENAME = "cordis.yml";
+-/**
+- * Replace the named custom profile with a fresh copy of one shipped template.
+- * This copies only the template's bundle list; local state from the
+- * same-named shipped profile is not read, and no inheritance metadata is
+- * persisted. The new profile is assembled in a `.<name>.staging-*` directory
+- * under the profiles directory and moved into place; only then is any previous
+- * target directory, including its dependencies and user patch, deleted. A
+- * failed move restores the previous directory; when restoring also fails, it
+- * stays in the staging directory. Shipped profile names, compared without
+- * case, are reserved. Concurrent replacements leave one complete copy; each
+- * one either succeeds or reports the concurrent recreation.
+- * @param name - the profile name to create or replace.
+- * @param fromDefaultProfile - shipped profile template to copy.
+- * @param home - Harness home containing the profile directory.
+- * @throws when the template is unknown, the target name is shipped, another process recreates the target
+- *   between the two renames, or a file-system operation fails; a restore failure is an `AggregateError`
+- *   that names the staging path holding the previous profile.
+- */
+-export declare function initializeProfileFromDefault(name: string, fromDefaultProfile: string, home?: string): void;
+-/**
+- * Load a resolved profile for `name` and (re)write the empty root config. The
+- * root is always rewritten: the whole composition is patch layers, and the
+- * vendored Loader's tree write-back (a plugin self-disposing persists the
+- * current tree) can bake composed rows into this file — which would duplicate
+- * every bundle insert on the next boot. The file exists on disk only because
+- * the Loader needs a real include root to anchor `baseUrl` at the profile
+- * directory (the config dump anchors on the same file, so both compose over
+- * the identical base).
+- * @param name - the profile name.
+- * @param userLayer - `false` skips parsing `cordis.patch.yml` (the default dump).
+- * @param fromDefaultProfile - shipped template that replaces the profile before loading it.
+- * @returns the loaded profile.
+- * @throws when explicit initialization names an unknown template or a shipped target.
+- */
+-export declare function prepareProfile(name: string, userLayer?: boolean, fromDefaultProfile?: string): Profile;
+-/** An application-owned profile and its independent installation fallback. */
+-export interface ResolvedProfileRuntime {
+-    /** Profile already loaded from the application's own directory. */
+-    profile: Profile;
+-    /** Absolute package.json path of the application's dsh installation. */
+-    installAnchor: string;
+-}
+-/** Options for {@link runProfile}. */
+-export interface RunProfileOptions {
+-    /** This run's frozen environment snapshot, provided before any entry mounts. */
+-    environment: LaunchEnvironmentSnapshot;
+-    /** The profile name to boot. */
+-    profile: string;
+-    /** Loaded application profile; bypasses named profile initialization when supplied. */
+-    resolvedProfile?: ResolvedProfileRuntime | undefined;
+-    /** Shipped template that replaces the named profile before boot. */
+-    fromDefaultProfile?: string | undefined;
+-    /** `--patch` overlay paths, in argv order. */
+-    patchFiles: readonly string[];
+-    /** The invocation's inner arguments, handed to the tree through `ctx.cmdlineArgs`. */
+-    args: readonly string[];
+-    /** Application-owned package runtime, scoped to plugin package operations. */
+-    packageManager?: ProfileContext['packageManager'];
+-}
+-/**
+- * Boot one profile invocation end to end and leave process lifetime to the
+- * mounted plugins (or to a one-shot runner the composition mounts).
+- * @param options - environment snapshot, profile name, overlays, and the booted app's own arguments.
+- * @returns the settled root context and the shutdown controller.
+- * @throws after disposing startup resources; cleanup failures retain the original error.
+- */
+-export declare function runProfile(options: RunProfileOptions): Promise<{
+-    ctx: Context;
+-    shutdown: ProcessShutdown;
+-}>;
++/**
++ * Shared profile boot for every `dsh` surface: resolve the profile, stack its
++ * patch layers (bundle layers in `dsh.profile.bundles` order, the profile's
++ * own `cordis.patch.yml`, `--patch` overlays, the telemetry switch), mount the
++ * tree over the profile's empty root config, and wire fail-loud plus bounded shutdown.
++ *
++ * App flags are not the launcher's business: the invocation's inner arguments
++ * are provided to the tree through `ctx.cmdlineArgs`, where any injected app
++ * plugin may read the same immutable snapshot.
++ * @module @deepseek-ai/dsh/profile-boot
++ */
++import { type Context } from '@deepseek-ai/cordis';
++import { type ProfileContext, type Profile } from '@deepseek-ai/dsh-app-boot';
++import { type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment';
++import { type ProcessShutdown } from './process-shutdown.ts';
++/**
++ * The home-level user patch layer (`$DSH_HOME/cordis.patch.yml`), applied
++ * over every profile's own layer. Resolved per call, not at module load:
++ * `$DSH_HOME` may be set by the test or launcher after import.
++ * @returns the absolute patch-file path.
++ */
++export declare function homePatchPath(): string;
++/** Absolute path of this dsh installation's package.json (both anchors: src/ and lib/ sit one level under apps/cli). */
++export declare const INSTALL_ANCHOR: string;
++/** Root config filename inside a profile directory. */
++export declare const PROFILE_ROOT_FILENAME = "cordis.yml";
++/**
++ * Replace the named custom profile with a fresh copy of one shipped template.
++ * This copies only the template's bundle list; local state from the
++ * same-named shipped profile is not read, and no inheritance metadata is
++ * persisted. The new profile is assembled in a `.<name>.staging-*` directory
++ * under the profiles directory and moved into place; only then is any previous
++ * target directory, including its dependencies and user patch, deleted. A
++ * failed move restores the previous directory; when restoring also fails, it
++ * stays in the staging directory. Shipped profile names, compared without
++ * case, are reserved. Concurrent replacements leave one complete copy; each
++ * one either succeeds or reports the concurrent recreation.
++ * @param name - the profile name to create or replace.
++ * @param fromDefaultProfile - shipped profile template to copy.
++ * @param home - Harness home containing the profile directory.
++ * @throws when the template is unknown, the target name is shipped, another process recreates the target
++ *   between the two renames, or a file-system operation fails; a restore failure is an `AggregateError`
++ *   that names the staging path holding the previous profile.
++ */
++export declare function initializeProfileFromDefault(name: string, fromDefaultProfile: string, home?: string): void;
++/**
++ * Load a resolved profile for `name` and (re)write the empty root config. The
++ * root is always rewritten: the whole composition is patch layers, and the
++ * vendored Loader's tree write-back (a plugin self-disposing persists the
++ * current tree) can bake composed rows into this file — which would duplicate
++ * every bundle insert on the next boot. The file exists on disk only because
++ * the Loader needs a real include root to anchor `baseUrl` at the profile
++ * directory (the config dump anchors on the same file, so both compose over
++ * the identical base).
++ * @param name - the profile name.
++ * @param userLayer - `false` skips parsing `cordis.patch.yml` (the default dump).
++ * @param fromDefaultProfile - shipped template that replaces the profile before loading it.
++ * @returns the loaded profile.
++ * @throws when explicit initialization names an unknown template or a shipped target.
++ */
++export declare function prepareProfile(name: string, userLayer?: boolean, fromDefaultProfile?: string): Profile;
++/** An application-owned profile and its independent installation fallback. */
++export interface ResolvedProfileRuntime {
++    /** Profile already loaded from the application's own directory. */
++    profile: Profile;
++    /** Absolute package.json path of the application's dsh installation. */
++    installAnchor: string;
++    /** Application-owned composition for subsequent configuration edits and HMR. */
++    readPatches?: ProfileContext['readPatches'];
++}
++/** Options for {@link runProfile}. */
++export interface RunProfileOptions {
++    /** This run's frozen environment snapshot, provided before any entry mounts. */
++    environment: LaunchEnvironmentSnapshot;
++    /** The profile name to boot. */
++    profile: string;
++    /** Loaded application profile; bypasses named profile initialization when supplied. */
++    resolvedProfile?: ResolvedProfileRuntime | undefined;
++    /** Shipped template that replaces the named profile before boot. */
++    fromDefaultProfile?: string | undefined;
++    /** `--patch` overlay paths, in argv order. */
++    patchFiles: readonly string[];
++    /** The invocation's inner arguments, handed to the tree through `ctx.cmdlineArgs`. */
++    args: readonly string[];
++    /** Application-owned package runtime, scoped to plugin package operations. */
++    packageManager?: ProfileContext['packageManager'];
++}
++/**
++ * Boot one profile invocation end to end and leave process lifetime to the
++ * mounted plugins (or to a one-shot runner the composition mounts).
++ * @param options - environment snapshot, profile name, overlays, and the booted app's own arguments.
++ * @returns the settled root context and the shutdown controller.
++ * @throws after disposing startup resources; cleanup failures retain the original error.
++ */
++export declare function runProfile(options: RunProfileOptions): Promise<{
++    ctx: Context;
++    shutdown: ProcessShutdown;
++}>;
+ //# sourceMappingURL=profile-boot.d.ts.map
+\ No newline at end of file
