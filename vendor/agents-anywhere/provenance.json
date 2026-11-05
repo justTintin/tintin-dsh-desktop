@@ -1,24 +1,24 @@
 {
   "repository": "https://github.com/anywhere-labs/Agents-Anywhere.git",
   "branch": "main",
-  "commit": "1f827133d6d6de86df424898d9b9738b6b3aebf3",
+  "commit": "296f70ed4036be3da039f1614b782fdbdbf8d150",
   "packageDirectory": "dsh-bridge-next",
   "sourceVersion": "2.1.0",
-  "desktopVersion": "2.1.0-desktop.c1f827133d6d6.rd9c47cbc",
-  "artifact": "agents-anywhere-dsh-bridge-next-2.1.0-desktop.c1f827133d6d6.rd9c47cbc.tgz",
-  "sha256": "e98420ca51c5a31afe14f5ceb425b25b6c1076efeffc46552a759315108dab56",
+  "desktopVersion": "2.1.0-desktop.c296f70ed4036.rc2b11bfc",
+  "artifact": "agents-anywhere-dsh-bridge-next-2.1.0-desktop.c296f70ed4036.rc2b11bfc.tgz",
+  "sha256": "879a434362e56d618410aa3659b738efac3e37b6933ddfe8b190465646b478e0",
   "runtimePeers": {
-    "@deepseek-ai/dsh-typert-protocol": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-llm": "0.2.2-alpha.2",
-    "@deepseek-ai/dsh-session": "0.2.2-alpha.2"
+    "@deepseek-ai/dsh-typert-protocol": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.1"
   },
   "manifestChanges": [
-    "version set to 2.1.0-desktop.c1f827133d6d6.rd9c47cbc",
+    "version set to 2.1.0-desktop.c296f70ed4036.rc2b11bfc",
     "release staging removes prepack/postpack hooks; build, typecheck and check:build run explicitly",
     "release staging pins the AA build-time DSH type graph to the source devDependencies",
-    "@deepseek-ai/dsh-typert-protocol peer accepts 0.2.2-alpha.2",
-    "@deepseek-ai/dsh-llm peer accepts 0.2.2-alpha.2",
-    "@deepseek-ai/dsh-session peer accepts 0.2.2-alpha.2"
+    "@deepseek-ai/dsh-typert-protocol peer accepts 0.2.2-rc.1",
+    "@deepseek-ai/dsh-llm peer accepts 0.2.2-rc.1",
+    "@deepseek-ai/dsh-session peer accepts 0.2.2-rc.1"
   ],
   "sourceChanges": []
 }
