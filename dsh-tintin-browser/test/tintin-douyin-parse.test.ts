@@ -1,7 +1,9 @@
 // 抖音分享链接解析纯函数层（SRC douyin-parse-logic.js 对拍；2026-10-26 下载扩展链复活工作包）
 import { describe, expect, it } from 'vitest'
 import {
+  buildDouyinShortUrl,
   buildDouyinVideoPageUrl,
+  extractDouyinPasscode,
   extractDouyinShareUrl,
   extractDouyinVideoIdFromUrl,
   validateDouyinParseResponse,
@@ -37,6 +39,25 @@ describe('buildDouyinVideoPageUrl', () => {
     expect(buildDouyinVideoPageUrl('74123456789012')).toBeNull()
     expect(buildDouyinVideoPageUrl('abc')).toBeNull()
     expect(buildDouyinVideoPageUrl('')).toBeNull()
+  })
+})
+
+describe('口令支持（2026-11-04 用户报障裁决选 1，超出 SRC 的扩展）', () => {
+  it('日期锚定提取口令码（含用户实报的乱码形态）', () => {
+    expect(extractDouyinPasscode('7.97 Z@j.Cu 09/09 UYz:/国行iphone终于能用AI了')).toBe('UYz')
+    expect(extractDouyinPasscode('7:97:5pm N@j;Cu 09/09 UYz:/国行 iphone')).toBe('UYz')
+  })
+  it('无日期退回泛匹配；URL 文本与普通文本不误抓', () => {
+    expect(extractDouyinPasscode('DYz:/ 国行iphone')).toBe('DYz')
+    expect(extractDouyinPasscode('https://v.douyin.com/iRNBho6u/ 复制此链接')).toBeNull()
+    expect(extractDouyinPasscode('随便一段文本')).toBeNull()
+    expect(extractDouyinPasscode('')).toBeNull()
+    expect(extractDouyinPasscode(null)).toBeNull()
+  })
+  it('码拼回 v.douyin.com 短链；非法码 → null', () => {
+    expect(buildDouyinShortUrl('UYz')).toBe('https://v.douyin.com/UYz/')
+    expect(buildDouyinShortUrl('bad_code!')).toBeNull()
+    expect(buildDouyinShortUrl('')).toBeNull()
   })
 })
 

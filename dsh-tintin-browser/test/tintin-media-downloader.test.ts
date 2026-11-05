@@ -136,6 +136,53 @@ describe('createMediaDownloaderIpc：单流直链下载（本地 server 实测�
     expect(seenHeaders.referer).toBe('https://www.bilibili.com/video/BV1x')
   })
 
+  it('douyinParse 口令兜底：码拼短链 → 302 Location 取 video_id（2026-11-04 选 1）', async () => {
+    const { handlers } = build()
+    const realFetch = globalThis.fetch
+    const calls: string[] = []
+    ;(globalThis as unknown as { fetch: unknown }).fetch = (async (input: unknown) => {
+      const u = String(input instanceof URL ? input.href : input)
+      calls.push(u)
+      return {
+        headers: { get: (k: string) => (String(k).toLowerCase() === 'location' ? 'https://www.douyin.com/video/7412345678901234567?x=1' : null) },
+        json: async () => ({ code: 500, msg: 'should-not-reach' }),
+      } as unknown as Response
+    }) as typeof fetch
+    try {
+      const r = (await handlers.get('browser:douyinParse')!(null, '7.97 Z@j.Cu 09/09 UYz:/国行iphone')) as { ok: boolean; videoPageUrl?: string }
+      expect(r.ok).toBe(true)
+      expect(r.videoPageUrl).toBe('https://www.douyin.com/video/7412345678901234567')
+      expect(calls[0]).toBe('https://v.douyin.com/UYz/')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  })
+
+  it('douyinParse 口令 302 失败 → 回落 API（喂构造短链）而非死路（2026-11-04）', async () => {
+    const { handlers } = build()
+    const realFetch = globalThis.fetch
+    const calls: string[] = []
+    ;(globalThis as unknown as { fetch: unknown }).fetch = (async (input: unknown) => {
+      const u = String(input instanceof URL ? input.href : input)
+      calls.push(u)
+      if (u.startsWith('https://dy.xs25.cn/')) {
+        return {
+          headers: { get: () => null },
+          json: async () => ({ code: 200, data: { video_url: 'https://v26-web.douyinvod.com/x.mp4', additional_data: [{ nickname: '作者', desc: '描述' }] } }),
+        } as unknown as Response
+      }
+      return { headers: { get: () => null }, json: async () => ({}) } as unknown as Response
+    }) as typeof fetch
+    try {
+      const r = (await handlers.get('browser:douyinParse')!(null, '7.97 Z@j.Cu 09/09 UYz:/国行iphone')) as { ok: boolean; videoUrl?: string }
+      expect(r.ok).toBe(true)
+      expect(r.videoUrl).toBe('https://v26-web.douyinvod.com/x.mp4')
+      expect(calls.some((u) => u.startsWith('https://dy.xs25.cn/') && u.includes('v.douyin.com%2FUYz'))).toBe(true)
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  })
+
   it('参数缺失 url → 显式报错（铁律 2）', async () => {
     const { handlers } = build()
     const r = (await handlers.get('browser:downloadMediaStart')!(null, {})) as { success: boolean; error?: string }

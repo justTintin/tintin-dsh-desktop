@@ -22,7 +22,9 @@ import { basename, dirname, extname, join } from 'node:path'
 import { URL } from 'node:url'
 import {
   DOUYIN_PARSE_API,
+  buildDouyinShortUrl,
   buildDouyinVideoPageUrl,
+  extractDouyinPasscode,
   extractDouyinShareUrl,
   extractDouyinVideoIdFromUrl,
   validateDouyinParseResponse,
@@ -300,39 +302,50 @@ export function createMediaDownloaderIpc(deps: MediaDownloaderDeps) {
   }
 
   // ── IPC: browser:douyinParse（SRC media-downloader.js L342-389 1:1：
-  //     主链路=短链 302 取 video_id → 视频页 URL 交 yt-dlp；API 降为兜底）──
+  //     主链路=短链 302 取 video_id → 视频页 URL 交 yt-dlp；API 降为兜底；
+  //     2026-11-04 增口令兜底（用户报障裁决选 1）：`09/09 UYz:/ 标题` 的 UYz 即短链码）──
+  /** 302 探测：短链/口令构造 URL → Location 里的视频页 video_id（实测无需 cookie） */
+  async function probeVideoIdFromRedirect(url: string): Promise<string | null> {
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        redirect: 'manual' as RequestRedirect,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' },
+        signal: AbortSignal.timeout(15000),
+      })
+      return extractDouyinVideoIdFromUrl(res.headers.get('location') || '')
+    } catch { /* 探测失败（网络/超时）→ 调用方走兜底 */ }
+    return null
+  }
   ipcMain.handle('browser:douyinParse', async (_e: unknown, shareText: unknown) => {
     const text = String(shareText || '')
     // 1) 分享文本里直接粘了视频页 / note 页 URL 的情况
     let videoId = extractDouyinVideoIdFromUrl(text)
-    // 2) 短链 → 302 Location 取 video_id（实测无需 cookie）
-    if (!videoId) {
-      const shareUrl = extractDouyinShareUrl(text)
-      if (shareUrl) {
-        try {
-          const res = await fetch(shareUrl, {
-            method: 'GET',
-            redirect: 'manual' as RequestRedirect,
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' },
-            signal: AbortSignal.timeout(15000),
-          })
-          const loc = res.headers.get('location') || ''
-          videoId = extractDouyinVideoIdFromUrl(loc)
-          if (!videoId) {
-            // 跳到 /user/ 等 → 视频已删除或短链失效
-            return { ok: false, reason: '分享链接无法定位到视频（可能已删除或失效），请重新从抖音 App 分享复制链接' }
-          }
-        } catch { /* 302 探测失败 → 走 API 兜底 */ }
+    // 2) v.douyin.com 短链 → 302 Location 取 video_id
+    const shareUrl = extractDouyinShareUrl(text)
+    if (!videoId && shareUrl) {
+      videoId = await probeVideoIdFromRedirect(shareUrl)
+      if (!videoId) {
+        // 跳到 /user/ 等 → 视频已删除或短链失效
+        return { ok: false, reason: '分享链接无法定位到视频（可能已删除或失效），请重新从抖音 App 分享复制链接' }
       }
+    }
+    // 3) 口令兜底（无 v.douyin.com 链接时）：码拼回短链走同一 302 探测；失败不在此
+    //    报错，落到 API 兜底再试一次（消灭死路文案）
+    let passcodeUrl: string | null = null
+    if (!videoId && !shareUrl) {
+      passcodeUrl = buildDouyinShortUrl(extractDouyinPasscode(text))
+      if (passcodeUrl) videoId = await probeVideoIdFromRedirect(passcodeUrl)
     }
     if (videoId) {
       const videoPageUrl = buildDouyinVideoPageUrl(videoId)
       if (videoPageUrl) return { ok: true, videoPageUrl, videoId }
     }
-    // 3) 兜底：第三方解析 API（dy.xs25.cn，其后端常被风控，成功则返回直链）
-    const shareUrl2 = extractDouyinShareUrl(text)
+    // 4) 兜底：第三方解析 API（dy.xs25.cn，其后端常被风控，成功则返回直链）；
+    //    链接与口令构造短链都可喂
+    const shareUrl2 = shareUrl ?? passcodeUrl ?? extractDouyinShareUrl(text)
     if (!shareUrl2) {
-      return { ok: false, reason: '未找到有效的抖音分享链接（需 v.douyin.com 短链或视频页链接，可在抖音 App 分享→复制链接获得）' }
+      return { ok: false, reason: '未找到有效的抖音分享链接或口令（App 内分享→复制链接，或粘贴含「码:/」的口令文本）' }
     }
     try {
       const res = await fetch(DOUYIN_PARSE_API + encodeURIComponent(shareUrl2), { signal: AbortSignal.timeout(20000) })

@@ -181,8 +181,8 @@
       <!-- 抖音分享链接解析（SRC SniffTab dy-parse-section；chrom-douyin 预装扩展能力） -->
       <div id="douyinParseSec" style="display:none;">
         <h4>抖音视频下载助手</h4>
-        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">预装扩展能力：粘贴分享文本，解析后自动开始下载（无水印完整视频）</div>
-        <input id="dyShare" placeholder="粘贴分享文本或 v.douyin.com 链接" spellcheck="false"
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">预装扩展能力：粘贴分享链接或口令，解析后自动开始下载（无水印完整视频）</div>
+        <input id="dyShare" placeholder="粘贴分享链接或口令（App 内分享→复制链接/口令）" spellcheck="false"
           style="width:100%;height:26px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:11px;outline:none;user-select:text;" />
         <button id="dyParseBtn" style="width:100%;height:26px;margin-top:6px;border:0;border-radius:5px;background:var(--primary);color:#fff;font:inherit;font-size:11px;cursor:pointer;">解析下载</button>
         <div id="dyMsg" style="margin-top:6px;font-size:11px;color:var(--muted);user-select:text;"></div>
@@ -477,24 +477,28 @@
   function dyParse() {
     if (!bridge) { dySetMsg(false, '桥不可达（客户端需更新）'); return }
     var text = document.getElementById('dyShare').value.trim()
-    if (!text) { dySetMsg(false, '先粘贴抖音分享文本或 v.douyin.com 链接'); return }
+    if (!text) { dySetMsg(false, '先粘贴抖音分享链接或口令'); return }
     var btn = document.getElementById('dyParseBtn')
     btn.disabled = true; btn.textContent = '解析中…'; dySetMsg(true, '')
     bridge.douyinParse(text).then(function (r) {
       btn.disabled = false; btn.textContent = '解析下载'
-      if (!r || !r.ok) { dySetMsg(false, (r && r.reason) || '解析失败'); return }
+      // 失败原因 toast 上屏（2026-11-04：原只有 11px 小红字，面板窄时不可见=「没反应」错觉）
+      if (!r || !r.ok) { var m = (r && r.reason) || '解析失败'; dySetMsg(false, m); toast(m); return }
       var baseName = String(r.desc || r.author || ('douyin_video_' + Date.now())).slice(0, 40).replace(/[\\/:*?"<>|\s]+/g, '_') || ('douyin_video_' + Date.now())
       var params = r.videoPageUrl
         ? { url: r.videoPageUrl, filename: baseName + '.mp4', referer: 'https://www.douyin.com/', platformId: 'douyin', subDir: 'douyin', useYtdlp: true }
         : { url: r.videoUrl, filename: baseName + '.mp4', referer: 'https://www.douyin.com/', platformId: 'douyin', subDir: 'douyin', useYtdlp: false }
       return bridge.downloadMediaStart(params).then(function (d) {
-        dySetMsg(!!(d && d.success), (d && d.success)
+        var ok = !!(d && d.success)
+        dySetMsg(ok, ok
           ? ('解析成功，已开始下载' + (r.videoPageUrl ? '（无水印完整视频）' : ''))
           : ((d && d.error) || '下载发起失败'))
+        if (!ok) toast((d && d.error) || '下载发起失败')
       })
     }).catch(function (e) {
       btn.disabled = false; btn.textContent = '解析下载'
-      dySetMsg(false, '解析失败：' + (e && e.message || e))
+      var m = '解析失败：' + (e && e.message || e)
+      dySetMsg(false, m); toast(m)
     })
   }
   document.getElementById('dyParseBtn').onclick = dyParse

@@ -419,6 +419,15 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 
 **总根因实锤**:封面会话带图 QA 的一切怪象(「读取中」无结果/智能体没见过图/像素扫描死循环)的协议层根因=`llm-pi-ai` 的模型行**缺省 `input` 为纯文本**——会话不广播 inline image prompts,用户附图在 ACP 协议层即被拒(`Invalid params: inline image prompts were not advertised`),智能体从未见过用户图,「查看这张图片」全是无图瞎猜。修复=影片(film-acp.ts `filmAgentPatchText`)+封面(cover-acp-bridge.js `writePatch`)模型行统一声明 `input: [text, image]`(服务端 /llm 已 caption-then-main 部署生效,A/B/C 探针三绿,声明即真)。联动解锁:①harness 原生 read-image 工具(模型声明 image 输入后自动可用,1104 探针实证智能体用它看图);②MCP 工具图片块结果可回传(mcp-cover-tools 的 render_preview/read_image 依赖此闸)。端到端探针(.tmp-cover-probe-image2.mjs):带图 prompt 被接受,智能体读图后输出计划先行文本(「计划:①…②用 matting 抠图,把鼠标主体…」),多步工具连跑健康。双文档同步=本文+cover-generation-requirements.md §十四。
 
+## 16.14 浏览器域：抖音解析支持口令(2026-11-04, 用户报障「解析下载并没有执行」, 裁决选 1)
+
+根因=粘贴的是抖音**口令**(`7.97 Z@j.Cu 09/09 UYz:/ 标题`, App 分享→复制口令), 不含 `v.douyin.com` 域名, 解析层(SRC 1:1)按设计拒绝——拒绝文案原只有按钮下方 11px 小红字(右栏窄不可见=「没反应」错觉)。实施(超出 SRC 1:1 的扩展, 依据=本条报障):
+
+- **纯函数**(douyin-parse-logic): `extractDouyinPasscode`——日期锚定(`MM/DD 码:/`)优先、词边界泛匹配退路(lookbehind 排除 https:/ 等 URL 成分), URL 文本不误抓; `buildDouyinShortUrl` 码拼 `https://v.douyin.com/<码>/`;
+- **IPC**(media-downloader douyinParse): 302 探测抽 `probeVideoIdFromRedirect` 复用; 分支序=直贴视频页 URL → 短链 302 → **口令码拼短链 302**(无链接时; 失败不在此死路, 喂构造短链落 API 兜底再试); 全败文案改「未找到有效的抖音分享链接或口令」;
+- **页面**: placeholder/说明改「分享链接或口令」; 解析失败/下载发起失败 toast 上屏(不再只有小红字);
+- 验证: 纯函数 3 用例(日期锚定含实报乱码形态/泛匹配与不误抓/短链拼装与非法码) + IPC 端到端 2 用例(stub fetch: 口令→短链 302→videoPageUrl; 302 失败回落 API 且喂 `v.douyin.com%2FUYz`), 页面语法 + tintin-browser 全量 + check:tintin + 包 build 绿。
+
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 
 > 依据:«字节跳动 Agent 实践手册»§4.3.1 创作辅助四段形态(创意方案→素材推荐→拍摄建议→**剪辑建议**)对照——前三段我们已有且更深,第四段(有人看节奏/转场/字幕落点并给建议)完全空白;用户裁决立项补齐,并追加「根据素材自动粗剪」。源参考:[agent-practice-manual.md](agent-practice-manual.md) §4.3.1/§5.2/§8.2.3;开发标准条款:[tintin-agent-dev-standards.md](tintin-agent-dev-standards.md) T1/T2/T4/T7。**本文只立项不定实现;动代码前先过 §17.4 的验收判据与 §17.2 的 spike 门。**

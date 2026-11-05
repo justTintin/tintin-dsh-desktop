@@ -21,6 +21,26 @@ export function extractDouyinShareUrl(text: unknown): string | null {
   return match ? (match[0] ?? null) : null
 }
 
+/**
+ * 从口令文本提取短链码（2026-11-04 用户报障裁决选 1，超出 SRC 1:1 的扩展：
+ * 口令形态 `7.97 Z@j.Cu 09/09 UYz:/ 国行iphone终于能用AI了` 的 `UYz` 即
+ * v.douyin.com 短链码，拼回短链走既有 302 探测）。日期锚定（MM/DD 码:/）
+ * 优先；无日期退回词边界泛匹配（排除 https:/ 之类 URL 成分）。
+ */
+export function extractDouyinPasscode(text: unknown): string | null {
+  const s = String(text || '')
+  const anchored = s.match(/[01]?\d\/[0123]?\d\s+([A-Za-z0-9]{2,12}):\//)
+  if (anchored?.[1]) return anchored[1]
+  const generic = s.match(/(?<![\w./:@~-])([A-Za-z0-9]{2,12}):\/(?!\/)/)
+  return generic?.[1] ?? null
+}
+
+/** 短链码拼 v.douyin.com 短链（302 探测入口与 API 兜底共用）；非法码 → null */
+export function buildDouyinShortUrl(code: unknown): string | null {
+  const c = String(code || '').trim()
+  return /^[A-Za-z0-9]{2,12}$/.test(c) ? `https://v.douyin.com/${c}/` : null
+}
+
 export interface DouyinParseOk {
   ok: true
   videoUrl: string
