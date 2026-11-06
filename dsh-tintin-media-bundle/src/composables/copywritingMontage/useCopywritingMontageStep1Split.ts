@@ -105,25 +105,24 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     })()
   }
 
-  /** 选择素材文件夹，递归收集内部全部视频文件（对齐 PR#3 allow_dirs + collect_video_files） */
+  /** 选择素材文件夹，递归收集内部全部视频文件（对齐 PR#3 allow_dirs + collect_video_files）。
+   *  2026-11-06 用户报障裁决：选择文件夹=替换语义——清单=该文件夹（含子目录递归）的
+   *  素材，旧清单清掉。原追加语义曾把上次选的上层目录素材（localStorage 跨会话恢复）
+   *  与新选混在一起，看起来像「扫了同层兄弟文件夹」。换文件夹=换批次；累加走拖入。 */
   function selectFolder(): void {
     void (async () => {
       const dir = await window.tintin.dialog.openDir({ title: '选择素材文件夹（自动遍历子文件夹内全部视频）' })
       if (!dir) return
-      const remaining = MAX_SOURCE_VIDEOS - srcVideos.value.length
-      if (remaining <= 0) { splitError.value = `素材已达上限（${MAX_SOURCE_VIDEOS}）`; return }
       const videos = await window.tintin.dialog.collectVideos({
         root: dir,
         exts: [...VIDEO_EXTS],
-        limit: remaining,
+        limit: MAX_SOURCE_VIDEOS,
       })
       // 重复度筛选（2026-11-05 用户裁定：按分镜脚本景别需求过滤导入素材）
       const filtered = materialFilter(videos)
+      srcVideos.value = filtered.slice(0, MAX_SOURCE_VIDEOS)
       if (filtered.length < videos.length) {
         splitMsg.value = `已按重复度筛选：文件夹 ${videos.length} 个 → 导入 ${filtered.length} 个`
-      }
-      for (const fp of filtered) {
-        if (fp && !srcVideos.value.includes(fp)) srcVideos.value.push(fp)
       }
       if (!filtered.length) splitMsg.value = splitMsg.value.includes('筛选') ? splitMsg.value : '所选文件夹内未找到视频文件'
     })()
