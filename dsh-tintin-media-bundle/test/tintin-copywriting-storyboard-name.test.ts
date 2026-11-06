@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isAutoStoryboardName,
   storyboardNameAfterSave,
+  cloneDisplayProgress,
 } from '../src/composables/copywritingMontageStep3VoiceLogic'
 
 describe('isAutoStoryboardName（默认「脚本N」判定）', () => {
@@ -47,3 +48,23 @@ describe('storyboardNameAfterSave（保存回学规则）', () => {
     expect(storyboardNameAfterSave('脚本2', `  ${topic}  `)).toBe(topic)
   })
 })
+
+describe('cloneDisplayProgress（克隆进度显示值：真实完成率 vs 时间爬升取大）', () => {
+  it('批次开局首条合成期间按轮次爬升，封顶在进行中那条的 90% 位', () => {
+    // 5 条批次（done=0）：每轮 +1%，封顶 18%（(0+0.9)/5）
+    expect(cloneDisplayProgress(0, 0, 5)).toBe(1)
+    expect(cloneDisplayProgress(10, 0, 5)).toBe(11)
+    expect(cloneDisplayProgress(17, 0, 5)).toBe(18)
+    expect(cloneDisplayProgress(18, 0, 5)).toBe(18) // 封顶不再上涨
+    expect(cloneDisplayProgress(50, 0, 5)).toBe(18) // 上一批遗留值被压回封顶
+  })
+  it('真实完成一到即被真实值覆盖，不虚报', () => {
+    expect(cloneDisplayProgress(18, 1, 5)).toBe(20) // 首条完成→真实 20%
+    expect(cloneDisplayProgress(20, 1, 5)).toBe(21) // 封顶 38% 内继续爬升
+  })
+})
+
+  it('全部完成=真实 100%；total=0 不炸', () => {
+    expect(cloneDisplayProgress(88, 5, 5)).toBe(100)
+    expect(cloneDisplayProgress(0, 0, 0)).toBe(1)
+  })

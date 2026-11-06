@@ -388,6 +388,9 @@ export function createChannelTable(deps) {
         if (p.product_mode !== undefined) parts.push({ name: 'product_mode', value: String(Boolean(p.product_mode)) })
         if (p.analyze !== undefined) parts.push({ name: 'analyze', value: String(Boolean(p.analyze)) })
         if (p.image_duration !== undefined) parts.push({ name: 'image_duration', value: String(p.image_duration) })
+        // fast_mode — 快速模式（2026-11-05 服务端实测）：切片即返片段，逐镜分析/去重延后，
+        // 渲染层经 GET /montage/split/analysis/{task_id} 轮询取件补齐
+        if (p.fast_mode !== undefined) parts.push({ name: 'fast_mode', value: String(Boolean(p.fast_mode)) })
         // 分割含逐帧分析，耗时长；超时对齐 SRC multipartUpload 宽松口径
         return await multipartPost(API_ENDPOINTS.montage.split, parts, 600000)
       } catch (err) {

@@ -10,6 +10,7 @@
 import { clientError } from '../../utils/clientLog'
 import { notify, errText, joinPath, unwrapIpc } from './context'
 import { readCacheDir } from '../useSettingsConfig'
+import { extractScriptItems } from '../opsStoryboardLogic'
 
 /** 编排壳所需的最小 tab 结构（StoryboardTab 结构性满足；voiceAudioId 由本模块维护） */
 export interface VoiceSyncTab {
@@ -83,4 +84,36 @@ export async function restoreTabVoiceFromLibrary(
     clientError('copywriting-montage', '口播音频恢复失败', errText(e))
     notify('口播恢复失败', `${errText(e)}——可重新「批量克隆」生成本地口播。`)
   }
+}
+
+/** 进入模块时按 scriptId 回学服务端选题名（2026-09-23 用户裁决：本地持久化只恢复
+ *  界面状态，同步是单向推——本地默认名「脚本N」会长期挂 Name；此处一次性拉脚本库
+ *  列表，按 id 回填 tab.topic 与 tab.name（display_name 优先），best-effort 静默。
+ *  2026-11-05 自宿主迁入（铁律 10 行数付账）；syncedSet 由宿主持有（实例级去重） */
+export async function refreshTabNamesFromServer(
+  tabs: Array<{ scriptId: string; topic: string; name: string }>,
+  syncedSet: Set<string>,
+): Promise<void> {
+  const withId = tabs.filter((t) => t.scriptId && !syncedSet.has(t.scriptId))
+  if (!withId.length) return
+  for (const t of withId) syncedSet.add(t.scriptId)
+  try {
+    const data = (await window.tintin.server.get('/api/storyboard/scripts', { page: 1, page_size: 100 })) as unknown
+    if (!data || typeof data !== 'object' || 'error' in data) return
+    const items = extractScriptItems(data)
+    const byId = new Map<string, Record<string, unknown>>()
+    for (const it of items) {
+      const id = String((it as Record<string, unknown>).id ?? '').trim()
+      if (id) byId.set(id, it as Record<string, unknown>)
+    }
+    for (const t of withId) {
+      const hit = byId.get(String(t.scriptId))
+      if (!hit) continue
+      const topic = String(hit.topic ?? '').trim()
+      const dn = String(hit.display_name ?? '').trim()
+      if (topic) t.topic = topic
+      if (dn) t.name = dn.slice(0, 20)
+      else if (topic && /^脚本\d+$/.test(t.name)) t.name = topic.slice(0, 20)
+    }
+  } catch (_) { /* best-effort：失败保持本地名 */ }
 }

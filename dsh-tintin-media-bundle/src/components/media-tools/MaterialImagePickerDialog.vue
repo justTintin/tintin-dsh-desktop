@@ -9,6 +9,10 @@
 // ═══════════════════════════════════════════════════════════════
 import { computed, ref, watch } from 'vue'
 import TButton from '@/components/common/TButton.vue'
+import { useHostDark } from '@/composables/hostTheme'
+
+// 弹窗 teleport 到 body（App 根外），暗色类必须显式绑定（2026-11-05 白弹窗同款裁决）
+const isDark = useHostDark()
 import {
   fetchMaterialGrid,
 } from '@/composables/useWorkbenchPickers'
@@ -158,7 +162,7 @@ function confirmSelection(): void {
 </script>
 
 <template>
-  <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
+  <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
     <div v-if="open" class="modal-mask" @click.self="emit('close')">
       <div class="modal">
         <span class="modal-title">选择产品图（绑定到「{{ props.viewLabel || '该视图' }}」，单张）</span>

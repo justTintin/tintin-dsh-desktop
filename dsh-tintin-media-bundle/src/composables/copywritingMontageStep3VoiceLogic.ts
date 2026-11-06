@@ -88,6 +88,40 @@ export function fancyDrawtextToPreview(style: string): Record<string, string> | 
   return out
 }
 
+/** 克隆进度「进行到哪个」标签（2026-11-05 用户裁定：按文案个数+当前项；
+ *  顺序执行语义——进行中下标=已完成数） */
+export function cloneProgressLabelOf(names: string[], done: number, total: number): string {
+  if (!total || !names.length) return ''
+  const i = Math.min(done, names.length - 1)
+  return `第 ${i + 1}/${names.length} 个「${names[i] || ''}」`
+}
+
+/** 克隆整体进度显示值（2026-11-06 用户报障「开始的时候没有进度条」）：轮询按产物
+ *  wav 出现计完成数，进行中那条合成期间（十几~几十秒）无任何可观测信号，进度条
+ *  长时间空置。显示值=真实完成率与「时间爬升」取大——爬升每轮 +1、封顶在进行中
+ *  那条的 90% 位（下一条真实完成值以下），真实完成一到即被真实值覆盖，不虚报。 */
+export function cloneDisplayProgress(prevDisplay: number, done: number, total: number): number {
+  const safeTotal = Math.max(1, total)
+  const real = Math.min(100, Math.round((done / safeTotal) * 100))
+  const cap = Math.min(100, Math.round(((done + 0.9) / safeTotal) * 100))
+  return Math.max(real, Math.min(cap, prevDisplay + 1))
+}
+
+/** 花字自定义样式效果预览样式（2026-11-05 自三处面板 computed 去重迁入，铁律 10）：
+ *  模板 style 解析（fancyDrawtextToPreview）优先；自定义（无模板/解析失败）时用
+ *  选中样式预设的 CSS 近似（对照主进程 FANCY_STYLES） */
+export function fancyPreviewStyleOf(tplStyle: string, styleKey: string): Record<string, string> {
+  const parsed = fancyDrawtextToPreview(tplStyle)
+  if (parsed) return parsed
+  const p = FANCY_STYLE_PREVIEW[styleKey] || FANCY_STYLE_PREVIEW.white_outline
+  return {
+    color: p.color,
+    webkitTextStroke: `3px ${p.stroke}`,
+    paintOrder: 'stroke',
+    textShadow: '2px 2px 4px rgba(0,0,0,.6)',
+  }
+}
+
 // ── AI 改写（对照 BatchAITextRewriteWorker / script_workers.py L449-493）────
 
 /** AI 改写自由度说明（对照 _show_ai_rewrite_settings desc QLabel 逐字） */

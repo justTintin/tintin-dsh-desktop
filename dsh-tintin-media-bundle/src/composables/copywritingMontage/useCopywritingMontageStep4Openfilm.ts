@@ -16,6 +16,9 @@ export interface OfTrackCheck {
   detail: string
 }
 
+/** 视频段间分隔（秒）——2026-11-05 用户裁定的 5 秒黑场，与剪映导出同口径。 */
+const OF_GAP_SEC = 5
+
 export interface CopywritingStep4OpenfilmDeps {
   assemblePlans: Ref<PrecomposePlan[]>
   getTabById: (id: string) => { voiceWav?: string } | undefined
@@ -86,10 +89,14 @@ export function useCopywritingMontageStep4Openfilm(deps: CopywritingStep4Openfil
       const segs: OfSeg[] = []
       const voices: Array<{ path: string; at: number }> = []
       let missing = 0
+      // 2026-11-06 用户裁决（方案 B+方案级间隔）：全部方案顺序铺一条视频轨，5s 黑场
+      // 只加在方案成片之间（方案内镜头紧密）。原先 c0 每方案清零，四方案全叠在 0 秒
+      // ——Studio 把重叠段拆成平行 lane，而 lane 共享所属轨（<section>）的静音/隐藏
+      // 状态（film.html 状态存轨上），无法单 lane 操作。
+      let c0 = 0
       vPlans.forEach((p) => {
         const tab = getTabById(p.tabId)
         if (!tab) return
-        let c0 = 0
         let planStart = -1
         p.groups.forEach((g) => {
           g.scenes.forEach((s, si) => {
@@ -104,6 +111,7 @@ export function useCopywritingMontageStep4Openfilm(deps: CopywritingStep4Openfil
             c0 += cut
           })
         })
+        c0 += OF_GAP_SEC // 方案成片之间 5s 黑场；末方案后多出的 5s 不落在任何 clip 上
         if (planStart >= 0 && tab.voiceWav) voices.push({ path: tab.voiceWav, at: planStart })
       })
       const bgm = String(bgmPath.value || '')

@@ -1,9 +1,10 @@
 // test/jianying-export-tracks.test.ts — exportMultiToDraft 轨道时间轴行为回归。
-// 背景（2026-09-29）：727a6eb 去掉了视频轨的半秒片段间隙（剪映转场要求相邻
-// 片段），但字幕/关键词/音效轨的游标仍在推进 VIDEO_GAP_US——副轨自第 2 片起
-// 逐边界漂移 0.5s；且显式镜级音效（sfxClips）被模板命中 guard 挡住，无模板
-// 命中的镜不落音效轨。本文件锁死：副轨窗口与视频段窗口逐段相等、片段相邻、
-// 显式音效无条件落轨、转场素材挂前一段。
+// 背景（2026-09-29）：727a6eb 去掉了视频轨的半秒片段间隙，副轨游标漂移随之
+// 修死——副轨窗口与视频段窗口逐段相等、显式音效无条件落轨。
+// 2026-11-06 用户裁定（修正 11-05 一刀切）：5 秒黑场只加在方案成片之间
+// （gapAfterUs 按片段表传入），方案内镜头缺省 0=紧密相接（转场靠相邻生效）。
+// 本文件锁死：缺省全紧密+转场挂接、副轨跟视频段实际起点、方案边界 5s 黑场
+// （该边界转场不挂、副轨/口播随实际起点顺移）。
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -14,6 +15,8 @@ let home = ''
 let savedLocalAppData = ''
 
 const US = (sec: number): number => Math.round(sec * 1e6)
+// 方案成片之间的黑场间隔 5 秒（仅方案边界传给 exporter，方案内不传）
+const GAP = US(5)
 
 function makeFakeVideo(name: string): string {
   const p = join(home, name)
@@ -41,6 +44,7 @@ function exportAndRead(options: {
   transitions?: string[]
   voiceClips?: Array<Array<{ path: string; startUs: number; durUs: number }>>
   bgmPath?: string
+  gapAfterUs?: number[]
 }): Record<string, any> {
   const videos = options.durationsSec.map((_, i) => makeFakeVideo(`v${i}.mp4`))
   const srts = options.durationsSec.map((_, i) => makeFakeSrt(`v${i}.srt`))
@@ -57,6 +61,7 @@ function exportAndRead(options: {
     sfxClips: options.sfxClips,
     voiceClips: options.voiceClips ?? null,
     bgmPath: options.bgmPath ?? '',
+    gapAfterUs: options.gapAfterUs ?? null,
     draftName: 'TRACK_ALIGN_PROBE',
     deps: { probeMedia: () => ({ durationSec: 0.6 }) }
   })
@@ -91,7 +96,7 @@ describe('exportMultiToDraft track alignment (2026-09-29 regression)', () => {
 
     const videoTrack = content.tracks.find((t: any) => t.type === 'video')
     expect(videoTrack.segments).toHaveLength(4)
-    // 相邻：下一段起点=前一段终点（727a6eb 契约）
+    // 缺省无 gapAfterUs → 全紧密：下一段起点=前一段终点（0924 契约，转场靠相邻）
     let cursor = 0
     const expectedWindows = durations.map((sec) => {
       const window = { start: cursor, duration: US(sec) }
@@ -139,6 +144,7 @@ describe('exportMultiToDraft track alignment (2026-09-29 regression)', () => {
     const segs = sfxTracks[0].segments
     expect(segs).toHaveLength(2)
     expect(segs[0].target_timerange.start).toBe(0)
+    // 第 2 段音效跟视频段实际起点（缺省紧密=1.0s+1.0s）
     expect(segs[1].target_timerange.start).toBe(US(2.0))
     for (const s of segs) expect(s.target_timerange.duration).toBe(US(0.6))
     // 音效素材进库
@@ -192,7 +198,7 @@ describe('exportMultiToDraft track alignment (2026-09-29 regression)', () => {
     expect(kwSegs[0].target_timerange.start).toBe(0)
   })
 
-  it('attaches boundary transition materials to the preceding segment of adjacent video segments', () => {
+  it('attaches boundary transition materials to the preceding segment (缺省紧密，转场恢复)', () => {
     savedLocalAppData = process.env.LOCALAPPDATA || ''
     home = mkdtempSync(join(tmpdir(), 'jy-transition-attach-'))
     process.env.LOCALAPPDATA = home
@@ -215,6 +221,68 @@ describe('exportMultiToDraft track alignment (2026-09-29 regression)', () => {
     // 末段不挂转场
     const lastRefs = videoTrack.segments[2].extra_material_refs
     expect(lastRefs.filter((id: string) => transitionIds.includes(id))).toHaveLength(0)
+  })
+
+  // 2026-11-06 用户裁定（修正 11-05 一刀切）：5s 黑场只加方案成片之间——
+  // 该边界转场失效（片段不再相邻），方案内边界转场照挂；副轨/口播随实际起点顺移
+  it('plan-boundary gapAfterUs: 5s black only at given boundaries (transition skipped there)', () => {
+    savedLocalAppData = process.env.LOCALAPPDATA || ''
+    home = mkdtempSync(join(tmpdir(), 'jy-plan-gap-'))
+    process.env.LOCALAPPDATA = home
+
+    const voice = makeFakeWav('voice.wav')
+    const bgm = makeFakeWav('bgm.mp3')
+    // 方案 A=[v0,v1] 方案 B=[v2,v3]：黑场只加在 v1 之后（方案边界）
+    const content = exportAndRead({
+      durationsSec: [1.0, 1.0, 1.0, 1.0],
+      gapAfterUs: [0, GAP, 0, 0],
+      transitions: ['fade', 'fade', 'fade'],
+      voiceClips: [[{ path: voice, startUs: 0, durUs: US(0.8) }], [], [{ path: voice, startUs: 0, durUs: US(0.8) }], []],
+      bgmPath: bgm,
+    })
+
+    const videoTrack = content.tracks.find((t: any) => t.type === 'video')
+    const starts = videoTrack.segments.map((s: any) => s.target_timerange.start)
+    // 方案内紧密：v1@1.0s；方案边界黑场=实体透明图片段@2.0s×5s；v2@7.0s；v3@8.0s
+    expect(starts).toEqual([0, US(1.0), US(2.0), US(7.0), US(8.0)])
+    expect(videoTrack.segments).toHaveLength(5)
+    // 黑场段=实体透明图片素材（photo，2026-11-06 用户裁决：剪映主轨相邻吸合，
+    // 纯游标空隙成片无黑场——必须实体段填充）
+    const blackSeg = videoTrack.segments[2]
+    expect(blackSeg.target_timerange.duration).toBe(GAP)
+    const blackMat = content.materials.videos.find((m: any) => m.id === blackSeg.material_id)
+    expect(blackMat?.type).toBe('photo')
+    expect(String(blackMat?.path || '')).toContain('tintin_gap_black.png')
+
+    // 转场只在相邻内容段边界挂：v0→v1 挂、v1→黑场不挂、v2→v3 挂 → 共 2 个转场素材
+    const transitionIds = content.materials.transitions.map((t: any) => t.id)
+    expect(transitionIds).toHaveLength(2)
+    const refCount = (seg: any) => (seg.extra_material_refs as string[]).filter((id: string) => transitionIds.includes(id)).length
+    expect(refCount(videoTrack.segments[0])).toBe(1)
+    expect(refCount(videoTrack.segments[1])).toBe(0)
+    expect(refCount(blackSeg)).toBe(0)
+    expect(refCount(videoTrack.segments[3])).toBe(1)
+
+    // 字幕窗跟各内容段实际起点（黑场段无字幕）：v0@0、v1@1.0、v2@7.0、v3@8.0
+    const subtitleTrack = content.tracks.find((t: any) => t.type === 'text' && t.flag === 1)
+    const subStarts = subtitleTrack.segments.map((s: any) => s.target_timerange.start)
+    expect(subStarts).toEqual([0, US(1.0), US(7.0), US(8.0)])
+
+    // 口播挂方案首段实际起点：A@0、B@7.0s
+    const voiceSegs = audioSegmentsFor(content, 'voice.wav')
+    expect(voiceSegs.map((s: any) => s.target_timerange.start)).toEqual([0, US(7.0)])
+
+    // BGM（2026-11-06 用户改判）：止于本方案末尾，黑场 [2s,7s) 静音——任何 BGM 段不得跨入黑场
+    const bgmSegs = audioSegmentsFor(content, 'bgm.mp3')
+    expect(bgmSegs.length).toBeGreaterThan(0)
+    for (const s of bgmSegs) {
+      const st = s.target_timerange.start
+      const en = st + s.target_timerange.duration
+      expect(en <= US(2.0) || st >= US(7.0)).toBe(true)
+    }
+
+    // 全片时长=各段之和 4s+方案边界 5s
+    expect(content.duration).toBe(US(9.0))
   })
 
   // 2026-10-16 用户裁决：口播长于画面总长时，全部轨道都以整条草稿时长为准——

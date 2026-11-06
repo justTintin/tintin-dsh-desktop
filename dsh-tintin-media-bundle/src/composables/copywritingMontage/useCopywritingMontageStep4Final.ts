@@ -562,6 +562,8 @@ async function exportAllToJianyingDraft(): Promise<void> {
     sfxDestDir?: string
     /** 2026-09-22 虚拟时间轴：逐段源裁剪时长（微秒，与 videoPaths 对齐；缺省=ffprobe 全长） */
     videoDurations?: Array<number>
+    /** 2026-11-06 用户裁定：段后黑场表（µs，与 videoPaths 对齐）——仅方案成片边界 5s */
+    gapAfterUs?: number[]
     /** 2026-09-22 虚拟时间轴：视频段静音标记（true=全片静音走旁白轨；数组=逐段） */
     muteVideoAudio?: boolean | Array<boolean>
     /** 2026-09-22 用户裁决「音效包装对齐导出」：镜级 AI 音效显式指派（逐视频、与
@@ -916,6 +918,9 @@ async function exportAllToJianyingDraft(): Promise<void> {
     }
     const cands = segsReady.map((s) => s.path)
     const videoDurations = segsReady.map((s) => Math.round(s.durSec * 1e6))
+    // 2026-11-06 用户裁定：5s 黑场只加方案成片之间（方案内镜头紧密保转场）——
+    // 曾误加每镜头之间，方案被拉长、口播随方案起点隔开一分多钟
+    const gapAfterUs = cands.map((_, i) => (segsReady[i + 1] && segsReady[i + 1].planIdx !== segsReady[i]?.planIdx) ? 5e6 : 0)
     // 逐边界转场（2026-09-22 用户裁决：转场随机——镜间从三种转场随机、镜内硬切；
     //  mode=固定值时镜间用该固定转场。2026-09-23 用户裁决：视频设置按 tab 绑定——
     //  镜间转场逐段取该段所属分镜自己的 transition（回退全局 concatTransition））
@@ -1066,6 +1071,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
       videoPaths: cands,
       // 2026-09-22 虚拟时间轴：逐段源裁剪时长（微秒）+ 视频段静音（旁白轨覆盖）
       videoDurations,
+      gapAfterUs,
       muteVideoAudio: true,
       srtPaths,
       srtLimitUs,
@@ -1162,61 +1168,6 @@ async function exportAllToJianyingDraft(): Promise<void> {
     }
   }
 
-  /** 轨 2（2026-09-17 用户裁决）：导入服务端草稿包——服务端封装好的剪映格式 zip，
-   *  客户端只做 解压→数据/路径校验→落盘剪映草稿目录（映射关系属客户端职责；
-   *  服务端给映射=服务端出草稿包，即本轨）。逐任务一个草稿。
-   *  overrideTaskIds（2026-10-08）：仿视频「生成任务转草稿」入口——直接传生成任务 id
-   *  （E-1.2 from-task 已支持 storyboard_generate），不传=旧行为（文案线 lastComposeTasks）。 */
-  async function exportJianyingPackageDraft(overrideTaskIds?: string[]): Promise<void> {
-    const tasks = overrideTaskIds?.length ? overrideTaskIds.map((id) => ({ taskId: id })) : lastComposeTasks.value
-    if (!tasks.length) {
-      notify('无法导入', '没有可导入的合成任务：请先执行「服务端合成」')
-      return
-    }
-    exportBusy.value = true
-    exportProgress.value = 0
-    exportStage.value = '准备导入...'
-    const progressChannel = `jy-pkg:progress:${(crypto?.randomUUID?.() || `${Date.now()}_${Math.floor(Math.random() * 1e8)}`).replace(/-/g, '')}`
-    const offProgress = window.tintin?.server?.onVoiceProgress?.(progressChannel, (d: { stage?: string; value?: number }) => {
-      if (typeof d?.value === 'number') exportProgress.value = d.value
-      if (d?.stage) exportStage.value = String(d.stage)
-    })
-    try {
-      const res = await window.tintin?.server?.editorExportJianyingPackage?.({
-        taskIds: tasks.map((t2) => t2.taskId),
-        progressChannel,
-        // 2026-09-18 用户裁决：草稿包 zip 属资产，落工程资产目录 jy_pkg/
-        //   （与 srt/ 同级，重导覆盖为最新，导入成功保留可复用）；主进程从该
-        //   文件解压（stdin 流式读 zip 静默丢条目曾致误报「包内无 draft_content.json」）
-        zipDestDir: voiceDirInput.value
-          ? joinPath(resolveOutMontageDir(voiceDirInput.value), 'jy_pkg')
-          : joinPath(await readCacheDir(), 'montage_cache', 'jy_pkg'),
-      })
-      if (res && res.success) {
-        const rx = res as unknown as { results?: Array<{ taskId: string; draftFolder: string; warnings: string[]; registered: boolean }>; launched?: boolean; jianyingRunning?: boolean; message?: string }
-        const rs = rx.results || []
-        if (rs[0]?.draftFolder) lastExportDraftPath.value = String(rs[0].draftFolder)
-        const tail = rx.launched ? '（已拉起剪映）' : rx.jianyingRunning ? '（剪映已运行，草稿已在首页）' : ''
-        const lines = rs.map((r) => '任务 ' + r.taskId + ' → ' + r.draftFolder + (r.registered ? '' : '（首页注册失败，草稿仍可用）'))
-        const warnCount = rs.reduce((n, r) => n + (r.warnings?.length || 0), 0)
-        const wsum = warnCount ? '\n⚠️ 格式符合性警告 ' + warnCount + ' 条（不影响打开，已记录日志）' : ''
-        notify('服务端草稿包导入成功', '已导入 ' + rs.length + ' 个草稿：\n' + lines.join('\n') + wsum + tail)
-      } else {
-        const msg = res && 'message' in res ? String(res.message || '') : '主进程不可达'
-        clientError('video-montage', '导入服务端草稿包失败', msg)
-        notify('导入失败', '导入服务端草稿包时发生错误：\n' + msg)
-      }
-    } catch (e) {
-      clientError('video-montage', '导入服务端草稿包失败', errText(e))
-      notify('导入失败', '导入服务端草稿包时发生错误：\n' + errText(e))
-    } finally {
-      exportBusy.value = false
-      exportProgress.value = -1
-      exportStage.value = ''
-      if (typeof offProgress === 'function') offProgress()
-    }
-  }
-
   /** 双击成片项内嵌预览（_preview_final_video：标题换文件名并播放） */
   function previewFinalVideo(i: number): void {
     const it = finalVideoList.value[i]
@@ -1235,7 +1186,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
     bgmGenMeta, bgmPreviewUrl, bgmPlaying, bgmPosMs, bgmDurMs, lastComposeTasks,
     generateBgm, downloadLibraryBgm, applyLibraryBgm, pickBgm, rowBgmName, setRowBgm,
     clearRowBgm, pickRowBgm, rowBgmForCandidate, collectCandidates, ensureProcessedSrt,
-    exportJianyingPackageDraft, enterStep4, startFinalMix, openFinalDir, openExportDraftDir,
+    enterStep4, startFinalMix, openFinalDir, openExportDraftDir,
     exportAllToJianyingDraft, toggleBgmPlay, stopBgmPlay, onBgmVolumeInput, seekBgm,
     previewFinalVideo,
   }

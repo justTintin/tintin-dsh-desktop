@@ -21,12 +21,43 @@ export namespace MontageAPI {
     product_mode?:    boolean
     analyze?:         boolean  // 逐镜分析（美学评分+景别/产品识别），默认 true
     image_duration?:  number   // 图片转静态镜头秒，默认 3
+    /** 快速模式（2026-11-05 服务端实测）：切片即返片段，逐镜分析/去重延后
+     *  （响应 analysis.deferred=true + background_task_id），经 GET
+     *  /montage/split/analysis/{task_id} 轮询取件补齐；仅 analyze=true 生效 */
+    fast_mode?:       boolean
   }
   export type SplitResponse = {
     shots?: Array<{
       start_sec?: number; end_sec?: number; shot_index?: number; filename?: string
       download_url?: string; aesthetic_score?: number; shot_analysis?: string; description?: string
     }>
+    [extra: string]: unknown
+  }
+
+  /** GET /montage/split/analysis/{task_id}（快速模式分析取件，2026-11-05 服务端实测；
+   *  路径参数=分割 task_id；done=true 即终态——completed/failed/cancelled 都算，
+   *  失败也透传 background_status 不静默装完成（铁律7） */
+  export type SplitAnalysisResponse = {
+    task_id?: string
+    done?: boolean
+    analyzed?: number
+    total?: number
+    background_task_id?: string
+    /** 服务端后台队列状态：pending/running/completed/failed/cancelled */
+    background_status?: string
+    shots?: Array<{
+      filename?: string
+      analyzed?: boolean
+      /** 美学评分：实测 null（未分析）；同步分割响应同字段为对象 {total,...} 或数字，兼容两态 */
+      aesthetic_score?: number | { total?: number } | null
+      /** 逐镜分析：实测 null（未分析）；完成后对象 {shot_type, scene_primary, ...} 或字符串 */
+      shot_analysis?: string | { shot_type?: string; scene_primary?: string; visual_type?: string; product?: string; model?: string } | null
+      description?: string
+      product?: string | null
+      model?: string | null
+      resolution?: { width?: number; height?: number } | null
+    }>
+    note?: string
     [extra: string]: unknown
   }
 

@@ -547,6 +547,9 @@ const tintinClient = (() => {
             // 去水印字幕（SRC preload vsr:remove 契约；进度事件不落桥）
             vsrRemove: (p, _onProgress) => call('vsr:remove', { args: [p] }),
             montageSplit: (p, _onProgress) => call('montage:split', { args: [p] }),
+            // 快速模式分析取件（2026-11-05 服务端 fast_mode：分割即返片段、逐镜分析延后；
+            // 路径参数=分割 task_id，done=true 即终态含失败，服务端建议 3~5s 轮询）
+            montageSplitAnalysis: (taskId) => call('server:get', { path: `/montage/split/analysis/${encodeURIComponent(String(taskId ?? ''))}` }),
             // Step2-4 本地合成族（2026-09-25 出清 PENDING：宿主 final-ipc.js 通道已就绪）
             trimEdgeClips: (p) => call('montage:trimEdgeClips', { args: [p] }),
             montageConcatClips: (p) => call('montage:concatClips', { args: [p] }),

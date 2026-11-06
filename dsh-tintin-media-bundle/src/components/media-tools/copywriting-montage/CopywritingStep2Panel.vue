@@ -12,6 +12,8 @@ import TSelect from '@/components/common/TSelect.vue'
 import WbPickProductPanel from '@/components/workbench/WbPickProductPanel.vue'
 import VdStepBar from '../VdStepBar.vue'
 import { markdownListLines, stripProductCodeFromModel, parseProductKeywords } from '@/composables/opsProductLibraryLogic'
+import { useHostDark } from '@/composables/hostTheme'
+import { libMid, libName, libSub, srcSummaryOf, SPLIT_MODE_OPTIONS } from '@/composables/copywritingMontageStep1SplitLogic'
 import { parseScriptDetail } from '@/composables/opsStoryboardLogic'
 import { copyPreviewText, SHOT_TYPE_COLORS, SHOT_TYPE_LABELS, buildAssignPool } from '@/composables/copywritingMontageLogic'
 import { buildAssignCandidateSet, buildAssignMatchPrompt, parseAssignMatchResponse, mergeTabAssignment, planShotGroup, prefilterShotCandidates, topUpClipGroups } from '@/composables/copywritingMontageAssignLogic'
@@ -25,6 +27,7 @@ import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 
 const shell = inject(copywritingMontageShellKey)!
 const { step, go, steps } = shell
+const isDark = useHostDark() // 弹窗 teleport 到 body（App 根外），暗色类需显式绑定（2026-11-05 白弹窗报障）
 const {
   // 参数与方案（2026-09-23 用户裁决：输出画幅/时长限制/转场动画/输出帧率改用按
   // 激活 tab 读写的绑定视图——每个分镜脚本各自一份，切换 tab 即切换设置）
@@ -42,7 +45,7 @@ const {
   // 编排层 threshold 仍以默认 50 传服务端，行为不变）
   srcVideos, srcDurations, minSceneLen, imageDuration,
   scenes, scoreFilter, splitBusy, splitError, splitMsg, splitProgress,
-  selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, requestStopSplit, splitStatusOf, updateSceneDesc,
+  selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, splitMode, dupMode, requestStopSplit, splitStatusOf, updateSceneDesc,
   previewSourceVideo, previewScene, clearSplitCache, openSplitsDir, splitsDownloading,
   // 动作
   planRowText, selectPlan, startSeqPreview, onSeqEnded,
@@ -125,12 +128,7 @@ const srcListCollapsed = ref(false)
 // 2026-09-23 用户裁决：弹窗右上角窗口化控制——最大化铺满父窗口（100vw×100vh）、
 // 还原回 min(1840px,92vw) 常规尺寸、关闭=取消；双击标题行同最大化/还原切换
 const srcDlgMax = ref(false)
-const srcSummary = computed(() => {
-  const parts: string[] = []
-  if (srcVideos.value.length) parts.push(`本地视频 ${srcVideos.value.length} 个`)
-  if (filteredScenes.value.length) parts.push(`素材池 ${filteredScenes.value.length} 条片段`)
-  return parts.length ? `已选素材：${parts.join('，')}` : '尚未选择素材：点下方「选择素材」开始'
-})
+const srcSummary = computed(() => srcSummaryOf(srcVideos.value.length, filteredScenes.value.length))
 /** 选择池构成摘要（2026-09-23 用户裁决：本地分割/素材库两来源分计数） */
 const poolSummary = computed(() => {
   const lib = filteredScenes.value.filter((s) => s.serverPath.startsWith('material://')).length
@@ -213,16 +211,12 @@ function confirmSrcDlg(): void {
   // 全部已分割时「确定」仅关弹窗（重切走弹窗内「开始智能镜头分割」按钮）
   if (srcVideos.value.length && pendingSplit.value) void runSplit()
 }
+/** 2026-11-06 用户裁定：分割进行中禁止关闭弹窗（遮罩/标题栏×全拦）——先「停止分割」再关 */
+function requestSrcDlgClose(): void {
+  if (splitBusy.value) { notify('分割进行中', '请先点「停止分割」再关闭窗口。'); return }
+  srcDlg.value = false
+}
 
-function libMid(it: PickerItem): string {
-  return String(it?.material_id ?? it?.id ?? '').trim()
-}
-function libName(it: PickerItem): string {
-  return String(it?.filename || '') || (libMid(it) ? `素材 ${libMid(it)}` : '未命名素材')
-}
-function libSub(it: PickerItem): string {
-  return [String(it?.brand || ''), String(it?.model || ''), String(it?.product || it?.share_name || '')].filter(Boolean).join(' / ')
-}
 function libThumb(it: PickerItem): string {
   const mid = libMid(it)
   return mid ? buildMediaThumbUrl(libServerUrl.value, mid) : ''
@@ -599,8 +593,8 @@ function scoreClass(score: number | undefined): string {
 </script>
 
 <template>
+      <VdStepBar :step="step" :steps="steps" @go="go" /><!-- 步骤条=最高布局层级（卡片框上面，同上一步/下一步层） -->
       <section class="card">
-        <VdStepBar :step="step" :steps="steps" @go="go" />
         <!-- 分镜脚本（2026-09-21 用户裁决：上一步的分镜脚本在页面顶部显示（material 态，
              只读 + 自动分配的素材镜头列表）；素材上传/分割区移到脚本下面） -->
         <CopywritingStoryboard mode="material" />
@@ -612,8 +606,8 @@ function scoreClass(score: number | undefined): string {
       <!-- 选择素材弹窗（2026-09-22 用户裁决：素材选择与主界面分离——
            点击「选择素材」弹出素材来源弹窗（本地上传/素材库等 tab），
            确认后关闭弹窗并自动智能镜头分割） -->
-      <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
-        <div v-if="srcDlg" class="modal-mask srcdlg-mask" @click.self="srcDlg = false">
+      <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
+        <div v-if="srcDlg" class="modal-mask srcdlg-mask" @click.self="requestSrcDlgClose()">
           <div class="modal srcdlg-modal" :class="{ 'srcdlg-modal--max': srcDlgMax }">
             <!-- 2026-09-23 用户裁决：标题行右上角窗口化控制（最大化/还原/关闭） -->
             <div class="srcdlg-head" @dblclick="srcDlgMax = !srcDlgMax">
@@ -630,7 +624,7 @@ function scoreClass(score: number | undefined): string {
                   <path d="M4 16V6a2 2 0 0 1 2-2h10" />
                 </svg>
               </button>
-              <button class="wnd-btn wnd-btn--close" type="button" title="关闭" @click="srcDlg = false">
+              <button class="wnd-btn wnd-btn--close" type="button" :title="splitBusy ? '分割进行中，不可关闭' : '关闭'" @click="requestSrcDlgClose()">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                   <path d="M6 6l12 12M18 6L6 18" />
                 </svg>
@@ -655,6 +649,9 @@ function scoreClass(score: number | undefined): string {
 
           <div class="row sec-head">
             <span class="sec-label">已选择的原始视频素材 (双击可播放预览):</span>
+            <span class="spacer"></span>
+            <!-- 重复度（2026-11-05 用户裁定：按分镜脚本景别需求×三档筛选导入素材） -->
+            <select v-model="dupMode" class="input" title="按分镜脚本景别需求筛选导入素材：低=不同脚本不共用素材；中（默认）=每脚本按需选、允许跨脚本复用；全部=不过滤"><option value="low">低重复度</option><option value="mid">中度重复度</option><option value="all">全部选择</option></select>
             <!-- 2026-09-23 用户裁决：折叠箭头——收起素材列表省高度；折叠时标题补条数 -->
             <button class="src-collapse" type="button"
               :title="srcListCollapsed ? '展开素材列表' : '折叠素材列表'"
@@ -696,8 +693,13 @@ function scoreClass(score: number | undefined): string {
             <label class="param-label" title="无法分割的视频，自动挑出多长的片段">分镜头时长(秒):</label>
             <input v-model.number="imageDuration" type="number" min="1" max="30"
               title="无法分割的视频，自动挑出多长的片段" class="input w80" />
+            <!-- 分割模式（2026-11-05 用户裁定）：默认快速=服务端 fast_mode 智能分割切片即返
+                 （逐镜分析后台补齐，不等待）；正常=原模式（分割+逐镜分析同步等待）。
+                 下拉=全应用统一 TSelect（2026-11-05 用户裁定：与其他下拉样式一致） -->
+            <TSelect v-model="splitMode" class="w90" :options="SPLIT_MODE_OPTIONS"
+              title="快速模式=服务端智能分割、切片即返（逐镜分析后台补齐，不等待）；正常模式=上传服务端分割+逐镜分析（等待返回）" />
             <span class="spacer"></span>
-            <TButton label="开始智能镜头分割" icon="cut" :loading="splitBusy" @click="runSplit" />
+            <TButton label="开始智能镜头分割" icon="cut" :loading="splitBusy" @click="void runSplit()" />
             <!-- 2026-09-22 用户裁决：停止分割（当前素材完成后停止，已完成素材保留可断点续分） -->
             <TButton label="停止分割" variant="secondary" :disabled="!splitBusy" title="停止智能镜头分割：当前素材完成后停止，已完成素材保留（列表淡绿标识）" @click="requestStopSplit" />
           </div>
@@ -855,18 +857,19 @@ function scoreClass(score: number | undefined): string {
           </div>
         </div>
         </div><!-- /srcdlg-cols -->
-            </div>
-            <div class="modal-actions">
-              <TButton label="取消" plain @click="srcDlg = false" />
-              <TButton :label="confirmLabel"
-                :disabled="!srcVideos.length && !filteredScenes.length" @click="confirmSrcDlg" />
+        <!-- 动作钮=弹窗级底栏右下角（2026-11-06 用户裁定；上一版误入左列底部） -->
+        <div class="row srcdlg-foot">
+          <span class="spacer"></span>
+          <TButton label="取消" plain :disabled="splitBusy" :title="splitBusy ? '分割进行中，不可关闭' : ''" @click="srcDlg = false" />
+          <TButton :label="confirmLabel" :disabled="!srcVideos.length && !filteredScenes.length" @click="confirmSrcDlg" />
+        </div>
             </div>
           </div>
         </div>
       </div></teleport>
 
       <!-- 停止确认弹窗（分割进行中重选：先停止当前分割，已完成素材保留） -->
-      <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
+      <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
         <div v-if="srcStopConfirm" class="modal-mask" @click.self="srcStopConfirm = false">
           <div class="modal">
             <span class="modal-title">分割进行中</span>
@@ -881,7 +884,7 @@ function scoreClass(score: number | undefined): string {
 
       <!-- 匹配目标选择弹窗（2026-09-23 用户裁决：匹配前先勾选要匹配到哪些分镜脚本，
            默认全选=原批量口径；确认后逐勾选脚本 LLM 匹配+兜底装填） -->
-      <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
+      <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
         <div v-if="matchDlg.show" class="modal-mask" @click.self="matchDlg.show = false">
           <div class="modal">
             <span class="modal-title">选择要匹配的分镜脚本</span>
@@ -1066,15 +1069,9 @@ function scoreClass(score: number | undefined): string {
 .tbl-scroll-wrap .tbl { border-radius: 0; }
 .tbl th, .tbl td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 .tbl th { color: var(--muted-foreground); font-weight: 500; font-size: 12px; position: sticky; top: 0; background: var(--surface-container); z-index: 1; }
-.shot-type-badge {
-  display: inline-block; padding: 1px 6px; border: 1px solid;
-  border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 1.4;
-}
+.shot-type-badge { display: inline-block; padding: 1px 6px; border: 1px solid; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 1.4; }
 /* Step2 镜头重组（原版 params_group/result_box/player 等同布局；颜色走 V3 design tokens） */
-.params-group {
-  display: flex; flex-direction: column; gap: 10px; padding: 10px 12px;
-  background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md);
-}
+.params-group { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .param-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .param-row .param-label { margin-left: var(--space-3); }
 .param-row .param-label:first-child { margin-left: 0; }
@@ -1085,10 +1082,7 @@ function scoreClass(score: number | undefined): string {
 .w140 { width: 140px; }
 .w180 { width: 180px; }
 .clip-count { font-weight: 700; font-size: 14px; color: var(--warning); }
-.result-box {
-  display: flex; flex-direction: column; gap: 10px; padding: 10px;
-  background: var(--surface-container); border: 1px dashed var(--border); border-radius: var(--radius-md);
-}
+.result-box { display: flex; flex-direction: column; gap: 10px; padding: 10px; background: var(--surface-container); border: 1px dashed var(--border); border-radius: var(--radius-md); }
 /* 预合成列表（2026-09-09 用户裁决改表格；2026-09-11 用户裁决：最大 10 行高度，
    超出滚动；不足 10 行随真实行数收缩——占位行已删，防止两表之间空余过多） */
 .plan-tbl-wrap {
@@ -1171,7 +1165,7 @@ function scoreClass(score: number | undefined): string {
    此前单类 .srcdlg-modal 写在前被 .modal 反压，弹窗一直按 440px 渲染（最大化同被压）。
    2026-09-23 用户裁决：宽度=原来的 2.5 倍（440→1100px），94vw 封顶；
    2026-09-30/10-01 用户反馈两轮加宽（1100→1320→1600px，右侧池条目两行信息需要横向空间），96vw 封顶，小屏不受影响 */
-.modal.srcdlg-modal { width: min(1600px, 96vw); max-height: 86vh; }
+.modal.srcdlg-modal { width: min(1600px, 96vw); height: min(86vh, 900px); max-height: 86vh; position: relative; }
 /* 2026-09-23 用户裁决：最大化态铺满父窗口（100vw×100vh），去圆角与限高 */
 .modal.srcdlg-modal--max { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; }
 /* 标题行窗口化控制（最大化/还原/关闭，双击标题行同切换） */
@@ -1185,17 +1179,18 @@ function scoreClass(score: number | undefined): string {
 }
 .wnd-btn:hover { background: var(--surface-container); color: var(--foreground); }
 .wnd-btn--close:hover { background: var(--destructive, #e5484d); color: #fff; }
-.srcdlg-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); }
+.srcdlg-body { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: var(--space-3); }
 /* 2026-09-23 用户裁决：弹窗左右两栏 1:1——左=素材来源 tabs，右=选择池 */
-.srcdlg-cols { display: flex; gap: var(--space-4); align-items: flex-start; }
-.srcdlg-left { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.srcdlg-cols { flex: 1 1 auto; min-height: 0; display: flex; gap: var(--space-4); align-items: stretch; }
+.srcdlg-left { flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: var(--space-3); }
 .srcdlg-pool {
-  flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3);
-  padding: var(--space-3); background: var(--surface-container);
+  flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: var(--space-3);
+  /* 底部 56px 留白给悬浮的确认按钮（footer 绝对定位盖在池容器右下角，列表不被遮挡） */
+  padding: var(--space-3) var(--space-3) 56px; background: var(--surface-container);
   border: 1px dashed color-mix(in srgb, var(--primary) 35%, var(--border)); border-radius: var(--radius-lg);
 }
 /* 选择池：一行一条（2026-09-23 用户裁决：高度加倍+编号后缩略图，替代过密的网格） */
-.pool-list { display: flex; flex-direction: column; gap: 8px; }
+.pool-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; }
 .pool-card {
   display: flex; align-items: center; gap: 10px; padding: 5px 10px; min-width: 0;
   min-height: 56px;
@@ -1308,7 +1303,7 @@ function scoreClass(score: number | undefined): string {
 .file-list { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; font-size: 13px; }
 .file-list li { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 6px 10px; border-bottom: 1px solid var(--border); word-break: break-all; }
 .file-list li:last-child { border-bottom: none; }
-.src-video-list { max-height: 480px; overflow-y: auto; }
+.src-video-list { flex: 1 1 auto; min-height: 120px; overflow-y: auto; overscroll-behavior: contain; }
 .src-video-list li { padding: 4px 8px; }
 .video-thumb { width: 60px; height: 40px; object-fit: cover; border-radius: var(--radius-sm); background: #000; flex: none; }
 .video-thumb--ph { display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); background: var(--surface-container-high); }
@@ -1319,6 +1314,9 @@ function scoreClass(score: number | undefined): string {
 .video-remove-btn { width: 24px; height: 24px; padding: 0; font-size: 16px; line-height: 1; flex: none; background: transparent; color: var(--muted-foreground); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
 .video-remove-btn:hover { color: var(--danger); border-color: var(--danger); }
 .video-count-footer { text-align: center; color: var(--muted-foreground); font-size: 12px; padding: 4px 0; }
+/* 弹窗级 footer：绝对定位悬浮右下角（2026-11-06 用户裁定修正——整行 footer 曾把
+   左列截短留出空白栏；现左右两列占满全高，按钮只盖选择池底部一角，左列到底） */
+.srcdlg-foot { position: absolute; right: 20px; bottom: 14px; z-index: 5; }
 /* 逐素材分割状态行底色（2026-09-22 用户裁决：done=淡绿、splitting=淡黄、failed=淡红、未分割无底色） */
 .split-status-row.split-done { background: rgba(46, 204, 113, 0.14); }
 .split-status-row.split-splitting { background: rgba(241, 196, 15, 0.14); }

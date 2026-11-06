@@ -488,6 +488,10 @@ declare interface TintinBridgeServer {
     payload: MontageAPI.SplitRequest,
     onProgress?: (percent: number) => void
   ): Promise<IpcError<MontageAPI.SplitResponse>>
+  /** 快速模式分析取件（GET /montage/split/analysis/{task_id}；done=true=终态含失败，铁律7） */
+  montageSplitAnalysis(
+    taskId: string
+  ): Promise<IpcError<MontageAPI.SplitAnalysisResponse>>
   montageConcat(
     payload: MontageAPI.ConcatRequest,
     onProgress?: (percent: number) => void

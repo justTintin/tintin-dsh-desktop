@@ -11,6 +11,8 @@
 import { computed, ref, watch } from 'vue'
 import { clientInfo } from '@/utils/clientLog'
 import TButton from '@/components/common/TButton.vue'
+import SbCollapseToggle from './SbCollapseToggle.vue'
+import { storyboardShotsExpanded } from '@/composables/storyboardShotsState'
 import {
   SCENE_ELEMENT_KEYS,
   canConfirmFrames,
@@ -233,9 +235,12 @@ function fmtElapsed(sec: number): string {
       <div v-if="framesNotStarted" class="row">
         <span class="muted">高清首尾帧将自动开始生成（单镜约 3~7 分钟，完成后逐镜确认）</span>
       </div>
-      <div class="row between">
+      <div class="row">
         <span class="sb-info">阶段① 已确认 {{ framesReadyCount }} / {{ generateShotsCount }} 镜——全帧确认后解锁视频生成</span>
+        <span class="spacer"></span>
         <span class="muted">每帧可手动替换 / 单帧重生成</span>
+        <!-- 收起/展开（2026-11-05 用户裁决：默认收起，与文案混剪同款交互；确认全部/进度行不受影响） -->
+        <SbCollapseToggle />
       </div>
         <!-- 高清精稿生成进度就地带在阶段①头部（2026-10-05 用户报障：进度条在页顶隔着两屏看不见） -->
         <div v-if="ivRef<string>('genPhase').value === 'running' && ivRef<string>('genStage').value === 'frames'" class="seg-field">
@@ -248,7 +253,7 @@ function fmtElapsed(sec: number): string {
           </div>
           <div v-if="ivRef<string>('genMessage').value" class="muted">{{ ivRef<string>('genMessage').value }}</div>
         </div>
-        <div class="iv-grid">
+        <div v-if="storyboardShotsExpanded" class="iv-grid">
           <div v-for="(shot, i) in shots.filter((s) => s.source === 'generate')" :key="shot.gen?.name || i" class="iv-shot-card">
             <div class="row">
               <span class="seg-no">#{{ i + 1 }}</span>
@@ -351,7 +356,13 @@ function fmtElapsed(sec: number): string {
 
     <!-- ═══ 第 4 步（mode=videos）：逐镜视频生成 + 可选 A-roll ═══ -->
     <template v-else>
-      <div class="iv-grid">
+      <!-- 分镜脚本卡行首（2026-11-05 用户裁决：收起/展开同文案混剪——默认收起，逐镜卡不显示） -->
+      <div class="row">
+        <span class="sb-info">分镜脚本（共 {{ shots.length }} 镜）</span>
+        <span class="spacer"></span>
+        <SbCollapseToggle />
+      </div>
+      <div v-if="storyboardShotsExpanded" class="iv-grid">
         <div v-for="(shot, i) in shots" :key="shot.gen?.name || i" class="iv-shot-card">
           <div class="seg-head">
             <span class="seg-no">#{{ i + 1 }}</span>

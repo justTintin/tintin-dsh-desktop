@@ -83,6 +83,7 @@ import type { VoiceoverCandidate } from './copywritingMontageStep2ConcatLogic'
 import type { PickerItem } from './useWorkbenchPickers'
 import { markdownListLines, stripProductCodeFromModel, parseProductKeywords } from './opsProductLibraryLogic'
 import { useCopywritingMontageStep1Split } from './copywritingMontage/useCopywritingMontageStep1Split'
+import { detectShotKeyword, filterMaterialsByDupMode } from './copywritingMontageStep1SplitLogic'
 import { useCopywritingMontageStep2Concat } from './copywritingMontage/useCopywritingMontageStep2Concat'
 import { useCopywritingMontageStep3Voice } from './copywritingMontage/useCopywritingMontageStep3Voice'
 import { useCopywritingMontageStep4Final } from './copywritingMontage/useCopywritingMontageStep4Final'
@@ -125,14 +126,39 @@ export function useCopywritingMontage() {
 
   // ══ Step1 素材解析（已迁 montage/useCopywritingMontageStep1Split.ts，铁律 10 纯搬迁；
   //    解构回原名 → 下文与 return 键集合零改动）═════════════════
-  const step1 = useCopywritingMontageStep1Split({ statusText, ensureServerUrl, toAbsolute })
+  // 素材重复度（2026-11-05 用户裁定：导入素材量过大——按分镜脚本景别需求×三档筛选，
+  //  默认中度；dupMode 随选择素材弹窗下拉切换）
+  const dupMode = ref<'low' | 'mid' | 'all'>('mid')
+  const applyMaterialFilter = (paths: string[]): string[] => {
+    // 从各分镜脚本镜头的「镜别」聚合景别需求：sums=跨脚本总和（mid 档=各脚本独立
+    // 配齐）、needs=单脚本最大（low 档=跨脚本复用最省）、scripts=脚本个数
+    const needs: Record<string, number> = {}
+    const sums: Record<string, number> = {}
+    let scripts = 0
+    for (const t of storyboards.value) {
+      if (!t.shots.length) continue
+      scripts++
+      const per: Record<string, number> = {}
+      for (const sh of t.shots) {
+        const kw = detectShotKeyword(String(sh.shot_type || ''))
+        if (!kw) continue
+        per[kw] = (per[kw] || 0) + 1
+      }
+      for (const [kw, n] of Object.entries(per)) {
+        sums[kw] = (sums[kw] || 0) + n
+        needs[kw] = Math.max(needs[kw] || 0, n)
+      }
+    }
+    return filterMaterialsByDupMode(paths, { needs, sums, scripts }, dupMode.value)
+  }
+  const step1 = useCopywritingMontageStep1Split({ statusText, ensureServerUrl, toAbsolute, materialFilter: applyMaterialFilter })
   const {
     srcVideos, srcDurations, threshold, minSceneLen, imageDuration,
     scenes, scoreFilter, filteredScenes,
     splitBusy, splitError, splitMsg, splitProgress, splitResolution, splitFps,
     splitsJobId, splitsDownloading,
     previewUrl, previewTranscoding,
-    addVideos, selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, requestStopSplit, splitStatusOf,
+    addVideos, selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, splitMode, requestStopSplit, splitStatusOf,
     updateSceneDesc, previewSourceVideo, previewScene, closePreview,
     clearSplitCache, openSplitsDir,
   } = step1
@@ -183,7 +209,7 @@ export function useCopywritingMontage() {
   interface PlatformItem { name: string; guide: string }
   const platformOptions = ref<PlatformItem[]>([])
   const platformDefault = ref('抖音')
-  const scriptPlatform = ref('')        // 选中平台名（''=未拉到字典时的待定态）
+  const scriptPlatform = ref('抖音')    // 选中平台名（恒非空——2026-11-05 用户报障空下拉）
   async function loadPlatforms(): Promise<void> {
     try {
       const res = await window.tintin.server.get(API_PATHS.copywriting.platforms)
@@ -193,9 +219,20 @@ export function useCopywritingMontage() {
         .filter((x) => x && typeof x.name === 'string' && x.name)
         .map((x) => ({ name: String(x.name), guide: String(x.guide || '') }))
       if (typeof data?.default === 'string' && data.default) platformDefault.value = data.default
-      // 选中值优先保持用户已选；否则取服务端 default；字典缺失时兜底"抖音"
+      // 兜底：抖音恒在字典（2026-11-05 用户报障「默认平台没了」——服务端字典变更/缺项时
+      // 选中值落空，下拉显示空白）
+      if (!platformOptions.value.some((p) => p.name === '抖音')) {
+        platformOptions.value = [{ name: '抖音', guide: '' }, ...platformOptions.value]
+      }
+      // 选中值优先保持用户已选；否则取服务端 default；default 也不在字典则取字典首项
+      //（选中值恒有对应选项，下拉不再出现空白）
       const keep = platformOptions.value.some((p) => p.name === scriptPlatform.value)
-      if (!keep) scriptPlatform.value = platformDefault.value || '抖音'
+      if (!keep) {
+        const def = platformDefault.value || '抖音'
+        scriptPlatform.value = platformOptions.value.some((p) => p.name === def)
+          ? def
+          : (platformOptions.value[0]?.name || '抖音')
+      }
     } catch (err) {
       // 字典拉取失败不阻塞生成：保底"抖音"（服务端对未知平台 400 会显式暴露）
       if (!scriptPlatform.value) scriptPlatform.value = '抖音'
@@ -203,19 +240,34 @@ export function useCopywritingMontage() {
     }
   }
   const manualCopy = ref('')            // 视频文案（可选，可编辑）
-  const manualCopyBusy = ref(false)     // 「AI生成视频文案」进行中
+  const manualCopyBusy = ref(false)     // 「AI生成视频文案」进行中（唯一生成入口；
+  // 2026-11-05 用户裁定：「根据产品生成文案」按钮回归纯产品选择，不触发生成）
+  // 生成提示词（2026-11-05 用户裁决：无产品时按输入提示词生成文案；有产品时产品优先，
+  // 提示词忽略。随本地设置持久化，重启保留）
+  const copyPrompt = ref('')
   // localStorage 恢复：显式判 null 为未设置才回退默认
   const lsGet = (k: string): string | null => {
     try { return localStorage.getItem(scriptLsKey(k)) } catch { return null }
   }
-  const savedCopy = lsGet('copy')
-  if (savedCopy !== null) manualCopy.value = savedCopy
+  // 2026-11-05 用户裁决：视频文案进来默认空——历史草稿不再持久化/回填（旧裁决
+  // 「文案随本地设置保存」随之废止）；提示词输入保留持久化
+  const savedPrompt = lsGet('prompt')
+  if (savedPrompt !== null) copyPrompt.value = savedPrompt
   function persistScript(): void {
     try {
-      localStorage.setItem(scriptLsKey('copy'), manualCopy.value)
+      localStorage.setItem(scriptLsKey('prompt'), copyPrompt.value)
     } catch { /* 隐私模式等写入失败静默 */ }
   }
-  watch([manualCopy], persistScript)
+  watch([copyPrompt], persistScript)
+  /** 进入文案混剪模块默认空态（2026-11-05 用户裁决：视频文案进来默认空；
+   *  同日追加裁定：上次会话的分镜标签不残留——「不是这次选择的应该没有」。
+   *  分镜列表整体清空：文案框/分镜区/标签行全部回到本次会话的空白起点，
+   *  历史脚本仍以服务端脚本库为准；挂载/KeepAlive 每次进入都执行（幂等） */
+  function resetScriptPageOnEnter(): void {
+    activeStoryboardId.value = ''
+    manualCopy.value = ''
+    storyboards.value = []
+  }
 
   /** 文案编写页「选择产品」（公共弹窗 WbPickProductDialog）：PickerItem → sharedProductInfo
    *  （与镜头重组页弹窗 onPickProduct 同口径：型号剥商品编码、关联关键词随选带回、
@@ -237,34 +289,48 @@ export function useCopywritingMontage() {
   }
 
   // ── 十稿全量生成与挑选确认（2026-10-03 用户裁决：服务端每次返回 10 种文案写法；
-  //    弹窗默认选中第一种，用户可点选切换，确定后写入文案框——「AI 生成分镜脚本」
-  //    读 activeNarrative 即按选中稿处理）──────────────────────────────────
+  //    2026-11-05 用户裁决二改：弹窗改多选——按勾选个数装载，每种勾选稿一个「仅文案」
+  //    分镜 tab（由「AI 生成分镜脚本」批量补全分镜），不再单稿写回文案框）──────────
   const voiceoverCandidates = ref<VoiceoverCandidate[]>([])
   const voiceoverFailedFormulas = ref<string[]>([])
   const voiceoverDlgOpen = ref(false)
-  const voiceoverSelectedIdx = ref(0)
+  const voiceoverSelectedIdxs = ref<number[]>([])
   function closeVoiceoverDlg(): void { voiceoverDlgOpen.value = false }
-  /** 确定采用当前选中稿（写入视频文案框=激活分镜旁白/全局草稿，并随脚本库同步） */
-  function confirmVoiceoverCandidate(): void {
-    const c = voiceoverCandidates.value[voiceoverSelectedIdx.value]
-    if (c) adoptVoiceoverCandidate(c)
+  /** 确定采用勾选稿（可多选）：每种勾选稿装载为一个分镜 tab（shots 留空待批量补全），
+   *  替换上一批「仅文案」装载；已生成分镜的 tab 不受影响。loadCopyCandidateTabs 在
+   *  step3 组合函数（本函数体延迟执行，声明顺序无碍） */
+  function confirmVoiceoverCandidates(): void {
+    const picks = voiceoverSelectedIdxs.value
+      .map((i) => voiceoverCandidates.value[i])
+      .filter((c): c is VoiceoverCandidate => !!c && !!c.text.trim())
+    if (!picks.length) {
+      notify('未选择文案', '请先勾选要采用的文案写法（可多选）。')
+      return
+    }
+    const n = loadCopyCandidateTabs(picks.map((c) => ({ name: c.formula, narrative: c.text })))
+    voiceoverDlgOpen.value = false
+    const secs = picks.length > 1 ? `，共 ${picks.length} 份` : ''
+    statusText.value = `完成：已装载 ${n} 份文案${secs}，点击「✨ AI 生成分镜脚本」为每份各生成一套分镜`
+    notify('已装载文案', `已按勾选装载 ${n} 份文案（每份一个分镜标签）；点击「✨ AI 生成分镜脚本」将为每份文案各生成一套分镜。`)
   }
 
   /** ✨ 生成视频文案：POST /copywriting/voiceover 十稿全量（formula 缺省=每次 10 种）；
-   *  product_desc 必填（选择产品）、hint=自定义文案要求、platform=页面下拉直传。
+   *  2026-11-05 用户裁决：product_desc 取值=有产品按产品（productDescFromInfo），无产品
+   *  按输入提示词（提示词文本即 product_desc——服务端必填缺失 400），两者皆空报错。
    *  时长不再由客户端指定（走服务端缺省 30s 字数预算）。活服务端未部署新版时
    *  响应为旧版单稿形态（顶层 text）→ 直接采用免弹窗（双形态兼容见逻辑层归一） */
   async function genVoiceoverCandidates(): Promise<void> {
     if (manualCopyBusy.value) return
     const desc = productDescFromInfo(sharedProductInfo.value || {})
-    if (!desc) {
-      notify('无法生成', '请先点击「选择产品」选择产品——服务端按产品信息生成 10 种文案写法。')
+    const prompt = copyPrompt.value.trim()
+    if (!desc && !prompt) {
+      notify('无法生成', '两个方案必须有一个：请「选择产品」（方案一），或输入提示词（方案二）后再生成。')
       return
     }
     manualCopyBusy.value = true
     try {
       const resp = await window.tintin.server.post(API_PATHS.copywriting.voiceover, {
-        product_desc: desc,
+        product_desc: desc || prompt,
         platform: scriptPlatform.value,
       })
       const parsed = voiceoverCandidatesFromResponse(resp)
@@ -276,7 +342,9 @@ export function useCopywritingMontage() {
         return
       }
       if (parsed.single || parsed.candidates.length === 1) {
-        adoptVoiceoverCandidate(parsed.candidates[0]!)
+        // 旧版服务端单稿形态（顶层 text）→ 同样装载为分镜标签（2026-11-05 用户裁定：
+        // 文案与脚本一一对应，不再写全局草稿——视频文案随脚本显示、进默认空）
+        loadCopyCandidateTabs([parsed.candidates[0]!].map((c) => ({ name: c.formula, narrative: c.text })))
         if (parsed.failedFormulas.length) {
           notify('部分写法出稿失败', `未出稿写法：${parsed.failedFormulas.join('、')}`)
         }
@@ -284,7 +352,7 @@ export function useCopywritingMontage() {
       }
       voiceoverCandidates.value = parsed.candidates
       voiceoverFailedFormulas.value = parsed.failedFormulas
-      voiceoverSelectedIdx.value = 0
+      voiceoverSelectedIdxs.value = [0] // 默认勾选第一种（旧单选默认的延续，可增勾）
       voiceoverDlgOpen.value = true
     } catch (e) {
       clientError('copywriting-montage', '生成视频文案失败', errText(e))
@@ -293,19 +361,6 @@ export function useCopywritingMontage() {
       manualCopyBusy.value = false
     }
   }
-
-  /** 挑选确认：选中稿写入视频文案框（激活分镜旁白/全局草稿同旧语义）并随脚本库同步 */
-  function adoptVoiceoverCandidate(c: VoiceoverCandidate): void {
-    activeNarrative.value = c.text
-    voiceoverDlgOpen.value = false
-    // 分镜以服务端脚本库为持久化层：每步完成后同步
-    void syncStoryboardsToServer()
-    const secs = c.durationS ? ` · 约 ${c.durationS} 秒` : ''
-    statusText.value = `完成：已选「${c.formula || '文案'}」稿（${c.chars} 字${secs}），可在下方编辑`
-    notify('已选择文案', `写法「${c.formula || '文案'}」已写入视频文案框（${c.chars} 字${secs}），可在下方编辑。`)
-  }
-
-
 
   // ══ Step3 口播配音（已迁 montage/useCopywritingMontageStep3Voice.ts，铁律 10 纯搬迁；
   //    S3↔S4 双向点经 ctx：collectCandidates/ensureProcessedSrt 惰性 lambda、
@@ -342,6 +397,7 @@ export function useCopywritingMontage() {
     editDlg, voiceBusy, rewriteBusy, voiceProgress,
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,
     storyboards, activeStoryboardId, activeStoryboard, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, activeNarrative, COPY_STORYBOARD_MAX,
+    loadCopyCandidateTabs, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
     scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript, syncStoryboardsToServer,
     refreshTabNamesFromServer,
     loadLuts, loadCatalogLanes, resolveKeywordHits,
@@ -390,7 +446,7 @@ export function useCopywritingMontage() {
     generateBgm, downloadLibraryBgm, applyLibraryBgm, pickBgm, rowBgmName, setRowBgm,
     clearRowBgm, pickRowBgm, rowBgmForCandidate, collectCandidates, ensureProcessedSrt,
     enterStep4, startFinalMix, openFinalDir, openExportDraftDir, exportAllToJianyingDraft,
-    previewFinalVideo, exportJianyingPackageDraft,
+    previewFinalVideo,
     toggleBgmPlay, stopBgmPlay, onBgmVolumeInput, seekBgm,
     // 导出到视频剪辑项目（2026-10-21 用户裁决：替换「服务端生成」占位）
     ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject,
@@ -428,14 +484,17 @@ export function useCopywritingMontage() {
     srcVideos, srcDurations, threshold, minSceneLen, imageDuration,
     scenes, scoreFilter, filteredScenes, checkedCount,
     splitBusy, splitError, splitMsg, splitProgress, splitResolution, concatProgress,
-    addVideos, selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, requestStopSplit, splitStatusOf,
-    // 文案编写（2026-10-03 用户裁决：平台选择 + 服务端十稿全量，客户端挑选确认一种）
+    addVideos, selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, splitMode, dupMode, requestStopSplit, splitStatusOf,
+    // 文案编写（2026-10-03 用户裁决：平台选择 + 服务端十稿全量；2026-11-05 二改：
+    // 提示词兜底 + 弹窗多选按勾选个数装载）
     sharedProductInfo, applyScriptProduct, clearScriptProduct,
     manualCopy, manualCopyBusy, activeNarrative, syncStoryboardsToServer,
     storyboards, activeStoryboardId, activeStoryboard, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, COPY_STORYBOARD_MAX,
     scriptPlatform, platformOptions, platformDefault, loadPlatforms,
-    voiceoverCandidates, voiceoverFailedFormulas, voiceoverDlgOpen, voiceoverSelectedIdx, closeVoiceoverDlg,
-    genVoiceoverCandidates, confirmVoiceoverCandidate,
+    copyPrompt, resetScriptPageOnEnter,
+    voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
+    voiceoverCandidates, voiceoverFailedFormulas, voiceoverDlgOpen, voiceoverSelectedIdxs, closeVoiceoverDlg,
+    genVoiceoverCandidates, confirmVoiceoverCandidates,
     updateSceneDesc, previewSourceVideo, previewScene, closePreview, clearSplitCache,
     previewUrl, previewTranscoding, openSplitsDir, splitsDownloading,
     // Step2 镜头重组
@@ -499,7 +558,6 @@ export function useCopywritingMontage() {
     exportDoneMsg, // 2026-09-18：导出完成提示行（内嵌「打开草稿目录」按钮）
     trackChecks, // 2026-10-13：逐轨检查清单（导出区左侧面板）
     exportWarnMsg,
-    exportJianyingPackageDraft, // 轨 2（2026-09-17）：导入服务端草稿包
     finalVideoList, finalVideoPath, finalSelIdx, finalPreviewUrl, finalPreviewTitle,
     bgmSource, bgmGenPrompt, bgmGenStyle, bgmGenDuration,
     bgmGenBusy, bgmGenError, bgmGenUrl, bgmGenMeta, bgmPreviewUrl,

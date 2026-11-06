@@ -10,6 +10,10 @@
 // ═════════════════════════════════════════════════════════════
 import { reactive, watch } from 'vue'
 import TButton from '@/components/common/TButton.vue'
+import { useHostDark } from '@/composables/hostTheme'
+
+// 弹窗 teleport 到 body（App 根外），暗色类必须显式绑定（2026-11-05 白弹窗同款裁决）
+const isDark = useHostDark()
 import TSelect from '@/components/common/TSelect.vue'
 
 const props = defineProps<{
@@ -59,7 +63,7 @@ function save(): void {
 </script>
 
 <template>
-  <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
+  <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
     <div v-if="dlg.show" class="modal-mask" @click.self="emit('close')">
       <div class="modal">
         <span class="modal-title">设置声音克隆</span>

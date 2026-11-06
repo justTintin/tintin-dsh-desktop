@@ -28,7 +28,7 @@ const {
   ttsSteps,
   ttsCfg,
   ttsSpeedMin,
-  voiceProgress,
+  voiceProgress, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
   ttsEngine, qwen3Speaker, qwen3Instruct, qwen3Voices, qwen3VoicesLoading,
   cloneParamsDlg,
   openCloneParams,
@@ -120,47 +120,23 @@ const tabVoices = computed(() => {
 </script>
 
 <template>
+      <!-- 2026-11-05 用户裁定：步骤条布局等级最高——显示在卡片框上面（与上一步/下一步同层） -->
+      <VdStepBar :step="step" :steps="steps" @go="go" />
       <section class="card">
-        <VdStepBar :step="step" :steps="steps" @go="go" />
         <!-- 1. 视频输入目录行：2026-09-08 用户裁决删除——口播配音无视频输入功能，
              配音对象自动取 Step2 已确认合成产物所在目录 -->
 
-        <!-- 分镜脚本（公共组件 voice 态，始终显示；2026-09-21 用户报障：从视频素材返回本步时分镜消失） -->
-        <CopywritingStoryboard mode="voice" />
-
-        <!-- 2026-09-22 用户裁决：移除旧「待合成视频列表与配音文案映射」表（智能混剪遗留的
-             逐视频配音界面——编辑/重生成/时长:视频）；文案混剪声音=每分镜脚本一条
-             （tab.voiceWav）。本框不再随视频行切换，恒显：口播文案（与激活分镜绑定）
-             + 各分镜克隆声音播放条 -->
+        <!-- 口播文案（2026-11-05 用户裁定：移到分镜标签上方——voice 态分镜组件内不再
+             渲染文案行，消除重复显示；与激活分镜绑定，随标签切换） -->
         <div v-if="activeNarrative.trim()" class="carry-copy">
-          <!-- 2026-09-21 用户裁决：口播文案与分镜脚本绑定——显示激活分镜的旁白
-               （= 批量克隆的声音来源），不再是全局草稿 manualCopy（曾致框文与声音不一致） -->
           <span class="sb-info">口播文案（旁白，与激活分镜脚本绑定，共 {{ activeNarrative.length }} 字；在「文案编写」页编辑）：</span>
           <textarea readonly rows="6" class="input carry-textarea">{{ activeNarrative }}</textarea>
-
-          <!-- 2026-09-22 用户裁决：播放条自空态分支上提为常显——此前预合成后 voiceRows
-               非空顶掉本框，声音播放条随之消失（用户报障②） -->
-          <template v-if="tabVoices.length">
-            <div class="carry-voice-list">
-              <div v-for="v in tabVoices" :key="v.tabId" class="carry-voice-row">
-                <span class="carry-voice-name" :title="v.name">{{ v.name }}</span>
-                <audio
-                  :key="v.wav + '|' + (v.dur || 0)"
-                  class="vd-voice-audio"
-                  controls
-                  preload="auto"
-                  :src="toFileUrl(v.wav)"
-                  :title="`分镜「${v.name}」克隆声音（${v.dur > 0 ? fmtDur(v.dur) : '时长未知'}）`"
-                />
-                <span class="vd-dur-voice" :class="{ none: !v.dur }">{{ v.dur > 0 ? fmtDur(v.dur) : '--:--' }}</span>
-              </div>
-            </div>
-            <!-- 2026-09-23 用户裁决：列表只含激活分镜自己的一条声音（绑定随 tab 切换） -->
-            <span class="muted">当前分镜「{{ tabVoices[0].name }}」的声音已生成，可就地试听；点「开始批量克隆人声合成」可重新生成（会重克全部分镜）</span>
-          </template>
-          <span v-else class="muted">当前分镜暂无声音：点击下方「开始批量克隆人声合成」，即为各分镜旁白生成声音</span>
+          <span v-if="!tabVoices.length" class="muted">当前分镜暂无声音：点击下方「开始批量克隆人声合成」，即为各分镜旁白生成声音（完成后显示在下方分镜脚本的视频文案下面）</span>
         </div>
         <div v-else class="muted">先在「文案编写」页生成文案与分镜脚本，再点击「开始批量克隆人声合成」生成声音</div>
+
+        <!-- 分镜脚本（公共组件 voice 态，始终显示；2026-09-21 用户报障：从视频素材返回本步时分镜消失） -->
+        <CopywritingStoryboard mode="voice" />
 
       </section>
 
@@ -187,21 +163,29 @@ const tabVoices = computed(() => {
         </div>
 
         <div class="row between clone-row">
-          <div class="row">
+          <div class="row clone-eng-row">
             <TSelect v-model="ttsEngine" :options="TTS_ENGINE_OPTIONS" class="tts-engine-select" />
             <TButton label="设置声音克隆" variant="secondary" size="small" @click="openCloneParams" />
           </div>
           <TButton label="开始批量克隆人声合成" :loading="voiceBusy" @click="startSynthesizeVoice" />
+          <!-- 只重试失败项（2026-11-05 用户裁定：服务端 TTS 资源性单条失败——不再重克已成功的） -->
+          <TButton v-if="lastCloneFailedIds.length" label="只重试失败项" variant="secondary"
+            :loading="voiceBusy" title="仅重新克隆上一轮失败的分镜声音（已成功的不重克）"
+            @click="retryFailedClones" />
         </div>
 
         <!-- 7. 配音动作已迁 Step4 统一合成（2026-09-09 用户裁决：Step3 只合成口播声音，
              配音+特效烧制+BGM 混音在第四步点「开始混音合成」一键完成） -->
 
 
-        <!-- 克隆批量进度（主进程逐条 emitRow 聚合为整体百分比；文案+进度条对照确认合成形态） -->
+        <!-- 克隆批量进度（2026-11-05 用户裁定：按文案个数整体进度+进行到哪个；
+             主进程逐条 emitRow 聚合为整体百分比） -->
         <template v-if="voiceBusy">
-          <div class="concat-status-line">{{ statusText }}</div>
-          <progress class="vd-progress split-progress" :value="voiceProgress" max="100" />
+          <!-- 2026-11-05 用户问「第二步为何显示字体加载提示」：全局 statusText 会被
+               无关预取（如字体加载）写入，进度块不再回显它，只显示克隆自身进度 -->
+          <div class="concat-status-line">正在克隆声音 {{ voiceDone }}/{{ voiceTotal }}：{{ cloneProgressLabel }}（{{ voiceProgress }}%）</div>
+          <!-- div 确定性进度条（2026-11-05 用户报障原生 progress 暗色下不可见） -->
+          <div class="clone-progress-bar"><div class="clone-progress-fill" :style="{ width: voiceProgress + '%' }"></div></div>
         </template>
       </section>
 
@@ -419,12 +403,17 @@ const tabVoices = computed(() => {
 .vd-dur-voice { flex: none; width: 60px; text-align: right; font-size: 11px; font-weight: 700; color: var(--success); }
 .vd-dur-voice.none { color: var(--muted-foreground); font-weight: 400; }
 .vd-progress { width: 100%; height: 6px; appearance: none; border-radius: 3px; overflow: hidden; }
+.clone-progress-bar { width: 100%; height: 8px; background: var(--surface-container); border-radius: 4px; overflow: hidden; }
+.clone-progress-fill { height: 100%; background: var(--primary); border-radius: 4px; transition: width 0.3s; }
 .vd-progress::-webkit-progress-bar { background: var(--surface-container); }
 .vd-progress::-webkit-progress-value { background: var(--primary); transition: width 0.3s; }
 /* 2026-09-10 用户裁决：设置组靠左、克隆主操作居最右（两端对齐）。
    2026-09-11 用户裁决：本行控件等高——下拉 34 / 小按钮 28 / 主按钮 36 三种高度
    混排 → 统一为输入高度 34px（与下拉及页面表单控件同口径，含四颗按钮） */
-.clone-row { align-items: center; }
+.clone-row { align-items: center; flex-wrap: nowrap; }
+/* 引擎选择+设置按钮同行不换行（2026-11-05 用户裁定：设置声音克隆放在引擎下拉后的
+   空位，不单独换行） */
+.clone-eng-row { flex-wrap: nowrap; }
 .clone-row :deep(.t-button) { height: var(--size-input-height); }
 /* TTS 引擎下拉（表格标题行内，不占满） */
 .tts-engine-select { width: 220px; flex: none; }

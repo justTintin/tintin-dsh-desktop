@@ -20,6 +20,8 @@ import WbPickProductDialog from '@/components/workbench/WbPickProductDialog.vue'
 import VoiceoverPickerDialog from '@/components/media-tools/VoiceoverPickerDialog.vue'
 import VoiceCloneParamsDialog from '@/components/media-tools/VoiceCloneParamsDialog.vue'
 import ImitationGenSteps from '@/components/media-tools/ImitationGenSteps.vue'
+import SbCollapseToggle from '@/components/media-tools/SbCollapseToggle.vue'
+import { storyboardShotsExpanded } from '@/composables/storyboardShotsState'
 import MaterialImagePickerDialog from '@/components/media-tools/MaterialImagePickerDialog.vue'
 import ImitationMontageStep from './ImitationMontageStep.vue'
 import ImitationFxStep from './ImitationFxStep.vue'
@@ -939,9 +941,12 @@ watch(() => [draftConfirmed.value, framesReadyCount.value, iv.genPhase.value, iv
 
     <!-- ═══ 第 2 步：生成脚本（原片脚本为模板：替换文字=新产品文案 + 新文案口播配音；HumanGate①；单脚本全步共用）═══ -->
     <div v-else-if="step === 2 && record && shots.length" class="iv-panel">
-      <div class="row between">
+      <div class="row">
         <span class="sb-info">原片脚本（模板）：共 {{ shots.length }} 镜 ｜ 总时长 {{ shotsTotalDuration(shots) }} 秒 ｜ 脚本 {{ scriptId }}</span>
+        <span class="spacer"></span>
         <span class="muted">本步生成新视频脚本：替换文案文字 + 新文案口播配音；AI/实拍逐镜定稿</span>
+        <!-- 收起/展开（2026-11-05 用户裁决：逐镜脚本卡默认收起，与文案混剪同款交互） -->
+        <SbCollapseToggle />
       </div>
       <!-- 两套文案（2026-10-02 用户裁决；2026-10-13 布局裁决：脚本文案块移至六视图之后、
            参考声音之前）——本行=拆解文案（原片口播转写，只读、不绑定脚本） -->
@@ -1038,6 +1043,9 @@ watch(() => [draftConfirmed.value, framesReadyCount.value, iv.genPhase.value, iv
         <span v-if="distributeBusy" class="muted">正在按新文案分配逐镜旁白…</span>
       </div>
 
+      <!-- 逐镜脚本卡（2026-11-05 用户裁决：默认收起——收起时上方提示行与逐镜卡都不显示，
+           头部行「展开」或文案混剪同源状态展开后可见） -->
+      <template v-if="storyboardShotsExpanded">
       <div class="muted">时长保存后由服务端按帧对齐量化（≤0.7s 偏移，设计行为，非 bug）</div>
       <div v-if="!shotsRevealed && shots.length" class="muted">逐镜脚本将在「重新生成仿写文案」采纳新文案后显示（当前为拆解稿原文，旁白未按新产品重写）</div>
       <div v-for="(shot, i) in (shotsRevealed ? shots : [])" :key="i" class="seg-card">
@@ -1092,6 +1100,7 @@ watch(() => [draftConfirmed.value, framesReadyCount.value, iv.genPhase.value, iv
           </div>
         </div>
       </div>
+      </template><!-- /逐镜脚本卡（收起/展开） -->
 
       <div class="row">
         <TButton label="← 上一步" variant="primary" @click="goBack" />

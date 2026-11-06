@@ -101,9 +101,7 @@ function getDefaultDraftRoot() {
 // ── v2 字段构建器（字段对照 pyJianYingDraft：segment.py / local_materials.py / text_segment.py）──
 
 /** 播放速度素材（materials.speeds 成员；segment.extra_material_refs 引用其 id） */
-function speedMaterial(speed) {
-  return { curve_speed: null, id: hexId(), mode: 0, speed, type: 'speed' }
-}
+function speedMaterial(speed) { return { curve_speed: null, id: hexId(), mode: 0, speed, type: 'speed' } }
 
 /** 通用片段字段（segment.py BaseSegment.export_json） */
 function baseSegmentFields(materialId, start, dur) {
@@ -130,25 +128,13 @@ function baseSegmentFields(materialId, start, dur) {
 
 /** 媒体片段字段（segment.py MediaSegment.export_json；speedId 进 extra_material_refs） */
 function mediaSegmentFields(dur, speedId, { speed = 1.0, volume = 1.0 } = {}) {
-  return {
-    source_timerange: { start: 0, duration: dur },
-    speed,
-    volume,
-    extra_material_refs: [speedId],
-    is_tone_modify: false,
-  }
+  return { source_timerange: { start: 0, duration: dur }, speed, volume, extra_material_refs: [speedId], is_tone_modify: false }
 }
 
 /** 视觉片段字段（segment.py VisualSegment.export_json） */
 function visualSegmentFields() {
   return {
-    clip: {
-      alpha: 1.0,
-      flip: { horizontal: false, vertical: false },
-      rotation: 0.0,
-      scale: { x: 1.0, y: 1.0 },
-      transform: { x: 0.0, y: 0.0 },
-    },
+    clip: { alpha: 1.0, flip: { horizontal: false, vertical: false }, rotation: 0.0, scale: { x: 1.0, y: 1.0 }, transform: { x: 0.0, y: 0.0 } },
     uniform_scale: { on: true, value: 1.0 },
   }
 }
@@ -1132,7 +1118,7 @@ function exportToDraft({ videoPath, bgmPath = '', bgmVolume = 50, srtPath = '', 
  *  不再导出旧 'tpl' 蓝字关键词轨（原生模板实例替代），'fancy' 花字轨照旧。
  *  sfxPaths（2026-09-18 用户裁决）：音效池=服务端音频库剪映音效库 <2s 条目
  *  下载产物（主进程 resolveJianyingSfxPool 解析），按文字模板命中全局索引循环指派。 */
-function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio = false, transitions = null, bgmPath = '', bgmPaths = null, bgmVolume = 50, srtPaths = null, srtLimitUs = null, draftName = '', fxWords = null, fxKinds = null, textAnim = '', fancyEffectId = '', tplEffectId = '', subAnim = '', videoEffectId = '', videoEffectName = '', textTemplateClips = null, fancyEvents = null, voiceClips = null, sfxClips = null, sfxPaths = null, sfxGainDb = null, subtitleStyle = null, subtitleBoxOpacity = null, subtitleFontSize = null, deps }) {
+function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio = false, transitions = null, bgmPath = '', bgmPaths = null, bgmVolume = 50, srtPaths = null, srtLimitUs = null, draftName = '', fxWords = null, fxKinds = null, textAnim = '', fancyEffectId = '', tplEffectId = '', subAnim = '', videoEffectId = '', videoEffectName = '', textTemplateClips = null, fancyEvents = null, voiceClips = null, sfxClips = null, sfxPaths = null, sfxGainDb = null, subtitleStyle = null, subtitleBoxOpacity = null, subtitleFontSize = null, gapAfterUs = null, deps }) {
   const paths = (videoPaths || []).filter(Boolean)
   if (!paths.length) return { success: false, message: '没有可导出的视频' }
   for (const p of paths) {
@@ -1157,7 +1143,10 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
       })
       totalDurationUs += clips[clips.length - 1].durationUs
     }
-    // 总时长=各片段时长之和（2026-09-24：段间不再留半秒空隙——相邻才生效转场）
+    // 段间黑场表（2026-11-06 用户裁定：间隔只加在方案成片之间——调用方按方案边界
+    // 填 5s，方案内镜头缺省 0=紧密相接（转场需相邻）；末段后不落任何 clip 不受影响）
+    const gapAfter = (Array.isArray(gapAfterUs) ? gapAfterUs : []).map((g) => Math.max(0, Math.round(Number(g) || 0)))
+    totalDurationUs += gapAfter.reduce((a, b) => a + b, 0)
     const canvasWidth = clips[0].width
     const canvasHeight = clips[0].height
 
@@ -1223,7 +1212,8 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
     // ① 末片段字幕窗口延长 ② 末段视频慢速延长铺满配音（旁白永不截断）。
     const cumStarts = []
     let cumUsPre = 0
-    for (const clip of clips) { cumStarts.push(cumUsPre); cumUsPre += clip.durationUs }
+    // 段起点基准=视频轨实际游标（含表内黑场），否则口播末端被低估漏判延长
+    for (let i = 0; i < clips.length; i++) { cumStarts.push(cumUsPre); cumUsPre += clips[i].durationUs + (gapAfter[i] || 0) }
     let voiceTimelineEndUs = 0
     for (let i = 0; i < clips.length; i++) {
       for (const vc of voiceSegsByVideo[i] || []) {
@@ -1234,14 +1224,21 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
     // 逐视频 BGM（bgmPaths[i] 优先，空则回退全局 bgmPath，落段时再判存在性）
     const bgmWindows = []
     let cursorUs = 0
+    // 2026-11-06 用户裁决：方案间黑场必须是实体段——剪映主轨相邻段吸合渲染，纯游标
+    // 空隙在成片里无黑场。1×1 透明 PNG 拉伸全屏即黑场，仅存在方案边界时落盘一次
+    let gapPngPath = ''
+    if (gapAfter.some((g) => g > 0)) {
+      gapPngPath = path.join(draftFolder, 'tintin_gap_black.png')
+      fs.writeFileSync(gapPngPath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64'))
+    }
     clips.forEach((clip, i) => {
       const materialId = hexId()
       materials.videos.push(videoMaterialFields({ ...clip, materialId }))
       const sp = speedMaterial(1.0)
       speeds.push(sp)
       // 2026-09-24 用户报障修复：BGM 窗口原先与视频段等长——视频轨的半秒间隔处
-      // BGM 静音，整条 BGM 轨被切成"音乐/静音"交替的碎块。现让每个窗口覆盖到
-      // 下一个窗口起点（含半秒间隔），音乐跨窗口连续（源游标续播）不断音。
+      // BGM 静音，整条 BGM 轨被切成"音乐/静音"交替的碎块。窗口=视频段自身时长
+      // （2026-11-06 用户改判：BGM 止于本方案末尾、黑场期静音，取代 0924 延伸口径）。
       bgmWindows.push({
         startUs: cursorUs,
         durUs: clip.durationUs,
@@ -1259,9 +1256,17 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
         hdr_settings: { intensity: 1.0, mode: 1, nits: 1000 },
       }
       videoTrack.segments.push(seg)
-      if (i > 0) {
+      if (i > 0 && !(gapAfter[i - 1] > 0)) { // 与前段之间有黑场则转场失效（需相邻片段），不挂
         const spec = transitionSpecs[i - 1]
         if (spec) videoTrack.segments[videoTrack.segments.length - 2].extra_material_refs.push(buildTransitionMaterial(materials, spec))
+      }
+      if (gapAfter[i] > 0) { // 方案边界：实体透明图片段铺满黑场窗（转场守卫已先取前内容段）
+        const g = gapAfter[i]
+        const pm = { ...videoMaterialFields({ materialId: hexId(), name: 'tintin_gap_black.png', path: gapPngPath, durationUs: g, width: canvasWidth, height: canvasHeight }), type: 'photo' }
+        materials.videos.push(pm)
+        const bsp = speedMaterial(1.0)
+        speeds.push(bsp)
+        videoTrack.segments.push({ ...baseSegmentFields(pm.id, cursorUs + clip.durationUs, g), ...mediaSegmentFields(g, bsp.id, { volume: 0 }), ...visualSegmentFields(), hdr_settings: { intensity: 1.0, mode: 1, nits: 1000 } })
       }
       for (const vc of voiceSegsByVideo[i] || []) {
         const mat = audioMaterialFields(vc.path, vc.durUs)
@@ -1279,10 +1284,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
           hdr_settings: null,
         })
       }
-      cursorUs += clip.durationUs
-      // 2026-09-24 用户裁决：片段紧密相接（不再留半秒空隙）——空隙会让剪映转场
-      // 无法生效（转场需要相邻片段），且黑场 flash 破坏连续观感。旧半秒间隔设计
-      // 废弃；BGM 窗口随之自然连续。
+      cursorUs += clip.durationUs + (gapAfter[i] || 0) // 段后黑场（2026-11-06：仅方案边界，末段后无 clip 不受影响）
     })
     // 配音末端 > 视频轨末端：末段视频慢速延长铺满（speed<1，画面末帧缓放，
     // 源消耗=target*speed 恰好=源全长）；BGM 末窗同步延长；内容总时长对齐
@@ -1422,10 +1424,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
         // 2026-09-29 修复：挪出模板命中 guard——镜级显式音效（sfxClips）不依赖
         // 模板命中，无命中镜也必须落轨；空事件时池路径自身 no-op。
         appendSfxForVideo(i, cursorUs, cursorUs + clip.durationUs)
-        cursorUs += clip.durationUs
-        // 2026-09-24 用户裁决：片段紧密相接（副轨游标与视频轨同口径，不再推进
-        // 半秒间隙——间隙会让字幕/关键词/音效窗口自第 2 片起逐边界漂移 0.5s，
-        // 与 727a6eb 修的视频轨空隙同根因，当时漏改了这两处游标）
+        cursorUs += clip.durationUs + (gapAfter[i] || 0) // 副轨游标与视频轨同口径（含段后黑场）
       })
       if (!subtitleTrack.segments.length) tracks.splice(tracks.indexOf(subtitleTrack), 1)
       if (tplTrack && tplTrack.segments.length) tracks.push(tplTrack)
@@ -1443,9 +1442,9 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
             textTplKwFallbackSegs += r.fallbackSegs
           } catch (_) {}
         }
-        // 2026-09-29 修复：同上——显式音效不依赖模板命中；游标不再推进间隙
+        // 2026-09-29 修复：显式音效不依赖模板命中；游标与视频轨同口径（含段后黑场）
         appendSfxForVideo(i, cursorUs, cursorUs + clip.durationUs)
-        cursorUs += clip.durationUs
+        cursorUs += clip.durationUs + (gapAfter[i] || 0)
       })
       if (tplTrack && tplTrack.segments.length) tracks.push(tplTrack)
     }
@@ -1837,6 +1836,7 @@ function probeVideo(videoPath, deps) {
 }
 
 /** 转场参数归一化为长度 count 的列表（_normalize_transitions L273-283；注意：list 保持原样，仅 str/单个 dict 包数组） */
+
 function normalizeTransitions(transitions, count) {
   if (transitions === null || transitions === undefined) transitions = []
   else if (!Array.isArray(transitions) && (typeof transitions === 'string' || typeof transitions === 'object')) transitions = [transitions]

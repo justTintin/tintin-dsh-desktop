@@ -22,10 +22,15 @@ import {
   shotsNarrationText, buildCopywritingStoryboardPrompt,
   type TextFxTrack, type SubtitleStylePreset, type PrecomposePlan, type VoiceRow,
 } from '../copywritingMontageLogic'
-import { storyboardNameAfterSave } from '../copywritingMontageStep3VoiceLogic'
+import { storyboardNameAfterSave, cloneProgressLabelOf, cloneDisplayProgress } from '../copywritingMontageStep3VoiceLogic'
 import { notify, errText, joinPath } from './context'
 import { attachVoiceRef, voiceRefFromScriptDetail } from '../copywritingMontageVoiceRefLogic'
-import { uploadTabVoiceWav, restoreTabVoiceFromLibrary } from './useCopywritingMontageVoiceSync'
+import { uploadTabVoiceWav, restoreTabVoiceFromLibrary, refreshTabNamesFromServer as refreshTabNamesFromServerImpl } from './useCopywritingMontageVoiceSync'
+// 分镜 tab 生命周期与多稿装载（2026-11-05 迁出以控本文件行数，铁律 10；宿主只留接缝）
+import {
+  COPY_STORYBOARD_MAX, createStoryboardTabs, productBriefOf,
+  type StoryboardTab,
+} from './useCopywritingMontageStoryboardTabs'
 import { readCacheDir } from '../useSettingsConfig'
 import {
   parseStoryboardShots,
@@ -132,7 +137,7 @@ export function useCopywritingMontageStep3Voice(ctx: CopywritingMontageStep3Cont
   const tfx = useCopywritingMontageTextFx({
     voiceRows, assemblePlans, finalBusy, step4Candidates, collectCandidates, sharedProductInfo,
     listAnnotatePlans: () => storyboards.value
-      .filter((t) => t.narrative.trim())
+      .filter((t) => t.narrative.trim() && t.shots.length) // 纯文案装载 tab（未生成分镜）不进标注方案池
       .map((t) => ({
         key: `plan:${t.id}`,
         name: t.name,
@@ -196,8 +201,14 @@ function clearVoiceProgressListener(): void {
   // 批量克隆/配音整体进度（0-100）：主进程逐条 emitRow，渲染层按
   //  「已完成条数 + 当条百分比」聚合；动作行下方进度条呈现（2026-09-09 用户裁决）
   const voiceProgress = ref(0)
-  let voiceTotal = 0
-  let voiceDone = 0
+  /** 克隆队列名（顺序=任务序号；克隆开始时填充，供进度标签映射当前项） */
+  const cloneQueueNames = ref<string[]>([])
+  /** 进行到哪个（2026-11-05 用户裁定）：第 k/N 个「标签」（纯逻辑在 Step3VoiceLogic） */
+  const cloneProgressLabel = computed(() =>
+    cloneProgressLabelOf(cloneQueueNames.value, voiceDone.value, voiceTotal.value))
+  // 2026-11-05 用户裁定：克隆要有按文案个数的整体进度+进行到哪个——转响应式供面板绑定
+  const voiceTotal = ref(0)
+  const voiceDone = ref(0)
   function nextVoiceChannel(): string {
     const ch = `voice:progress:${(crypto?.randomUUID?.() || `${Date.now()}_${Math.floor(Math.random() * 1e8)}`).replace(/-/g, '')}`
     offVoiceProgress?.(); offVoiceProgress = null
@@ -220,10 +231,10 @@ function clearVoiceProgressListener(): void {
             row.progress = 0
           }
         }
-        if (d.value !== undefined && voiceTotal > 0) {
-          if (d.value >= 100 || d.failed) voiceDone++ // 失败行同样终结，计入完成数（否则总进度到不了 100）
+        if (d.value !== undefined && voiceTotal.value > 0) {
+          if (d.value >= 100 || d.failed) voiceDone.value++ // 失败行同样终结，计入完成数（否则总进度到不了 100）
           const frac = d.value < 100 ? d.value / 100 : 0
-          voiceProgress.value = Math.min(100, Math.round(((voiceDone + frac) / voiceTotal) * 100))
+          voiceProgress.value = Math.min(100, Math.round(((voiceDone.value + frac) / voiceTotal.value) * 100))
         }
       }
       // Step4 统一合成：进度接通 + 成片增量上表（2026-09-12 用户反馈：服务端已合成完
@@ -297,7 +308,8 @@ function clearVoiceProgressListener(): void {
       const files = allFiles.filter((f) => (seen.has(f.path) ? false : (seen.add(f.path), true)))
       voicesDir.value = voicesDirFirst
       // 2026-09-21 用户裁决：第一步文案带入——行无旁车 .txt（原文空）时，配音文案回退第一步文案
-      const tabNarrs = storyboards.value.map((s) => s.narrative.trim())
+      // （2026-11-05：按已生成分镜的 tab 口径取旁白——纯文案装载 tab 未成片，混入会错位下标）
+      const tabNarrs = storyboards.value.filter((s) => s.shots.length).map((s) => s.narrative.trim())
       voiceRows.value = files.map((f, fi) => ({
         path: f.path,
         name: f.name,
@@ -612,7 +624,7 @@ function clearVoiceProgressListener(): void {
         outWavPath: joinPath(voicesDir.value, `voice_${i + 1}.wav`),
       }))
     voiceBusy.value = true
-    voiceTotal = tasks.length; voiceDone = 0; voiceProgress.value = 0
+    voiceTotal.value = tasks.length; voiceDone.value = 0; voiceProgress.value = 0
     const channel = nextVoiceChannel()
     try {
       const res = await window.tintin?.server?.voiceCloneBatch?.({
@@ -653,167 +665,32 @@ function clearVoiceProgressListener(): void {
   }
 
   // ── 多分镜脚本（2026-09-21 用户裁决：分镜脚本支持多个，tab 切换，每个分镜脚本对应
-  //  一个视频；二/三步对全部分镜批量处理；分镜数据内存化不持久化；tab 上限 10）──
-  interface StoryboardTab {
-    id: string
-    name: string
-    /** 来源脚本库 id（''=AI 生成/手动；选择脚本时同 id 的 tab 已存在则直接切换） */
-    scriptId: string
-    /** 服务端脚本库选题（首次同步/保存时生成；同 topic 覆盖更新） */
-    topic: string
-    /** 该脚本的旁白（第一步文案框绑定激活 tab 的旁白） */
-    narrative: string
-    shots: StoryboardShot[]
-    /** 每镜绑定的分割素材 idx 有序组（2026-09-22 用户裁决：一镜多片·按时长装填——
-     *  外层=镜、内层=该镜按序使用的片段；空数组=未绑定） */
-    clipGroups: number[][]
-    /** 分镜生成/应用时的旁白快照（过期判定：narrative 改过即过期） */
-    sourceNarrative: string
-    /** 整体克隆产物（2026-09-21 用户裁决：每分镜脚本一条整段声音；二/三步批量处理） */
-    voiceWav: string
-    voiceDurSec: number
-    /** 克隆产物在服务端音频库的 id（2026-09-30 用户裁决 B：wav 上传
-     *  POST /audio/library/upload category=口播→归一「配音」池；''=未上传——脚本
-     *  同步不携带口播引用，换机应用脚本后无口播可恢复，重新批量克隆即可重建） */
-    voiceAudioId: string
-    /** 每脚本视频设置（2026-09-23 用户裁决：输出画幅/转场动画/输出帧率按 tab 绑定——
-     *  切 tab 即切设置，导出按各 tab 自身 transition 消费；时长限制=跟随本 tab 声音时长派生值） */
-    layout: string
-    transition: string
-    fps: number | 'source'
-    /** 产品快照（2026-09-23 用户裁决：品牌/产品/型号 摘要，创建时自 sharedProductInfo
-     *  快照、选择脚本时自服务端 detail.product 带回；选择弹窗等处展示脚本基本信息） */
-    productBrief: string
-  }
-  const COPY_STORYBOARD_MAX = 10
+  //  一个视频；二/三步对全部分镜批量处理；tab 上限 10。StoryboardTab 结构与 tab CRUD/
+  //  多稿装载编排已迁 useCopywritingMontageStoryboardTabs.ts——铁律 10 分离，宿主留接缝）──
   const storyboards = ref<StoryboardTab[]>([])
   const activeStoryboardId = ref('')
 
-  // ── 会话持久化（2026-09-22 用户裁决 A5：装填结果/克隆声音/音效包装产物落
-  //  localStorage，重启恢复——分镜内容仍以服务端脚本库为权威（选择脚本整组刷新），
-  //  本缓存只恢复本地态：绑定组/声音/音效路径，避免重跑智能匹配与音效包装。
-  //  声音/音效为 cacheDir 下的稳定本地路径，重启后仍有效；缓存被清则路径失效，
-  //  重按批量克隆/音效包装即可重建）──
-  const STORYBOARDS_LS_KEY = 'copywriting-montage.storyboards'
-  const STORYBOARDS_LS_ACTIVE = 'copywriting-montage.storyboards.active'
-  function reviveTab(raw: unknown): StoryboardTab | null {
-    if (!raw || typeof raw !== 'object') return null
-    const t = raw as Record<string, unknown>
-    const shots = Array.isArray(t.shots) ? (t.shots as StoryboardShot[]) : []
-    if (!shots.length || !String(t.id || '')) return null
-    const rawGroups = Array.isArray(t.clipGroups) ? (t.clipGroups as unknown[]) : []
-    const clipGroups = rawGroups
-      .map((g) => (Array.isArray(g) ? (g as unknown[]).map((v) => Number(v)).filter((v) => Number.isInteger(v) && v >= 0) : []))
-      .slice(0, shots.length)
-    while (clipGroups.length < shots.length) clipGroups.push([])
-    return {
-      id: String(t.id),
-      name: String(t.name || '').slice(0, 20) || '未命名分镜',
-      scriptId: String(t.scriptId || ''),
-      topic: String(t.topic || ''),
-      narrative: String(t.narrative || ''),
-      shots,
-      clipGroups,
-      sourceNarrative: String(t.sourceNarrative || t.narrative || ''),
-      voiceWav: String(t.voiceWav || ''),
-      voiceDurSec: Number(t.voiceDurSec) || 0,
-      voiceAudioId: String(t.voiceAudioId || ''),
-      // 每脚本视频设置（恢复失败/旧缓存缺字段回退全局默认）
-      layout: String(t.layout || 'vertical'),
-      transition: String(t.transition || 'random'),
-      fps: t.fps === 'source' || Number(t.fps) > 0 ? (t.fps === 'source' ? 'source' : Number(t.fps)) : 'source',
-      productBrief: String(t.productBrief || ''),
-    }
-  }
-  function restoreStoryboards(): void {
-    try {
-      const raw = localStorage.getItem(STORYBOARDS_LS_KEY)
-      if (!raw) return
-      const parsed: unknown = JSON.parse(raw)
-      if (!Array.isArray(parsed)) return
-      const seen = new Set<string>()
-      const tabs = parsed.slice(0, COPY_STORYBOARD_MAX)
-        .map(reviveTab)
-        .filter((t): t is StoryboardTab => !!t)
-        // 2026-09-22 用户裁决：脚本身份统一——同服务端脚本 id 的重复 tab 只保留一个
-        //（修复历史缓存里「同内容双 tab」），后续新写入不再产生重复
-        .filter((t) => {
-          if (t.scriptId && seen.has(t.scriptId)) return false
-          if (t.scriptId) seen.add(t.scriptId)
-          return true
-        })
-      if (!tabs.length) return
-      storyboards.value = tabs
-      const act = localStorage.getItem(STORYBOARDS_LS_ACTIVE)
-      activeStoryboardId.value = act && tabs.some((t) => t.id === act) ? act : tabs[0].id
-    } catch (_) { /* 缓存损坏忽略，走空态 */ }
-  }
-  restoreStoryboards()
   // 分镜（旁白/声音/时长）变化 → 标注面板与预览轨重刷
   watch(storyboards, () => { scheduleManualKwRefresh() }, { deep: true })
-  watch(storyboards, () => {
-    try {
-      localStorage.setItem(STORYBOARDS_LS_KEY, JSON.stringify(storyboards.value))
-      localStorage.setItem(STORYBOARDS_LS_ACTIVE, activeStoryboardId.value)
-    } catch (_) { /* 存储满/不可写静默 */ }
-  }, { deep: true })
-  watch(activeStoryboardId, (v) => {
-    try { localStorage.setItem(STORYBOARDS_LS_ACTIVE, v) } catch (_) {}
-  })
 
+  // 2026-11-05 用户裁定（批三+批十+批十四）：进入模块即清空分镜/文案（不残留上次
+  //  会话），分镜不再做 localStorage 持久化/恢复——2026-09-22 A5 会话持久化机制随
+  //  「进来默认空」整体退役（reviveTab/restoreStoryboards 摘除）；历史脚本以服务端
+  //  脚本库为准。
   const activeStoryboard = computed(() =>
     storyboards.value.find((s) => s.id === activeStoryboardId.value) || null)
-  function nextStoryboardName(): string {
-    let max = 0
-    for (const s of storyboards.value) {
-      const m = /^脚本(\d+)$/.exec(s.name)
-      if (m) max = Math.max(max, Number(m[1]))
-    }
-    return `脚本${max + 1}`
-  }
-  /** 产品快照摘要（品牌/产品(品类)/型号 非空拼接；detail.product 与 sharedProductInfo 两形态通用） */
-  function productBriefOf(p: { brand?: string; product?: string; category?: string; model?: string }): string {
-    return [p.brand, p.product || p.category, p.model].map((x) => String(x || '').trim()).filter(Boolean).join(' / ')
-  }
-  /** 新增分镜 tab（AI 生成分镜/选择脚本/手动新建都走这里）；超上限返回 null */
-  function addStoryboardTab(init: { name?: string; scriptId?: string; topic?: string; narrative: string; shots: StoryboardShot[]; productBrief?: string }): StoryboardTab | null {
-    if (storyboards.value.length >= COPY_STORYBOARD_MAX) return null
-    const tab: StoryboardTab = {
-      id: `sb_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
-      name: (init.name || '').trim() || nextStoryboardName(),
-      scriptId: init.scriptId || '',
-      topic: init.topic || '',
-      narrative: init.narrative,
-      shots: init.shots,
-      clipGroups: init.shots.map(() => []),
-      sourceNarrative: init.narrative,
-      voiceWav: '',
-      voiceDurSec: 0,
-      voiceAudioId: '',
-      layout: 'vertical',
-      transition: 'random',
-      fps: 'source',
-      productBrief: (init.productBrief || '').trim(),
-    }
-    storyboards.value.push(tab)
-    activeStoryboardId.value = tab.id
-    return tab
-  }
-  function removeStoryboardTab(id: string): void {
-    const i = storyboards.value.findIndex((s) => s.id === id)
-    if (i < 0) return
-    storyboards.value.splice(i, 1)
-    if (activeStoryboardId.value === id) {
-      activeStoryboardId.value = storyboards.value[Math.min(i, storyboards.value.length - 1)]?.id || ''
-    }
-  }
-  function renameStoryboardTab(id: string, name: string): void {
-    const tab = storyboards.value.find((s) => s.id === id)
-    if (tab && name.trim()) tab.name = name.trim().slice(0, 20)
-  }
-  function setActiveStoryboard(id: string): void {
-    if (storyboards.value.some((s) => s.id === id)) activeStoryboardId.value = id
-  }
+  // ── tab 生命周期/多稿装载/批量分镜补全编排（useCopywritingMontageStoryboardTabs.ts）：
+  //    依赖注入后解构回原名——下方所有调用点零改动 ──
+  const {
+    addStoryboardTab, removeStoryboardTab, renameStoryboardTab, setActiveStoryboard,
+    loadCopyCandidateTabs, genStoryboardsForTabs, storyboardBusy,
+  } = createStoryboardTabs({
+    storyboards,
+    activeStoryboardId,
+    productInfo: () => sharedProductInfo.value,
+    statusText,
+    syncToServer: () => void syncStoryboardsToServer(),
+  })
   /** 当前激活分镜的旁白（第一步文案框绑定此处；无分镜 tab → 全局草稿 manualCopy） */
   const activeNarrative = computed<string>({
     get: () => {
@@ -967,9 +844,19 @@ function clearVoiceProgressListener(): void {
           attachClipGroups(payload, tab)
           attachVoiceRef(payload, tab)
           // 与 saveStoryboard 同接口同忙场景（分割/合成排队时实测 68s 才返回）：2026-09-21
-          // 用户裁决同步一并放宽 120s（30s 默认超时被掐即弹「分镜同步失败」）
-          const res = await window.tintin.server.post('/api/storyboard/scripts', payload, undefined, 120000)
-          if (res && typeof res === 'object' && 'error' in res) throw new Error(String(res.error || '同步失败'))
+          // 用户裁决同步一并放宽 120s。2026-11-05 用户报障「老是提示分镜同步失败 Request
+          // timeout」：放宽至 300s + 失败自动重试 1 次（多 tab 串行回传时服务端排队
+          // 累计超时；仍失败才提示，同步属后台辅助不阻断本地流程）
+          const postScript = (): Promise<unknown> =>
+            window.tintin.server.post('/api/storyboard/scripts', payload, undefined, 300000)
+          let res: unknown
+          try {
+            res = await postScript()
+          } catch (e) {
+            res = await postScript().catch(() => null) // 自动重试 1 次
+          }
+          if (res === null || res === undefined) throw new Error('分镜同步失败（请求两次超时/不可达）——脚本库同步为后台辅助，不影响本地流程')
+          if (res && typeof res === 'object' && 'error' in res) throw new Error(String((res as { error: unknown }).error || '同步失败'))
           // 2026-09-22 用户裁决：脚本身份统一——tab 回学服务端脚本 id（原不回学，
           // 「选择脚本」再次选到同一份即成重复 tab）
           const sid = (res as { id?: unknown } | null)?.id
@@ -988,43 +875,28 @@ function clearVoiceProgressListener(): void {
   // 已有，0923 裁决）③第四步导出剪映草稿（Step4Panel 导出完成后调用，见该文件）。
   // 手动「保存脚本」不作为触发要求；不做成全局 watch（避免任何绑定抖动都触发全量
   // 脚本回传）。attachClipGroups 仍挂在本文件两个 POST 点，途经即携带。
-  /** 进入模块时按 scriptId 回学服务端选题名（2026-09-23 用户裁决：本地持久化只恢复
-   *  界面状态，同步是单向推——本地默认名「脚本N」会长期挂 Name；此处一次性拉脚本库
-   *  列表，按 id 回填 tab.topic 与 tab.name（display_name 优先），best-effort 静默。 */
+  /** 进入模块时按 scriptId 回学服务端选题名（实现已迁 useCopywritingMontageVoiceSync，
+   *  2026-11-05 铁律 10 行数付账；宿主只留接缝与实例级去重集） */
   const tabNamesSynced = new Set<string>()
   async function refreshTabNamesFromServer(): Promise<void> {
-    const withId = storyboards.value.filter((t) => t.scriptId && !tabNamesSynced.has(t.scriptId))
-    if (!withId.length) return
-    for (const t of withId) tabNamesSynced.add(t.scriptId)
-    try {
-      const data = (await window.tintin.server.get('/api/storyboard/scripts', { page: 1, page_size: 100 })) as unknown
-      if (!data || typeof data !== 'object' || 'error' in data) return
-      const items = extractScriptItems(data)
-      const byId = new Map<string, Record<string, unknown>>()
-      for (const it of items) {
-        const id = String((it as Record<string, unknown>).id ?? '').trim()
-        if (id) byId.set(id, it as Record<string, unknown>)
-      }
-      for (const t of withId) {
-        const hit = byId.get(String(t.scriptId))
-        if (!hit) continue
-        const topic = String(hit.topic ?? '').trim()
-        const dn = String(hit.display_name ?? '').trim()
-        if (topic) t.topic = topic
-        if (dn) t.name = dn.slice(0, 20)
-        else if (topic && /^脚本\d+$/.test(t.name)) t.name = topic.slice(0, 20)
-      }
-    } catch (_) { /* best-effort：失败保持本地名 */ }
+    await refreshTabNamesFromServerImpl(storyboards.value, tabNamesSynced)
   }
   /** ✨ AI 生成分镜：llm:chat → 现有分镜解析器（剥```/JSON/normalize）→ 整组替换镜头卡。
-   *  解析失败（fallback 单镜回退标记）保留现有卡并报错，不吞用户已编辑内容 */
-  const storyboardBusy = ref(false)
+   *  解析失败（fallback 单镜回退标记）保留现有卡并报错，不吞用户已编辑内容。
+   *  2026-11-05 用户裁决：多稿装载态（「仅文案」tab，shots 为空）批量补全——逐 tab 按
+   *  其旁白各生成一套分镜（对应文案个数，genStoryboardsForTabs 已迁
+   *  useCopywritingMontageStoryboardTabs.ts）；无装载态保持单稿行为（激活旁白→新 tab） */
   async function genStoryboard(): Promise<void> {
+    if (storyboardBusy.value) return
+    const pending = storyboards.value.filter((t) => t.narrative.trim() && !t.shots.length)
+    if (pending.length) {
+      await genStoryboardsForTabs(pending)
+      return
+    }
     // 2026-09-21 用户裁决：口播文案与分镜脚本绑定——生成分镜取激活旁白
     // （activeNarrative：有 tab=激活 tab.narrative，无 tab=全局草稿），不再读全局草稿
     const copy = activeNarrative.value.trim()
     if (!copy) { notify('文案为空', '请先在「文案编写」页生成或填写视频文案。'); return }
-    if (storyboardBusy.value) return
     storyboardBusy.value = true
     try {
       statusText.value = '正在根据旁白生成分镜脚本...'
@@ -1217,8 +1089,17 @@ function clearVoiceProgressListener(): void {
   }
   /** 批量克隆全部分镜的旁白（2026-09-21 用户裁决：二/三步批量处理——每个分镜脚本
    *  一条整段声音；进度按 tab 聚合；单 tab 失败不阻断其余。产物落在各 tab.voiceWav） */
-  async function cloneAllTabVoices(): Promise<void> {
-    const tabs = storyboards.value.filter((s) => s.narrative.trim())
+  /** 上一轮批量克隆失败的 tabId（部分成功时记录，供「只重试失败项」；全成功清空） */
+  const lastCloneFailedIds = ref<string[]>([])
+  async function cloneAllTabVoices(opts?: { onlyTabIds?: string[] }): Promise<void> {
+    // 2026-11-05 用户裁定（批十反转批一）：克隆只依赖旁白本身——纯文案装载 tab
+    // （未生成分镜）同样克隆（声音随文案显示在各 tab 下；分镜是第三步视频素材的事）。
+    // 此前「必须有分镜」闸门导致只有带分镜的 tab（如早先生成的痛点式）有声、其余纯文案 tab 全被挡掉。
+    // 2026-11-05 用户裁定：支持只重试失败项（服务端 TTS 资源性单条失败不再重克全部分镜）
+    const onlyIds = opts?.onlyTabIds
+    const tabs = storyboards.value
+      .filter((s) => s.narrative.trim())
+      .filter((s) => !onlyIds || onlyIds.includes(s.id))
     if (!tabs.length) {
       notify('没有可克隆的旁白', '请先在分镜脚本中生成或填写旁白。')
       return
@@ -1251,14 +1132,42 @@ function clearVoiceProgressListener(): void {
       }
     }
     voiceBusy.value = true
-    voiceTotal = tasks.length; voiceDone = 0; voiceProgress.value = 0
+    voiceTotal.value = tasks.length; voiceDone.value = 0; voiceProgress.value = 0
+    // 2026-11-05 用户裁定：进度提示进行到哪个——队列名随任务序号映射（顺序执行，
+    // 进行中下标=已完成数 voiceDone）
+    cloneQueueNames.value = tabs.map((t) => t.name)
     const channel = nextVoiceChannel()
+    // 真实进度轮询（2026-11-05 用户报障「进度不刷新恒 0%」根因：宿主传输层为同步阻塞
+    // 请求/响应，ctx.emit 未注入（bundle P0 欠账），onVoiceProgress 亦为空桩——事件
+    // 永不到达）。顺序执行下产物 wav 出现=该条完成：2s 轮询 liveclip:fileExists，
+    // k=已存在数（真实完成数）；批次结束/全部完成即停。
+    let pollTimer: ReturnType<typeof setInterval> | null = null
+    const stopClonePoll = (): void => {
+      if (pollTimer !== null) { clearInterval(pollTimer); pollTimer = null }
+    }
+    pollTimer = setInterval(() => {
+      void (async () => {
+        try {
+          let k = 0
+          for (const t of tasks) {
+            const ex = await window.tintin?.liveclip?.fileExists?.({ path: t.outWavPath })
+            if (!ex?.exists) break // 顺序执行：首个缺失即进行中项
+            k++
+          }
+          if (k > voiceDone.value) voiceDone.value = k
+          // 显示值带时间爬升（cloneDisplayProgress）：首条合成期间进度条不再空置
+          voiceProgress.value = cloneDisplayProgress(voiceProgress.value, k, tasks.length)
+          if (k >= tasks.length) stopClonePoll()
+        } catch { /* 轮询失败静默，下一轮再试 */ }
+      })()
+    }, 2000)
     try {
       const res = await window.tintin?.server?.voiceCloneBatch?.({ tasks, ...clonePayload(), progressChannel: channel })
       if (!res) throw new Error('主进程不可达')
       if ('error' in res) throw new Error(res.error)
       let ok = 0
       const fails: string[] = []
+      const failedIds: string[] = []
       for (const tk of tasks) {
         const wav = res.results[tk.videoPath]
         const tab = storyboards.value.find((s) => s.id === tk.tabId)
@@ -1269,11 +1178,16 @@ function clearVoiceProgressListener(): void {
         } else {
           const f = res.failures.find((x) => x.rowIdx === tk.rowIdx)
           fails.push(`${tab ? tab.name : tk.outWavPath}：${f ? f.msg : '克隆失败'}`)
+          if (tab) failedIds.push(tab.id) // 记录失败 tabId 供「只重试失败项」
         }
       }
+      lastCloneFailedIds.value = failedIds
       if (ok) {
         statusText.value = `完成： ${ok}/${tabs.length} 个分镜声音已生成`
-        notify('批量克隆完成', ok === tabs.length ? `${ok} 个分镜声音全部生成。` : `${ok}/${tabs.length} 个成功：${fails.join('；')}`)
+        notify('批量克隆完成', ok === tabs.length
+          ? `${ok} 个分镜声音全部生成。`
+          : `${ok}/${tabs.length} 个成功：${fails.join('；')}
+可点「只重试失败项」补齐（不重克已成功的）`)
         // 2026-09-30 用户裁决 B：克隆产物上传音频库（category=口播→归一「配音」池，
         // 编排实现在 useCopywritingMontageVoiceSync.ts），id 记 tab.voiceAudioId 随下方
         // 里程碑脚本同步跨机携带；单 tab 失败仅打点不阻断。必须先于
@@ -1282,24 +1196,9 @@ function clearVoiceProgressListener(): void {
           const tab = storyboards.value.find((s) => s.id === tk.tabId)
           if (tab?.voiceWav) await uploadTabVoiceWav(tab)
         }
-        // 2026-09-30 用户裁决 A：克隆后欠装检测提示——镜标将按旁白时长等比放大，
-        // 「先匹配后克隆」的旧绑定组可能全长不足新目标。提示用户方案生成时会自动
-        // 补片（裁决 B）；需要语义最优分配时可重新智能匹配。
-        try {
-          const pool = buildAssignPool(scenes.value)
-          const cloned = storyboards.value.filter((t) => t.voiceWav && tasks.some((tk) => tk.tabId === t.id))
-          let shortShots = 0
-          let deficit = 0
-          for (const t of cloned) {
-            if (!t.clipGroups.length || t.clipGroups.length !== t.shots.length) continue
-            const u = underfillAfterVoice(t.shots, t.clipGroups, pool, Number(t.voiceDurSec) || 0)
-            shortShots += u.shotsShort
-            deficit += u.deficitSec
-          }
-          if (shortShots > 0) {
-            notify('镜标已按旁白放大', `旁白时长长于镜标设计：${shortShots} 个镜头的已绑定素材将不够填满（合计约差 ${deficit.toFixed(1)} 秒）。\n生成剪辑方案时会自动从素材池补片填满；如需按画面语义重新分配，可重新「智能匹配到分镜脚本」。`)
-          }
-        } catch { /* 检测失败不影响克隆完成提示 */ }
+        // 2026-11-05 用户裁定：克隆后的「镜标已按旁白放大」欠装提示整体移除——
+        // 该提示属第三步（视频素材/智能匹配）语义，第二步只管声音；补片仍在
+        // 生成剪辑方案时自动进行（2026-09-30 裁决 B 不变）
         // 2026-09-22 用户裁决：声音克隆完成后自动触发服务端同步——让脚本库及时
         // 感知声音状态（120s 超时、best-effort 不阻断）
         void syncStoryboardsToServer()
@@ -1311,8 +1210,18 @@ function clearVoiceProgressListener(): void {
       notify('批量克隆失败', errText(e))
     } finally {
       voiceBusy.value = false
+      stopClonePoll()
       offVoiceProgress?.(); offVoiceProgress = null
     }
+  }
+  /** 只重试上一轮失败的 tab（2026-11-05 用户裁定：服务端 TTS 资源性单条失败——
+   *  不再重克已成功的；全成功时提示无操作对象） */
+  async function retryFailedClones(): Promise<void> {
+    if (!lastCloneFailedIds.value.length) {
+      notify('没有需要重试的项', '上一轮批量克隆没有失败的分镜。')
+      return
+    }
+    await cloneAllTabVoices({ onlyTabIds: [...lastCloneFailedIds.value] })
   }
 
   /** 开始批量克隆人声合成（对照 _start_synthesize_voice 弹窗逐字） */
@@ -1364,7 +1273,7 @@ function clearVoiceProgressListener(): void {
         text: r.text.trim(),
       }))
     if (!tasks.length) return
-    voiceTotal = tasks.length; voiceDone = 0; voiceProgress.value = 0
+    voiceTotal.value = tasks.length; voiceDone.value = 0; voiceProgress.value = 0
     const channel = nextVoiceChannel()
     try {
       // 纯化配音：字幕/花字特效已在 final:mix 统一烧制，此处不传任何特效配置
@@ -1662,6 +1571,7 @@ function clearVoiceProgressListener(): void {
     currentMatchTemplateIds, refreshTextFxTracks, loadTextTemplates, ensureTtsApiUrl,
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial,
     storyboards, activeStoryboardId, activeStoryboard, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, activeNarrative, COPY_STORYBOARD_MAX,
+    loadCopyCandidateTabs, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
     scriptSyncing, syncStoryboardsToServer,
     refreshTabNamesFromServer,
     genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,

@@ -8,6 +8,8 @@
 //   · utils/montage_cache.py + utils_media.safe_source_name（splits 本地缓存口径）
 //   · utils_media.py PR#3 景别分类（classify_shot_type / apply_shot_layout_order）
 // 本文件不做任何 IPC / DOM 操作（IRON-06/07 分层）
+
+import type { PickerItem } from "./useWorkbenchPickers"
 // ═══════════════════════════════════════════════════════════════
 
 // ── Step1 镜头分割（/montage/split 响应解析）──────────────────
@@ -167,6 +169,54 @@ export function shotsToRows(shots: SplitShot[], sourceName: string, sourcePath?:
     ...(s.model ? { model: s.model } : {}),
     ...(s.resolution ? { resolution: s.resolution } : {}),
   }))
+}
+
+// ── 快速模式分析取件回填（2026-11-05 服务端 fast_mode：GET /montage/split/analysis/
+//  {task_id} 按片段文件名补齐逐镜分析；字段形状与同步分割响应同源，对象/扁平双态兼容）──
+
+/** 分割模式选项（2026-11-05 用户裁定：默认快速=服务端 fast_mode 即返片段；正常=原模式同步等分析） */
+export const SPLIT_MODE_OPTIONS = [
+  { label: '快速模式', value: 'fast' },
+  { label: '正常模式', value: 'server' },
+]
+
+/** aesthetic_score 数值化（数字直取；对象取 total；缺省 undefined，与 parseSplitResponse 同口径） */
+function analysisScoreOf(raw: unknown): number | undefined {
+  if (raw == null) return undefined
+  if (typeof raw === 'object') return Number((raw as Record<string, unknown>).total) || undefined
+  return Number(raw) || undefined
+}
+
+/** 逐镜分析取件行回填镜头表格行（mutating）：仅 analyzed 片段且空位才写——
+ *  描述空位才回填（不覆盖用户手动改写）；景别/评分/产品/型号仅服务端来源。
+ *  返回是否有任何字段实际写入。 */
+export function backfillRowsFromAnalysis(rows: SplitSceneRow[], shots: unknown): boolean {
+  if (!Array.isArray(shots)) return false
+  let applied = 0
+  for (const s of shots) {
+    if (!s || typeof s !== 'object') continue
+    const shot = s as Record<string, unknown>
+    if (!shot.analyzed || !shot.filename) continue
+    const row = rows.find((r) => r.name === shot.filename)
+    if (!row) continue
+    const a = shot.shot_analysis
+    const aObj = a && typeof a === 'object' ? (a as Record<string, unknown>) : null
+    const analysisText = aObj
+      ? String(aObj.scene_primary || aObj.visual_type || '')
+      : String(a || '')
+    if (!row.description && shot.description != null) row.description = String(shot.description)
+    if (!row.analysis && analysisText) row.analysis = analysisText
+    const shotType = String(aObj?.shot_type || shot.shot_type || '')
+    if (!row.shotType && shotType) row.shotType = shotType
+    const score = analysisScoreOf(shot.aesthetic_score ?? shot.score)
+    if (row.score == null && score != null) row.score = score
+    const product = String(aObj?.product || shot.product || '')
+    if (!row.product && product) row.product = product
+    const model = String(aObj?.model || shot.model || '')
+    if (!row.model && model) row.model = model
+    applied++
+  }
+  return applied > 0
 }
 
 // ── Step1 splits 本地缓存目录（对齐 utils/montage_cache.py + utils_media.safe_source_name）──
@@ -355,4 +405,85 @@ export function applyShotLayoutOrder<T>(
     return t !== 'entrance' && t !== 'exit'
   })
   return [...heads, ...middle, ...tails]
+}
+
+
+// ── 素材库条目展示辅助（2026-11-05 自 Step2Panel 迁入，铁律 10 行数付账；纯函数）──
+
+// ── 素材重复度筛选（2026-11-05 用户裁定：导入素材量过大，按分镜脚本景别需求匹配筛选）──
+
+/** 景别关键词（按优先级序：先长词后短词，避免「特写镜头」被「镜头」类误切；用户素材
+ *  以文件夹名/文件名标注景别，如「雪豹白 特写\C9372.MP4」） */
+export const MATERIAL_SHOT_KEYWORDS = ['特写', '近景', '中景', '全景', '远景'] as const
+
+export type MaterialDupMode = 'low' | 'mid' | 'all'
+
+/** 路径（含父文件夹名+文件名）→ 景别关键词；无命中返回 '' */
+export function detectShotKeyword(path: string): string {
+  const p = String(path || '')
+  for (const kw of MATERIAL_SHOT_KEYWORDS) {
+    if (p.includes(kw)) return kw
+  }
+  return ''
+}
+
+export interface MaterialFilterNeeds {
+  /** 景别 → 单脚本需求个数（各分镜脚本该景别镜头数的最大值；low 档用） */
+  needs: Record<string, number>
+  /** 景别 → 跨脚本总需求个数（各分镜脚本该景别镜头数之和；mid 档用） */
+  sums: Record<string, number>
+  /** 分镜脚本（要生成的视频）个数 */
+  scripts: number
+}
+
+/** 按重复度三档筛选素材路径（纯函数；保留原导入顺序）：
+ *  · all  = 不过滤全部导入
+ *  · mid（默认）= 每景别选「跨脚本总需求」个——各脚本独立配齐自己的素材（4 视频 ×
+ *    每视频 10+ 镜 = 40+，即用户期望的口径）
+ *  · low  = 每景别只选「单脚本最大需求」个（跨脚本复用同一批，量最省）
+ *  · 识别不出景别的素材仅 all 档导入；需求里没有的景别仅 all 档导入 */
+export function filterMaterialsByDupMode(
+  paths: string[],
+  nf: MaterialFilterNeeds,
+  mode: MaterialDupMode,
+): string[] {
+  if (mode === 'all') return paths.slice()
+  const buckets = new Map<string, string[]>()
+  for (const p of paths) {
+    const kw = detectShotKeyword(p)
+    if (!kw) continue // 无景别：低/中档不导入
+    const arr = buckets.get(kw) || []
+    arr.push(p)
+    buckets.set(kw, arr)
+  }
+  const kept = new Set<string>()
+  for (const [kw, perScript] of Object.entries(nf.needs)) {
+    const total = mode === 'mid' ? perScript * Math.max(1, nf.scripts) : perScript
+    const arr = buckets.get(kw) || []
+    for (const p of arr.slice(0, Math.max(0, total))) kept.add(p)
+  }
+  return paths.filter((p) => kept.has(p))
+}
+
+/** 已选素材摘要（2026-11-05 自 Step2Panel 迁入，铁律 10 行数付账；纯函数） */
+export function srcSummaryOf(srcCount: number, sceneCount: number): string {
+  const parts: string[] = []
+  if (srcCount) parts.push(`本地视频 ${srcCount} 个`)
+  if (sceneCount) parts.push(`素材池 ${sceneCount} 条片段`)
+  return parts.length ? `已选素材：${parts.join('，')}` : '尚未选择素材：点下方「选择素材」开始'
+}
+
+/** 素材库条目 material_id（material_id 优先，回落 id） */
+export function libMid(it: PickerItem): string {
+  return String(it?.material_id ?? it?.id ?? '').trim()
+}
+
+/** 素材库条目名（filename 优先；无名回落「素材 <id>」/「未命名素材」） */
+export function libName(it: PickerItem): string {
+  return String(it?.filename || '') || (libMid(it) ? `素材 ${libMid(it)}` : '未命名素材')
+}
+
+/** 素材库条目副行（品牌/型号/产品（share_name 兜底）「 / 」拼接） */
+export function libSub(it: PickerItem): string {
+  return [String(it?.brand || ''), String(it?.model || ''), String(it?.product || it?.share_name || '')].filter(Boolean).join(' / ')
 }

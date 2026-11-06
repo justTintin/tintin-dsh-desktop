@@ -13,6 +13,10 @@ import TSelect from '@/components/common/TSelect.vue'
 import VideoPreview from '@/components/common/VideoPreview.vue'
 // import VideoPlayer 已移除：Step4 成片预览由统一右栏 StepPreviewPane 接管（2026-09-10 界面统一）
 import { useCopywritingMontage } from '@/composables/useCopywritingMontage'
+import { useHostDark } from '@/composables/hostTheme'
+
+// 弹窗 teleport 到 body（App 根外），暗色类必须显式绑定（2026-11-05 白弹窗同款裁决）
+const isDark = useHostDark()
 import { useAudioGen } from '@/composables/useAudioGen'
 import { useFilePicker } from '@/composables/useFilePicker'
 import WbPickProductPanel from '@/components/workbench/WbPickProductPanel.vue'
@@ -24,7 +28,7 @@ import CopywritingStep3Panel from './CopywritingStep3Panel.vue'
 import CopywritingStep1Panel from './CopywritingStep1Panel.vue'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 import { markdownListLines, stripProductCodeFromModel, parseProductKeywords } from '@/composables/opsProductLibraryLogic'
-import { copyPreviewText, subtitlePresetTileStyle, FANCY_STYLE_PREVIEW, fancyDrawtextToPreview } from '@/composables/copywritingMontageLogic'
+import { copyPreviewText, subtitlePresetTileStyle, fancyPreviewStyleOf } from '@/composables/copywritingMontageLogic'
 import type { PickerItem } from '@/composables/useWorkbenchPickers'
 
 // 2026-09-17 用户裁决：步骤序定案 1.文案编写 → 2.口播配音 → 3.镜头重组 → 4.特效包装
@@ -61,6 +65,8 @@ const {
   onSeqEnded,
   // Step3 口播配音（对照 step3_voice_view.py 逐控件）
   loadRefSamples,
+  // 2026-11-05 用户裁决：进入模块=文案区默认空态（不激活分镜/草稿清空）
+  resetScriptPageOnEnter,
   // 字幕样式（2026-09-17 用户裁决：字幕样式统一来自服务端 /subtitle_styles）
   fancyStyle,
   // 文字模板（2026-09-09 裁决：服务端 textfx 体系，与花字独立；随机样式默认 3 个）
@@ -165,20 +171,9 @@ const fancyTemplatePreview = computed(() =>
   fancyTemplateId.value ? fancyPreviews.value[fancyTemplateId.value] || '' : '')
 /** 花字效果预览样本字（行3 效果预览；卖点风格样例） */
 const FANCY_PREVIEW_TEXT = '199元超值'
-/** 花字自定义样式效果预览（行3）：选模板时解析模板 drawtext style 还原主色+描边；
- *  自定义（无模板）时用选中样式预设的 CSS 近似（对照主进程 FANCY_STYLES） */
-const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
-  const tpl = selectedTemplate.value
-  const parsed = tpl ? fancyDrawtextToPreview(String(tpl.style || '')) : null
-  if (parsed) return parsed
-  const p = FANCY_STYLE_PREVIEW[fancyStyle.value] || FANCY_STYLE_PREVIEW.white_outline
-  return {
-    color: p.color,
-    webkitTextStroke: `3px ${p.stroke}`,
-    paintOrder: 'stroke',
-    textShadow: '2px 2px 4px rgba(0,0,0,.6)',
-  }
-})
+/** 花字自定义样式效果预览（行3）——纯逻辑已去重迁 copywritingMontageStep3VoiceLogic.fancyPreviewStyleOf（2026-11-05） */
+const fancyCustomPreviewStyle = computed<Record<string, string>>(() =>
+  fancyPreviewStyleOf(selectedTemplate.value ? String(selectedTemplate.value.style || '') : '', fancyStyle.value))
 onMounted(() => { void loadFancyTemplates() })
 // 2026-09-15 用户裁决：KeepAlive 下每次进入第④步都刷新模板库/字体/LUT 清单（服务端重渲染后进页面即见新预览）
 onActivated(() => {
@@ -189,6 +184,10 @@ onActivated(() => {
 // 声音样本与 VoiceClone 页同口径：每次进入 Step3（及挂载时）重新拉取（原实现仅在
 // composable 创建时拉一次，服务端新增样本/离线恢复后下拉一直为空）
 onMounted(() => { void loadRefSamples() })
+// 2026-11-05 用户裁决：进入文案混剪=文案区默认空态——不激活任何分镜标签、全局草稿
+// 清空（历史分镜随标签保留；点标签再激活）。挂载与 KeepAlive 每次进入都重置（幂等）
+onMounted(() => { resetScriptPageOnEnter() })
+onActivated(() => { resetScriptPageOnEnter() })
 // 2026-09-21 修复：换序后口播配音=index 1，进入时重新拉取声音样本（原条件 v===2 为旧序）
 watch(step, (v) => { if (v === 1) void loadRefSamples() })
 
@@ -300,7 +299,7 @@ function scoreClass(score: number | undefined): string {
       2026-09-11 用户裁决：三块（产品列表｜产品详情｜填写表单）宽度 1:1:1。
       2026-09-19 用户裁决改判：三块宽度 1:1.5:1（详情中栏加宽，核心卖点下新增关键词展示）。
       2026-09-13 改调 /copywriting/voiceover：时长不再手填，逐条按成片时长 duration_s 传入） -->
-    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
+    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
       <div v-if="productDlg.show" class="modal-mask" @click.self="closeProductDlg">
         <div class="modal modal-pick">
           <span class="modal-title"> 生成口播文案</span>
@@ -329,7 +328,7 @@ function scoreClass(score: number | undefined): string {
     </div></teleport>
 
     <!-- 口播文案查看弹窗（原版 _view_assembled_copy：标题 + 只读全文 + 关闭） -->
-    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
+    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
       <div v-if="copyViewDlg.show" class="modal-mask" @click.self="closeCopyView">
         <div class="modal modal-wide">
           <span class="modal-title">{{ copyViewDlg.title }}</span>

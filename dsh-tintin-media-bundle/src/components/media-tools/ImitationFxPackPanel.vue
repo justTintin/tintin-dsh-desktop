@@ -14,7 +14,7 @@ import CopywritingBgmPickDialog from './copywriting-montage/CopywritingBgmPickDi
 import CopywritingStoryboard from './copywriting-montage/CopywritingStoryboard.vue'
 import KeywordAnnotateRows from './KeywordAnnotateRows.vue'
 import type { CopywritingMontageUi } from './copywriting-montage/copywritingMontageUiContext'
-import { FANCY_STYLE_PREVIEW, fancyDrawtextToPreview, subtitlePresetTileStyle } from '@/composables/copywritingMontageLogic'
+import { subtitlePresetTileStyle, fancyPreviewStyleOf } from '@/composables/copywritingMontageLogic'
 import { errText, notify, joinPath } from '@/composables/copywritingMontage/context'
 import { clientError } from '@/utils/clientLog'
 import { readCacheDir } from '@/composables/useSettingsConfig'
@@ -84,7 +84,6 @@ const {
   exportStage,
   lastExportDraftPath,
   exportDoneMsg, exportWarnMsg,
-  exportJianyingPackageDraft,
   finalVideoList,
   finalSelIdx,
   bgmPlaying,
@@ -472,20 +471,9 @@ const fancyTemplatePreview = computed(() =>
   fancyTemplateId.value ? fancyPreviews.value[fancyTemplateId.value] || '' : '')
 /** 花字效果预览样本字（行3 效果预览；卖点风格样例） */
 const FANCY_PREVIEW_TEXT = '199元超值'
-/** 花字自定义样式效果预览（行3）：选模板时解析模板 drawtext style 还原主色+描边；
- *  自定义（无模板）时用选中样式预设的 CSS 近似（对照主进程 FANCY_STYLES） */
-const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
-  const tpl = selectedTemplate.value
-  const parsed = tpl ? fancyDrawtextToPreview(String(tpl.style || '')) : null
-  if (parsed) return parsed
-  const p = FANCY_STYLE_PREVIEW[fancyStyle.value] || FANCY_STYLE_PREVIEW.white_outline
-  return {
-    color: p.color,
-    webkitTextStroke: `3px ${p.stroke}`,
-    paintOrder: 'stroke',
-    textShadow: '2px 2px 4px rgba(0,0,0,.6)',
-  }
-})
+/** 花字自定义样式效果预览（行3）——纯逻辑已去重迁 copywritingMontageStep3VoiceLogic.fancyPreviewStyleOf（2026-11-05） */
+const fancyCustomPreviewStyle = computed<Record<string, string>>(() =>
+  fancyPreviewStyleOf(selectedTemplate.value ? String(selectedTemplate.value.style || '') : '', fancyStyle.value))
 </script>
 
 <template>
@@ -726,13 +714,6 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() => {
               :disabled="finalBusy || exportBusy"
               :title="exportBusy ? exportStage : '将合成候选按顺序导出为一条剪映时间轴草稿（口播/字幕/关键词/BGM 各轨独立，片段间自动转场）'"
               @click="onExportDraft" />
-            <!-- 轨 2（2026-09-17 用户裁决）：服务端封装好的剪映格式草稿 zip → 解压校验 → 落盘剪映
-                 2026-09-18 用户裁决：暂时禁止使用（恒禁用）；恢复时把 :disabled 改回
-                 "finalBusy || exportBusy"、title 改回原文案即可 -->
-            <TButton label="导入服务端草稿包" variant="secondary" class="vd4-run vd4-grow"
-              :disabled="true"
-              title="该功能暂时停用"
-              @click="exportJianyingPackageDraft()" />
           </div>
           <!-- 2026-09-29 用户裁决：导出草稿前需在剪映开启「导入 PR或FCP 工程」——
                引导图 + 文字提示常驻导出按钮下方（图=剪映 全局设置→通用 截图，

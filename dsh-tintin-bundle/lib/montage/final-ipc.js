@@ -1197,8 +1197,8 @@ function createMontageFinalApi({ httpRequest, isExpectedOfflineError, getServerU
           const res = p.mode === 'multi'
         ? JY.exportMultiToDraft({
             videoPaths: p.videoPaths,
-            // 2026-09-22 用户裁决（虚拟时间轴）：逐段源裁剪时长（微秒）覆盖 + 视频段静音标记
-            videoDurations: Array.isArray(p.videoDurations) ? p.videoDurations : null,
+            videoDurations: Array.isArray(p.videoDurations) ? p.videoDurations : null, // 0922 虚拟时间轴：逐段源裁剪时长（µs）覆盖
+            gapAfterUs: Array.isArray(p.gapAfterUs) ? p.gapAfterUs : null, // 2026-11-06 用户裁定：段后黑场表（仅方案成片边界 5s，方案内 0=紧密保转场）
             muteVideoAudio: p.muteVideoAudio ?? false,
             transitions: p.transitions,
             bgmPath: p.bgmPath,

@@ -16,6 +16,7 @@ import {
   normalizeSourceResolution,
   safeSourceName,
   pathBasename,
+  backfillRowsFromAnalysis,
   VIDEO_EXTS,
   MAX_SOURCE_VIDEOS,
   type SplitSceneRow,
@@ -27,10 +28,13 @@ export interface MontageStep1Context {
   statusText: import('vue').Ref<string>
   ensureServerUrl: () => Promise<string>
   toAbsolute: (url: string) => string
+  /** 素材重复度筛选（2026-11-05 用户裁定：导入量过大——按分镜脚本景别需求×重复度
+   *  三档过滤导入素材；实现+dupMode 状态在主编排层） */
+  materialFilter: (paths: string[]) => string[]
 }
 
 export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
-  const { statusText, ensureServerUrl, toAbsolute } = ctx
+  const { statusText, ensureServerUrl, toAbsolute, materialFilter } = ctx
 
   // ══ Step1 素材解析（/montage/split，同步）═══════════════════
   const srcVideos = ref<string[]>([])
@@ -113,10 +117,15 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
         exts: [...VIDEO_EXTS],
         limit: remaining,
       })
-      for (const fp of videos) {
+      // 重复度筛选（2026-11-05 用户裁定：按分镜脚本景别需求过滤导入素材）
+      const filtered = materialFilter(videos)
+      if (filtered.length < videos.length) {
+        splitMsg.value = `已按重复度筛选：文件夹 ${videos.length} 个 → 导入 ${filtered.length} 个`
+      }
+      for (const fp of filtered) {
         if (fp && !srcVideos.value.includes(fp)) srcVideos.value.push(fp)
       }
-      if (!videos.length) splitMsg.value = '所选文件夹内未找到视频文件'
+      if (!filtered.length) splitMsg.value = splitMsg.value.includes('筛选') ? splitMsg.value : '所选文件夹内未找到视频文件'
     })()
   }
 
@@ -136,7 +145,9 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
         root: p, exts: [...VIDEO_EXTS], limit: remaining,
       })
       if (expanded.length) {
-        for (const fp of expanded) {
+        // 重复度筛选（2026-11-05 用户裁定，同选择文件夹口径）
+        const filtered = materialFilter(expanded)
+        for (const fp of filtered) {
           if (fp && !srcVideos.value.includes(fp)) srcVideos.value.push(fp)
         }
       } else if (!srcVideos.value.includes(p)) {
@@ -158,6 +169,7 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
    *  分割进行中由调用方禁用入口（避免分割回写已清空的行）。 */
   function clearAllVideos(): void {
     closePreview()
+    splitAnalysisGen++ // 在途快速模式分析轮询作废（行已清空，回填无消费方）
     splitStatusByVideo.value = {}
     srcVideos.value = []
     scenes.value = []
@@ -186,6 +198,54 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     splitMsg.value = '正在停止分割（当前素材完成后停止）…'
   }
 
+  /** 分割模式（2026-11-05 用户裁定）：fast=快速模式（默认）——服务端 /montage/split
+   *  fast_mode=true 智能分割即返片段（真场景检测），逐镜分析后台轮询取件补齐；
+   *  server=正常模式（界面名，即原模式：分割+逐镜分析同步等待）。
+   *  原「本地模式」ffmpeg 直切已随语义切换退役 */
+  const splitMode = ref<'fast' | 'server'>('fast')
+
+  // ── 快速模式后台分析取件（2026-11-05 服务端 fast_mode：GET /montage/split/analysis/
+  //  {task_id} 按 filename 补齐逐镜分析；done=true 即终态含失败（铁律7 不静默装完成）；
+  //  服务端建议 3~5s 轮询；代际令牌防旧轮询写已清空/重分割的行）──
+  let splitAnalysisGen = 0
+  async function pollSplitAnalysis(taskIds: string[]): Promise<void> {
+    const gen = ++splitAnalysisGen
+    const pending = new Set(taskIds)
+    let failedStatus = ''
+    let consecutiveOffline = 0
+    while (pending.size && gen === splitAnalysisGen && consecutiveOffline < 5) {
+      await new Promise((r) => setTimeout(r, 4000))
+      if (gen !== splitAnalysisGen) return
+      for (const taskId of [...pending]) {
+        if (gen !== splitAnalysisGen) return
+        let raw: unknown = null
+        try {
+          raw = await window.tintin.server.montageSplitAnalysis(taskId)
+        } catch { /* 瞬时断线：任务保留，下轮再取 */ }
+        // null = IPC 层吞掉的瞬时网络错误（同 runSplit 重试口径）：不计失败
+        if (raw === null || raw === undefined) { consecutiveOffline++; continue }
+        let res: { done?: boolean; background_status?: string; shots?: unknown } | null = null
+        try { res = unwrapIpc(raw, '分析取件') } catch { consecutiveOffline++; continue }
+        consecutiveOffline = 0
+        backfillRowsFromAnalysis(scenes.value, res?.shots)
+        const status = String(res?.background_status || '')
+        if (res?.done) {
+          pending.delete(taskId)
+          // 铁律7：失败/取消透传不装完成；片段行仍可用，仅分析列缺数据
+          if (status === 'failed' || status === 'cancelled') failedStatus = status
+        }
+      }
+    }
+    if (gen !== splitAnalysisGen) return
+    if (!pending.size) {
+      splitMsg.value = failedStatus
+        ? `快速分割：逐镜分析后台${failedStatus === 'cancelled' ? '已取消' : '失败'}（片段仍可用，重新分割可再分析）`
+        : '快速分割：逐镜分析已全部补齐'
+    } else {
+      splitMsg.value = '快速分割：分析取件中断（服务端不可达），片段仍可用'
+    }
+  }
+
   /** 逐个素材调 /montage/split（同步返回 shots[]）；ECONNRESET/ETIMEDOUT 等瞬时断线自动重试 1 次 */
   async function runSplit(): Promise<void> {
     if (!srcVideos.value.length) { splitError.value = '请先选择视频素材'; return }
@@ -210,21 +270,26 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     let stoppedCount = 0
     try {
       const rows: SplitSceneRow[] = scenes.value.filter((s) => doneNames.has(s.sourceName))
+      // 快速模式（2026-11-05 用户裁定）：逐素材分割 task_id 收集，分割完成后后台轮询取件
+      const analysisTaskIds: string[] = []
       // 最后一次素材的 source_resolution（供分割后画幅兜底链 ③ 使用；帧率取 fps 字段）
       let lastSrcRes: unknown = null
       // 逐素材阶段文案 + 进度（对照原版 _process_next_merged_video L202-203：
       // `_stage("智能镜头分割 ({idx}/{total})：{fname}")` + `_progress(done*100/total)`）
       const total = srcVideos.value.length
       splitProgress.value = 0
-      for (let vi = 0; vi < total; vi++) {
-        const v = srcVideos.value[vi]
-        const name = v.split(/[\\/]/).pop() || v
-        // 停止分割（2026-09-22 用户裁决）：当前素材完成后停止；已完成素材跳过（断点续分）
-        if (splitStopRequested.value) break
-        if (doneNames.has(name)) continue
+      // 2026-11-06 用户批准（配套服务端方案 A 评估报告）：K 路并发池替换串行 for——
+      // 串行 45 条=45×24s 线性叠加（实跑 18 分钟），4 路并发实测整批 1.82×（≈10 分钟）。
+      // JS 单线程：循环体内同步段（push/上表/重编号/状态写）原子执行无竞态；乱序完成
+      // →表序=完成序（每完成一条即重编号，与原行为同款）。失败契约不变：fail-fast。
+      const SPLIT_CONCURRENCY = 4 // < 服务端并发闸 6，给仿视频/智能混剪留余量
+      let doneCount = 0
+      let nextIdx = 0
+      let firstError: unknown = null
+      const progressDone = (): void => { splitProgress.value = Math.round((doneCount * 100) / total) }
+      const runOne = async (v: string, name: string): Promise<void> => {
         splitStatusByVideo.value[v] = 'splitting'
-        splitMsg.value = `智能镜头分割 (${vi + 1}/${total})：${name}`
-        splitProgress.value = Math.round((vi * 100) / total)
+        splitMsg.value = `智能镜头分割（已完成 ${doneCount}/${total}，${SPLIT_CONCURRENCY} 路并发）：${name}`
         // 瞬时断线（ECONNRESET/ETIMEDOUT）自动重试 1 次，避免误报 OFFLINE
         // 注意：server-proxy 的 isExpectedOfflineError 会把 ECONNRESET 吞为 null，
         // 所以重试条件需检查 null / {error}，不能只靠 catch
@@ -241,6 +306,9 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
               dedup: true,
               analyze: true,
               product_mode: false,
+              // 快速模式：fast_mode=true 切片即返（2026-11-05 服务端实测；与 reuse_essence=false 互斥——
+              // 本流程不传 reuse_essence 吃默认 true，无冲突）
+              ...(splitMode.value === 'fast' ? { fast_mode: true } : {}),
             })
           } catch (e) { lastErr = e }
           // null = IPC 层吞掉了瞬时网络错误（ECONNRESET 等），服务端实际可能在线
@@ -262,12 +330,16 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
         // 传递 sourcePath 用于「位置」兑底推断（对齐 PR#3 classify_shot_type；景别仅服务端返回）
         const shots = parseSplitResponse(res)
         console.log(`[split] ${name}: ${shots.length} shots, 首个 clipUrl=${shots[0]?.downloadUrl || '(空)'}`)
+        // 快速模式：记录分割 task_id（2026-11-05 实测响应顶层 task_id=取件路径参数）
+        if (splitMode.value === 'fast' && res?.task_id) analysisTaskIds.push(String(res.task_id))
         rows.push(...shotsToRows(shots, name, v))
         splitStatusByVideo.value[v] = 'done'
+        doneCount++
         // 逐素材增量上表（对照原版 _on_split_analysis_ready L309-316：每素材分割完成
         // 即刷新 split_result_table；行号连续重编号，未落盘行预览回退服务端 clipUrl 内嵌）
         scenes.value = rows.slice()
         rows.forEach((r, i) => { r.idx = i + 1 })
+        progressDone()
         // 画幅基准（2026-09-15 用户裁决）：「与原视频一致」= 与分割片段一致，非原素材——
         // 服务端分割产物已统一缩放（4K 竖屏素材出 1080x1920），旧实现取 source_resolution
         // （原素材 4K）当画幅基准，Step2 预合成被撑成 4K/横屏。取值链：
@@ -281,6 +353,23 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
         const remoteFps = Number((srcRes as { fps?: unknown } | null | undefined)?.fps)
         if (Number.isFinite(remoteFps) && remoteFps > 0) splitFps.value = remoteFps
       }
+      const worker = async (): Promise<void> => {
+        // 停止分割（2026-09-22 用户裁决）语义平移：不再派发新任务，在途跑完即停；
+        // 已完成素材跳过（断点续分）；fail-fast：出错即停止派发，在途完成行保留
+        while (nextIdx < total && !splitStopRequested.value && firstError === null) {
+          const v = srcVideos.value[nextIdx++]
+          const name = v.split(/[\\/]/).pop() || v
+          if (doneNames.has(name)) { doneCount++; progressDone(); continue }
+          try {
+            await runOne(v, name)
+          } catch (e) {
+            if (firstError === null) firstError = e
+            return
+          }
+        }
+      }
+      await Promise.all(Array.from({ length: SPLIT_CONCURRENCY }, () => worker()))
+      if (firstError !== null) throw firstError
       // 行已随各素材完成逐批增量上表（scenes 与 rows 同引用集），此处仅收尾文案
       if (splitStopRequested.value) {
         const doneN = srcVideos.value.filter((v) => splitStatusOf(v) === 'done').length
@@ -295,6 +384,12 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
       // jobId 已在 runSplit 启动时生成，见函数头注释）
       if (rows.length) {
         await downloadClipsToSplits()
+      }
+      // 快速模式收尾（2026-11-05 用户裁定）：片段已可用，逐镜分析后台轮询取件补齐——
+      // 不阻塞本次分割返回；完成/失败文案由 pollSplitAnalysis 落 splitMsg
+      if (analysisTaskIds.length) {
+        splitMsg.value = `${splitMsg.value}；逐镜分析后台补齐中…`
+        void pollSplitAnalysis(analysisTaskIds)
       }
       // PR#4 条目10：出入场超长片段自动裁剪（后台，对照 _maybe_trim_edge_clips L1706
       // 挂在 _check_split_clips_exist 尾部的同口径：分割完成即扫描）
@@ -490,6 +585,7 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
   /** 清空混剪缓存（原版 _clear_montage_cache → clear_montage_cache：删除 montage_cache 下
    *  全部任务目录，不触碰原始素材；本端同口径删本地缓存目录 + 清会话内镜头清单） */
   async function clearSplitCache(): Promise<void> {
+    splitAnalysisGen++ // 在途快速模式分析轮询作废（行已清空，回填无消费方）
     scenes.value = []
     try { localStorage.removeItem('copywriting-montage.splitJobId') } catch (_) {}
     splitResolution.value = ''
@@ -514,7 +610,7 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     splitsJobId, splitsDownloading,
     previewUrl, previewTranscoding,
     // fns
-    addVideos, selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, requestStopSplit, splitStatusOf,
+    addVideos, selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, splitMode, requestStopSplit, splitStatusOf,
     updateSceneDesc, previewSourceVideo, previewScene, closePreview,
     clearSplitCache, openSplitsDir,
   }

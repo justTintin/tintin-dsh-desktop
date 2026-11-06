@@ -11,6 +11,10 @@
 // ═════════════════════════════════════════════════════════════
 import { computed, reactive, ref, inject } from 'vue'
 import TButton from '@/components/common/TButton.vue'
+import SbCollapseToggle from '../SbCollapseToggle.vue'
+import { storyboardShotsExpanded } from '@/composables/storyboardShotsState'
+import { fmtDur } from '@/composables/copywritingMontageLogic'
+import { toFileUrl } from '@/utils/fileUrl'
 import type { StoryboardShot } from '@/composables/opsStoryboardLogic'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 
@@ -19,10 +23,7 @@ const emit = defineEmits<{ (e: 'sfx-regen', shot: StoryboardShot): void; (e: 'sf
 
 const shell = inject(copywritingMontageShellKey)!
 const {
-  copyShots, copyShotsStale, genStoryboard, storyboardBusy,
-  // 2026-09-29 用户裁决：第一步「保存脚本」按钮删除——脚本随三个里程碑动作
-  // （批量克隆完成/生成剪辑方案/导出草稿）自动同步到服务端，不再需要手动保存
-  scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript,
+  copyShots, copyShotsStale, genStoryboard, storyboardBusy, activeNarrative,
   scenes, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, toAbsolute,
   storyboards, activeStoryboardId, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, COPY_STORYBOARD_MAX,
 } = shell.s
@@ -33,9 +34,9 @@ const editable = computed(() => props.mode === 'edit')
 const activeMeta = computed(() => storyboards.value.find((t) => t.id === activeStoryboardId.value) || null)
 /** 分镜预计总时长（各镜 duration 求和） */
 const shotsTotalSec = computed(() => copyShots.value.reduce((s, x) => s + (Number(x.duration) || 0), 0))
-// 选脚本弹窗右栏：详情总时长
-const infoTotalSec = computed(() =>
-  (pickDetail.value.detail?.shots || []).reduce((s, x) => s + (Number(x.duration) || 0), 0))
+/** 多稿装载待补全数（2026-11-05 用户裁决：仅文案 tab，shots 为空，待 AI 生成分镜批量补全） */
+const pendingCopyCount = computed(() =>
+  storyboards.value.filter((t) => t.narrative.trim() && !t.shots.length).length)
 
 // ── 分镜 tab 管理（多分镜：每 tab 一个脚本对应一个视频；上限 10；双击重命名；
 //    删除=2026-09-22 用户裁决改弹窗确认——原「确认」挤在 × 图标上重叠）──
@@ -57,6 +58,11 @@ function onTabClose(id: string): void {
   delDlg.id = id
   delDlg.name = sb.name
   delDlg.show = true
+}
+/** 切换激活分镜 tab（2026-11-05 用户再裁：点 tab 只切换显示——分镜卡显隐仅由
+ *  展开/收起钮控制，不再联动展开） */
+function onTabActivate(id: string): void {
+  setActiveStoryboard(id)
 }
 function confirmDelTab(): void {
   if (delDlg.id) removeStoryboardTab(delDlg.id)
@@ -109,16 +115,41 @@ const EMPTY_HINT: Record<string, string> = {
 
 <template>
   <div class="sb-block">
-    <!-- 操作行（2026-09-21 用户裁决：选择分镜脚本 / AI 生成分镜脚本单独一行，置于 tab 之上） -->
-    <div v-if="mode === 'edit'" class="row sb-actions">
-      <TButton label="选择分镜脚本" variant="secondary" :loading="scriptPickDlg.loading" @click="openScriptPick" />
-      <TButton label="✨ AI 生成分镜脚本" :loading="storyboardBusy" @click="genStoryboard" />
+    <!-- 2026-11-05 用户裁定：视频文案在分镜脚本顶部显示（有激活脚本才显示；进默认
+         无脚本不显示）；文案与激活脚本一一对应——编辑即改该脚本旁白，克隆声音以此为准。
+         文案框不受收起控制（收起/展开只控制下方分镜卡） -->
+    <div v-if="mode === 'edit' && activeMeta" class="sb-copy-edit">
+      <label class="sb-copy-lbl">
+        口播文案（可选）
+        <span class="sb-copy-tip" title="该脚本绑定的口播文案（=激活分镜的旁白，克隆声音以此为准）；由方案一/二生成后随标签装载，也可就地编辑">ⓘ</span>
+      </label>
+      <textarea v-model="activeNarrative" class="input carry-textarea sb-copy-ta" rows="8"
+        placeholder="该脚本的口播文案（由方案一/二生成后随标签装载，可就地编辑）"></textarea>
+    </div>
+    <!-- 2026-11-05 用户裁定：voice 态不再显示本行——口播文案框（面板移到 tab 上方）即为
+         文案展示，避免重复；material/fx 态保留只读行 -->
+    <div v-else-if="mode !== 'edit' && mode !== 'voice' && activeMeta?.narrative" class="sb-copy" :title="activeMeta.narrative">文案：{{ activeMeta.narrative }}</div>
+
+    <!-- 克隆声音（2026-11-05 用户裁定：口播配音批量克隆完成的声音显示在每个 tab 的
+         视频文案下面，随标签切换；与文案框同层不受收起控制） -->
+    <div v-if="activeMeta?.voiceWav" class="sb-voice-row">
+      <span class="sb-voice-lbl">克隆声音</span>
+      <audio
+        :key="activeMeta.voiceWav"
+        class="sb-voice-audio"
+        controls
+        preload="auto"
+        :src="toFileUrl(activeMeta.voiceWav)"
+        :title="`分镜「${activeMeta.name}」克隆声音（${activeMeta.voiceDurSec > 0 ? fmtDur(activeMeta.voiceDurSec) : '时长未知'}）`"
+      />
+      <span class="sb-voice-dur" :class="{ none: !activeMeta.voiceDurSec }">{{ activeMeta.voiceDurSec > 0 ? fmtDur(activeMeta.voiceDurSec) : '--:--' }}</span>
     </div>
 
-    <!-- 分镜 tab 条（多分镜：每 tab 一个脚本对应一个视频；双击重命名，删除二次确认，上限 10） -->
+    <!-- 分镜 tab 条（多分镜：每 tab 一个脚本对应一个视频；双击重命名，删除二次确认，上限 10。
+         2026-11-05 用户裁定：行尾收起/展开钮（控制分镜卡显示，不控制视频文案）——加长样式） -->
     <div class="sb-tabs">
       <div v-for="sb in storyboards" :key="sb.id" class="sb-tab" :class="{ active: sb.id === activeStoryboardId }"
-        @click="setActiveStoryboard(sb.id)">
+        @click="onTabActivate(sb.id)">
         <template v-if="renamingId === sb.id">
           <input v-model="renameValue" class="sb-rename" @click.stop
             @keyup.enter="commitRename(sb.id)" @keyup.esc="renamingId = ''" @blur="commitRename(sb.id)" />
@@ -130,10 +161,15 @@ const EMPTY_HINT: Record<string, string> = {
           @click.stop="onTabClose(sb.id)">×</button>
       </div>
       <!-- singleScript（仿视频=一个视频脚本）：多分镜添加提示/删除入口不适用 -->
-      <span v-if="!singleScript && storyboards.length < COPY_STORYBOARD_MAX" class="sb-info" title="生成新的分镜：在「文案编写」页点击「✨ AI 生成分镜」，或在「选择脚本」中选取脚本库脚本">{{ storyboards.length ? '' : '' }}可再添加 {{ COPY_STORYBOARD_MAX - storyboards.length }} 个分镜</span>
+      <span v-if="!singleScript && storyboards.length < COPY_STORYBOARD_MAX" class="sb-info" title="生成新的分镜：点击「✨ AI 生成分镜脚本」">{{ storyboards.length ? '' : '' }}可再添加 {{ COPY_STORYBOARD_MAX - storyboards.length }} 个分镜</span>
       <span v-else-if="!singleScript" class="sb-info">已达分镜数量上限（{{ COPY_STORYBOARD_MAX }}）</span>
+      <span class="sb-flex"></span>
+      <SbCollapseToggle v-if="storyboards.length" />
     </div>
 
+    <!-- 分镜卡区（2026-11-05 用户裁决：默认收起——收起时卡片/信息行不显示；
+         无任何分镜时保持引导提示可见不受收起影响） -->
+    <template v-if="!storyboards.length || storyboardShotsExpanded">
     <div class="row between">
       <!-- 2026-09-22 用户裁决：脚本头部显示服务端脚本基本信息（选题/脚本库 id）——
            取回分镜脚本后基本信息随 tab 保存，不再只显示镜数/时长 -->
@@ -252,7 +288,19 @@ const EMPTY_HINT: Record<string, string> = {
         })" />
       </div>
     </template>
-    <div v-else class="muted">{{ EMPTY_HINT[mode] }}</div>
+    <div v-else class="muted">
+      <!-- 2026-11-05 用户裁决：进入模块不激活任何分镜（文案框默认空）——有分镜未激活时提示点标签 -->
+      <template v-if="storyboards.length && !activeStoryboardId">已加载 {{ storyboards.length }} 个分镜脚本，点击上方标签查看或编辑</template>
+      <!-- 2026-11-05 用户裁决：多稿装载态（仅文案 tab）提示批量补全入口 -->
+      <template v-else-if="editable && pendingCopyCount">已装载 {{ pendingCopyCount }} 份文案（每份一个标签）：点击「✨ AI 生成分镜脚本」将为每份文案各生成一套分镜</template>
+      <template v-else>{{ EMPTY_HINT[mode] }}</template>
+    </div>
+    </template><!-- /分镜脚本卡（收起/展开） -->
+
+    <!-- 2026-11-05 用户裁定：AI 生成分镜脚本按钮移到分镜区底部（红框位），全宽 -->
+    <div v-if="mode === 'edit'" class="row sb-actions">
+      <TButton label="✨ AI 生成分镜脚本" :loading="storyboardBusy" @click="genStoryboard" />
+    </div>
 
     <!-- 单镜选素材弹窗（material 态；素材池=本地上传分割出的镜头；2026-09-22 用户裁决：
          一镜多片——点选即追加进该镜绑定组，组内已选片段自动去重跳过） -->
@@ -269,55 +317,6 @@ const EMPTY_HINT: Record<string, string> = {
             <div v-if="!scenes.length" class="muted script-empty">暂无已分割镜头：请先在下方「本地上传」完成素材上传与镜头分割</div>
           </div>
           <div class="modal-actions"><TButton label="关闭" plain @click="matPickIdx = -1" /></div>
-        </div>
-      </div>
-    </div></teleport>
-
-    <!-- 选择脚本弹窗（2026-09-21 用户裁决：加大并左右 1:1——左=脚本列表，右=脚本基本信息；
-         「使用此脚本」将分镜与旁白整组回填为新分镜 tab） -->
-    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
-      <div v-if="scriptPickDlg.show" class="modal-mask" @click.self="scriptPickDlg.show = false">
-        <div class="modal modal--script">
-          <span class="modal-title">选择脚本</span>
-          <div class="script-cols">
-            <div class="script-list-pane">
-              <div class="row" style="margin-bottom: 6px">
-                <TButton label="刷新" variant="secondary" size="small" :loading="scriptPickDlg.loading" @click="refreshScriptOptions" />
-                <span class="muted">共 {{ scriptPickDlg.options.length }} 个脚本</span>
-              </div>
-              <div class="script-list">
-                <button v-for="o in scriptPickDlg.options" :key="o.id" class="script-row"
-                  :class="{ picked: scriptPickDlg.selectedId === o.id }" @click="selectScriptOption(o.id)">
-                <span class="script-topic">【{{ o.topic }}】</span>
-                <span class="script-meta">{{ o.shotCount }} 镜 · {{ o.savedAt }}{{ o.displayName ? ` · ${o.displayName}` : '' }}</span>
-                </button>
-                <div v-if="!scriptPickDlg.loading && !scriptPickDlg.options.length" class="muted script-empty">脚本库为空（可先「保存脚本」）</div>
-                <div v-if="scriptPickDlg.error" class="muted script-empty">{{ scriptPickDlg.error }}</div>
-              </div>
-            </div>
-            <div class="script-info-pane">
-              <template v-if="pickDetail.detail">
-                <div class="info-grid">
-                  <div class="info-item"><span class="lbl">选题</span><b>{{ pickDetail.detail.topic || '未命名' }}</b></div>
-                  <div class="info-item"><span class="lbl">镜数</span>{{ pickDetail.detail.shots.length }}</div>
-                  <div class="info-item"><span class="lbl">总时长</span>{{ infoTotalSec }} 秒</div>
-                  <div class="info-item"><span class="lbl">画幅</span>{{ pickDetail.detail.ratio || '竖屏' }}</div>
-                </div>
-                <div class="lbl" style="margin: 10px 0 4px">镜头列表</div>
-                <div class="script-shots">
-                  <div v-for="(s, i) in pickDetail.detail.shots" :key="i" class="shot-line">
-                    <b>#{{ i + 1 }}</b> {{ s.shot_type || '—' }} · {{ s.duration }}s ｜ {{ s.audio || s.visual || '—' }}
-                  </div>
-                </div>
-              </template>
-              <div v-else-if="pickDetail.loading" class="muted">正在加载脚本详情...</div>
-              <div v-else class="muted">在左侧选择一个脚本查看基本信息</div>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <TButton label="使用此脚本" :disabled="!scriptPickDlg.selectedId || !pickDetail.detail" @click="applySelectedScript()" />
-            <TButton label="关闭" plain @click="scriptPickDlg.show = false" />
-          </div>
         </div>
       </div>
     </div></teleport>
@@ -348,6 +347,23 @@ const EMPTY_HINT: Record<string, string> = {
 .sb-actions { display: flex; }
 .sb-actions :deep(.t-button) { flex: 1 1 0; }
 .sb-line { font-size: 12px; color: var(--foreground); line-height: 1.5; }
+/* 脚本头部文案行（2026-11-05 用户裁定：每个分镜脚本头部显示其绑定的文案，超两行截断、悬停看全文） */
+.sb-copy {
+  font-size: 12px; color: var(--foreground); line-height: 1.6;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* 克隆声音播放行（2026-11-05 用户裁定：随文案框显示在每个 tab 的视频文案下面） */
+.sb-voice-row { display: flex; align-items: center; gap: 8px; }
+.sb-voice-lbl { font-size: 12px; color: var(--muted-foreground); flex: none; }
+.sb-voice-audio { flex: 1 1 auto; height: 28px; min-width: 0; }
+.sb-voice-dur { font-size: 12px; color: var(--muted-foreground); flex: none; }
+.sb-voice-dur.none { color: var(--border); }
+
+/* 视频文案编辑框（edit 态分镜脚本顶部；2026-11-05 用户裁定随脚本显示） */
+.sb-copy-edit { display: flex; flex-direction: column; gap: 6px; }
+.sb-copy-lbl { font-size: 13px; color: var(--foreground); display: inline-flex; align-items: center; gap: 4px; }
+.sb-copy-tip { color: var(--muted-foreground); font-size: 12px; cursor: help; }
+.sb-copy-ta { min-height: 160px; }
 .sb-audio { color: var(--primary); }
 .sb-stale { color: var(--warning, #f1c40f); font-weight: 600; margin-left: 8px; }
 .muted { color: var(--muted-foreground); font-size: 12px; }
@@ -357,6 +373,8 @@ const EMPTY_HINT: Record<string, string> = {
 
 /* ── 分镜 tab 条（多分镜：切换/双击重命名/删除二次确认，上限 10） ── */
 .sb-tabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+/* 行尾弹性占位（收起/展开钮推到最右——2026-11-05 用户裁定） */
+.sb-flex { flex: 1 1 auto; min-width: 8px; }
 .sb-tab {
   display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
   background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md);
@@ -418,10 +436,7 @@ const EMPTY_HINT: Record<string, string> = {
 .modal-title { font-size: 15px; font-weight: 600; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
-/* ── 选择脚本弹窗（2026-09-21 用户裁决：加大 + 左右 1:1——左列表右基本信息） ── */
-.modal--script { width: min(960px, 94vw); height: min(640px, 84vh); }
-.script-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-.script-list-pane { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+/* 弹窗内列表行（单镜选素材弹窗复用；原选择脚本弹窗已随按钮删除退役） */
 .script-list { flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .script-row {
   display: flex; align-items: center; gap: 8px; padding: 8px 10px; text-align: left;
@@ -429,19 +444,10 @@ const EMPTY_HINT: Record<string, string> = {
   border-radius: var(--radius-md); cursor: pointer; color: var(--foreground); font-size: 13px;
 }
 .script-row:hover { border-color: var(--primary); }
-.script-row.picked { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, var(--surface-container)); }
 .script-topic { font-weight: 600; }
 .script-meta { color: var(--muted-foreground); font-size: 12px; }
 .script-empty { padding: 12px; text-align: center; }
-.script-info-pane {
-  display: flex; flex-direction: column; gap: 6px; min-height: 0; overflow-y: auto;
-  padding: 10px 12px; background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md);
-}
-.info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 12px; font-size: 13px; }
-.info-item .lbl { margin-right: 6px; color: var(--muted-foreground); font-size: 12px; }
-.script-shots { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-.shot-line { padding: 4px 6px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--foreground); line-height: 1.5; }
-.shot-line b { color: var(--primary); margin-right: 4px; }
+
 /* 一镜多片绑定（2026-09-22 用户裁决：逐片列表 + 移除） */
 .bound-clip {
   display: inline-flex; align-items: center; gap: 2px; margin-right: 8px;
