@@ -125,6 +125,8 @@ export function SkillsPane({ line, query, projectId, opened, onOpen, onDiscover 
   const [, refold] = React.useReducer((n: number) => n + 1, 0);
   const fold = (key: string) => { if (FOLDED.has(key)) FOLDED.delete(key); else FOLDED.add(key); refold(); };
   const agents = useAgentSkills(installed);
+  /* TinTin 服务端技能组: hook 必须在 discover 的提前 return 之前调用(React #300, 2026-11-07 实测) */
+  const server = useServerSkills(installed);
   const q = query.trim().toLowerCase();
   const found = skills
     .filter((k) => !q || [words(k).title, words(k).summary, k.name, k.uid].some((w) => w?.toLowerCase().includes(q)))
@@ -211,7 +213,6 @@ export function SkillsPane({ line, query, projectId, opened, onOpen, onDiscover 
     );
   }
   const importSkill = studioHost?.skills?.add;
-  const server = useServerSkills(installed);
   const serverRows = server.skills
     .filter((s) => !q || s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q));
   type Part = { key: string; title: string; lines: React.ReactNode[]; empty?: React.ReactNode };
