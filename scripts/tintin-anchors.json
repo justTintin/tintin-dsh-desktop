@@ -114,15 +114,9 @@
     "minCount": 1
   },
   {
-    "comment": "the online library drawer seam stays in the bridge",
-    "path": "dsh-tintin-bundle/openfilm-shell/bridge.ts",
-    "pattern": "registerAssetsDrawer",
-    "minCount": 1
-  },
-  {
-    "comment": "the online library drawer registers with the bridge",
+    "comment": "the online library mounts into the drawer's content area over the page bridge",
     "path": "dsh-tintin-bundle/openfilm-shell/tintin-library.ts",
-    "pattern": "registerAssetsDrawer",
+    "pattern": "tintinOnlineLibrary",
     "minCount": 1
   },
   {

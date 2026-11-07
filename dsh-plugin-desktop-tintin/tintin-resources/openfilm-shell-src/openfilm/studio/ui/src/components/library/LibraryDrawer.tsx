@@ -118,6 +118,15 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
   const index = useLibraryIndex();
   const favorites = useLibraryFavorites();
   const voices = useLibraryVoices();
+  /* TinTin(2026-11-07 用户裁决): the media pane's 在线素材 entry — the shell's online library
+     UI mounts into the content area over the page bridge (window.tintinOnlineLibrary). */
+  const [tintinOnline, setTintinOnline] = React.useState(false);
+  const onlineHost = React.useRef<HTMLDivElement | null>(null);
+  React.useEffect(() => {
+    const host = window as unknown as { tintinOnlineLibrary?: { mount: (el: HTMLElement) => void; unmount: () => void } };
+    if (tintinOnline && cat === 'media' && onlineHost.current) host.tintinOnlineLibrary?.mount(onlineHost.current);
+    return () => { host.tintinOnlineLibrary?.unmount?.() };
+  }, [tintinOnline, cat]);
   /* the categories shown, in the person's order */
   const arranged = useLibraryArrangement();
   const categories = arrangedCategories(CATEGORIES, arranged).filter((c) => c.on).map((c) => c.id);
@@ -351,8 +360,11 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
               <>
                 {/* what the person brought into this project (what it took from the library stays in its category),
                     then Saved */}
-                <SideBox on={mediaScope === 'project'} onClick={() => onMediaScope('project')}>{t('assetDrawer.mediaImport')}</SideBox>
-                <SideBox on={mediaScope === 'saved'} onClick={() => onMediaScope('saved')}>{t('assetDrawer.favorites')}</SideBox>
+                <SideBox on={mediaScope === 'project' && !tintinOnline} onClick={() => { setTintinOnline(false); onMediaScope('project') }}>{t('assetDrawer.mediaImport')}</SideBox>
+                <SideBox on={mediaScope === 'saved' && !tintinOnline} onClick={() => { setTintinOnline(false); onMediaScope('saved') }}>{t('assetDrawer.favorites')}</SideBox>
+                {/* TinTin(2026-11-07 用户裁决): the online materials (the TinTin server's library) sit
+                    under Saved; the page mounts the shell's own library UI over the content area */}
+                <SideBox on={tintinOnline} onClick={() => setTintinOnline(true)}>{t('gallery.tintinOnline')}</SideBox>
               </>
             ) : cat === 'skill' ? (
               <>
@@ -407,7 +419,10 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
           </nav>
         </div>
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-studio-host-panel={cat === 'media' ? undefined : ''}>
-          {cat === 'media' ? media : cat === 'captions' ? <CaptionsPane actions={captions} /> : (
+          {cat === 'media' ? (tintinOnline
+            ? <div ref={onlineHost} className="relative flex min-h-0 flex-1 flex-col" />
+            : media)
+            : cat === 'captions' ? <CaptionsPane actions={captions} /> : (
             <>
               {/* a skill's page has its own way back instead */}
               <div className="flex gap-2 px-3 pb-2 pt-2.5" hidden={cat === 'skill' && skillOpen != null}>

@@ -5,7 +5,7 @@
  * 数据经 openfilmNative.products(主进程代理服务端 /api/product-library/*, 实测形状)。
  */
 import { bootFail } from './boot';
-import { requestLibraryDrawer, requestShowSkills } from './bridge';
+import { requestShowSkills } from './bridge';
 
 type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: unknown; goods_no?: unknown; features?: unknown; selling_points?: unknown };
 
@@ -87,31 +87,8 @@ const mount = (): void => {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(skillTick, 0))
     else setTimeout(skillTick, 0)
 
-    /* 在线素材抽屉入口(2026-11-07 用户裁决方案 1): 官方素材按钮归 0.3 库面板(assets 缝)后,
-       TinTin 在线素材(服务端 /material 下载落项目)改由本按钮直开 —— 图标区分官方「素材」。 */
-    const libFab = document.createElement('button');
-    libFab.className = 'openfilm-composer-tool';
-    libFab.title = '在线素材(服务端素材库)';
-    libFab.setAttribute('data-tintin-library', '1');
-    libFab.setAttribute('aria-label', '在线素材');
-    libFab.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>';
-    libFab.onclick = () => requestLibraryDrawer();
-    const attachLib = (): boolean => {
-      const official = document.querySelector('.openfilm-composer-tool')
-      const row = official?.parentElement
-      if (!row) return false
-      if (row.querySelector('[data-tintin-library]')) return true
-      row.append(libFab)
-      return true
-    }
-    let libTries = 0
-    const libTick = (): void => {
-      if (attachLib()) return
-      libTries += 1
-      if (libTries < 80) setTimeout(libTick, 250)
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(libTick, 0))
-    else setTimeout(libTick, 0)
+    /* 在线素材的入口已移入 0.3 库面板素材侧栏(「收藏」下的「在线素材」, 2026-11-07 用户裁决) ——
+       输入框旁的注入按钮退役。 */
 
     const panel = document.createElement('div');
     panel.className = 'tintin-pd-panel';

@@ -123,20 +123,8 @@ function setAssetsOpen(open: boolean) {
     place();
   });
 }
-/** 在线素材抽屉(tintin-library.ts)注册的开合实现; 入口=注入的「在线素材」按钮(直开, 不经 assets 缝)。 */
-let assetsDrawerOpener: ((open: boolean) => void) | null = null;
-export function registerAssetsDrawer(opener: (open: boolean) => void): void {
-  assetsDrawerOpener = opener;
-}
-/** 打开 TinTin 在线素材抽屉(注入按钮的入口)。 */
-export function requestLibraryDrawer(): void {
-  if (!layout.open) setChatOpen(true);
-  assetsDrawerOpener?.(true);
-}
-/** 在线素材抽屉关闭时回置按钮状态(抽屉自身关闭时回调)。 */
-export function closeAssetsDrawer(): void {
-  assetsDrawerOpener?.(false);
-}
+/* 在线素材抽屉的开合机制(registerAssetsDrawer/requestLibraryDrawer)已退役(2026-11-07):
+   在线素材嵌入 0.3 库面板素材侧栏(经 window.tintinOnlineLibrary 页级桥挂载)。 */
 native.onToggleChat(() => setChatOpen(!layout.open));
 
 /* ── the theme and the language are the page's (Studio sets them on <html>) ── */

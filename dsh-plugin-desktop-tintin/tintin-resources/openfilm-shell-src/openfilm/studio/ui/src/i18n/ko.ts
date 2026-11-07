@@ -125,6 +125,7 @@ export const ko: Words = {
     tryOff: '켜야 사용해 볼 수 있습니다',
     viewSource: 'GitHub에서 보기',
     workflow: '작업',
+    tintinOnline: '온라인 소재',
   },
   /* the app's update, ready to install (Studio's top bar, in an app that has updates: lib/host.ts `update`) */
   update: {

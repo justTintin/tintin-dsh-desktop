@@ -128,6 +128,7 @@ export const ja: Words = {
     tryOff: 'オンにすると試せます',
     viewSource: 'GitHub で見る',
     workflow: 'ワークフロー',
+    tintinOnline: 'オンライン素材',
   },
   /* the app's update, ready to install (Studio's top bar, in an app that has updates: lib/host.ts `update`) */
   update: {

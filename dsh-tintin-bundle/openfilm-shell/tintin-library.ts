@@ -1,19 +1,20 @@
 /**
- * 在线素材库抽屉(2026-10-24 交互规范见 docs/tintin-openfilm-port.md §10)。
+ * 在线素材库(2026-10-24 交互规范见 docs/tintin-openfilm-port.md §10; 2026-11-07 用户裁决:
+ * 嵌入 0.3 库面板的素材分类侧栏——「收藏」下面的「在线素材」项, 不再是独立抽屉)。
  * 数据经 openfilmNative.library(主进程代理服务端, 无 CORS); 下载落项目后即出现在
- * Studio 左侧媒体面板, 走官方交互(拖入时间线 / @ 引用)。
+ * 库面板的「导入」里, 走官方交互(拖入时间线 / @ 引用)。
+ * 挂载协议: 页级全局桥 window.tintinOnlineLibrary = { mount(container), unmount() } ——
+ * 0.3 LibraryDrawer(vendored) 经它把本 UI 挂进自己的内容区, 无跨树 import。
  */
 import { bootFail } from './boot';
-import { registerAssetsDrawer, closeAssetsDrawer } from './bridge';
 
 type LibraryItem = { material_id?: unknown; id?: unknown; filename?: unknown; name?: unknown; size?: unknown; media_type?: unknown };
 type Tab = 'video' | 'image' | 'audio';
 
 const STYLE = [
-  '.tintin-lib-backdrop{position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.28)}',
-  /* 抽屉贴聊天列(0.3 聊天在左): top 对齐列顶(TOP_BAR 32), 左缘对齐窗口左(2026-11-07) */
-  '.tintin-lib-drawer{position:fixed;top:32px;left:0;bottom:0;width:420px;z-index:2147483001;background:#101114;border-right:1px solid #26272b;display:flex;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6}',
-  '.tintin-lib-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1c1d21}',
+  /* 嵌入形态: 铺满挂载容器(容器自带 relative+flex), 无遮罩无关闭 */
+  '.tintin-lib-drawer{position:absolute;inset:0;width:100%;background:#101114;border:0;display:none;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6}',
+  '.tintin-lib-head{display:flex;align-items:center;gap:8px;padding:10px 12px 4px}',
   '.tintin-lib-title{flex:1;font-weight:700;font-size:14px}',
   '.tintin-lib-close{background:#1a1b1f;border:1px solid #2a2b31;border-radius:8px;color:#c9c9cf;font-size:15px;cursor:pointer;min-width:28px;height:28px;padding:0 8px;flex:none}',
   '.tintin-lib-close:hover{background:#24262b;color:#fff}',
@@ -71,24 +72,25 @@ const drawer = document.createElement('div');
     drawer.style.display = 'none';
     const head = document.createElement('div'); head.className = 'tintin-lib-head';
     const title = document.createElement('div'); title.className = 'tintin-lib-title'; title.textContent = '在线素材库';
-    const close = document.createElement('button'); close.className = 'tintin-lib-close'; close.textContent = '×'; close.title = '关闭';
-    head.append(title, close);
+    head.append(title);
     const tabs = document.createElement('div'); tabs.className = 'tintin-lib-tabs';
     const search = document.createElement('input'); search.className = 'tintin-lib-search'; search.placeholder = '搜索素材库…';
     const list = document.createElement('div'); list.className = 'tintin-lib-list';
     const more = document.createElement('button'); more.className = 'tintin-lib-more'; more.textContent = '加载更多'; more.style.display = 'none';
     const status = document.createElement('div'); status.className = 'tintin-lib-status';
-    /* 下载进度条(2026-10-24 用户要求): 抽屉底部的不定长进度条, 下载期间显示 */
+    /* 下载进度条(2026-10-24 用户要求): 列表底部的不定长进度条, 下载期间显示 */
     const progress = document.createElement('div'); progress.className = 'tintin-lib-progress'; progress.style.display = 'none';
     progress.append(document.createElement('i'));
-    const footer = document.createElement('div'); footer.className = 'tintin-lib-footer';
-    const footerClose = document.createElement('button'); footerClose.className = 'tintin-lib-close'; footerClose.textContent = '关闭'; footerClose.style.width = '100%';
-    footer.append(footerClose);
-    drawer.append(head, tabs, search, list, more, progress, status, footer);
-    document.body.append(drawer);
-    /* 背景遮罩(点抽屉外任意处即关闭): 抽屉 z=3001, 遮罩 z=3000 */
-    const backdrop = document.createElement('div'); backdrop.className = 'tintin-lib-backdrop'; backdrop.style.display = 'none';
-    document.body.append(backdrop);
+    drawer.append(head, tabs, search, list, more, progress, status);
+    /* 嵌入挂载(2026-11-07): 由 0.3 LibraryDrawer 的「在线素材」侧栏项经页级全局桥调用 ——
+       DOM 挂进面板内容区(铺满), 遮罩/×/Esc/页脚关闭全部退役(切侧栏项即离开)。 */
+    const mountOnlinePane = (container: HTMLElement): void => {
+      container.append(drawer);
+      drawer.style.display = 'flex';
+      if (!list.childElementCount && !busy) void load(true);
+    };
+    const unmountOnlinePane = (): void => { stopAudio(); drawer.style.display = 'none'; drawer.remove() };
+    (window as unknown as { tintinOnlineLibrary?: unknown }).tintinOnlineLibrary = { mount: mountOnlinePane, unmount: unmountOnlinePane };
 
     let tab: Tab = 'video';
     let page = 1;
@@ -185,28 +187,8 @@ const drawer = document.createElement('div');
       }, 0);
     };
 
-    const open = (): void => {
-      backdrop.style.display = 'block'
-      drawer.style.display = 'flex';
-      if (!list.childElementCount && !busy) void load(true);
-    };
-    const hide = (): void => { stopAudio(); drawer.style.display = 'none'; backdrop.style.display = 'none' };
-    /* 关闭(2026-10-24 报障三轮): 三条独立路径 —— ①大热区 × (pointerdown+click) ②点抽屉外的背景遮罩
-       ③Esc; 全部落到同一个 requestClose, 关闭后回置聊天素材按钮状态。 */
-    const requestClose = (event?: Event): void => {
-      if (event) { event.preventDefault(); event.stopPropagation() }
-      hide()
-      closeAssetsDrawer()
-    };
-    close.addEventListener('pointerdown', requestClose)
-    close.addEventListener('click', requestClose)
-    footerClose.addEventListener('pointerdown', requestClose)
-    footerClose.addEventListener('click', requestClose)
-    backdrop.addEventListener('pointerdown', requestClose)
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && drawer.style.display !== 'none') requestClose()
-    })
-    registerAssetsDrawer((openState) => { if (openState) open(); else hide() });
+    /* 旧浮层开关路径已退役(2026-11-07): open/hide/遮罩/×/Esc 全部随嵌入模式移除,
+       入口=0.3 库面板素材侧栏的「在线素材」项。 */
 
     async function load(reset: boolean): Promise<void> {
       if (busy) return;

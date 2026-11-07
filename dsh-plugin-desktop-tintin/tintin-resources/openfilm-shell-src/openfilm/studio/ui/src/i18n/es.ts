@@ -128,6 +128,7 @@ export const es: Words = {
     tryOff: 'Actívala para probarla',
     viewSource: 'Ver en GitHub',
     workflow: 'Flujos de trabajo',
+    tintinOnline: 'Biblioteca en línea',
   },
   /* the app's update, ready to install (Studio's top bar, in an app that has updates: lib/host.ts `update`) */
   update: {

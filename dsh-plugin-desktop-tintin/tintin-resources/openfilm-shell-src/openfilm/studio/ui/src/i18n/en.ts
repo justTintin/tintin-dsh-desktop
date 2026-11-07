@@ -129,6 +129,7 @@ export const en = {
     tryOff: 'Turn it on to try it',
     viewSource: 'View on GitHub',
     workflow: 'Workflows',
+    tintinOnline: 'Online library',
   },
   /* the app's update, ready to install (Studio's top bar, in an app that has updates: lib/host.ts `update`) */
   update: {

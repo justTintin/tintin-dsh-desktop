@@ -161,10 +161,9 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 
 | 入口 | 行为 |
 |---|---|
-| 聊天列 composer 的素材按钮 | 经桥 `setAssetsOpen` → `registerAssetsDrawer` 打开抽屉(再点关闭) |
-| shell 页左下角「⇩ 在线素材」 | 打开抽屉 |
+| 0.3 库面板素材侧栏的「在线素材」(「收藏」下面,2026-11-07 用户裁决) | 经页级桥 `window.tintinOnlineLibrary.mount(container)` 把在线素材 UI 嵌入面板内容区(切回导入/收藏/其它分类即卸载);旧浮层抽屉与 composer 注入按钮退役(`registerAssetsDrawer`/`requestLibraryDrawer` 随之退役,锚点改为 `tintinOnlineLibrary`) |
 
-### 10.2 抽屉交互
+### 10.2 交互
 
 | 交互 | 规格 | 状态 |
 |---|---|---|
@@ -174,12 +173,12 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | 缩略图 | 视频/图片行显示 `/material/thumbnail`;音频无缩略图用 ♪ | ✅ |
 | 空态/错误 | 空结果与加载失败显式文案(不静默) | ✅ |
 | 预览 | 点击名称/缩略图 → 模态预览(视频/音频播放器、图片大图),关闭返回 | ✅ |
-| 音频试听 | 行内 ▶/■ 同键切换,单实例(起播停他行),自然结束复位 | ✅ |
-| 下载到项目 | 行按钮:落 `<影片>/assets/download/` → Studio 左侧媒体面板可见 → 拖时间线 / `@` 引用 | ✅ |
+| 音频试听 | 行内 ▶/■ 同键切换,单实例(起播停他行),自然结束复位;卸载即停止 | ✅ |
+| 下载到项目 | 行按钮:落 `<影片>/assets/download/` → 库面板「导入」可见 → 拖时间线 / `@` 引用 | ✅ |
 | 下载到电脑 | 右键菜单:落系统下载目录(`app.getPath('downloads')`) | ✅ |
-| 下载进度 | 抽屉底部不定长进度条 + 「正在下载到项目…」状态;完成后显示落盘路径/失败原因 | ✅ |
-| 关闭抽屉 | 四条路径: 头部 ×(28px)/底部「关闭」/点抽屉外背景遮罩/Esc;抽屉整体下移 40px 避开窗口标题栏拖拽热区(双击会触发窗口最大化);关闭同时回置聊天素材按钮状态 | ✅ |
-| 拖拽出抽屉 | 不提供(以「下载」按钮替代,避免跨视图拖拽的层级问题) | 不适用 |
+| 下载进度 | 列表底部不定长进度条 + 「正在下载到项目…」状态;完成后显示落盘路径/失败原因 | ✅ |
+| 离开 | 切侧栏其它项(导入/收藏/其它分类)即卸载;浮层时代的遮罩/×/Esc/页脚关闭随嵌入模式退役 | ✅ |
+| 拖拽出面板 | 不提供(以「下载」按钮替代,避免跨视图拖拽的层级问题) | 不适用 |
 
 ### 10.3 数据与 IPC
 
@@ -461,6 +460,16 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 - **底部日志条退役**:`dsh-tintin-client-ui/client.js` 的 `tintin-of-logbar`(「官方聊天已接管 ✓ | 诊断 JSON」常驻条,2026-10-24 用户要求加)按用户裁决删除 —— 条本身、4s 轮询(`hasShellChat` 刷文案)、CSS 规则全撤;原生视图底部让出的 22px 收回,**视图铺满舞台全高**(顶部 40px chrome 补偿保留)。诊断走 console 与统一日志(`%APPDATA%TinTinlogsdsh-*.log`),不再占界面。
 - **会话历史栏删除**:0.3 聊天列顶部的 ConversationSessionBar(会话切换条)按用户裁决不渲染(chat App.tsx 死分支保留 JSX,升级重放清单项);会话本身照常持久/轮转,对话区从顶铺到输入框。恢复=去掉 `{false ? … : null}` 一处。
 - 同批:客户端视图接管检测(`has-shell` 探针)保留在主进程,门禁/排障不受日志条删除影响。
+- **提交时序补记(2026-11-07 晚)**:本节文档先随 45638a01d0 单独入库,配套的 client.js 运行时改动仍留工作树待提交——doc-sync 门禁按「工作树 vs HEAD」比对,期间报「运行时改了文档没改」为时序性假红;待 client.js 与本节同批提交后即闭合。
+
+## 16.17 浏览器域：抖音下载改走嗅探捕获 + yt-dlp 二进制刷新(2026-11-07, 用户报障「下载失败+文件名抖音视频」续)
+
+**上游实锤(本机四组对照实验)**: 当期 yt-dlp(2026.10.26, 源码已读)抖音抽取器**不会算 a_bogus 签名** —— `tiktok.py DouyinIE._real_extract` 裸发 `aweme/detail`(query 只有 aweme_id), 源码 `TODO: Run verification challenge code to generate signature cookies` 明写缺口; 当期抖音服务端对该裸请求必 403 → 抽取器把 403 误报成「Fresh cookies are needed」。对照实验: ①新二进制匿名 → 同错; ②新二进制+全量登录 jar(交接文件 66 条含 ttwid/s_v_web_id/sessionid, 11 分钟新鲜) → 同错; ③+Deno 2.9.8(JS runtimes 由 none→deno) → 同错; ④+Chrome UA → 同错。**cookie/版本/运行时三要素全部排除, 缺口在上游签名实现**。第三方解析 API(dy.xs25.cn)也已失联(curl 连接失败)。同期修了引擎两处: ①yt-dlp 下载目标被 referer(站点首页)顶掉(解析链语义混用, B 站等仍受益此修); ②cookie 导出双口径(当时以为 jar 空)。
+
+**本批实施(下载改走自家已验证链路)**: 解析链下载不再走 yt-dlp —— 「解析」出视频后点「下载视频」= **打开视频页(page.action go, 域名路由进抖音分区) → 嗅探捕获新出现的播放地址(基线差分轮询, 25s 超时) → sniffDownload 流式下载(分区 cookie+referer, 1012 验证过的那套)**; `browser:sniffDownload` 增加可选 `filename`(解析链按视频标题命名, 面板直下保持 URL 尾段名); 超时文案指引「点播放后重试捕获/媒体嗅探面板直下」。
+
+**yt-dlp 二进制与拉取脚本**: fetch-tintin-binaries.mjs 重写 —— yt-dlp 改为**每次打包下载最新 release**(PE 头校验+--version 探针; GitHub 不可达回落旧拷贝并大声告警, 不阻塞打包), ffmpeg/ffprobe 维持旧拷贝; 本机实拉 2026.08.19→**2026.10.26** 成功(curl 直连可用, node fetch 曾超时=间歇阻断)。**二进制刷新对抖音无效但对 B站 m3u8 嗅探/YouTube videoplayback 等 yt-dlp 路线仍是必要升级**。
+- 验证: 页面语法 + tintin-browser 全量 + check:tintin + 包 build 绿; 端到端待用户实机(依赖分区播放行为)。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 

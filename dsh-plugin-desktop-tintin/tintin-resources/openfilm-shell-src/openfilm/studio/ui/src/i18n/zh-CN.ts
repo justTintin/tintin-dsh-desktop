@@ -129,6 +129,7 @@ export const zhCN: Words = {
     tryOff: '开启后才能试',
     viewSource: '在 GitHub 上查看',
     workflow: '场景',
+    tintinOnline: '在线素材',
   },
   /* the app's update, ready to install (Studio's top bar, in an app that has updates: lib/host.ts `update`) */
   update: {
