@@ -54,7 +54,7 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
        │         ├─ window.openfilmHost   ← shell 页 bridge.ts(唯一宿主)
        │         ├─ window.openfilmDesktop ← shell 页 bridge.ts(聊天桥)
        │         └─ window.openfilmNative  ← studio-preload(系统面 IPC)
-       ├─ 底部常驻日志条(接管状态 + 诊断 + 日志路径)
+       └─ 加载遮罩 / 失败重试(底部日志条已删,见 §16.8)
        └─ 加载遮罩 / 失败重试
 主进程(dsh-plugin-desktop-tintin)
   ├─ FilmAgentManager(每影片一个 dsh --profile acp 子进程)
@@ -86,9 +86,9 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 - **show 门旗(2026-10-28 报障根修, 方案 2)**: 挂载期 `syncBounds` 先于 `open()` 发出的 show 被主进程**静默忽略却照答 ok**(视图未创建), 客户端把 bounds 记入去重缓存 → open 之后同 bounds 的 show 全被吞、**视图永不挂载**; 未挂载页不跑 rAF, 双 rAF 就绪探针永挂, 启动卡「正在启动视频剪辑工作台…」直到窗口 resize 击穿去重(实机: 仅最大化/还原能救活)。修复 = `syncBounds` 加 `nativeOpened` 门旗(对齐浏览器视图的 opened 模式), `open()` 返回后放行并立即补发一次真实 show(先挂载、后轮询);
 
 - 原生视图覆盖舞台;250ms 快轮询 `has-shell`(openfilmDesktop + #of-chat 双判定),命中即接管;
-- **视图边界 = 舞台矩形, 不向上扩张**(2026-10-24 报障的机制): 曾经的 TOP_FILL=40 让原生视图侵入窗口 chrome 条, 抽屉头部压在标题栏拖拽区边界 → 双击触发窗口最大化、× 点击落到 chrome; 现在视图从舞台顶开始, 底部仍让出 40px 日志条;
+- **视图边界 = 舞台矩形, 不向上扩张**(2026-10-24 报障的机制): 曾经的 TOP_FILL=40 让原生视图侵入窗口 chrome 条, 抽屉头部压在标题栏拖拽区边界 → 双击触发窗口最大化、× 点击落到 chrome; 现在视图从舞台顶开始(2026-11-07 用户裁决: 底部日志条退役, 视图铺满舞台全高);
 - **陈旧判定只在确认旧页时触发**(2026-10-24 报障修复):探测诊断须连续 3 次「readyState=complete 且无桌面桥」才请求清理 run.json;页面加载慢时**绝不重启**(否则会起第二个服务、视图闪切到别的界面);未命中兜底恢复过渡版;
-- 顶部填充 40px(原生视图上移)、底部留 22px **日志条**(接管状态 + 诊断 + 日志路径), 且**只在视频轨道宽度内**(右缘让出聊天列, 不横跨会话框下方);
+- 顶部填充 40px(原生视图上移, 铺满舞台); 底部 22px 日志条已删(2026-11-07 §16.8);
 - 未命中兜底:恢复过渡版聊天列 + 状态行;陈旧服务清理后由 `startStudio` 全新拉起。
 
 ## 6. 影片智能体(ACP)
@@ -455,6 +455,12 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 ## 16.16 浏览器域：抖音下载 cookie 双口径 + 标题命名(2026-11-05, 用户报障「下载失败+文件名抖音视频」, 附 `Fresh cookies are needed` 截图)
 
 两项: ①**cookie 导出双口径并取去重** —— 原只走 `cookies.get({ domain })` 域名过滤, 部分 Electron 形态下漏收(分区已登录仍空 jar) → yt-dlp 报 `Fresh cookies (not necessarily logged in) are needed`; 改 **URL 口径(与流式路线同源, 实测可用)优先 + 域名口径补漏**, name|domain|path 去重, 并打点导出条数(`yt-dlp cookies exported: N cookies (平台)`) —— 再失败可直接从统一日志看到 jar 是否为空; ②**标题命名** —— 解析链返回结构原无 desc(只有 API 兜底带), 页面落到「抖音视频」占位; 新增 `extractDouyinCaption`(码段之后/首个链接之前的描述段, 样板话剥离, 无码段不提取), douyinParse 成功返回随文本带回 `desc`, 页面结果卡标题与文件名都改用真标题(如 `操盘百亿的「地产神童」罗兆辉....mp4`)。验证: 纯函数 2 用例(实报样本/样板话与纯链接 null) + IPC 用例断言 desc 回带, tintin-browser 全量 + check:tintin + 包 build 绿。
+
+## 16.17 底部日志条退役 + 会话历史栏删除(2026-11-07, 用户裁决)
+
+- **底部日志条退役**:`dsh-tintin-client-ui/client.js` 的 `tintin-of-logbar`(「官方聊天已接管 ✓ | 诊断 JSON」常驻条,2026-10-24 用户要求加)按用户裁决删除 —— 条本身、4s 轮询(`hasShellChat` 刷文案)、CSS 规则全撤;原生视图底部让出的 22px 收回,**视图铺满舞台全高**(顶部 40px chrome 补偿保留)。诊断走 console 与统一日志(`%APPDATA%TinTinlogsdsh-*.log`),不再占界面。
+- **会话历史栏删除**:0.3 聊天列顶部的 ConversationSessionBar(会话切换条)按用户裁决不渲染(chat App.tsx 死分支保留 JSX,升级重放清单项);会话本身照常持久/轮转,对话区从顶铺到输入框。恢复=去掉 `{false ? … : null}` 一处。
+- 同批:客户端视图接管检测(`has-shell` 探针)保留在主进程,门禁/排障不受日志条删除影响。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 
