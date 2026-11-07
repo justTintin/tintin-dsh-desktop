@@ -2,7 +2,7 @@
 // film shell build (第三行形态, 2026-10-23 用户裁决). The npm package strips `studio/ui/src`
 // while its exports map still names it — sources come from the pinned git commit instead:
 //
-//   TINTIN_OPENFILM_GIT_COMMIT (default cf6cd6f…, "DeepSeek Harness starts on Windows")
+//   TINTIN_OPENFILM_GIT_COMMIT (default 7713d38…, v0.3.0 "Desktop release: built on macos-15")
 //   TINTIN_OPENFILM_GIT_DIR    a local clone to copy from; its HEAD must match the pin
 //
 // Materialized under tintin-resources/openfilm-shell-src/:
@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const COMMIT = process.env.TINTIN_OPENFILM_GIT_COMMIT ?? 'b7673b585e3e9c3b434fe663e68619cc1984ae8b'
+const COMMIT = process.env.TINTIN_OPENFILM_GIT_COMMIT ?? '7713d38c8ddc860e1b8e517bb8b0f180988f8f73'
 const LOCAL_CLONE = process.env.TINTIN_OPENFILM_GIT_DIR ?? 'D:\\Project\\openfilm'
 const here = dirname(fileURLToPath(import.meta.url))
 /* vendor 到 tintin-resources(第三方源树的指定去处, 1000 行门禁豁免该段; 见 verify-tintin-gate.mjs) */

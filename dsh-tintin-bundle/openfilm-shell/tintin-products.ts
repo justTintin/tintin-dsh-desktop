@@ -5,12 +5,15 @@
  * 数据经 openfilmNative.products(主进程代理服务端 /api/product-library/*, 实测形状)。
  */
 import { bootFail } from './boot';
+import { requestLibraryDrawer, requestShowSkills } from './bridge';
 
 type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: unknown; goods_no?: unknown; features?: unknown; selling_points?: unknown };
 
 const STYLE = [
   '.tintin-pd-fab{z-index:2147483000}',
-  '.tintin-pd-panel{position:fixed;right:8px;bottom:120px;width:400px;max-height:480px;z-index:2147483001;background:#101114;border:1px solid #26272b;border-radius:12px;display:flex;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6;box-shadow:0 12px 32px rgba(0,0,0,.5)}',
+  /* 弹窗跟随聊天列(2026-11-07 用户裁决: 0.3 聊天列在左, 弹窗不得写死屏幕右侧) ——
+     打开时按 #of-chat 的实位 JS 定位贴其右缘, 这里的 left:8px 只是列不在时的兜底。 */
+  '.tintin-pd-panel{position:fixed;left:8px;bottom:120px;width:400px;max-height:480px;z-index:2147483001;background:#101114;border:1px solid #26272b;border-radius:12px;display:flex;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6;box-shadow:0 12px 32px rgba(0,0,0,.5)}',
   '.tintin-pd-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1c1d21}',
   '.tintin-pd-title{flex:1;font-weight:700;font-size:14px}',
   '.tintin-pd-close{background:#1a1b1f;border:1px solid #2a2b31;border-radius:8px;color:#c9c9cf;font-size:14px;cursor:pointer;min-width:28px;height:28px}',
@@ -57,6 +60,58 @@ const mount = (): void => {
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(fabTick, 0))
     else setTimeout(fabTick, 0)
+
+    /* 技能入口(2026-11-07 用户裁决「按原来的图标和原来的窗口」): 0.2.7 的 Blocks 图标(lucide,
+       与官方工具行按钮同款 16px/stroke 1.75) + show-skills 命令开恢复的技能弹窗(发现/服务端/我的)。 */
+    const skillFab = document.createElement('button');
+    skillFab.className = 'openfilm-composer-tool';
+    skillFab.title = '技能库(发现/服务端/我的)';
+    skillFab.setAttribute('data-tintin-skills', '1');
+    skillFab.setAttribute('aria-label', '技能库');
+    skillFab.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="14" y="3" rx="1"/><path d="M10 21V8a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H3"/></svg>';
+    skillFab.onclick = () => requestShowSkills();
+    const attachSkill = (): boolean => {
+      const official = document.querySelector('.openfilm-composer-tool')
+      const row = official?.parentElement
+      if (!row) return false
+      if (row.querySelector('[data-tintin-skills]')) return true
+      row.append(skillFab)
+      return true
+    }
+    let skillTries = 0
+    const skillTick = (): void => {
+      if (attachSkill()) return
+      skillTries += 1
+      if (skillTries < 80) setTimeout(skillTick, 250)
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(skillTick, 0))
+    else setTimeout(skillTick, 0)
+
+    /* 在线素材抽屉入口(2026-11-07 用户裁决方案 1): 官方素材按钮归 0.3 库面板(assets 缝)后,
+       TinTin 在线素材(服务端 /material 下载落项目)改由本按钮直开 —— 图标区分官方「素材」。 */
+    const libFab = document.createElement('button');
+    libFab.className = 'openfilm-composer-tool';
+    libFab.title = '在线素材(服务端素材库)';
+    libFab.setAttribute('data-tintin-library', '1');
+    libFab.setAttribute('aria-label', '在线素材');
+    libFab.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>';
+    libFab.onclick = () => requestLibraryDrawer();
+    const attachLib = (): boolean => {
+      const official = document.querySelector('.openfilm-composer-tool')
+      const row = official?.parentElement
+      if (!row) return false
+      if (row.querySelector('[data-tintin-library]')) return true
+      row.append(libFab)
+      return true
+    }
+    let libTries = 0
+    const libTick = (): void => {
+      if (attachLib()) return
+      libTries += 1
+      if (libTries < 80) setTimeout(libTick, 250)
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(libTick, 0))
+    else setTimeout(libTick, 0)
 
     const panel = document.createElement('div');
     panel.className = 'tintin-pd-panel';
@@ -157,6 +212,10 @@ const mount = (): void => {
     };
     const open = (): void => {
       panel.style.display = 'flex';
+      /* 贴聊天列右缘: 0.3 聊天列在左, 弹窗落在列右边(列收起/不在=屏幕左侧兜底) */
+      const columnRect = document.getElementById('of-chat')?.getBoundingClientRect();
+      if (columnRect && columnRect.width > 40) panel.style.left = `${Math.min(Math.round(columnRect.right) + 8, Math.max(8, innerWidth - 408))}px`;
+      else panel.style.left = '8px';
       if (!list.childElementCount && !status.textContent) void load('');
     };
     fab.onclick = open;

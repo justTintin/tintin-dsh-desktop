@@ -61,3 +61,39 @@ describe('filmChat.load 僵尸轮次过滤', () => {
     return readFileSync(join(project, '.film', 'chat.json'), 'utf8')
   }
 })
+
+describe('filmChat.log 0.3 增量读语义', () => {
+  // 背景(2026-11-07): 上游 0.3 起 chat.log 收 since=上次读位次(TurnLogAt), 无 whole 字段时
+  // 聊天侧每 1.5s 把整份尾读追加进已显示列表 —— 运行中轮次日志重复翻倍。
+  function projectWithLog(body: string): string {
+    const project = mkdtempSync(join(tmpdir(), 'tintin-film-log-'))
+    dirs.push(project)
+    mkdirSync(join(project, '.film', 'logs'), { recursive: true })
+    writeFileSync(join(project, '.film', 'logs', 't1.jsonl'), body, 'utf8')
+    return project
+  }
+  const line = (kind: string, n: number) => `${JSON.stringify({ t: n, kind, n })}\n`
+
+  it('整读(无 since): whole=true + at=文件字节长, 尾 200 条截断时 cut=true', () => {
+    const project = projectWithLog(line('a', 1) + line('b', 2))
+    const whole = filmChat.log(project, 't1')
+    expect(whole).toMatchObject({ whole: true, cut: false, callsWhole: true, callsCut: false, at: { events: (line('a', 1) + line('b', 2)).length, calls: 0, callsFile: 0 } })
+    expect((whole as { events: unknown[] }).events).toHaveLength(2)
+  })
+
+  it('增量读(since): 只回位次之后的新事件, whole=false', () => {
+    const head = line('a', 1)
+    const project = projectWithLog(head + line('b', 2))
+    const fresh = filmChat.log(project, 't1', { events: head.length, calls: 0, callsFile: 0 })
+    expect(fresh).toMatchObject({ whole: false, at: { calls: 0 } })
+    if (!fresh || !('events' in fresh)) throw new Error('增量读应回事件')
+    expect(fresh.events.map((e) => e.kind)).toEqual(['b'])
+  })
+
+  it('无新增(since=当前长度)回 {same:true}, 文件回缩(位次越界)回落整读', () => {
+    const project = projectWithLog(line('a', 1))
+    expect(filmChat.log(project, 't1', { events: line('a', 1).length, calls: 0, callsFile: 0 })).toEqual({ same: true })
+    const shrank = filmChat.log(project, 't1', { events: 9999, calls: 0, callsFile: 0 })
+    expect(shrank).toMatchObject({ whole: true })
+  })
+})

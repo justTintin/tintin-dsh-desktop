@@ -12,6 +12,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable, Writable } from 'node:stream'
 import * as acp from '@agentclientprotocol/sdk'
+import { fileOf, scheduleFilmModelLog } from './film-model-calls.ts'
 
 const require_ = createRequire(import.meta.url)
 
@@ -369,20 +370,26 @@ export class FilmAgentManager {
     const turnId = meta?.turnId ?? randomUUID()
     const logsDir = join(project, '.film', 'logs')
     mkdirSync(logsDir, { recursive: true })
-    const logFile = join(logsDir, `${turnId}.jsonl`)
+    /* 轮次 id 含冒号(local:xxx), Windows 文件名禁冒号 —— 官方 fileOf 同款净化
+       (未净化时写成 NTFS ADS 流, unsaved 扫描永远空; 2026-11-07 实证)。 */
+    const logFile = join(logsDir, `${fileOf(turnId)}.jsonl`)
     this.activeLogs.set(project, logFile)
     const handle = await this.ensure(project)
     this.trackTurn(project, null, handle.agentId)
     const entry = this.turns.get(project)!
     const agent = await handle.agent
-    appendFileSync(logFile, `${JSON.stringify({ t: Date.now(), kind: 'prompt', text })}\n`, 'utf8')
+    const startedAt = Date.now()
+    appendFileSync(logFile, `${JSON.stringify({ t: startedAt, kind: 'prompt', meta: { turnId }, agent: handle.agentId, text })}\n`, 'utf8')
     /* 回合护栏计数清零(每回合一个作用域;轮询类工具不计,见 advanceToolCallGuard) */
     this.turnGuard.set(project, { count: 0, warned: false })
     try {
       const result = await agent.prompt(text, images)
       entry.done = { ok: true, stopReason: result.stopReason }
       const toolCalls = this.turnGuard.get(project)?.count ?? 0
-      appendFileSync(logFile, `${JSON.stringify({ t: Date.now(), kind: 'done', ok: true, stopReason: result.stopReason, toolCalls })}\n`, 'utf8')
+      const doneAt = Date.now()
+      appendFileSync(logFile, `${JSON.stringify({ t: doneAt, kind: 'done', ok: true, stopReason: result.stopReason, toolCalls })}\n`, 'utf8')
+      /* 模型请求明细(0.3 的 calls 页签): 轮次落定后从 DSH 会话日志重建本窗口的请求 */
+      scheduleFilmModelLog({ project, turnId, agentHome: join(this.options.channelHome, filmAgentHomeDir(handle.agentId)), sessionId: handle.sessionId ?? '', fromMs: startedAt, toMs: doneAt })
       this.emit(project, { key: project, kind: 'done', ok: true, stopReason: result.stopReason, toolCalls })
       return result
     } catch (error) {
@@ -399,13 +406,14 @@ export class FilmAgentManager {
   }
 
   /** 显式启动(或续接)一部影片的会话, 返回会话信息(聊天侧 start 的后端).
-      persona 缺省沿用该项目最近的角色(首次为 deepseek)。 */
-  async begin(project: string, persona?: FilmAgentPersona): Promise<{
+      persona 缺省沿用该项目最近的角色(首次为 deepseek)。resume=聊天侧存档的会话 id:
+      管理器无内存会话(如应用重启后)按它续持久会话; 0.3 起聊天侧比对 resumed/sessionId。 */
+  async begin(project: string, persona?: FilmAgentPersona, resume?: string | null): Promise<{
     sessionId: string; resumed: boolean; agentInfo: { name?: string; title?: string; version?: string } | null; authMethods: never[]; mcp: false;
     models: { availableModels: Array<{ modelId: string; name: string; description?: string }>; currentModelId: string } | null;
     modes: null; configOptions: Array<Record<string, unknown>> | null;
   }> {
-    const handle = await this.ensure(project, persona)
+    const handle = await this.ensure(project, persona, resume)
     const session = (handle.session ?? {}) as {
       models?: { availableModels?: Array<Record<string, unknown>>; currentModelId?: unknown }
       configOptions?: Array<Record<string, unknown>>
@@ -413,7 +421,9 @@ export class FilmAgentManager {
     const available = Array.isArray(session.models?.availableModels) ? session.models!.availableModels! : []
     return {
       sessionId: handle.sessionId ?? '',
-      resumed: false,
+      /* 0.3 聊天侧按 resumed+sessionId 判定是否真续上了: 管理器服务的会话与聊天侧存档 id
+         一致才算续上, 不一致时聊天侧会前置会话上下文并如实提示(官方 local-agent-run 语义)。 */
+      resumed: typeof resume === 'string' && resume !== '' && (handle.sessionId ?? '') === resume,
       agentInfo: handle.init?.agentInfo ?? null,
       authMethods: [],
       mcp: false,
@@ -580,19 +590,19 @@ export class FilmAgentManager {
     this.options.onEvent?.({ project, event })
   }
 
-  private ensure(project: string, persona?: FilmAgentPersona): Promise<Handle> {
+  private ensure(project: string, persona?: FilmAgentPersona, resume?: string | null): Promise<Handle> {
     const wanted = persona ?? this.personas.get(project) ?? 'deepseek'
     if (persona !== undefined) this.personas.set(project, persona)
     const existing = this.handles.get(project)
     /* 角色切换 = 人设不同, 会话必须重建(补丁按角色分文件) */
     if (existing && existing.child.exitCode === null && existing.agentId === wanted) return Promise.resolve(existing)
     if (existing) this.stop(project)
-    const handle = this.start(project, wanted)
+    const handle = this.start(project, wanted, resume)
     this.handles.set(project, handle)
     return handle.agent.then(() => handle)
   }
 
-  private start(project: string, agentId: FilmAgentPersona): Handle {
+  private start(project: string, agentId: FilmAgentPersona, resume?: string | null): Handle {
     const serverUrl = this.options.serverUrl().replace(/\/+$/, '')
     if (!serverUrl) throw new Error('server.url 未配置: 影片智能体无法启动')
     const patchPath = ensureFilmAgentPatch(this.options.channelHome, serverUrl, undefined, agentId)
@@ -696,7 +706,10 @@ export class FilmAgentManager {
       /* MCP 挂载走补丁行(2026-10-30):rc.2 会话参数挂载死路(实测合法 URL 零连接、坏条目被
          SDK schema 静默跳过), 补丁行进程级挂载。此键仍是 schema 必需 —— 留空数组防双挂。 */
       const params = { cwd: project, mcpServers: [] }
-      let sessionId: string | null = this.sessionIds.get(sessionKey) ?? null
+      /* 管理器内存的会话优先(本进程内已续上); 无内存会话而聊天侧带存档 id 时按它续 ——
+         应用重启后会话文件仍在(DSH_HOME 持久), 否则每次重启都静默开新会话。 */
+      let sessionId: string | null = this.sessionIds.get(sessionKey)
+        ?? (typeof resume === 'string' && resume !== '' ? resume : null)
       if (sessionId !== null) {
         /* 持久会话: resume 失败(如目录变更)回落新建 */
         const resumed = await conn.agent.request(acp.methods.agent.session.resume, { ...params, sessionId }).then((r) => r as { sessionId: string } & Record<string, unknown>, () => null)

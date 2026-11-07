@@ -10,7 +10,8 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { FilmAgentManager, dshBinExists, filmAgentHomeDir, filmAgentPersona } from './film-acp.ts'
-import { filmChat, keepSnapshot, settleSnapshot } from './film-chat.ts'
+import { filmChat } from './film-chat.ts'
+import { createTurnChangesTracker } from './film-turn-changes.ts'
 import { resolveDesktopChannelHome } from '../desktop-channel-home.ts'
 import { DESKTOP_PRODUCT_IDENTITY, DESKTOP_PRODUCT_NAME } from '../product-identity.ts'
 import { diagnosticLog } from '../developer-logging.ts'
@@ -215,6 +216,9 @@ export function installTinTinMainHook(): void {
   installed = true
 
   seedTinTinDefaults(app.getPath('appData'))
+
+  /* 轮次快照与撤销(0.3 官方语义): 新增的进系统回收站 */
+  const turnChanges = createTurnChangesTracker({ trash: (path) => shell.trashItem(path) })
 
   if (process.env.TINTIN_BIN_DIR === undefined && app.isPackaged) {
     const binDir = join(process.resourcesPath, 'bin')
@@ -557,14 +561,15 @@ export function installTinTinMainHook(): void {
           const resume = typeof p.resume === 'string' && p.resume ? p.resume : null
           const persona = filmAgentPersona(p.agent)
           manager.trackTurn(cwd, p.meta, persona)
-          const info = await manager.begin(cwd, persona).catch((error: unknown) => {
+          /* 0.3 起聊天侧比对 info.sessionId/resumed(不匹配即补「会话未续接」提示+前置上下文),
+             resume 必须如实进 begin(管理器无内存会话时按它续持久会话) */
+          const info = await manager.begin(cwd, persona, resume).catch((error: unknown) => {
             /* 会话建立失败实录(2026-10-25 可观测性): 智能体子进程被终止的真实原因落统一日志 */
             const detail = error instanceof Error ? error.message : String(error)
             try { diagnosticLog({ source: 'film-acp', event: 'begin-error', level: 'error', developer: false, fields: { cwd, message: String(detail).slice(0, 2000) } }) } catch { /* 日志失败不阻断 */ }
             console.error(`[tintin-film-acp] begin 失败: ${detail}`)
             throw error
           })
-          void resume /* begin 内部已按历史 sessionId resume */
           return { ok: true, key: cwd, info }
         }
         case 'prompt': {
@@ -818,17 +823,22 @@ export function installTinTinMainHook(): void {
     return filmChat.unsavedTurns(chatProject(p), Array.isArray(q.except) ? q.except.map(String) : [])
   })
   ipcMain.handle('desktop:chat:log', (_e, p: unknown) => {
-    const q = (p ?? {}) as { project?: unknown; turnId?: unknown }
-    return filmChat.log(chatProject(p), String(q.turnId ?? ''))
+    const q = (p ?? {}) as { project?: unknown; turnId?: unknown; since?: { events: number; calls: number; callsFile: number } }
+    const since = q.since && typeof q.since === 'object' && typeof (q.since as { events?: unknown }).events === 'number' ? q.since : undefined
+    return filmChat.log(chatProject(p), String(q.turnId ?? ''), since)
   })
   ipcMain.handle('desktop:chat:snapshot', (_e, p: unknown) => {
     const q = p as { project?: unknown; turnId?: string }
-    keepSnapshot(String(q.turnId ?? ''), chatProject(p))
-    return { ok: true }
+    return turnChanges.begin(chatProject(p), String(q.turnId ?? '')).then(() => ({ ok: true }))
   })
   ipcMain.handle('desktop:chat:changes', (_e, p: unknown) => {
     const q = p as { project?: unknown; turnId?: string }
-    return settleSnapshot(String(q.turnId ?? ''), chatProject(p))
+    return turnChanges.settle(chatProject(p), String(q.turnId ?? ''))
+  })
+  /* 撤销一轮(0.3 官方语义): 新增进系统回收站、改动/删除写回开工前样子; 快照不在=gone(聊天侧如实提示) */
+  ipcMain.handle('desktop:chat:undo', (_e, p: unknown) => {
+    const q = p as { project?: unknown; turnId?: string }
+    return turnChanges.undo(chatProject(p), String(q.turnId ?? ''))
   })
   ipcMain.handle('desktop:chat:reveal', (_event, payload: unknown) => {
     const project = chatProject(payload)

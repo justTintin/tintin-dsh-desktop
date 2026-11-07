@@ -103,8 +103,26 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 
 - `<影片>/.film/chat.json`(原子整写:{sessions,last,turns:[{turn,items}]});
 - `<影片>/.film/logs/<turnId>.jsonl`(prompt/done/事件逐行);
-- IPC 面 `desktop:chat:*`(load/sessions/turn/log/unsaved/ref-image/attachment/paths/snapshot/changes/reveal);
-- 轮次回执缓存:重载后恢复“运行中”会话,ack 后清理。
+- IPC 面 `desktop:chat:*`(load/sessions/turn/log/unsaved/ref-image/attachment/paths/snapshot/changes/undo/reveal);
+- 轮次回执缓存:重载后恢复“运行中”会话,ack 后清理;
+- 轮次撤销(0.3 官方语义,2026-11-07 用户裁决方案 1):`film-turn-changes.ts` 1:1 移植官方
+  file-changes.mjs+chat-ipc 轮次生命周期——开工快照(文本按扩展名整读、其余文件 hard link 进
+  `.film/cache/turn-files/<turnId>`、film.html 整读到 32MB),结算有变更回 `undoable:true`,
+  `desktop:chat:undo` 回滚(新增进系统回收站、改动/删除写回、放不回的如实列 `missed`),
+  开工中/可撤销各至多 8 份,淘汰与更换启动即放开遗留链。聊天侧(undone 标记/上一轮提示)
+  由 vendored 0.3 聊天自带,零改动。
+- 模型请求明细(0.3 的 calls 页签,2026-11-07 用户裁决方案 1):`film-model-calls.ts` 从 DSH
+  子进程自己的会话日志重建(官方 agent-records.mjs 对各家 agent 的同款做法)——日志在
+  `<agent home>/sessions/<projectSessionKey(cwd)>/session-<id>/session.v*.jsonl.zstd`,多帧
+  zstd(Node 流式在帧边界停,按帧头格式逐帧 `zstdDecompressSync`);重放 system/user/
+  assistant/tool/header 事件,每个带 usage 的 assistant/message 出一次请求(startedAt 落在
+  prompt..done 时间窗才收),compactCalls 去重语义 1:1;轮次落定后 ~800ms 整写
+  `<fileOf(turnId)>.model.jsonl`(64MB 上限+cut 行,同内容哈希跳过保读侧增量稳定),
+  `film-chat.log` 按官方 readLog 融合读(偏移增量+ino 文件身份+callsCut)。usage 映射
+  input=max(0,inputTokens-cacheRead)/cacheRead/cacheWrite/output/reasoning。**顺带修**:
+  轮次 id 含冒号(local:xxx),此前日志/ref 图文件名未净化写成 NTFS ADS 流(`.film/logs/local`
+  0 字节幽灵,unsaved 扫描恒空)——全面 fileOf 净化(冒号→-),prompt 行补 meta.turnId 供
+  unsavedTurns 反解真 id,unsaved 恢复机制在 Windows 首次真正可用。
 
 ## 8. 媒体 provider(服务端为默认)
 
@@ -220,7 +238,7 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | 通道主进程 | `dsh-plugin-desktop-tintin/src/tintin/{film-acp.ts,film-chat.ts,studio-preload.ts,main-hook.ts}` |
 | 契约 | `dsh-plugin-desktop-tintin/src/openfilm-view-contract.ts`(三通道镜像) |
 | 客户端视图 | `dsh-tintin-client-ui/client.js`(mountOpenFilm + 抽屉/日志条/接管) |
-| 宿主桥插件 | `dsh-tintin-bundle/lib/openfilm/*`(studio-runtime 对账、providers-seed、skill-sync、libs-sync) |
+| 宿主桥插件 | `dsh-tintin-bundle/lib/openfilm/*`(studio-runtime 对账、providers-seed、libs-sync) |
 | 官方运行时 | `dsh-plugin-desktop-tintin/tintin-resources/openfilm`(0.2.7,editor dist 由 shell 构建覆盖;**覆盖后自验 shell 标记**[build.mjs 2026-10-26],`verify-tintin-resources.mjs` 同步内容闸门——防 fetch:openfilm/热调把官方原版 dist 静默带进包) |
 
 ## 13. 生命周期与自愈
@@ -427,6 +445,16 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 - **IPC**(media-downloader douyinParse): 302 探测抽 `probeVideoIdFromRedirect` 复用; 分支序=直贴视频页 URL → 短链 302 → **口令码拼短链 302**(无链接时; 失败不在此死路, 喂构造短链落 API 兜底再试); 全败文案改「未找到有效的抖音分享链接或口令」;
 - **页面**: placeholder/说明改「分享链接或口令」; 解析失败/下载发起失败 toast 上屏(不再只有小红字);
 - 验证: 纯函数 3 用例(日期锚定含实报乱码形态/泛匹配与不误抓/短链拼装与非法码) + IPC 端到端 2 用例(stub fetch: 口令→短链 302→videoPageUrl; 302 失败回落 API 且喂 `v.douyin.com%2FUYz`), 页面语法 + tintin-browser 全量 + check:tintin + 包 build 绿。
+
+## 16.15 浏览器域：yt-dlp 下载目标修复 + 解析/下载分离(2026-11-05, 用户报障「解析没有结果」, 附 `Unsupported URL: https://www.douyin.com/` 截图)
+
+- **引擎目标 bug(老缺陷, 本批截图实证)**: `startMedia` yt-dlp 路线 `urlToDownload = referer || url` 把两条链的参数语义混用 —— 解析链 url=视频页 / referer=站点首页(`https://www.douyin.com/`), 结果 yt-dlp 拿到**首页**报 Unsupported URL(302 解析本身成功, videoPageUrl 被顶掉)。修复: 导出 `resolveYtdlpTargetUrl`——url 本身是合法视频页就取 url, 否则回落 `referer || url`; 嗅探链(url=媒体直链/referer=视频页)保持 SRC 口径不变。三用例回归(解析链/嗅探链/双缺回落)。
+- **解析/下载分离(用户裁决)**: 右栏抖音助手改两段式 —— 「解析」按钮只出结果(标题卡+「下载视频」按钮), 点下载才走 `downloadMediaStart`; 重解析自动撤旧卡。文件: tintin-browser.html(dyParseSec 结构 + dyParse/dyDownloadBtn 两函数)。
+- 验证: tintin-browser 13 文件用例全绿, check:tintin + 包 build + 页面语法绿。
+
+## 16.16 浏览器域：抖音下载 cookie 双口径 + 标题命名(2026-11-05, 用户报障「下载失败+文件名抖音视频」, 附 `Fresh cookies are needed` 截图)
+
+两项: ①**cookie 导出双口径并取去重** —— 原只走 `cookies.get({ domain })` 域名过滤, 部分 Electron 形态下漏收(分区已登录仍空 jar) → yt-dlp 报 `Fresh cookies (not necessarily logged in) are needed`; 改 **URL 口径(与流式路线同源, 实测可用)优先 + 域名口径补漏**, name|domain|path 去重, 并打点导出条数(`yt-dlp cookies exported: N cookies (平台)`) —— 再失败可直接从统一日志看到 jar 是否为空; ②**标题命名** —— 解析链返回结构原无 desc(只有 API 兜底带), 页面落到「抖音视频」占位; 新增 `extractDouyinCaption`(码段之后/首个链接之前的描述段, 样板话剥离, 无码段不提取), douyinParse 成功返回随文本带回 `desc`, 页面结果卡标题与文件名都改用真标题(如 `操盘百亿的「地产神童」罗兆辉....mp4`)。验证: 纯函数 2 用例(实报样本/样板话与纯链接 null) + IPC 用例断言 desc 回带, tintin-browser 全量 + check:tintin + 包 build 绿。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 

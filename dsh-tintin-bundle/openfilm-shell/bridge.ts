@@ -71,16 +71,19 @@ const TOP_BAR = 32;
 const column = document.getElementById('of-chat')!;
 const layout = { open: true, width: 420, min: 340, studioMin: 640 };
 /** the assets open in the column (Studio draws them, above the composer); `bottom`: the composer's height, all the
-    chat shows then */
-const assets = { open: false, bottom: 120 };
+    chat shows then. TinTin(2026-11-07 用户裁决): 默认展开 —— 库面板(八项工具栏)常驻聊天列,
+    素材按钮可收起回完整聊天。 */
+const assets = { open: true, bottom: 120 };
 const assetsSignal = signal(false);
 const chatOpenSignal = signal(true);
 
 /** The column's width as the window allows it: Studio keeps its least width, the chat its own while it fits. */
 const shownWidth = () => (layout.open ? Math.max(Math.min(layout.width, innerWidth - layout.studioMin), Math.min(layout.min, innerWidth)) : 0);
-  /* TinTin(2026-10-24 用户裁决): 不向 Studio 声明 assets 缝 —— Studio 保留自己的
-     左侧媒体面板(项目素材位); 聊天列抽屉改为 TinTin 在线素材(见 tintin-library)。 */
-  const panelState = () => ({ open: layout.open, width: shownWidth() });
+  /* TinTin(2026-11-07 用户裁决方案 1, 推翻 10-24 的不声明缝): 向 Studio 声明 assets 缝,
+     对齐官方 0.3 形态 —— Studio 不再画自己的左侧媒体面板, 库面板(素材/技能/模板/字幕/配音/
+     音效/音乐/文本)经 PanelSeam 盖在聊天列上。TinTin 在线素材抽屉改由注入按钮直开
+     (requestLibraryDrawer), 不再占用聊天的素材按钮。 */
+  const panelState = () => ({ open: layout.open, width: shownWidth(), assets: { open: assets.open && layout.open, bottom: assets.bottom } });
 const panelListeners = new Set<Listener<ReturnType<typeof panelState>>>();
 
 /** 聊天列必现(2026-10-23 用户明确: 会话框不能是隐藏态)—— 只有手动的收起开关能藏它。 */
@@ -88,6 +91,8 @@ function place() {
   column.hidden = !layout.open;
   column.style.width = `${shownWidth()}px`;
   column.style.top = `${TOP_BAR}px`;
+  /* the column never moves or resizes for the assets: the chat shows only its composer then (官方 0.3 同款) */
+  column.toggleAttribute('data-assets-open', assets.open && layout.open);
   const state = panelState();
   for (const listener of panelListeners) listener(state);
 }
@@ -111,25 +116,26 @@ function setChatWidth(width: number, done = false) {
 }
 function setAssetsOpen(open: boolean) {
   if (open && !layout.open) setChatOpen(true);
-  /* 没有注册在线素材抽屉时不得置开: 聊天在 assetsOpen=true 时会隐藏内容区,
-     抽屉不存在就会留下整块空白(2026-10-24 实测: 空白列事故)。 */
-  assets.open = open && layout.open && assetsDrawerOpener !== null;
+  /* the chat folding to its composer and Studio's drawer appearing are one frame: neither is seen without the other */
+  assets.open = open && layout.open;
   flushSync(() => {
     assetsSignal.set(assets.open);
     place();
   });
-  /* TinTin(2026-10-24 用户裁决): 聊天列抽屉 = 在线素材(不向 Studio 索取项目媒体);
-     项目素材保留在 Studio 左侧媒体面板位。抽屉的开关转给 TinTin 在线素材抽屉。 */
-  assetsDrawerOpener?.(assets.open);
 }
-/** 在线素材抽屉(tintin-library.ts)注册的开合实现; 聊天的素材按钮经此开合。 */
+/** 在线素材抽屉(tintin-library.ts)注册的开合实现; 入口=注入的「在线素材」按钮(直开, 不经 assets 缝)。 */
 let assetsDrawerOpener: ((open: boolean) => void) | null = null;
 export function registerAssetsDrawer(opener: (open: boolean) => void): void {
   assetsDrawerOpener = opener;
 }
-/** 在线素材抽屉关闭时回置聊天的素材按钮状态。 */
+/** 打开 TinTin 在线素材抽屉(注入按钮的入口)。 */
+export function requestLibraryDrawer(): void {
+  if (!layout.open) setChatOpen(true);
+  assetsDrawerOpener?.(true);
+}
+/** 在线素材抽屉关闭时回置按钮状态(抽屉自身关闭时回调)。 */
 export function closeAssetsDrawer(): void {
-  setAssetsOpen(false);
+  assetsDrawerOpener?.(false);
 }
 native.onToggleChat(() => setChatOpen(!layout.open));
 
@@ -196,8 +202,16 @@ setInterval(() => { void follow() }, 2500);
 const selection = signal<StudioSelection | null>(null);
 const refer = events<StudioRef>();
 /* a skill picked in the examples (Studio's ExamplesDialog), to be named in the message; and "Add a skill" there */
-const skillPicked = events<{ name: string; description: string; newConversation?: boolean }>();
+const skillPicked = events<{ name: string; description: string; title?: string; newConversation?: boolean }>();
 const skillAdd = events<void>();
+/** 打开技能弹窗(2026-11-07 用户裁决「按原来的图标和原来的窗口集成技能」): 0.2.7 的
+    Blocks 按钮经 show-examples 开 ExamplesGallery(Skills 视图), 0.3 重构删了按钮与
+    SkillsLibrary —— TinTin 注入按钮发 show-skills 命令, Studio 开恢复的独立弹窗。 */
+export function requestShowSkills(): void {
+  command?.({ type: 'show-skills' });
+}
+/* Studio 为人写好的提问(0.3 的 ask): 文字进输入框、引用随行, 人自己发送(对齐官方壳桥) */
+const asked = events<{ text: string; refs: StudioRef[] }>();
 /** what the pointer is over in Studio (null: nothing), for the chat to light its pills that point at it */
 const hover = signal<StudioRef | null>(null);
 let command: ((command: StudioCommand) => void) | null = null;
@@ -318,6 +332,8 @@ const host: StudioHost = {
        左侧面板。聊天列的素材按钮走 AppBridge 的 setAssetsOpen(在线素材抽屉), 与此无关。 */
     setOpen: setChatOpen,
     setWidth: (width, done) => setChatWidth(width, done === true),
+    /* 0.3 库面板(PanelSeam)的开关: useHostPanel 以本方法存在与否判定宿主 assets 缝(2026-11-07 方案 1) */
+    setAssetsOpen,
     onChange: (listener) => { panelListeners.add(listener); listener(panelState()); },
   },
   agents: native.agents,
@@ -328,6 +344,7 @@ const host: StudioHost = {
   tabs: native.tabs,
   useSkill: (skill) => skillPicked.set(skill),
   skills: { add: () => skillAdd.set(undefined) },
+  ask: (request) => { if (!layout.open) setChatOpen(true); asked.set(request); },
 };
 (window as unknown as { openfilmHost: StudioHost }).openfilmHost = host;
 
@@ -405,6 +422,11 @@ function commandFor(ref: StudioRef): StudioCommand {
   /* the composer's examples button: the examples over the film, to point at one or name a skill */
   showExamples: (open?: CommunityItem) => command?.({ type: 'show-examples', ...(open ? { open } : {}) }),
   onUseSkill: skillPicked.on,
+  /* Studio 写好的提问(0.3 的 ask)流进聊天输入框 */
+  onAsk: asked.on,
+  /* 空会话的技能卡(0.3 的 starters): npm 包剥离了官方 skills 目录、TinTin 技能无封面,
+     如实回空 —— 卡片区留空不崩, 技能走 @ 菜单/素材抽屉自有通道。 */
+  starterSkills: async () => [],
   onAddSkill: skillAdd.on,
   useSkill: (skill: { name: string; description: string; newConversation?: boolean }) => skillPicked.set(skill),
   /* a reference made in the chat (⌘L there, the @ menu) gets its picture as Studio's own do */

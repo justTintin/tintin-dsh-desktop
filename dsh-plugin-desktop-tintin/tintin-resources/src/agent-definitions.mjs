@@ -12,6 +12,10 @@ const definitions = {
   kimi: { name: 'Kimi', install: 'https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started.html' },
   minimax: { name: 'MiniMax Code', install: 'https://www.npmjs.com/package/@minimax-ai/code' },
   deepseek: { name: 'DeepSeek Harness', install: 'https://www.deepseek.com/harness/' },
+  // TinTin(2026-10-30, 0.3 重放 2026-11-07): 影片聊天的「TinTin智能体」—— 非外部 CLI, 由桌面端
+  // 按人设补丁直接拉起, 调度服务端子智能体(视频/图片/音乐/音频/口播/数字人生成); 无安装页。
+  // 名册行来自主进程, 这里登记 id 使持久化的选择合法。
+  'tintin-agent': { name: 'TinTin智能体', install: null },
   byok: { name: 'Own key', install: null },
 };
 

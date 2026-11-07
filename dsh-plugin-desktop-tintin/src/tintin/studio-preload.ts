@@ -84,8 +84,9 @@ const chat = {
     nativeInvoke('desktop:chat:sessions', { project, sessions, last }),
   saveTurn: (project: string, turn: unknown, items: unknown[]): Promise<unknown> =>
     nativeInvoke('desktop:chat:turn', { project, turn, items }),
-  log: (project: string, turnId: string, unless?: { size: number; callsSize: number }): Promise<unknown> =>
-    nativeInvoke('desktop:chat:log', { project, turnId, unless }),
+  /* 0.3 起 since=上次读位次(TurnLogAt), 后端按增量回(见 film-chat.log) */
+  log: (project: string, turnId: string, since?: { events: number; calls: number; callsFile: number }): Promise<unknown> =>
+    nativeInvoke('desktop:chat:log', { project, turnId, since }),
   reveal: (project: string, turnId?: string): Promise<unknown> => nativeInvoke('desktop:chat:reveal', { project, turnId }),
   saveRefImage: (project: string, turnId: string, n: number, bytes: ArrayBuffer): Promise<unknown> =>
     nativeInvoke('desktop:chat:ref-image', { project, turnId, n, bytes }),
@@ -95,6 +96,8 @@ const chat = {
   unsaved: (project: string, except?: string[]): Promise<unknown> => nativeInvoke('desktop:chat:unsaved', { project, except }),
   snapshot: (project: string, turnId: string): Promise<unknown> => nativeInvoke('desktop:chat:snapshot', { project, turnId }),
   changes: (project: string, turnId: string): Promise<unknown> => nativeInvoke('desktop:chat:changes', { project, turnId }),
+  /* 撤销一轮(0.3): 文件回到开工前, 新增的进回收站; 快照不在回 {ok:false, code:'gone'} */
+  undo: (project: string, turnId: string): Promise<unknown> => nativeInvoke('desktop:chat:undo', { project, turnId }),
 }
 
 const skills = {
@@ -149,7 +152,7 @@ contextBridge.exposeInMainWorld('openfilmNative', {
   async hello() {
     return {
       flavor: 'tintin',
-      version: '0.2.1-rc.1',
+      version: '0.3.0',
       ffmpeg: {},
       update: null,
       chatOpen: true,
