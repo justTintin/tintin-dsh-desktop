@@ -118,8 +118,17 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
   const index = useLibraryIndex();
   const favorites = useLibraryFavorites();
   const voices = useLibraryVoices();
+  /* the categories shown, in the person's order */
+  const arranged = useLibraryArrangement();
+  const categories = arrangedCategories(CATEGORIES, arranged).filter((c) => c.on).map((c) => c.id);
+  const [shownCat, setCat] = React.useState<Category>(SHOWN.cat);
+  /* one turned off while it was shown: the media in its place */
+  const cat: Category = categories.includes(shownCat) ? shownCat : 'media';
   /* TinTin(2026-11-07 用户裁决): the media pane's 在线素材 entry — the shell's online library
-     UI mounts into the content area over the page bridge (window.tintinOnlineLibrary). */
+     UI mounts into the content area over the page bridge (window.tintinOnlineLibrary).
+     Declared after `cat`: the mount effect reads it, and the host bridge flushSyncs panel
+     state, which can run this effect synchronously — reading `cat` from a declaration that
+     stood before this line threw the TDZ the 2253 build crashed on. */
   const [tintinOnline, setTintinOnline] = React.useState(false);
   const onlineHost = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
@@ -127,12 +136,6 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
     if (tintinOnline && cat === 'media' && onlineHost.current) host.tintinOnlineLibrary?.mount(onlineHost.current);
     return () => { host.tintinOnlineLibrary?.unmount?.() };
   }, [tintinOnline, cat]);
-  /* the categories shown, in the person's order */
-  const arranged = useLibraryArrangement();
-  const categories = arrangedCategories(CATEGORIES, arranged).filter((c) => c.on).map((c) => c.id);
-  const [shownCat, setCat] = React.useState<Category>(SHOWN.cat);
-  /* one turned off while it was shown: the media in its place */
-  const cat: Category = categories.includes(shownCat) ? shownCat : 'media';
   const [group, setGroup] = React.useState<string>(firstLine(SHOWN.cat));
   const [textOpen, setTextOpen] = React.useState(SHOWN.textOpen);
   const [starredText, setStarredText] = React.useState(SHOWN.starredText);
