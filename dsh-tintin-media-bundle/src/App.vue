@@ -18,11 +18,12 @@ import ImageMatting from './components/media-tools/ImageMatting.vue'
 // 图视域=服务端素材库检索/预览/多选/下载（形态对齐会话「选择素材」弹窗），
 // 音频 tab=原音频生成界面与功能原样内嵌（AudioGen 随本组件挂载）
 import MaterialLibrary from './components/media-tools/MaterialLibrary.vue'
-// 参考视频下载（2026-09-25 用户裁决移植）：YouTube/Bilibili 链接解析 → 档位下载
-// （yt-dlp 门 + 浏览器登录态 cookies）
-import VideoDownload from './components/media-tools/VideoDownload.vue'
 // 分镜脚本创作（2026-09-25 P2 恢复）：文案→分镜→引用素材→保存脚本库；消费产品资料卡草案信号
 import OtStoryboard from './components/media-tools/OtStoryboard.vue'
+// 图片/视频反推提示词（2026-11-09 用户裁决：自运营工具整体迁入——视频反推
+// 消费本包既有 useImitationVideo，与仿爆款视频卡同编排同源、state 独立实例）
+import ReversePromptVideo from './components/media-tools/ReversePromptVideo.vue'
+import ReversePromptImage from './components/media-tools/ReversePromptImage.vue'
 // 视频转文字（2026-09-25 P2 恢复）：批量转写队列 + 听悟式字幕工作台 + 洗稿 + 四格式导出
 import VideoTranscribe from './components/media-tools/VideoTranscribe.vue'
 // 去水印字幕（2026-09-25 P2 恢复）：预览帧四点框选 + /vsr/remove
@@ -32,10 +33,6 @@ import SubtitleRemoval from './components/media-tools/SubtitleRemoval.vue'
 import ImitationVideo from './components/media-tools/ImitationVideo.vue'
 // 直播切片（2026-09-25 P2 恢复）：热点发现→切片→封面/字幕（whisper+llmChat+liveclip 文件 I/O）
 import LiveClip from './components/media-tools/LiveClip.vue'
-// 封面制作（2026-09-25 用户裁决移植）：图层编辑 → /workflow/run + SSE 进度 →
-// 结果画廊；AI 文案（/llm/chat/completions）可用，「开始生成」待服务端补
-// cover 工作流端点（组件头注登记实测缺口）
-import CoverMaker from './components/media-tools/CoverMaker.vue'
 // 「前往分镜」跨视图跳转（2026-09-27）：产品资料文案面板写入 pendingStoryboard
 // 信号后，本视图侦听并自动打开分镜脚本创作卡
 import { pendingStoryboard } from './composables/pendingStoryboard'
@@ -65,9 +62,10 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
     ],
   },
   {
+    // 封面制作卡已退役（2026-11-09 用户裁决）：封面编辑器独立为侧栏「封面制作」
+    // 视图（dsh-tintin-cover-plugin 页内挂载），媒体包旧 workflow 版卡整体删除
     group: '图形',
     tools: [
-      { id: 'cover-design', title: '封面制作', desc: '商品封面图快速制作', emoji: '🎨', accent: 'linear-gradient(135deg,#EC4899 0%,#F43F5E 100%)' },
       { id: 'image-matting', title: '图像抠图', desc: '智能抠图 / 去除背景', emoji: '✂️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#06B6D4 100%)' },
     ],
   },
@@ -88,7 +86,14 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
       { id: 'live-slice', title: '直播切片', desc: '视频分析热点发现→切片与封面生成', emoji: '📡', accent: 'linear-gradient(135deg,#EF4444 0%,#DC2626 100%)' },
       // 视频修复占位卡已删（2026-10-06 用户裁决：卡片及功能移除；从未实现，仅禁用占位）
       { id: 'subtitle-removal', title: '视频去水印字幕', desc: '去除字幕 / 台标水印', emoji: '🔤', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)' },
-      { id: 'video-download', title: '参考视频下载', desc: '粘贴 YouTube/B 站 链接选档位下载', emoji: '⬇️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#6366F1 100%)' },
+    ],
+  },
+  {
+    // 提示词组（2026-11-09 用户裁决：自运营工具整体迁入，ops 侧不再有）
+    group: '提示词',
+    tools: [
+      { id: 'reverse-prompt-image', title: '图片反推提示词', desc: '上传图片，AI 生成绘画提示词', emoji: '🖼️', accent: 'linear-gradient(135deg,#10B981 0%,#14B8A6 100%)' },
+      { id: 'reverse-prompt-video', title: '视频反推提示词', desc: '拆解视频 → 脚本 + 反推提示词（仿视频拆解接口）', emoji: '🎬', accent: 'linear-gradient(135deg,#3B82F6 0%,#8B5CF6 100%)' },
     ],
   },
 ]
@@ -99,18 +104,20 @@ const active = ref<string | null>(null)
 // 信号后自动打开分镜脚本创作卡（信号由 OtStoryboard 挂载/在位时消费）
 watch(pendingStoryboard, (v) => { if (v) active.value = 'storyboard' })
 // 工具内跨卡跳转（2026-10-09）：仿视频第 1 步「视频去字幕」等按钮写入目标卡
-// id 后在此切卡；立即清空（一次性消费，防残留重复触发）
+// id 后在此切卡；立即清空（一次性消费，防残留重复触发）。
+// 未知卡 id 拒收（2026-11-09 封面卡退役防御）：否则 active 落在无分支匹配的 id
+// 上 = 只剩返回键的空详情页死胡同；存量外部绑定（创作包 localStorage）可能还带着旧 id。
 watch(pendingMediaTool, (id) => {
-  if (!id) return
-  active.value = id
   pendingMediaTool.value = null
+  if (!id || !ALL_TOOLS.some((t) => t.id === id)) return
+  active.value = id
 })
 // 跨包直达（2026-10-17 创作模式拆独立插件 dsh-tintin-creation-bundle）：
 // 创作包经窗口总线 __tintinBus 请求打开媒体工具卡（同 bundle 写入方仍走
-// 上方 pendingMediaTool ref，两条路径同一落点）
+// 上方 pendingMediaTool ref，两条路径同一落点）；未知卡 id 同款拒收
 function onBusMediaTool(payload: unknown): void {
   const id = String(payload ?? '')
-  if (!id) return
+  if (!id || !ALL_TOOLS.some((t) => t.id === id)) return
   active.value = id
 }
 onMounted(() => {
@@ -202,10 +209,10 @@ const isDark = useHostDark()
         <VideoTranscribe v-else-if="active === 'video-transcribe'" />
         <SubtitleRemoval v-else-if="active === 'subtitle-removal'" />
         <LiveClip v-else-if="active === 'live-slice'" />
-        <CoverMaker v-else-if="active === 'cover-design'" />
         <ImageMatting v-else-if="active === 'image-matting'" />
         <MaterialLibrary v-else-if="active === 'material-library'" />
-        <VideoDownload v-else-if="active === 'video-download'" />
+        <ReversePromptVideo v-else-if="active === 'reverse-prompt-video'" />
+        <ReversePromptImage v-else-if="active === 'reverse-prompt-image'" />
       </KeepAlive>
     </div>
   </div>

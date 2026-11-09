@@ -531,27 +531,8 @@ export namespace TTSAPI {
   export type VoicesSamplesResponse = VoiceSample[]
 }
 
-export namespace WorkflowAPI {
-  // CoverMaker 一键成片 workflow 编排接口
-  export interface WorkflowNode {
-    id: string
-    capability_key: string
-    input: Record<string, any>
-    depends_on?: string[]
-  }
-  export interface RunRequest {
-    title?:    string
-    product_context?: Record<string, any>
-    nodes:     WorkflowNode[]
-    priority?: 0 | 1 | 2
-  }
-  export interface RunResponse {
-    run_id:    string
-    task_id?:  string   // 如果编排后合并为一个 c_* 任务
-    status:    TaskStatus
-    queued_at: string
-  }
-}
+// WorkflowAPI（CoverMaker 一键成片编排）已随媒体包封面卡退役删除（2026-11-09 用户裁决）：
+// 唯一消费方 CoverMaker.vue 移除，服务端 /workflow/run 端点不在本包契约面。
 
 export namespace MaterialAPI {
   export type MediaKind = 'image' | 'video' | 'audio' | 'all'

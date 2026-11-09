@@ -9,12 +9,13 @@
 // 功能后端=本服务端（用户裁决 2026-10-16）：不消费即梦私有协议。
 // ═══════════════════════════════════════════════════════════════
 
-/** 媒体工具卡 id（App.vue GROUPS 的 id 域）——技能可绑定直达 */
+/** 媒体工具卡 id（App.vue GROUPS 的 id 域）——技能可绑定直达。
+ *  'cover-design' 已移除（2026-11-09 用户裁决）：封面编辑器独立为侧栏视图，
+ *  媒体包旧 workflow 版卡退役，绑定域随之收窄。 */
 export type CreationToolId =
   | 'storyboard'
   | 'jianying-templates'
   | 'video-transcribe'
-  | 'cover-design'
   | 'image-matting'
   | 'material-library'
   | 'voice-clone'
@@ -173,7 +174,6 @@ export const TOOL_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: 'storyboard', label: '分镜脚本创作' },
   { value: 'copywriting-montage', label: '文案混剪' },
   { value: 'imitation-video', label: '仿爆款视频' },
-  { value: 'cover-design', label: '封面制作' },
   { value: 'voice-clone', label: '声音克隆' },
   { value: 'material-library', label: '素材库' },
   { value: 'video-transcribe', label: '视频转文字' },
@@ -203,7 +203,7 @@ export const BUILTIN_CREATION_SKILLS: readonly CreationSkill[] = Object.freeze([
   { id: 'sk-narrative-storyboard', name: '叙事短片导演分镜', emoji: '🎥', badge: 'Hot', builtin: true, tool: 'storyboard', backend: 'llm', template: `你是「叙事短片导演分镜」技能（作者：森海荧光）。技能说明：\n以森海荧光导演分镜方法论产出叙事短片：导演意图书、九列分镜表、4~15s Clip 表与逐 Clip 提示词，直至成片。\n\n请对下面的创作需求执行该技能：\n{{输入}}{{主体}}` },
   { id: 'sk-micro-expression', name: '微表情导演', emoji: '😌', badge: 'Hot', builtin: true, backend: 'llm', template: '你是「AI演员微表情导演」技能。以微表情导演的方式细化下面场景中人物的表演：{{输入}}\n逐拍给出：微表情变化（眼/眉/嘴）、头部与肢体微动作、与台词/节奏的配合点。{{主体}}' },
   { id: 'sk-ad-director', name: '电影广告全能导演', emoji: '📺', builtin: true, tool: 'copywriting-montage', backend: 'llm', template: '以电影广告片导演身份把下面的brief发展为15-30s广告：{{输入}}\n输出：核心卖点一句话、创意概念、逐镜脚本（画面/运镜/字幕/音乐点）、结尾落版与行动号召。{{主体}}' },
-  { id: 'sk-series-sets', name: '系列套图生成', emoji: '🖼️', builtin: true, tool: 'cover-design', backend: 'llm', template: '围绕下面的主题设计一组风格统一的系列图（4-6 张）：{{输入}}\n每张给出：画面主体与构图、统一风格的色调/字体/版式规则、图与图之间的叙事递进关系。{{主体}}' },
+  { id: 'sk-series-sets', name: '系列套图生成', emoji: '🖼️', builtin: true, backend: 'llm', template: '围绕下面的主题设计一组风格统一的系列图（4-6 张）：{{输入}}\n每张给出：画面主体与构图、统一风格的色调/字体/版式规则、图与图之间的叙事递进关系。{{主体}}' },
 ])
 
 function cloneSkills(skills: readonly CreationSkill[]): CreationSkill[] {
@@ -225,7 +225,10 @@ export function sanitizeSkills(raw: unknown): CreationSkill[] {
     const id = String(it.id ?? '').trim()
     const name = String(it.name ?? '').trim()
     if (!id || !name) continue
-    const tool = typeof it.tool === 'string' && it.tool.trim() ? (it.tool.trim() as CreationToolId) : undefined
+    /* 绑定域校验（2026-11-09）：只认 TOOL_OPTIONS 下拉白名单——盲转型会让 localStorage
+       存量技能带着已退役的 'cover-design' 绑定活下来，直达按钮点了切到不存在的卡 */
+    const rawTool = typeof it.tool === 'string' ? it.tool.trim() : ''
+    const tool = rawTool && TOOL_OPTIONS.some((o) => o.value === rawTool) ? (rawTool as CreationToolId) : undefined
     const backend = it.backend === 'voiceover' || it.backend === 'copy' || it.backend === 'llm' ? it.backend : undefined
     const badge = it.badge === 'New' || it.badge === 'Hot' ? it.badge : undefined
     const version = typeof it.version === 'string' && it.version.trim() ? it.version.trim() : undefined

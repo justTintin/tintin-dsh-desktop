@@ -13,7 +13,6 @@ import type {
   RembgAPI,
   ViralCloneAPI,
   VisionAPI,
-  WorkflowAPI,
   AgentAPI,
   TasksAPI,
   ScheduledAPI,
@@ -453,11 +452,6 @@ declare interface TintinBridgeServer {
   jyfontsServerList(): Promise<{ fonts: Array<Record<string, unknown>> } | { error: string } | null>
   /** 批量上传本机剪映字体到服务端字体库（名称互含命中已装则跳过；单条失败不阻断） */
   jyfontsUpload(payload: { paths: string[] }): Promise<{ ok: boolean; results: Array<{ path: string; name: string; ok: boolean; skipped?: boolean; error?: string }> } | { error: string }>
-
-  // ---------- workflow（CoverMaker 一键成片编排）----------
-  workflowRun(
-    payload: WorkflowAPI.RunRequest
-  ): Promise<IpcError<WorkflowAPI.RunResponse>>
 
   // ---------- llm ----------
   llmChat(
@@ -969,10 +963,6 @@ declare interface TintinBridge {
   feishu: TintinBridgeFeishu
   clientTasks: TintinBridgeClientTasks // W11 客户端任务活动订阅（client-task:activity → 任务队列实时刷新）
 }
-declare interface TintinBridgeClientTasks {
-  /** 订阅客户端任务活动事件（返回取消函数） */ onActivity(cb: (payload: { type?: string; task_id?: string; ok?: boolean; status?: string }) => void): () => void
-}
-
 /** 参考视频下载（yt-dlp）桥类型 */
 declare interface TintinYtdlpOption {
   id: string
@@ -1004,6 +994,10 @@ declare interface TintinBridgeYtdlp {
   openLoginBrowser(payload: { platform: string }): Promise<{ ok?: boolean; error?: { type?: string; message?: string } }>
   /** 下载进度事件，返回取消函数 */
   onProgress(cb: (p: { phase: string; pct: number }) => void): () => void
+}
+
+declare interface TintinBridgeClientTasks {
+  /** 订阅客户端任务活动事件（返回取消函数） */ onActivity(cb: (payload: { type?: string; task_id?: string; ok?: boolean; status?: string }) => void): () => void
 }
 
 // --------------------------------------------------------------------
