@@ -10,13 +10,13 @@ function CanvasCrash({ error, onShown, onReload }: { error: Error; onShown: () =
   const shownRef = React.useRef(onShown)
   React.useEffect(() => { shownRef.current() }, [])
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, maxWidth: '80%', padding: 16, color: '#e8e8e6', fontSize: 13, textAlign: 'center' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, maxWidth: '80%', padding: 16, color: 'var(--text)', fontSize: 13, textAlign: 'center' }}>
       <div style={{ fontWeight: 600 }}>⚠ 画布渲染出错,修改内容后会自动重试</div>
-      <div style={{ color: '#8b8b88', fontSize: 11, wordBreak: 'break-all' }}>{error.message}</div>
+      <div style={{ color: 'var(--text-faint)', fontSize: 11, wordBreak: 'break-all' }}>{error.message}</div>
       <button
         onPointerDown={(e) => e.stopPropagation()}
         onClick={onReload}
-        style={{ background: '#2a2a2e', color: '#e8e8e6', border: '1px solid #444', borderRadius: 6, padding: '4px 12px', fontSize: 12, cursor: 'pointer' }}
+        style={{ background: 'var(--bg-raised)', color: 'var(--text)', border: '1px solid var(--border-strong)', borderRadius: 6, padding: '4px 12px', fontSize: 12, cursor: 'pointer' }}
       >重新加载画布</button>
     </div>
   )

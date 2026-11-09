@@ -16,21 +16,21 @@ function ensureStripStyle(): void {
   const s = document.createElement('style')
   s.textContent = [
     '.tintin-as-cell{position:relative}',
-    '.tintin-as-drop{outline:2px dashed #4f7cff;outline-offset:-8px}',
+    '.tintin-as-drop{outline:2px dashed var(--accent);outline-offset:-8px}',
     /* 右键菜单(2026-10-31 用户裁决:与视频剪辑素材右键同款) */
-    '.tintin-as-menu{position:fixed;z-index:2300;min-width:200px;background:#1e1e20;border:1px solid #3a3a3e;border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);padding:5px}',
+    '.tintin-as-menu{position:fixed;z-index:2300;min-width:200px;background:var(--bg-raised);border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);padding:5px}',
     '.tintin-as-menu button{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:#d9d9de;font:400 12px/1.6 system-ui;padding:7px 10px;border-radius:8px;cursor:pointer;text-align:left;white-space:nowrap}',
-    '.tintin-as-menu button:hover{background:#26272b}',
-    '.tintin-as-menu button.danger{color:#f87171}',
+    '.tintin-as-menu button:hover{background:var(--bg-hover)}',
+    '.tintin-as-menu button.danger{color:var(--err)}',
     '.tintin-as-menu button .ico{width:16px;text-align:center;flex-shrink:0;color:#a9a9af}',
-    '.tintin-as-menu button.danger .ico{color:#f87171}',
+    '.tintin-as-menu button.danger .ico{color:var(--err)}',
     /* 收藏星标(右键菜单「收藏」) */
     '.tintin-as-fav{position:absolute;top:4px;right:4px;z-index:5;color:#f5c451;font-size:12px;line-height:1;text-shadow:0 1px 2px rgba(0,0,0,.6)}',
     /* 滚动条与右侧会话框同款(2026-10-31 用户裁决:细条圆角透明轨道;取自 chat.css Thin scrollbars) */
     '::-webkit-scrollbar{width:9px;height:9px}',
     '::-webkit-scrollbar-track{background:transparent}',
     '::-webkit-scrollbar-thumb{background:var(--border-strong,#3f3f46);border-radius:99px;border:2px solid transparent;background-clip:padding-box}',
-    '::-webkit-scrollbar-thumb:hover{background:var(--text-faint,#8b8b88);background-clip:padding-box}',
+    '::-webkit-scrollbar-thumb:hover{background:var(--text-faint,var(--text-faint));background-clip:padding-box}',
     '::-webkit-scrollbar-corner{background:transparent}',
   ].join('\n')
   document.head.append(s)
@@ -198,7 +198,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
   }
   return (
     <div
-      style={{ flexShrink: 0, background: '#1a1a1c', borderTop: '1px solid #2c2c30', padding: '0 14px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}
+      style={{ flexShrink: 0, background: 'var(--bg-panel)', borderTop: '1px solid var(--border)', padding: '0 14px 10px', display: 'flex', flexDirection: 'column', gap: 6 }}
       onDragOver={stripDragOver}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropping(false) }}
       onDrop={stripDrop}
@@ -206,12 +206,12 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
       {/* 头行 40px=与顶部工具栏同高;字号对齐图层面板头行(2026-10-30 用户裁决) */}
       <div style={{ height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
         {/* 标题字体对齐项目 tab(2026-10-30 用户裁决:11.5 + tab 同亮色) */}
-        <span style={{ fontSize: 11.5, color: '#e8e8e6', fontWeight: 700 }}>素材 · {items.length} 张</span>
+        <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700 }}>素材 · {items.length} 张</span>
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={importBusy}
           title="从系统目录选择图片文件导入当前项目"
-          style={{ padding: '3px 10px', borderRadius: 999, border: '1px solid #3a3a3e', cursor: importBusy ? 'wait' : 'pointer', background: 'transparent', color: '#c9c9cf', fontSize: 11, fontWeight: 600 }}
+          style={{ padding: '3px 10px', borderRadius: 999, border: '1px solid var(--border-strong)', cursor: importBusy ? 'wait' : 'pointer', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, fontWeight: 600 }}
         >{importBusy ? '导入中…' : (
           <>
             {/* 上传图标(2026-10-30 用户裁决:⎘ 语义不对,改 feather upload) */}
@@ -223,7 +223,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
             导入
           </>
         )}</button>
-        {notice ? <span style={{ fontSize: 11, color: notice.includes('失败') ? '#e8a23c' : '#7ee2a8' }}>{notice}</span> : null}
+        {notice ? <span style={{ fontSize: 11, color: notice.includes('失败') ? 'var(--warn)' : 'var(--ok)' }}>{notice}</span> : null}
         <span style={{ flex: 1 }} />
         {/* 打开封面项目文件目录(2026-10-29 用户裁决):复用 /api/reveal(缺省=封面目录)。
             图标与热区放大(2026-10-30 用户追问:13px emoji 过小,与 40px 头行不匹配) */}
@@ -231,9 +231,9 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
           type="button"
           title="打开封面项目的文件目录"
           onClick={() => { void fetch('/tintin/ipc/cover/reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }) }}
-          style={{ ...iconBtn, width: 30, height: 30, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c9c9c7' }}
+          style={{ ...iconBtn, width: 30, height: 30, fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}
         >📁</button>
-        <span style={{ fontSize: 10, color: '#8b8b88' }}>拖图入库 · 拖到画布成层</span>
+        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>拖图入库 · 拖到画布成层</span>
         <input
           ref={fileInputRef}
           type="file"
@@ -254,14 +254,14 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
             {[0, 1].map((i) => (
               <div
                 key={i}
-                style={{ flexShrink: 0, width: 128, height: 148, borderRadius: 8, border: '1px dashed #3a3a3e', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#55565c', fontSize: 20, background: '#101012' }}
+                style={{ flexShrink: 0, width: 128, height: 148, borderRadius: 8, border: '1px dashed var(--border-strong)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-faint)', fontSize: 20, background: 'var(--bg-app)' }}
               >
                 {i === 0 ? '⬆' : '🖼'}
               </div>
             ))}
             {/* 提示文案只在确认加载完成且确为空时出现;加载中不闪文案(切项目防抖动) */}
             {loaded ? (
-              <div style={{ flexShrink: 0, alignSelf: 'center', fontSize: 11, color: '#8b8b88', padding: '0 10px', lineHeight: 1.8 }}>
+              <div style={{ flexShrink: 0, alignSelf: 'center', fontSize: 11, color: 'var(--text-faint)', padding: '0 10px', lineHeight: 1.8 }}>
                 还没有图片素材——点「导入」选图入库，或直接把图片拖进本条；
                 <br />上传、AI 生成、会话领养也会出现在这里
               </div>
@@ -288,15 +288,15 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
               onDragOver={stripDragOver}
               onDrop={(e) => { e.stopPropagation(); stripDrop(e) }}
               style={{
-                cursor: 'default', border: sel ? '1px solid rgba(79,124,255,0.7)' : '1px solid #333', borderRadius: 8,
-                overflow: 'hidden', background: '#101012', flexShrink: 0, width: 128,
+                cursor: 'default', border: sel ? '1px solid var(--accent)' : '1px solid var(--border)', borderRadius: 8,
+                overflow: 'hidden', background: 'var(--bg-app)', flexShrink: 0, width: 128,
               }}
             >
               {/* 1:1 方格+棋盘格衬底=透明素材可见（RGBA 装饰落在近黑底上曾是黑块） */}
               <div style={{ height: 128, background: 'repeating-conic-gradient(#2e2e35 0% 25%, #1b1b21 0% 50%) 0 0 / 12px 12px' }}>
                 <img src={`/tintin/ipc/cover/acp/asset?name=${encodeURIComponent(name)}`} alt={base} loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
               </div>
-              <div style={{ padding: '3px 6px', fontSize: 10, lineHeight: '12px', color: '#8b8b88', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{base}</div>
+              <div style={{ padding: '3px 6px', fontSize: 10, lineHeight: '12px', color: 'var(--text-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{base}</div>
               {fav ? <span className="tintin-as-fav">★</span> : null}
             </div>
           )
@@ -417,15 +417,15 @@ function ExportModal({ onClose }: { onClose: () => void }): React.ReactElement {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={onClose}>
-      <div style={{ width: 380, background: '#1e1e20', borderRadius: 14, padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}
+      <div style={{ width: 380, background: 'var(--bg-raised)', borderRadius: 'var(--radius-lg)', padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}
         onClick={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: '#e8e8e6', marginBottom: 16 }}>导出封面</div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', marginBottom: 16 }}>导出封面</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
           {targets.map((t) => (
             <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
-              <input type="checkbox" checked={t.checked} onChange={() => toggle(t.key)} style={{ accentColor: '#4f7cff', width: 16, height: 16 }} />
-              <span style={{ color: '#e8e8e6', fontWeight: 600 }}>{t.label}</span>
-              <span style={{ color: '#8b8b88', fontSize: 11, marginLeft: 'auto' }}>{t.size}</span>
+              <input type="checkbox" checked={t.checked} onChange={() => toggle(t.key)} style={{ accentColor: 'var(--accent)', width: 16, height: 16 }} />
+              <span style={{ color: 'var(--text)', fontWeight: 600 }}>{t.label}</span>
+              <span style={{ color: 'var(--text-faint)', fontSize: 11, marginLeft: 'auto' }}>{t.size}</span>
             </label>
           ))}
         </div>
@@ -434,13 +434,13 @@ function ExportModal({ onClose }: { onClose: () => void }): React.ReactElement {
           onClick={() => void doExport()}
           style={{
             width: '100%', padding: '10px 0', borderRadius: 8, border: 0, cursor: busy ? 'default' : 'pointer',
-            background: busy ? 'rgba(79,124,255,0.4)' : 'var(--primary, #4f7cff)', color: '#fff', fontSize: 14, fontWeight: 700,
+            background: busy ? 'var(--bg-pressed)' : 'var(--primary)', color: 'var(--on-primary)', fontSize: 14, fontWeight: 700,
           }}
         >{busy ? '渲染中…' : `导出 ${targets.filter((t) => t.checked).length} 张 PNG`}</button>
         {results.length ? (
-          <div style={{ marginTop: 12, fontSize: 11.5 }}>
+          <div style={{ marginTop: 12, fontSize: 12 }}>
             {results.map((r, i) => (
-              <div key={i} style={{ color: r.ok ? '#22c55e' : '#f87171', wordBreak: 'break-all', userSelect: 'text', marginBottom: 4 }}>{r.text}</div>
+              <div key={i} style={{ color: r.ok ? 'var(--ok)' : 'var(--err)', wordBreak: 'break-all', userSelect: 'text', marginBottom: 4 }}>{r.text}</div>
             ))}
             {results.some((r) => r.ok) ? (
               <button
@@ -454,7 +454,7 @@ function ExportModal({ onClose }: { onClose: () => void }): React.ReactElement {
           </div>
         ) : null}
         <div style={{ marginTop: 16, textAlign: 'right' }}>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #444', borderRadius: 6, color: '#8b8b88', fontSize: 12, padding: '5px 16px', cursor: 'pointer' }}>关闭</button>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #444', borderRadius: 6, color: 'var(--text-faint)', fontSize: 12, padding: '5px 16px', cursor: 'pointer' }}>关闭</button>
         </div>
       </div>
     </div>
@@ -509,8 +509,8 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
     <div style={{ ...panelStyle, flex: '1 1 auto', minHeight: 0 }}>
       <div style={{ ...headStyle, display: 'flex', alignItems: 'center' }}>
         {/* 标题字体对齐项目 tab(2026-10-30 用户裁决:11.5 + tab 同亮色,去字距) */}
-        <span style={{ flex: 1, fontSize: 11.5, color: '#e8e8e6', letterSpacing: 'normal' }}>图层 · {tpl.label}</span>
-        <span style={{ fontSize: 10, color: '#8b8b88' }}>拖 ⠿ 调层级</span>
+        <span style={{ flex: 1, fontSize: 12, color: 'var(--text)', letterSpacing: 'normal' }}>图层 · {tpl.label}</span>
+        <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>拖 ⠿ 调层级</span>
       </div>
       <div
         style={{ display: 'flex', flexDirection: 'column', gap: 3 }}
@@ -534,8 +534,8 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                 onClick={() => selectLayer(row.groupId)}
                 style={{
                   marginLeft: 20, padding: '2px 8px', borderRadius: 6, cursor: 'pointer', userSelect: 'none',
-                  fontSize: 11, color: row.hidden ? '#6b6b69' : '#a9a9af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  background: selected ? 'rgba(79,124,255,0.12)' : 'transparent',
+                  fontSize: 11, color: row.hidden ? 'var(--text-faint)' : '#a9a9af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  background: selected ? 'var(--bg-selected)' : 'transparent',
                 }}
               >
                 └ 默认图层 · {row.detail}
@@ -586,12 +586,12 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                 style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '5px 7px', borderRadius: 8,
                 cursor: 'default', userSelect: 'none',
-                  background: selected ? 'linear-gradient(90deg, rgba(79,124,255,0.22), rgba(79,124,255,0.07))' : 'rgba(127,127,127,0.05)',
+                  background: selected ? 'linear-gradient(90deg, var(--bg-selected), var(--bg-selected))' : 'var(--bg-hover)',
                   border: selected
-                    ? '1px solid rgba(79,124,255,0.55)'
-                    : assetOverId === id ? '1px dashed rgba(79,124,255,0.7)'
+                    ? '1px solid var(--accent)'
+                    : assetOverId === id ? '1px dashed var(--accent)'
                     : '1px solid transparent',
-                  boxShadow: isOver ? 'inset 0 2px 0 #4f7cff' : 'none',
+                  boxShadow: isOver ? 'inset 0 2px 0 var(--accent)' : 'none',
                   opacity: dragId === id ? 0.45 : 1,
                 }}
               >
@@ -601,12 +601,12 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                   style={{ ...iconBtn, opacity: row.hidden ? 0.35 : 1, width: 24, height: 24, fontSize: 13 }}
                 >{row.hidden ? '🚫' : '👁'}</button>
                 <span style={{ fontSize: 12, flexShrink: 0 }}>{icon(row.type)}</span>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: row.hidden ? '#8b8b88' : '#e8e8e6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
-                {row.members > 0 ? <span style={{ fontSize: 10, color: '#4f7cff', flexShrink: 0 }}>{row.members} 层</span> : null}
+                <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: row.hidden ? 'var(--text-faint)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.label}</span>
+                {row.members > 0 ? <span style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0 }}>{row.members} 层</span> : null}
                 {lockedOf(props, id) ? <button title="已锁定位置(点击解锁)" onClick={(e) => { e.stopPropagation(); setLayerStyle(id, { locked: undefined }) }} style={{ ...iconBtn, width: 20, height: 22, fontSize: 11 }}>🔒</button> : null}
-                <span title="图层组:素材拖到组上=加入本组(图片组,叠放)" style={{ fontSize: 9.5, color: '#8b8b88', border: '1px solid #3a3a3e', borderRadius: 4, padding: '0 4px', flexShrink: 0 }}>组</span>
+                <span title="图层组:素材拖到组上=加入本组(图片组,叠放)" style={{ fontSize: 9.5, color: 'var(--text-faint)', border: '1px solid var(--border-strong)', borderRadius: 4, padding: '0 4px', flexShrink: 0 }}>组</span>
                 {/* 拖动柄放行尾(2026-10-30 用户裁决) */}
-                <span title="拖动调层级" style={{ color: '#6b6b69', fontSize: 11, flexShrink: 0, cursor: 'grab' }}>⠿</span>
+                <span title="拖动调层级" style={{ color: 'var(--text-faint)', fontSize: 11, flexShrink: 0, cursor: 'grab' }}>⠿</span>
               </div>
             )
           }
@@ -639,12 +639,12 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
               style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '5px 7px', borderRadius: 8,
                 cursor: 'default', userSelect: 'none',
-                background: selected ? 'linear-gradient(90deg, rgba(79,124,255,0.22), rgba(79,124,255,0.07))' : 'rgba(127,127,127,0.05)',
+                background: selected ? 'linear-gradient(90deg, var(--bg-selected), var(--bg-selected))' : 'var(--bg-hover)',
                 border: selected
-                  ? '1px solid rgba(79,124,255,0.55)'
-                  : assetOverId === id ? '1px dashed rgba(79,124,255,0.7)'
+                  ? '1px solid var(--accent)'
+                  : assetOverId === id ? '1px dashed var(--accent)'
                   : '1px solid transparent',
-                boxShadow: isOver ? 'inset 0 2px 0 #4f7cff' : 'none',
+                boxShadow: isOver ? 'inset 0 2px 0 var(--accent)' : 'none',
                 opacity: dragId === id ? 0.45 : 1,
               }}
             >
@@ -654,14 +654,14 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
                 style={{ ...iconBtn, opacity: row.hidden ? 0.35 : 1, width: 24, height: 24, fontSize: 13 }}
               >{row.hidden ? '🚫' : '👁'}</button>
               <span style={{ fontSize: 12, flexShrink: 0 }}>🖼</span>
-              <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: row.hidden ? '#8b8b88' : '#e8e8e6', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: row.group ? 10 : 0 }}>
-                {row.group && defOf(row.group) ? <span style={{ fontSize: 9.5, color: '#4f7cff', border: '1px solid rgba(79,124,255,0.5)', borderRadius: 4, padding: '0 4px', marginRight: 5 }}>{defOf(row.group)?.label}</span> : null}
+              <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: row.hidden ? 'var(--text-faint)' : 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: row.group ? 10 : 0 }}>
+                {row.group && defOf(row.group) ? <span style={{ fontSize: 9.5, color: 'var(--accent)', border: '1px solid var(--accent)', borderRadius: 4, padding: '0 4px', marginRight: 5 }}>{defOf(row.group)?.label}</span> : null}
                 {row.label}
               </span>
               {lockedOf(props, id) ? <button title="已锁定位置(点击解锁)" onClick={(e) => { e.stopPropagation(); setCustomLayer(id, { locked: undefined }) }} style={{ ...iconBtn, width: 20, height: 22, fontSize: 11 }}>🔒</button> : null}
-              <button title="删除图层" onClick={(e) => { e.stopPropagation(); removeCustomLayer(id) }} style={{ ...iconBtn, color: '#f87171', width: 24, height: 24, fontSize: 12 }}>✕</button>
+              <button title="删除图层" onClick={(e) => { e.stopPropagation(); removeCustomLayer(id) }} style={{ ...iconBtn, color: 'var(--err)', width: 24, height: 24, fontSize: 12 }}>✕</button>
               {/* 拖动柄放行尾(2026-10-30 用户裁决) */}
-              <span title="拖动调层级" style={{ color: '#6b6b69', fontSize: 11, flexShrink: 0, cursor: 'grab' }}>⠿</span>
+              <span title="拖动调层级" style={{ color: 'var(--text-faint)', fontSize: 11, flexShrink: 0, cursor: 'grab' }}>⠿</span>
             </div>
           )
         })}
@@ -687,24 +687,24 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
               {lines ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6, flexWrap: 'wrap' }}>
                   {lines.map((line, i) => (
-                    <span key={`${i}:${line}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #3a3a3e', borderRadius: 999, padding: '1px 4px 1px 8px', fontSize: 10.5, color: '#c9c9cf' }}>
+                    <span key={`${i}:${line}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid var(--border-strong)', borderRadius: 999, padding: '1px 4px 1px 8px', fontSize: 11, color: 'var(--text-muted)' }}>
                       行{i + 1}
                       <button
                         title={`删除行${i + 1}`}
                         onClick={() => { if (lines.length <= 1) return; setProp(key, lines.filter((_, j) => j !== i)) }}
-                        style={{ border: 0, background: 'transparent', color: lines.length > 1 ? '#f87171' : '#55565c', cursor: lines.length > 1 ? 'pointer' : 'default', fontSize: 10, padding: '0 3px' }}
+                        style={{ border: 0, background: 'transparent', color: lines.length > 1 ? 'var(--err)' : 'var(--text-faint)', cursor: lines.length > 1 ? 'pointer' : 'default', fontSize: 10, padding: '0 3px' }}
                       >✕</button>
                     </span>
                   ))}
                   <button
                     onClick={() => setProp(key, [...lines, ''])}
                     title="追加一行(在文本框里填内容)"
-                    style={{ border: '1px dashed #3a3a3e', borderRadius: 999, background: 'transparent', color: '#8b8b88', fontSize: 10.5, padding: '1px 8px', cursor: 'pointer' }}
+                    style={{ border: '1px dashed var(--border-strong)', borderRadius: 999, background: 'transparent', color: 'var(--text-faint)', fontSize: 11, padding: '1px 8px', cursor: 'pointer' }}
                   >＋ 添加一行</button>
                 </div>
               ) : null}
               <TextStyleEditor layerId={layer.id} baseFontSize={layer.fontSize ?? 36} />
-              <div style={{ fontSize: 10.5, color: '#8b8b88', marginTop: 4 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
                 {Array.isArray(value) ? '每行一条(钩子/卖点);末行默认跳色可被颜色覆盖' : '支持中文;改动即时预览'}
               </div>
             </div>
@@ -722,7 +722,7 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
               <div style={headStyle}>编辑「{layer.label}」</div>
               <DelayedTextEditor key={layer.id} value={value} isArray={false}
                 onCommit={(v) => setProp(key, v)} />
-              <div style={{ fontSize: 10.5, color: '#8b8b88', marginTop: 4 }}>装饰层文案,改动即时预览;字号/配色由模板排版</div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>装饰层文案,改动即时预览;字号/配色由模板排版</div>
             </div>
           )
         }
@@ -737,4 +737,4 @@ function LayersPanel({ project }: { project: string }): React.ReactElement {
 
 export { AssetsPanel, ExportModal, LayersPanel }
 
-/** 文字样式细调:字号缩放+颜色预设;存 props.styles(§9.3 同一份 props 投影) */
+/** 文字样式细调:字号缩放+颜色预设;存 props.styles(§9.3 同一份 props 投影) */

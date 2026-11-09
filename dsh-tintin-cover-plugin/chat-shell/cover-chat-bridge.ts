@@ -11,7 +11,7 @@
  * agent 知道模板与图层取值;编辑器点「引用到会话」(tintin-cover:refer)走与 Studio
  * 「Reference in chat」同一条 pill 通路。
  */
-import type { Project, StudioRef } from '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/app-bridge';
+import type { Project, SkillListing, StarterSkill, StudioRef } from '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/app-bridge';
 import type {
   LocalAgentEvent,
   LocalAgentId,
@@ -138,7 +138,7 @@ function ensureStream(): void {
 
 async function helloMeta(): Promise<{ coverDir: string; dshBin: boolean }> {
   if (!cachedHello) {
-    const r = await j<{ coverDir?: string; dshBin?: boolean }>('hello').catch(() => ({}));
+    const r = await j<{ coverDir?: string; dshBin?: boolean }>('hello').catch((): { coverDir?: string; dshBin?: boolean } => ({}));
     cachedHello = { coverDir: String(r.coverDir ?? ''), dshBin: r.dshBin === true };
   }
   return cachedHello;
@@ -152,7 +152,8 @@ const rosterAgents = async (): Promise<RosterAgent[]> => {
   const status = meta.dshBin ? 'ready' as const : 'missing' as const;
   return [
     { id: 'deepseek' as LocalAgentId, name: 'DeepSeek Harness', shown: true, status, install: 'https://github.com/deepseek-ai/deepseek-harness' },
-    { id: 'tintin-agent' as LocalAgentId, name: 'TinTin智能体', shown: true, status, install: null, disabled: '服务端智能体观察期,暂不可用' },
+    /* disabled=封面域扩展字段(1101 观察期裁决,契约 RosterAgent 无此键;聊天组件按自有逻辑渲染),as 放行 */
+    { id: 'tintin-agent' as LocalAgentId, name: 'TinTin智能体', shown: true, status, install: null, disabled: '服务端智能体观察期,暂不可用' } as RosterAgent,
   ];
 };
 
@@ -160,8 +161,9 @@ const agentStates = async (): Promise<LocalAgentState[]> => {
   const meta = await helloMeta().catch(() => ({ coverDir: '', dshBin: false }));
   const cli = meta.dshBin ? { path: 'dsh', source: 'app' as const } : null;
   return [
-    { id: 'tintin-agent', label: 'TinTin智能体', cli, signedIn: true, install: null },
-    { id: 'deepseek', label: 'DeepSeek Harness', cli, signedIn: true, install: 'https://github.com/deepseek-ai/deepseek-harness' },
+    /* tintin-agent 无官方安装页(模型由 TinTin 服务端提供):空串=falsy,UI 不指向安装 */
+    { id: 'tintin-agent' as LocalAgentId, label: 'TinTin智能体', cli, signedIn: true, install: '' },
+    { id: 'deepseek' as LocalAgentId, label: 'DeepSeek Harness', cli, signedIn: true, install: 'https://github.com/deepseek-ai/deepseek-harness' },
   ];
 };
 
@@ -179,7 +181,7 @@ const sessionInfoOf = (info: Record<string, unknown>): LocalAgentSessionInfo => 
 
 const localAgents = {
   list: async (): Promise<LocalAgentState[]> => agentStates(),
-  disconnect: async (): Promise<{ ok: boolean }> => postJson('close', {}),
+  disconnect: async (): Promise<{ ok: boolean }> => postJson('close', {}) as Promise<{ ok: boolean }>,
   signIn: async (): Promise<{ ok: false; error: string }> => ({ ok: false, error: '无需登录: 模型由 TinTin 服务端提供' }),
   probe: async (agent: LocalAgentId): Promise<{ ok: true; info: LocalAgentSessionInfo } | { ok: false; error: string; code?: string }> => {
     /* probe 按所选拉起临时会话取模型清单(主进程按 agent 分补丁) */
@@ -241,7 +243,7 @@ async function libraryFetch(reset: boolean): Promise<Array<Record<string, unknow
   libraryPage.loading = true
   libraryPage.page += 1
   const q = `library?page=${libraryPage.page}&size=24${libraryPage.search ? `&search=${encodeURIComponent(libraryPage.search)}` : ''}`
-  const body = await j<{ ok?: boolean; items?: Array<Record<string, unknown>>; error?: string }>(q).catch(() => ({ ok: false, error: '加载失败' }))
+  const body = await j<{ ok?: boolean; items?: Array<Record<string, unknown>>; error?: string }>(q).catch((): { ok?: boolean; items?: Array<Record<string, unknown>>; error?: string } => ({ ok: false, error: '加载失败' }))
   libraryPage.loading = false
   if (body.ok !== true) throw new Error(String(body.error ?? '加载失败'))
   const items = Array.isArray(body.items) ? body.items : []
@@ -378,7 +380,13 @@ function setLibraryDrawer(open: boolean): void {
   assetsSignal.set(assetsDrawerOpen);
 }
 
-(window as unknown as { openfilmDesktop: unknown }).openfilmDesktop = {
+/* 桥契约编译期校验(2026-11-09 方案 3):AppBridge 未导出,经 `app` 常量的类型提取;
+   & Record<string, unknown> 放行封面合法扩展成员(agents/localAgents/coverLayers/
+   starters 等,非上游契约)。0.3.0 升级漏 starterSkills 静默白屏的教训——上游给契约
+   加必选成员,此处类型即刻报缺,不再依赖人工升级清单。 */
+type AppBridgeContract = typeof import('../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/app-bridge')['app'];
+
+const coverBridge: AppBridgeContract & Record<string, unknown> = {
   version: 'tintin-cover-1',
   bridgeVersion: '1',
   platform: navigator.platform.startsWith('Win') ? 'win32' : navigator.platform.startsWith('Mac') ? 'darwin' : 'linux',
@@ -478,6 +486,10 @@ function setLibraryDrawer(open: boolean): void {
     '切成竖屏布局并保留内容',
     '生成一张星空下露营的场景图',
   ],
+  /* 空会话技能卡(0.3.0 新契约,AppBridge 必选成员):影片侧 bridge.ts 返回空数组,
+     封面域暂无 starter 技能卡同款空实现。2026-11-09 事故=升级漏配此方法,新项目空会话
+     挂 ProjectStarters 时同步抛 starterSkills is not a function → React 整树白屏。 */
+  starterSkills: async (): Promise<StarterSkill[]> => [],
   /* composer 占位符(封面域措辞;影片侧无此方法保持「描述你的影片」) */
   composerPlaceholder: async () => ({
     blank: '描述你要的封面。输入 @ 可引用图层或素材',
@@ -509,7 +521,7 @@ function setLibraryDrawer(open: boolean): void {
       const res = await fetch(`${API}/chat-attachment?name=${encodeURIComponent(name)}`, { method: 'POST', body: bytes });
       return res.json();
     },
-    describePaths: (paths: string[]) => postJson('describe-paths', { paths }),
+    describePaths: (paths: string[]) => postJson('describe-paths', { paths }) as Promise<Array<{ path: string; folder: boolean; size?: number } | { path: string; error: string }>>,
     unsaved: async (): Promise<never[]> => [],
     snapshot: async (): Promise<null> => null,
     changes: async (): Promise<null> => null,
@@ -517,18 +529,20 @@ function setLibraryDrawer(open: boolean): void {
   /* useSyncExternalStore 的 get 必须返回稳定引用(新数组会触发无限重渲染, React #185) */
   asks: { get: (): never[] => NO_ASKS, onChange: noopStop, answer: () => {} },
   skills: {
-    list: (project: string, agent: string) => j('skills').catch(() => ({ openfilm: [], own: { agent, filtered: false, skills: [] }, mine: '' })),
-    texts: (project: string, agent: string, names: string[]) => postJson('skills-texts', { project, agent, names }).catch(() => []),
+    list: (project: string, agent: string) => j('skills').catch(() => ({ openfilm: [], own: { agent, filtered: false, skills: [] }, mine: '' })) as Promise<SkillListing>,
+    texts: (project: string, agent: string, names: string[]) => postJson('skills-texts', { project, agent, names }).catch(() => []) as Promise<Array<{ name: string; text: string }>>,
     allow: async (): Promise<{ ok: boolean }> => ({ ok: true }),
     changed: async (): Promise<null> => null,
     preview: async (): Promise<{ ok: false; error: string }> => ({ ok: false, error: '封面技能随插件分发,不支持从地址安装' }),
-    previewFolder: async (): Promise<{ ok: false; cancelled: boolean }> => ({ ok: false, cancelled: true }),
+    previewFolder: async () => ({ ok: false as const, cancelled: true as const }),
     commit: async (): Promise<{ ok: true; skills: never[] }> => ({ ok: true, skills: [] }),
     discard: async (): Promise<null> => null,
     reveal: async (): Promise<null> => null,
   },
   developer: { get: async (): Promise<{ logs: boolean; changes: boolean }> => ({ logs: false, changes: false }), onChange: noopStop },
 };
+
+(window as unknown as { openfilmDesktop: unknown }).openfilmDesktop = coverBridge;
 
 /* 模式切换按钮已删除(2026-10-30 用户裁决):composer 不再有「直连生图/Agent」切换钮 ——
    会话固定走 TinTin智能体;该按钮与 prompt 直连旁路一并移除(见上方 prompt)。 */

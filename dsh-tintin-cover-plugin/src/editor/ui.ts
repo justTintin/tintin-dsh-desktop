@@ -2,18 +2,18 @@
 import type React from 'react'
 
 export const panelStyle: React.CSSProperties = {
-  width: 252, flexShrink: 0, background: '#1a1a1c', borderRight: '1px solid #333',
+  width: 252, flexShrink: 0, background: 'var(--bg-panel)', borderRight: '1px solid #333',
   padding: 12, display: 'flex', flexDirection: 'column', overflowY: 'auto', overflowX: 'hidden',
 }
-export const headStyle: React.CSSProperties = { fontSize: 11, color: '#8b8b88', margin: '4px 0 8px', fontWeight: 700, letterSpacing: 1 }
+export const headStyle: React.CSSProperties = { fontSize: 11, color: 'var(--text-faint)', margin: '4px 0 8px', fontWeight: 700, letterSpacing: 1 }
 export const iconBtn: React.CSSProperties = { border: 0, background: 'transparent', cursor: 'pointer', fontSize: 13, padding: 0, width: 22 }
 export const ghostBtn: React.CSSProperties = {
   width: '100%', padding: '7px 0', borderRadius: 8, border: '1px solid #444',
-  background: 'transparent', color: '#e8e8e6', fontSize: 12, cursor: 'pointer',
+  background: 'transparent', color: 'var(--text)', fontSize: 12, cursor: 'pointer',
 }
 export const inputStyle = (extra: React.CSSProperties = {}): React.CSSProperties => ({
   width: '100%', background: '#101012', border: '1px solid #444', borderRadius: 6,
-  color: '#e8e8e6', fontSize: 12, padding: '6px 8px', outline: 'none', ...extra,
+  color: 'var(--text)', fontSize: 12, padding: '6px 8px', outline: 'none', ...extra,
 })
 
 export const chatFrameRef: { current: HTMLIFrameElement | null } = { current: null }

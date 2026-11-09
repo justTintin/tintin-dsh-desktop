@@ -87,14 +87,14 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const discoverList = registry.filter((s) => hit([s.name, s.description, s.id]))
 
   const input: React.CSSProperties = {
-    background: '#141416', color: '#e8e8e6', border: '1px solid #3a3a3e', borderRadius: 8,
+    background: 'var(--bg-app)', color: 'var(--text)', border: '1px solid var(--border-strong)', borderRadius: 8,
     padding: '6px 10px', fontSize: 12.5, outline: 'none',
   }
   const btn = (tone: 'primary' | 'ghost' | 'danger'): React.CSSProperties => ({
     padding: '5px 16px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: busy ? 'wait' : 'pointer',
-    background: tone === 'primary' ? '#4f7cff' : 'transparent',
-    border: tone === 'danger' ? '1px solid #7f2d2d' : tone === 'ghost' ? '1px solid #3a3a3e' : 0,
-    color: tone === 'primary' ? '#fff' : tone === 'danger' ? '#f87171' : '#c9c9cf',
+    background: tone === 'primary' ? 'var(--accent)' : 'transparent',
+    border: tone === 'danger' ? '1px solid #7f2d2d' : tone === 'ghost' ? '1px solid var(--border-strong)' : 0,
+    color: tone === 'primary' ? '#fff' : tone === 'danger' ? 'var(--err)' : 'var(--text-muted)',
   })
 
   const row = (opts: {
@@ -104,11 +104,11 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   }): React.ReactElement => {
     const expanded = detailId === opts.key
     return (
-      <div key={opts.key} style={{ display: 'flex', gap: 12, padding: '10px 12px', border: '1px solid #26272b', borderRadius: 10, background: '#16171a', alignItems: 'flex-start' }}>
-        <div style={{ width: 52, height: 52, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, background: 'linear-gradient(135deg,#232733,#16171a 65%)', border: '1px solid #26272b' }}>🧩</div>
+      <div key={opts.key} style={{ display: 'flex', gap: 12, padding: '10px 12px', border: '1px solid var(--bg-hover)', borderRadius: 10, background: 'var(--bg-field)', alignItems: 'flex-start' }}>
+        <div style={{ width: 52, height: 52, borderRadius: 8, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, background: 'linear-gradient(135deg,#232733,var(--bg-field) 65%)', border: '1px solid var(--bg-hover)' }}>🧩</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e2e6' }}>{opts.name}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{opts.name}</span>
             {opts.update ? <span style={{ fontSize: 10, fontWeight: 700, color: '#e8a23c', border: '1px solid rgba(232,162,60,.45)', background: 'rgba(232,162,60,.12)', borderRadius: 999, padding: '1px 8px' }}>⟳ 有新版本</span> : null}
           </div>
           <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
@@ -116,9 +116,9 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               <span key={i} style={{ fontSize: 10, color: '#9a9ba1', background: 'rgba(127,127,127,.16)', borderRadius: 999, padding: '1px 8px' }}>{chip}</span>
             ))}
           </div>
-          <div style={{ fontSize: 11.5, color: '#8a8a90', marginTop: 6, display: '-webkit-box', WebkitLineClamp: expanded ? 'unset' : '2', WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.6 }}>{opts.description || '（无描述）'}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 6, display: '-webkit-box', WebkitLineClamp: expanded ? 'unset' : '2', WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.6 }}>{opts.description || '（无描述）'}</div>
           {expanded ? (
-            <div style={{ marginTop: 8, fontSize: 11, color: '#8a8a90', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-faint)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               {opts.detailFields.map(([k, v]) => (
                 <div key={k}><span style={{ color: '#b9b9b6' }}>{k}：</span>{v || '—'}</div>
               ))}
@@ -139,7 +139,7 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         onClick={(e) => e.stopPropagation()}
         /* 尺寸=影片 Skill 弹窗同款(2026-10-31 用户裁决: 参考视频剪辑一样大)——
            min(1200px, 100vw-64px) × min(800px, 100vh-80px), 居中, 圆角, 投影 */
-        style={{ width: 'min(1200px, calc(100vw - 64px))', height: 'min(800px, calc(100vh - 80px))', background: '#1e1e20', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        style={{ width: 'min(1200px, calc(100vw - 64px))', height: 'min(800px, calc(100vh - 80px))', background: 'var(--bg-raised)', borderRadius: 'var(--radius-lg)', boxShadow: '0 20px 60px rgba(0,0,0,0.5)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
       >
         {/* 头部: 标题行(右上角关闭钮=影片同款) + tab 行(右侧=＋添加 skill + 搜索, 影片同排版) */}
         <div style={{ padding: '14px 18px 0', flexShrink: 0 }}>
@@ -156,7 +156,7 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
               <button
                 key={key}
                 onClick={() => setTab(key)}
-                style={{ padding: '7px 14px', fontSize: 12.5, cursor: 'pointer', background: tab === key ? '#18191d' : 'transparent', color: tab === key ? '#e2e2e6' : '#8a8a90', fontWeight: tab === key ? 700 : 400, border: `1px solid ${tab === key ? '#26272b' : 'transparent'}`, borderBottom: tab === key ? '1px solid #18191d' : '1px solid #2c2c30', borderRadius: '8px 8px 0 0' }}
+                style={{ padding: '7px 14px', fontSize: 12.5, cursor: 'pointer', background: tab === key ? '#18191d' : 'transparent', color: tab === key ? 'var(--text)' : 'var(--text-faint)', fontWeight: tab === key ? 700 : 400, border: `1px solid ${tab === key ? 'var(--bg-hover)' : 'transparent'}`, borderBottom: tab === key ? '1px solid #18191d' : '1px solid #2c2c30', borderRadius: '8px 8px 0 0' }}
               >{label}</button>
             ))}
             <span style={{ flex: 1 }} />
@@ -176,10 +176,10 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {tab === 'installed' ? (
             <>
-              <div style={{ fontSize: 11, color: '#8a8a90' }}>我的 —— 已装在封面专属装位（<span style={{ color: '#b9b9b6' }}>%DSH_HOME%\cover-skills\</span>），封面 / 菜单可引用</div>
-              {!loaded ? <div style={{ fontSize: 12, color: '#8a8a90', padding: 14 }}>加载中…</div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>我的 —— 已装在封面专属装位（<span style={{ color: '#b9b9b6' }}>%DSH_HOME%\cover-skills\</span>），封面 / 菜单可引用</div>
+              {!loaded ? <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: 14 }}>加载中…</div>
                 : installedList.length === 0 ? (
-                  <div style={{ fontSize: 12, color: '#8a8a90', border: '1px dashed #3a3a3e', borderRadius: 10, padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-faint)', border: '1px dashed var(--border-strong)', borderRadius: 10, padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'space-between' }}>
                     <span>还没有已安装的技能——到「发现」选择服务端技能安装，或点「＋ 添加 skill」按 id 安装。</span>
                     <button onClick={() => { setTab('discover'); setAddOpen(true) }} style={{ ...btn('ghost'), flexShrink: 0 }}>＋ 添加 skill</button>
                   </div>
@@ -201,10 +201,10 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </>
           ) : (
             <>
-              <div style={{ fontSize: 11, color: '#8a8a90' }}>服务端技能库（{registry.length}）—— 安装后落到技能主目录，封面 / 菜单可引用{serverError ? <span style={{ color: '#ff8f8f' }}> · 清单刷新失败：{serverError}</span> : null}</div>
-              {!loaded ? <div style={{ fontSize: 12, color: '#8a8a90', padding: 14 }}>加载中…</div>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>服务端技能库（{registry.length}）—— 安装后落到技能主目录，封面 / 菜单可引用{serverError ? <span style={{ color: '#ff8f8f' }}> · 清单刷新失败：{serverError}</span> : null}</div>
+              {!loaded ? <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: 14 }}>加载中…</div>
                 : discoverList.length === 0 ? (
-                  <div style={{ fontSize: 12, color: '#8a8a90', padding: 14 }}>{serverError ? `服务端不可达（${serverError}）——点「刷新」或到 ⚙ 服务设置检查地址。` : `没有匹配「${query}」的服务端技能。`}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: 14 }}>{serverError ? `服务端不可达（${serverError}）——点「刷新」或到 ⚙ 服务设置检查地址。` : `没有匹配「${query}」的服务端技能。`}</div>
                 ) : discoverList.map((s) => {
                   const local = installedById.get(s.id)
                   const update = local ? versionNewer(s.version, local.version) : false
@@ -225,7 +225,7 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </>
           )}
         </div>
-        <div style={{ padding: '6px 18px 12px', fontSize: 11, color: '#8a8a90', flexShrink: 0, whiteSpace: 'pre-wrap' }}>{status || '安装=下载技能包落盘并注册到封面 / 菜单；当前会话若未见新技能，新开会话即生效。'}</div>
+        <div style={{ padding: '6px 18px 12px', fontSize: 11, color: 'var(--text-faint)', flexShrink: 0, whiteSpace: 'pre-wrap' }}>{status || '安装=下载技能包落盘并注册到封面 / 菜单；当前会话若未见新技能，新开会话即生效。'}</div>
       </div>
     </div>
   )

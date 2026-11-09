@@ -1,4 +1,4 @@
-// cover-tools-mcp 用例(2026-11-04 感知闭环+工具收敛批):MCP 端点协议面 + 三工具行为。
+// cover-tools-mcp 用例(2026-11-04 感知闭环+工具收敛批):MCP 端点协议面 + 六工具行为。
 // fetch 打桩(服务端 /matting 模型链),engine 打桩(临时项目目录+渲染写真 PNG),
 // webServer 桩捕 handler;req 用 node stream Readable 喂 JSON-RPC body。
 import { mkdtempSync, rmSync, writeFileSync, readdirSync, existsSync } from 'node:fs'
@@ -72,7 +72,7 @@ describe('cover tools mcp endpoint', () => {
     expect(resultOf(init).serverInfo.name).toBe('cover-tools')
     const list = await call(rpc(2, 'tools/list'))
     const names = resultOf(list).tools.map((t: { name: string }) => t.name)
-    expect(names).toEqual(['read_image', 'matting', 'render_preview'])
+    expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'ocr_image', 'text_remove'])
     const bad = await call(rpc(3, 'no/such'))
     expect((bad.body as Record<string, any>).error.code).toBe(-32601)
     const note = await call({ jsonrpc: '2.0', method: 'notifications/initialized' })
@@ -145,6 +145,124 @@ describe('cover tools mcp endpoint', () => {
     expect(resultOf(missing).content[0].text).toContain('cover.props.json')
   })
 
+  it('imitate_cover: 上传→接单→轮询→产物双写全链;无文案拒绝;编排失败错误原文上返', async () => {
+    const jsonRes = (obj: unknown, status = 200) => ({ ok: true, status, headers: { get: () => 'application/json' }, json: async () => obj, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })
+    const fetchMock = vi.fn()
+      // product-upload
+      .mockImplementationOnce(async () => jsonRes({ paths: ['/srv/uploads/ref.png'], count: 1 }))
+      // /generate/cover 202
+      .mockImplementationOnce(async () => jsonRes({ task_id: 'c_test-1', poll: '/tasks/unified/c_test-1' }, 202))
+      // poll → completed
+      .mockImplementationOnce(async () => jsonRes({ id: 'c_test-1', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_test-1.png', width: 704, height: 1248, engine: 'comfygen' } }))
+      // 产物下载
+      .mockImplementationOnce(async () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { coverDir, pluginDir, call } = await setup()
+    writeFileSync(join(coverDir, 'ref-cover.png'), TINY_PNG)
+    const ok = await call(rpc(1, 'tools/call', { name: 'imitate_cover', arguments: { images: ['ref-cover.png'], title: '探针标题', prompt: 'test' } }))
+    const payload = JSON.parse(resultOf(ok).content[0].text)
+    expect(payload.ok).toBe(true)
+    expect(payload.name).toMatch(/^imitate-\d+\.png$/)
+    expect(payload.taskId).toBe('c_test-1')
+    expect(payload.note).toContain('无分层')
+    expect(existsSync(join(coverDir, payload.name))).toBe(true)
+    expect(existsSync(join(pluginDir, 'public', payload.name))).toBe(true)
+    // 上传 multipart 与生成载荷契约
+    const upCall = fetchMock.mock.calls[0] as [string, { body: FormData }]
+    expect(upCall[0]).toContain('/api/storyboard/scripts/product-upload')
+    expect(upCall[1].body.get('files')).toBeTruthy()
+    const genCall = fetchMock.mock.calls[1] as [string, { body: string }]
+    expect(genCall[0]).toContain('/generate/cover')
+    const genBody = JSON.parse(genCall[1].body)
+    expect(genBody.images).toEqual(['/srv/uploads/ref.png'])
+    expect(genBody.title).toBe('探针标题')
+
+    // 无文案 → 本地校验拒绝, 不打服务端
+    const noText = await call(rpc(2, 'tools/call', { name: 'imitate_cover', arguments: { images: ['ref-cover.png'] } }))
+    expect(resultOf(noText).isError).toBe(true)
+    expect(resultOf(noText).content[0].text).toContain('文案至少其一')
+
+    // 编排失败 → 错误原文上返
+    const failMock = vi.fn()
+      .mockImplementationOnce(async () => jsonRes({ paths: ['/srv/uploads/ref.png'], count: 1 }))
+      .mockImplementationOnce(async () => jsonRes({ task_id: 'c_test-2' }, 202))
+      .mockImplementationOnce(async () => jsonRes({ id: 'c_test-2', status: 'failed', error: '封面生成失败: status=partial_failed failed_shots=[cover]' }))
+    vi.stubGlobal('fetch', failMock)
+    const bad = await call(rpc(3, 'tools/call', { name: 'imitate_cover', arguments: { images: ['ref-cover.png'], title: 'x' } }))
+    expect(resultOf(bad).isError).toBe(true)
+    expect(resultOf(bad).content[0].text).toContain('partial_failed')
+  })
+
+  it('ocr_image: 返回逐行文本+位置框;服务端错误原文上返', async () => {
+    const { coverDir, call } = await setup()
+    writeFileSync(join(coverDir, 'poster.png'), TINY_PNG)
+    const ocrPayload = { filename: 'poster.png', text: 'Hello Cover 2026\nSecond Line Text', total: 2, lines: [
+      { text: 'Hello Cover 2026', confidence: 0.9941, box: [98, 97, 180, 113], box_rel: [0.0766, 0.1347, 0.1406, 0.1569] },
+      { text: 'Second Line Text', confidence: 0.9999, box: [100, 401, 182, 411], box_rel: [0.0781, 0.5569, 0.1422, 0.5708] },
+    ] }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ocrPayload, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })))
+    const ok = await call(rpc(1, 'tools/call', { name: 'ocr_image', arguments: { image: 'poster.png' } }))
+    const payload = JSON.parse(resultOf(ok).content[0].text)
+    expect(payload.ok).toBe(true)
+    expect(payload.total).toBe(2)
+    expect(payload.lines[0].box_rel).toEqual([0.0766, 0.1347, 0.1406, 0.1569])
+    expect(payload.note).toContain('box_rel')
+
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, headers: { get: () => 'application/json' }, json: async () => ({ detail: 'OCR engine down' }), arrayBuffer: async () => Buffer.from('x'), text: async () => JSON.stringify({ detail: 'OCR engine down' }) })))
+    const bad = await call(rpc(2, 'tools/call', { name: 'ocr_image', arguments: { image: 'poster.png' } }))
+    expect(resultOf(bad).isError).toBe(true)
+    expect(resultOf(bad).content[0].text).toContain('OCR engine down')
+  })
+
+  it('text_remove: 无 boxes 自动 OCR 全框→去字→双写;显式框直通;OCR 空行=无需去字;服务端错误原文上返', async () => {
+    const jsonRes = (obj: unknown, status = 200) => ({ ok: true, status, headers: { get: () => 'application/json' }, json: async () => obj, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })
+    const pngRes = () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' })
+    const { coverDir, pluginDir, call } = await setup()
+    writeFileSync(join(coverDir, 'poster.png'), TINY_PNG)
+
+    // 自动 OCR 分支: ocr 返回两行 → text-remove 用其 box → PNG 落盘
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(async () => jsonRes({ filename: 'poster.png', text: 'A B', total: 2, lines: [
+        { text: 'A', confidence: 0.99, box: [10, 20, 110, 40], box_rel: [0.01, 0.02, 0.11, 0.04] },
+        { text: 'B', confidence: 0.98, box: [10, 60, 90, 80], box_rel: [0.01, 0.06, 0.09, 0.08] },
+      ] }))
+      .mockImplementationOnce(async () => pngRes())
+    vi.stubGlobal('fetch', fetchMock)
+    const ok = await call(rpc(1, 'tools/call', { name: 'text_remove', arguments: { image: 'poster.png' } }))
+    const payload = JSON.parse(resultOf(ok).content[0].text)
+    expect(payload.ok).toBe(true)
+    expect(payload.autoOcr).toBe(true)
+    expect(payload.name).toMatch(/^text-remove-poster-\d+\.png$/)
+    expect(existsSync(join(coverDir, payload.name))).toBe(true)
+    expect(existsSync(join(pluginDir, 'public', payload.name))).toBe(true)
+    const trUrl = (fetchMock.mock.calls[1]![0] as string)
+    expect(trUrl).toContain('/image/text-remove')
+    const trBody = (fetchMock.mock.calls[1]![1] as { body: FormData }).body
+    expect(trBody.get('boxes')).toBe('[[10,20,110,40],[10,60,90,80]]')
+    expect(trBody.get('file')).toBeTruthy()
+
+    // 显式框直通(不调 OCR)
+    const direct = vi.fn().mockImplementationOnce(async () => pngRes())
+    vi.stubGlobal('fetch', direct)
+    const ok2 = await call(rpc(2, 'tools/call', { name: 'text_remove', arguments: { image: 'poster.png', boxes: '[[1,2,3,4]]' } }))
+    expect(JSON.parse(resultOf(ok2).content[0].text).autoOcr).toBe(false)
+    expect(direct).toHaveBeenCalledTimes(1)
+
+    // OCR 空行 → 无需去字,不调 text-remove
+    const emptyOcr = vi.fn().mockImplementationOnce(async () => jsonRes({ filename: 'poster.png', text: '', total: 0, lines: [] }))
+    vi.stubGlobal('fetch', emptyOcr)
+    const ok3 = await call(rpc(3, 'tools/call', { name: 'text_remove', arguments: { image: 'poster.png' } }))
+    const p3 = JSON.parse(resultOf(ok3).content[0].text)
+    expect(p3.removed).toBe(0)
+    expect(emptyOcr).toHaveBeenCalledTimes(1)
+
+    // 服务端错误原文上返
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, headers: { get: () => 'application/json' }, json: async () => ({ detail: 'lama down' }), arrayBuffer: async () => Buffer.from('x'), text: async () => JSON.stringify({ detail: 'lama down' }) })))
+    const bad = await call(rpc(4, 'tools/call', { name: 'text_remove', arguments: { image: 'poster.png', boxes: '[[1,2,3,4]]' } }))
+    expect(resultOf(bad).isError).toBe(true)
+    expect(resultOf(bad).content[0].text).toContain('lama down')
+  })
+
   it('独立监听: 无 token 401;带 token 全链(tools/list);export 语义=render_preview 落项目目录', async () => {
     const coverDir = tempRoot()
     const { startCoverToolsServer } = await import('../lib/cover-tools-mcp.js')
@@ -165,7 +283,7 @@ describe('cover tools mcp endpoint', () => {
       await fetch(server.url, { method: 'POST', headers: { ...h, 'mcp-session-id': sid! }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) })
       const list = await fetch(server.url, { method: 'POST', headers: { ...h, 'mcp-session-id': sid! }, body: JSON.stringify(rpc(2, 'tools/list')) })
       const names = ((await list.json()) as { result?: { tools?: Array<{ name: string }> } }).result?.tools?.map((t) => t.name)
-      expect(names).toEqual(['read_image', 'matting', 'render_preview'])
+      expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'ocr_image', 'text_remove'])
     } finally {
       await server.dispose()
     }

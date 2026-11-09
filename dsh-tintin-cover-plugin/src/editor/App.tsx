@@ -417,7 +417,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (!drag.active) {
       if (Math.hypot(dxs, dys) < 3) return // 死区:手抖不算拖
       drag.active = true
-      if (drag.el) { drag.el.style.outline = '2px solid rgba(79,124,255,0.9)'; drag.el.style.willChange = 'translate' } // 提升合成层,预览不重绘整栈
+      if (drag.el) { drag.el.style.outline = '2px solid var(--accent)'; drag.el.style.willChange = 'translate' } // 提升合成层,预览不重绘整栈
       canvasDragFreeze.active = true
       // 层间智能吸附候选(激活时一次实测;拖动中其它层静止):其它图层的 左/中/右、上/中/下 线
       { const xs: { at: number; guide: number }[] = []; const ys: { at: number; guide: number }[] = []
@@ -537,13 +537,13 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
         const file = e.dataTransfer.files?.[0]
         if (file && /image\//i.test(file.type)) uploadAsLayer(file, e.clientX, e.clientY)
       }}
-      style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#101012', gap: 12, outline: 'none' }}>
+      style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-field)', gap: 12, outline: 'none' }}>
       {/* Δ读数浮层(对照 PhotoCraft offset_readout):直接 DOM 写,拖动中跟指针 */}
-      <div ref={readoutRef} style={{ position: 'fixed', display: 'none', zIndex: 13000, pointerEvents: 'none', background: 'rgba(20,20,22,0.92)', color: '#e8e8e6', border: '1px solid rgba(79,124,255,0.55)', borderRadius: 6, padding: '2px 7px', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'nowrap' }} />
+      <div ref={readoutRef} style={{ position: 'fixed', display: 'none', zIndex: 13000, pointerEvents: 'none', background: 'rgba(24,24,24,0.92)', color: 'var(--text)', border: '1px solid var(--accent-soft)', borderRadius: 6, padding: '2px 7px', fontSize: 12, fontFamily: 'monospace', whiteSpace: 'nowrap' }} />
       {pcRunning ? (
         <>
           {shot ? <img src={shot} alt="PhotoCraft" style={{ maxWidth: '96%', maxHeight: '74vh', borderRadius: 10, boxShadow: '0 18px 60px rgba(0,0,0,0.5)' }} /> : null}
-          <div style={{ color: '#8b8b88', fontSize: 11 }}>PhotoCraft 实时镜像 · 图层与编辑在 PhotoCraft 窗口 · 会话可直接驱动</div>
+          <div style={{ color: 'var(--text-faint)', fontSize: 11 }}>PhotoCraft 实时镜像 · 图层与编辑在 PhotoCraft 窗口 · 会话可直接驱动</div>
         </>
       ) : (
         <>
@@ -564,13 +564,13 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                   <div data-preview-grid style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 40, backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px)' }} />
                 ) : null}
                 {/* 拖动吸附参考线(青色十字;ref 直写,拖动全程零重渲染)——在缩放内容层内,随缩放对齐画布 */}
-                <div ref={guideVRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, background: '#22d3ee', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
-                <div ref={guideHRef} style={{ position: 'absolute', left: 0, right: 0, height: 1, background: '#22d3ee', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
+                <div ref={guideVRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, background: 'var(--accent)', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
+                <div ref={guideHRef} style={{ position: 'absolute', left: 0, right: 0, height: 1, background: 'var(--accent)', pointerEvents: 'none', zIndex: 95, display: 'none' }} />
               </div>
             </div>
             {/* 选中边缘框(2026-10-31 §2.6:常驻=任何选中图层都有,旋转时保持;拖动中由拖动轮廓接管) */}
             {handleBox && !pcRunning ? (
-              <div ref={outlineRef} style={{ position: 'absolute', left: handleBox.x - 2, top: handleBox.y - 2, width: handleBox.w + 4, height: handleBox.h + 4, border: '1.5px solid rgba(79,124,255,0.85)', borderRadius: 4, pointerEvents: 'none', zIndex: 86 }} />
+              <div ref={outlineRef} style={{ position: 'absolute', left: handleBox.x - 2, top: handleBox.y - 2, width: handleBox.w + 4, height: handleBox.h + 4, border: '1.5px solid var(--accent)', borderRadius: 4, pointerEvents: 'none', zIndex: 86 }} />
             ) : null}
             {/* 对齐工具条(选中图层时出现;相对画布六向)。阻断冒泡:否则宿主 onPointerDown 按
                 坐标命中落空 → selectLayer(null) → 工具条随选中态卸载,点击永远无效(实测) */}
@@ -578,7 +578,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
               <div
                 onPointerDown={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => e.stopPropagation()}
-                style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, background: 'rgba(30,30,32,0.92)', border: '1px solid #3a3a3e', borderRadius: 8, padding: '3px 5px', zIndex: 80 }}>
+                style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, background: 'rgba(30,30,32,0.92)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '3px 5px', zIndex: 80 }}>
                 {([
                   ['left', '⇤', '左对齐画布'],
                   ['centerX', '⇔', '水平居中'],
@@ -592,7 +592,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                     title={lockedOf(props, selectedLayer) ? '图层已锁定位置' : titleText}
                     disabled={lockedOf(props, selectedLayer)}
                     onClick={() => selectedLayer && alignLayer(selectedLayer, mode)}
-                    style={{ width: 26, height: 24, borderRadius: 6, border: 0, cursor: 'pointer', background: 'transparent', color: '#c9c9c7', fontSize: 13, lineHeight: 1, opacity: lockedOf(props, selectedLayer) ? 0.35 : 1 }}
+                    style={{ width: 26, height: 24, borderRadius: 6, border: 0, cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, opacity: lockedOf(props, selectedLayer) ? 0.35 : 1 }}
                   >{glyph}</button>
                 ))}
               </div>
@@ -600,13 +600,13 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
             {/* 旋转手柄(选中的图片层=自定义层/产品图;拖动绕中心旋转,虚线柄+连接杆) */}
             {isImageLayer && handleBox && !pcRunning && !lockedOf(props, selectedLayer) ? (
               <>
-                <div style={{ position: 'absolute', left: handleBox.x + handleBox.w / 2 - 1, top: handleBox.y - 20, width: 2, height: 20, background: '#4f7cff', pointerEvents: 'none', zIndex: 88 }} />
+                <div style={{ position: 'absolute', left: handleBox.x + handleBox.w / 2 - 1, top: handleBox.y - 20, width: 2, height: 20, background: 'var(--accent)', pointerEvents: 'none', zIndex: 88 }} />
                 <div
                   onPointerDown={onRotateDown}
                   onPointerMove={onRotateMove}
                   onPointerUp={onRotateUp}
                   title="拖动旋转(接近水平/垂直自动吸附)"
-                  style={{ position: 'absolute', left: handleBox.x + handleBox.w / 2 - 9, top: handleBox.y - 38, width: 18, height: 18, borderRadius: 999, background: '#4f7cff', border: '2px solid #fff', cursor: 'grab', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
+                  style={{ position: 'absolute', left: handleBox.x + handleBox.w / 2 - 9, top: handleBox.y - 38, width: 18, height: 18, borderRadius: 999, background: 'var(--accent)', border: '2px solid #fff', cursor: 'grab', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
                 />
               </>
             ) : null}
@@ -619,7 +619,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                   onPointerMove={onResizeMove}
                   onPointerUp={onResizeUp}
                   title="拖动角改尺寸(等比,对角为锚)"
-                  style={{ position: 'absolute', left: handleBox.x + (c === 'ne' || c === 'se' ? handleBox.w - 7 : -7), top: handleBox.y + (c === 'sw' || c === 'se' ? handleBox.h - 7 : -7), width: 14, height: 14, borderRadius: 3, background: '#4f7cff', border: '2px solid #fff', cursor, zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
+                  style={{ position: 'absolute', left: handleBox.x + (c === 'ne' || c === 'se' ? handleBox.w - 7 : -7), top: handleBox.y + (c === 'sw' || c === 'se' ? handleBox.h - 7 : -7), width: 14, height: 14, borderRadius: 3, background: 'var(--accent)', border: '2px solid #fff', cursor, zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
                 />
               ))
             ) : null}
@@ -643,19 +643,19 @@ function CanvasSettingsStrip(): React.ReactElement {
     <button
       onClick={() => setZoom(zoom * factor)}
       title={titleText}
-      style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', fontSize: 13, lineHeight: 1, cursor: 'pointer' }}
+      style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, cursor: 'pointer' }}
     >{label}</button>
   )
   return (
-    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 14, padding: '8px 14px', background: '#141416', borderBottom: '1px solid #2c2c30' }}>
+    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 14, padding: '8px 14px', background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)' }}>
       <OrientationToggle />
       <div style={{ width: 1, height: 18, background: '#333' }} />
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#c9c9c7', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-        <input type="checkbox" checked={showGuides} onChange={(e) => setGuides(e.target.checked)} style={{ accentColor: '#4f7cff' }} />
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        <input type="checkbox" checked={showGuides} onChange={(e) => setGuides(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
         拖动对齐参考线
       </label>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: '#c9c9c7', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-        <input type="checkbox" checked={showGrid} onChange={(e) => setCanvasGrid(e.target.checked)} style={{ accentColor: '#4f7cff' }} />
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+        <input type="checkbox" checked={showGrid} onChange={(e) => setCanvasGrid(e.target.checked)} style={{ accentColor: 'var(--accent)' }} />
         画布网格
       </label>
       {/* 画布缩放(2026-10-31 §2.6 对照 PhotoCraft):Ctrl+滚轮同款,按钮=无滚轮入口;点百分比=复位适合窗口 */}
@@ -664,7 +664,7 @@ function CanvasSettingsStrip(): React.ReactElement {
         <button
           onClick={() => setZoom(1)}
           title="复位为适合窗口"
-          style={{ minWidth: 46, height: 24, borderRadius: 6, border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', fontSize: 11, cursor: 'pointer' }}
+          style={{ minWidth: 46, height: 24, borderRadius: 6, border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}
         >{Math.round(fitScale * zoom * 100)}%</button>
         {zoomBtn('＋', 1.25, '放大画布')}
       </div>
@@ -673,12 +673,12 @@ function CanvasSettingsStrip(): React.ReactElement {
       <button
         onClick={() => undo()}
         title="撤销上一步(会话与面板操作同栈)"
-        style={{ border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', borderRadius: 7, fontSize: 11.5, padding: '4px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+        style={{ border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-muted)', borderRadius: 7, fontSize: 12, padding: '4px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
       >↩ 撤销</button>
       <button
         onClick={() => redo()}
         title="重做(Ctrl+Shift+Z)"
-        style={{ border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', borderRadius: 7, fontSize: 11.5, padding: '4px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+        style={{ border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-muted)', borderRadius: 7, fontSize: 12, padding: '4px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
       >↪ 重做</button>
     </div>
   )
@@ -697,9 +697,9 @@ function OrientationToggle(): React.ReactElement {
           onClick={() => setOrientation(value)}
           style={{
             flex: 1, padding: '7px 0', borderRadius: 8, fontSize: 12, cursor: 'pointer',
-            background: current === value ? 'rgba(79,124,255,0.25)' : 'rgba(127,127,127,0.08)',
-            border: current === value ? '1px solid rgba(79,124,255,0.6)' : '1px solid transparent',
-            color: current === value ? '#bfdbfe' : '#e8e8e6', fontWeight: 700,
+            background: current === value ? 'var(--bg-selected)' : 'var(--bg-hover)',
+            border: current === value ? '1px solid var(--accent)' : '1px solid transparent',
+            color: current === value ? 'var(--accent)' : 'var(--text)', fontWeight: 700,
           }}
         >{label} {current === value ? '●' : ''}</button>
       ))}
@@ -717,12 +717,12 @@ function ensurePjStyle(): void {
   const s = document.createElement('style')
   s.textContent = [
     '.tintin-pj-tab{position:relative}',
-    '.tintin-pj-x{opacity:0;transition:opacity .12s;color:#8b8b88;font-size:11px;line-height:1;cursor:pointer;padding:1px 3px;border-radius:4px}',
+    '.tintin-pj-x{opacity:0;transition:opacity .12s;color:var(--text-faint);font-size:11px;line-height:1;cursor:pointer;padding:1px 3px;border-radius:4px}',
     '.tintin-pj-x:hover{color:#f87171;background:rgba(127,127,127,.18)}',
     '.tintin-pj-tab:hover .tintin-pj-x,.tintin-pj-tab.is-active .tintin-pj-x{opacity:1}',
-    '.tintin-pj-pop{position:absolute;top:calc(100% + 6px);left:0;width:300px;max-height:340px;overflow:auto;background:#1e1e20;border:1px solid #3a3a3e;border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);z-index:2100;padding:6px}',
-    '.tintin-pj-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:12px;color:#c9c9cf}',
-    '.tintin-pj-item:hover{background:#26272b}',
+    '.tintin-pj-pop{position:absolute;top:calc(100% + 6px);left:0;width:300px;max-height:340px;overflow:auto;background:var(--bg-raised);border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);z-index:2100;padding:6px}',
+    '.tintin-pj-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:12px;color:var(--text-muted)}',
+    '.tintin-pj-item:hover{background:var(--bg-hover)}',
     '.tintin-pj-item.is-current{color:#fff}',
   ].join('\n')
   document.head.append(s)
@@ -757,6 +757,11 @@ export const EditorApp: React.FC = () => {
   }
   React.useEffect(() => {
     refreshProjects()
+    /* 挂载即回读当前项目(2026-11-09 用户报障: 新建时空白、重启/刷新后再进出现模板默认
+       装饰+渐变——store 初始值=video 模板 defaultProps 且 hiddenLayers=[], 而
+       reloadProjectState 原本只在切换项目时调用, 刷新后无人回读; 轮询只认 origin=agent
+       不会兜底。record 有值→套用, 空项目→空白分支清场)。 */
+    void reloadProjectState()
   }, [])
   const switchProject = async (name: string): Promise<void> => {
     if (!name || name === currentProject) return
@@ -825,25 +830,26 @@ export const EditorApp: React.FC = () => {
       .catch(() => {})
   }
   const iconBtn: React.CSSProperties = {
-    width: 30, height: 30, borderRadius: 6, border: 0, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16,
+    width: 26, height: 26, borderRadius: 6, border: 0, cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
+    background: 'transparent', color: 'var(--text-muted)',
   }
   return (
-    <div style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: '#141416', color: '#e8e8e6' }}>
-      <div style={{ height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', background: '#1a1a1c', borderBottom: '1px solid #333' }}>
+    <div data-tintin-cover-scope="" style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', color: 'var(--text)', fontFamily: 'var(--font-sans)' }}>
+      <div style={{ height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', background: 'var(--bg-titlebar)', borderBottom: '1px solid var(--border)' }}>
         {/* 顶栏(2026-10-30 用户裁决):T 图标与「封面制作」文字删除;「打开项目」=弹全部
             项目列表(含已关闭,点击打开/切换);tab × 关闭项目=仅移出栏,数据保留可重开 */}
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <button
             onClick={() => { void refreshProjects(); setProjectListOpen((v) => !v) }}
             title="打开项目——列出全部封面项目，点击打开/切换"
-            style={{ padding: '5px 14px', borderRadius: 8, border: '1px solid #3a3a3e', background: projectListOpen ? '#26272b' : 'transparent', color: '#c9c9cf', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
+            style={{ padding: '5px 14px', borderRadius: 8, border: '1px solid var(--border-strong)', background: projectListOpen ? 'var(--bg-hover)' : 'transparent', color: 'var(--text-muted)', fontSize: 12, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}
           >打开项目 ▾</button>
           {projectListOpen ? (
             <>
               <div style={{ position: 'fixed', inset: 0, zIndex: 2050 }} onClick={() => setProjectListOpen(false)} />
               <div className="tintin-pj-pop">
-                {projects.length === 0 ? <div style={{ fontSize: 11, color: '#8a8a90', padding: 10 }}>还没有封面项目——点「＋」新建</div> : null}
+                {projects.length === 0 ? <div style={{ fontSize: 12, color: '#8a8a90', padding: 10 }}>还没有封面项目——点「＋」新建</div> : null}
                 {projects.map((p) => {
                   const open = !closedProjects.includes(p.name)
                   return (
@@ -854,7 +860,7 @@ export const EditorApp: React.FC = () => {
                       title={open ? `切换到 ${p.name}` : `重新打开 ${p.name}（项目数据保留在磁盘）`}
                     >
                       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
-                      {p.name === currentProject ? <span style={{ fontSize: 10, color: '#8fd6a4' }}>当前</span> : open ? <span style={{ fontSize: 10, color: '#8a8a90' }}>已打开</span> : null}
+                      {p.name === currentProject ? <span style={{ fontSize: 11, color: '#8fd6a4' }}>当前</span> : open ? <span style={{ fontSize: 11, color: '#8a8a90' }}>已打开</span> : null}
                     </div>
                   )
                 })}
@@ -863,7 +869,10 @@ export const EditorApp: React.FC = () => {
           ) : null}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, flex: '0 1 auto', overflowX: 'auto', overflowY: 'hidden', padding: '0 2px' }}>
-          {projects.filter((p) => !closedProjects.includes(p.name)).map((p) => {
+          {/* tab 按项目名升序(默认名=日期时间戳, 名字序=创建序——新建的排最后, 2026-11-09 用户报障:
+              服务端 projects 按 mtime 降序(近期修改在前, 对「打开项目」弹层合理), 直接渲染会
+              让新建/刚改过的项目跳到第一位;改名项目跟新名字走=可预测)。slice 防 mutate 状态。 */}
+          {projects.filter((p) => !closedProjects.includes(p.name)).slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN')).map((p) => {
             const active = p.name === currentProject
             const isRenaming = renaming?.from === p.name
             return (
@@ -875,10 +884,10 @@ export const EditorApp: React.FC = () => {
                 title={active ? `${p.name}（当前项目）· 双击重命名` : `${p.name} · 点击切换 · 双击重命名`}
                 style={{
                   flexShrink: 0, maxWidth: 180, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-                  padding: '4px 10px', borderRadius: 7, fontSize: 11.5, whiteSpace: 'nowrap',
-                  background: active ? '#2a2b31' : 'transparent',
-                  border: active ? '1px solid #3b3c42' : '1px solid transparent',
-                  color: active ? '#e8e8e6' : '#8b8b88', fontWeight: active ? 700 : 400,
+                  padding: '4px 10px', borderRadius: 7, fontSize: 12, whiteSpace: 'nowrap',
+                  background: active ? 'var(--bg-selected)' : 'transparent',
+                  border: active ? '1px solid var(--border-strong)' : '1px solid transparent',
+                  color: active ? 'var(--text)' : 'var(--text-faint)', fontWeight: active ? 700 : 400,
                 }}
               >
                 {isRenaming ? (
@@ -892,7 +901,7 @@ export const EditorApp: React.FC = () => {
                       if (e.key === 'Enter') { void commitRename(); return }
                       if (e.key === 'Escape') { setRenaming(null); e.stopPropagation() }
                     }}
-                    style={{ width: 130, background: '#101012', color: '#e8e8e6', border: '1px solid #4f7cff', borderRadius: 5, fontSize: 11.5, padding: '1px 6px', outline: 'none' }}
+                    style={{ width: 130, background: 'var(--bg-field)', color: 'var(--text)', border: '1px solid var(--accent)', borderRadius: 5, fontSize: 12, padding: '1px 6px', outline: 'none' }}
                   />
                 ) : <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>}
                 {/* × 关闭项目(2026-10-30 用户裁决):悬停/激活时显示;仅移出栏,数据保留可重开 */}
@@ -907,18 +916,23 @@ export const EditorApp: React.FC = () => {
           <button
             onClick={() => void createProject()}
             title="新建封面项目（默认名=日期时间）"
-            style={{ flexShrink: 0, width: 24, height: 24, borderRadius: 6, border: '1px solid #3a3a3e', background: 'transparent', color: '#c9c9c7', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}
+            style={{ flexShrink: 0, width: 24, height: 24, borderRadius: 6, border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}
           >＋</button>
         </div>
         <span style={{ flex: 1 }} />
-        {/* 按钮序(2026-10-31 用户裁决):设置第一,其后 PhotoCraft、导出 */}
-        <button onClick={() => setShowServer(true)} title="服务设置（服务端地址 + MCP 自动发现）" style={{ ...iconBtn, background: 'rgba(126,226,168,0.1)', color: '#7ee2a8', fontSize: 14, fontWeight: 800 }}>
+        {/* 技能管理入口(2026-11-09 用户裁决:顶栏 ⚙ 左边加图标——此前入口只剩空会话
+            「更多技能」链接,0.3.0 composer 重绘后 ▦ 通道不稳,编辑器顶栏给常驻直达) */}
+        <button onClick={() => setShowSkills(true)} title="技能管理" style={{ ...iconBtn }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 17.5h7M17.5 14v7"/></svg>
+        </button>
+        {/* 按钮序(2026-10-31 用户裁决):设置第一,其后 PhotoCraft、导出;技能管理 2026-11-09 加于设置左侧 */}
+        <button onClick={() => setShowServer(true)} title="服务设置（服务端地址 + MCP 自动发现）" style={{ ...iconBtn }}>
           ⚙
         </button>
-        <button onClick={openPhotoCraft} title="用 PhotoCraft 打开精修" style={{ ...iconBtn, background: 'rgba(34,211,238,0.1)', color: '#22d3ee' }}>
+        <button onClick={openPhotoCraft} title="用 PhotoCraft 打开精修" style={{ ...iconBtn }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
         </button>
-        <button onClick={() => setShowExport(true)} title="导出封面 PNG" style={{ ...iconBtn, background: 'rgba(79,124,255,0.1)', color: '#93c5fd' }}>
+        <button onClick={() => setShowExport(true)} title="导出封面 PNG" style={{ ...iconBtn }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         </button>
       </div>
@@ -937,13 +951,13 @@ export const EditorApp: React.FC = () => {
           <AssetsPanel key={projectEpoch} project={currentProject} />
         </div>
         {/* 中栏 = 图层+编辑整栏(横向兄弟,全高;2026-11-02 用户裁决:下延至窗口底) */}
-        <div style={{ width: 260, flexShrink: 0, background: '#1a1a1c', borderLeft: '1px solid #333', borderRight: '1px solid #333', padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'hidden', gap: 10 }}>
+        <div style={{ width: 260, flexShrink: 0, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)', padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'hidden', gap: 10 }}>
           <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <LayersPanel project={currentProject} />
           </div>
         </div>
         {/* 右栏 = 会话列(2026-10-28 裁决:通栏全高官方聊天,不被素材带挤占) */}
-        <div style={{ width: 420, flexShrink: 0, background: '#1a1a1c', borderLeft: '1px solid #333', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div style={{ width: 420, flexShrink: 0, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {/* 会话随项目:epoch 变化=切换/新建/改名当前项目 → iframe 重挂 → start 以新 cwd 起会话(记录随项目目录) */}
           <CoverChatPanel key={projectEpoch} />
         </div>

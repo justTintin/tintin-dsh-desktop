@@ -17,7 +17,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 | 通道 | 内容 | 用途 |
 |---|---|---|
 | **服务端工具(MCP,工具名 `mcp__tintin-server__*`)** | create_image(生成)、task_status_unified(轮询) | **一切图片/封面生成唯一出口**;异步任务轮询 |
-| **本地工具 MCP(工具名 `mcp__cover-tools__*`)** | render_preview(渲染当前画布→回看预览图)、read_image(查看项目/素材位图片)、matting(抠图,内置健康模型链+落盘校验) | **看结果**(渲染回看/查看任何图片)与抠图——感知与图像处理 |
+| **本地工具 MCP(工具名 `mcp__cover-tools__*`)** | render_preview(渲染当前画布→回看预览图)、read_image(查看项目/素材位图片)、matting(抠图,内置健康模型链+落盘校验)、imitate_cover(仿封面生成:参考图上传→服务端编排→产物落盘)、ocr_image(拆解提字:逐行文本+位置框)、text_remove(去字:抹掉原字→干净底图) | **看结果**(渲染回看/查看任何图片)、抠图、仿封面、版式拆解 |
 | **本地/编辑器通道** | cover.props.json 读写、编辑器导出 API(render)、项目文件与素材位 | 排版、图层、导出——不生成任何画面 |
 
 **除抠图已收敛为 `mcp__cover-tools__matting` 外,不要用 curl/pwsh 调任何服务端端点(`/generate/*`、`/matting` 等)——那是编辑器界面与页面按钮自己的通道,不是会话的。**
@@ -56,12 +56,19 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 ## 生图(画面归 AI,文字归排版——铁律)
 
 - **所有生成(底图/环境图/产品图重绘)统一走服务端 MCP 工具 `create_image`**:mode=t2i(文生图,prompt 直接出图)或 mode=cover(封面图生图,参考图 script_id/images/material_ids 三选一)。**不要用 curl/pwsh 直调任何 `/generate/*` 端点或编辑器的 generate-background/generate-product**(那些是编辑器界面自身使用的通道;会话里的生成一律经 create_image 工具)。异步任务按会话工作纪律用 task_status_unified 轮询到终态(间隔 ≥5 秒,预算 30 分钟)。
-- **参考图必须是服务端可达的引用(2026-11-02 用户裁决:传给服务端的不是路径)**:`images`/`material_ids`/`script_id` 只认 material id、script、服务端可达 URL;**本机/客户端项目里的文件路径对服务端不可见**(生成服务跑在另一台 Linux 主机上),传本地路径必报「找不到」且重试无效。用户拿本机图当参考时:①该图已在服务端素材库→给 material_ids;②用户能提供图片 URL→直传 URL;③都没有→如实说明「本机文件需先上传到服务端素材库才能作为参考」,等用户提供,不要传本地路径。抠图例外:`/matting` 是 multipart 上传文件字节,本地图可直接用。
+- **参考图必须是服务端可达的引用(2026-11-02 用户裁决:传给服务端的不是路径)**:`images`/`material_ids`/`script_id` 只认 material id、script、服务端可达 URL;**本机/客户端项目里的文件路径对服务端不可见**(生成服务跑在另一台 Linux 主机上),传本地路径必报「找不到」且重试无效。用户拿本机图当参考时:①该图已在服务端素材库→给 material_ids;②用户能提供图片 URL→直传 URL;③都没有→如实说明「本机文件需先上传到服务端素材库才能作为参考」,等用户提供,不要传本地路径。抠图例外:`/matting` 是 multipart 上传文件字节,本地图可直接用。**仿封面例外:用 `imitate_cover`(见下节),它内置上传通路,images 直接给本机路径。**
 - 产物落盘后按用途写回 props(底图 → `props.bgImage` = 文件名;产品图 → `props.image`),写回规则见上节。
 - **抠图/去背景**:用 `mcp__cover-tools__matting`(image=源图绝对路径,可选 model),工具内置健康模型链 **isnet-general-use→u2net→isnet-anime**(1104 实测 bria-rmbg/silueta 服务端 ONNX 崩溃,禁用)与落盘校验(HTTP 状态+PNG 魔数,非 200/非 PNG 不落盘,失败返回错误原文)。约 2-3 秒直出**透明底 PNG**(RGBA),产物自动落素材区+项目目录。**抠图结果是一个素材(2026-10-31 用户裁决)**,可用于任何图层(产品图/底图/新增图层都行),用在哪由用户说了算;落盘后进素材区并告知路径即可,**不要默认写 `props.image`/`props.bgImage`、不要自动加图层**——用户明确要求设为产品图/底图时才写对应字段。
   - **抠图结果直接当素材用,禁止客户端逐像素扫描**(PowerShell GetPixel/边界计算等):产物已是透明底 PNG,主体裁剪/摆放由用户在编辑器里做;确实需要边界信息时如实说明并等用户指示。
 - prompt 只描述画面/光影/材质/氛围;**任何文字、标语、Logo 都不要写进 prompt**(文字由模板排版,写了必崩)。
 - 生成期间如实告知用户「分钟级」;**失败或端点不可达时把错误原样转述,同一请求最多重试 2 次,禁止反复重试**(2026-10-30 重试风暴事故教训)。
+
+## 仿封面与版式拆解(2026-11-09 服务端能力批)
+
+- **仿封面生成**:`mcp__cover-tools__imitate_cover`(images=本机参考图 1..4 张 + 文案至少其一 title/prompt/selling_points)。工具内部完成参考图上传→服务端编排→轮询→产物落盘双写(素材区+项目目录),**不再需要先手动传素材库**——`images` 直接给本机路径/素材文件名即可(2026-11-09 服务端核实:product-upload 换路径→/generate/cover 全链通)。产物是**无分层整图**——要按项目版式组装:read_image 看产物→取其中元素(matting 抠主体)当图层素材→写 cover.props.json→render_preview 回看。
+- **参考封面拆解**:`mcp__cover-tools__ocr_image`(image=参考封面)→逐行文字+位置框(box 像素/box_rel 相对比例/置信度)。按 box_rel×模板宽高换算成文字层位置重打标题/角标文案——**文字一律回排版层,永不进生图 prompt**;系统字体复刻不了的花字效果如实说明。
+- **去字还原干净底图(2026-11-10 服务端 /image/text-remove 生产上线)**:`mcp__cover-tools__text_remove`(image=参考封面;boxes 省略=自动 OCR 全部字框,或显式传 `[[x1,y1,x2,y2],...]` 绝对像素=ocr_image 的 lines[].box)。LaMa 质量档约 6s,产物 PNG 落素材区+项目目录——**原字已抹的干净底图**,可直接当 bgImage/底图层;fast=true 仅适合纯色/渐变底小字。
+- 典型流(用户提供参考封面+产品图):ocr_image 拆参考版式(文字+位置) → text_remove 抹掉原字得干净底图 → 组装:干净底图当 bgImage+文字层按 OCR 位置重打(可改文案) + matting 抠产品主体/imitate_cover 补图 → render_preview 回看 → 导出。
 
 ## 导出
 

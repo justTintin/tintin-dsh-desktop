@@ -59,8 +59,8 @@ function CustomLayerEditor({ layer, project }: { layer: CustomLayer; project: st
           style={{ ...ghostBtn, width: 'auto', padding: '4px 10px', fontSize: 11, opacity: matting.busy ? 0.5 : 1 }}
         >{matting.busy ? '抠图中…' : '抠图去背景'}</button>
       </div>
-      {matting.msg ? <div style={{ marginTop: 6, fontSize: 11, color: matting.ok ? '#7ee2a8' : '#f87171', wordBreak: 'break-all' }}>{matting.msg}</div> : null}
-      <div style={{ fontSize: 10.5, color: '#8b8b88', marginTop: 6 }}>画布拖动改位置 · 拖右下角柄改大小 · 拖上方圆点旋转 · Alt+拖动复制</div>
+      {matting.msg ? <div style={{ marginTop: 6, fontSize: 11, color: matting.ok ? 'var(--ok)' : 'var(--err)', wordBreak: 'break-all' }}>{matting.msg}</div> : null}
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6 }}>画布拖动改位置 · 拖右下角柄改大小 · 拖上方圆点旋转 · Alt+拖动复制</div>
     </div>
   )
 }
@@ -69,7 +69,7 @@ function CustomLayerEditor({ layer, project }: { layer: CustomLayer; project: st
  *  底图保留 AI 生成;产品图来源=素材面板拖入/会话生成。
  *  2026-10-31 §2.5 P1:产品图补「用选中素材设为产品图」(素材区点选→一键设图)与「抠图去背景」;
  *  2026-11-01 用户裁决:删除「恢复默认」;外观/变换/排列统一走 ImageLayerProps(对齐 PhotoCraft)) */
-const STYLE_COLORS = ['#ffffff', '#22d3ee', '#facc15', '#f97316', '#f87171', '#4ade80', '#93c5fd', '#0f172a']
+const STYLE_COLORS = ['#ffffff', '#22d3ee', '#facc15', '#f97316', 'var(--err)', '#4ade80', '#93c5fd', '#0f172a']
 
 /** 文本防抖提交(方案 B §2.5 P0):输入中只写本地态,停顿 250ms 或失焦才写 props——
  *  击键风暴合并为单次渲染。外部值变更(智能体/轮询)即时同步本地。 */
@@ -113,9 +113,9 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
   const dx = styles?.dx ?? 0
   const dy = styles?.dy ?? 0
   return (
-    <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(127,127,127,0.07)', border: '1px solid #2c2c30' }}>
+    <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(127,127,127,0.07)', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>字体</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>字体</span>
         <FontFamilyPicker
           value={styles?.font}
           onChange={(f) => setLayerStyle(layerId, { font: f, weight: undefined, italic: undefined })} // 换字体重置样式字面
@@ -123,7 +123,7 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
       </div>
       {styles?.font ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>样式</span>
+          <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>样式</span>
           <FontStylePicker
             font={styles.font}
             weight={typeof styles?.weight === 'number' ? styles.weight : undefined}
@@ -133,27 +133,27 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
         </div>
       ) : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>大小</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>大小</span>
         <input
           type="range" min={Math.max(14, Math.round(baseFontSize * 0.3))} max={Math.round(baseFontSize * 3)} step={1} value={px}
           onChange={(e) => { const el = layerEl(layerId); if (el) el.style.fontSize = `${Number(e.target.value)}px` }}
           onPointerUp={(e) => setPx(Number(e.currentTarget.value))}
           onKeyUp={(e) => setPx(Number(e.currentTarget.value))}
           onBlur={(e) => setPx(Number(e.currentTarget.value))}
-          style={{ flex: 1, accentColor: '#4f7cff' }}
+          style={{ flex: 1, accentColor: 'var(--accent)' }}
         />
         <input type="number" min={10} max={400} value={px} onChange={(e) => setPx(Number(e.target.value))} style={numBox} />
-        <span style={{ fontSize: 10.5, color: '#8b8b88' }}>px</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>px</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>位置</span>
-        <span style={{ fontSize: 10.5, color: '#8b8b88' }}>X</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>位置</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>X</span>
         <input type="number" min={-1200} max={1200} value={dx} onChange={(e) => setLayerStyle(layerId, { dx: Number(e.target.value) })} style={numBox} />
-        <span style={{ fontSize: 10.5, color: '#8b8b88' }}>Y</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Y</span>
         <input type="number" min={-1200} max={1200} value={dy} onChange={(e) => setLayerStyle(layerId, { dy: Number(e.target.value) })} style={numBox} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: '#8b8b88' }}>颜色</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>颜色</span>
         {STYLE_COLORS.map((c) => (
           <button
             key={c}
@@ -161,7 +161,7 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
             title={styles?.color === c ? `${c}(点击还原默认)` : c}
             style={{
               width: 20, height: 20, borderRadius: 999, cursor: 'pointer', padding: 0,
-              background: c, border: styles?.color === c ? '2px solid #4f7cff' : '1px solid #555',
+              background: c, border: styles?.color === c ? '2px solid var(--accent)' : '1px solid #555',
             }}
           />
         ))}
@@ -175,30 +175,30 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
       </div>
       {/* 投影/描边(2026-11-02 对齐 PhotoCraft 图层样式;设置后覆盖模板硬编码阴影) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>投影</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>投影</span>
         <button
           onClick={() => setLayerStyle(layerId, styles?.shadow ? { shadow: undefined } : { shadow: { dx: 0, dy: 6, blur: 14, color: 'rgba(0,0,0,0.6)' } })}
           title={styles?.shadow ? '关闭投影' : '开启投影'}
-          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 10.5, color: styles?.shadow ? '#4f7cff' : '#8b8b88', borderColor: styles?.shadow ? 'rgba(79,124,255,0.6)' : undefined }}
+          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 11, color: styles?.shadow ? 'var(--accent)' : 'var(--text-faint)', borderColor: styles?.shadow ? 'var(--accent)' : undefined }}
         >{styles?.shadow ? '开' : '关'}</button>
         {styles?.shadow ? (
           <>
-            <span style={{ fontSize: 10.5, color: '#8b8b88' }}>大小</span>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>大小</span>
             <input type="number" min={0} max={60} value={styles.shadow.blur} onChange={(e) => setLayerStyle(layerId, { shadow: { ...styles.shadow!, blur: Math.max(0, Math.min(60, Number(e.target.value) || 0)) } })} style={numBox} />
             <input type="color" value="#000000" onChange={(e) => setLayerStyle(layerId, { shadow: { ...styles.shadow!, color: e.target.value } })} title="投影颜色" style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }} />
           </>
         ) : null}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: '#8b8b88', flexShrink: 0 }}>描边</span>
+        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>描边</span>
         <button
           onClick={() => setLayerStyle(layerId, styles?.stroke ? { stroke: undefined } : { stroke: { width: 3, color: 'rgba(2,6,23,0.65)' } })}
           title={styles?.stroke ? '关闭描边' : '开启描边'}
-          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 10.5, color: styles?.stroke ? '#4f7cff' : '#8b8b88', borderColor: styles?.stroke ? 'rgba(79,124,255,0.6)' : undefined }}
+          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 11, color: styles?.stroke ? 'var(--accent)' : 'var(--text-faint)', borderColor: styles?.stroke ? 'var(--accent)' : undefined }}
         >{styles?.stroke ? '开' : '关'}</button>
         {styles?.stroke ? (
           <>
-            <span style={{ fontSize: 10.5, color: '#8b8b88' }}>宽</span>
+            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>宽</span>
             <input type="number" min={0} max={12} value={styles.stroke.width} onChange={(e) => setLayerStyle(layerId, { stroke: { ...styles.stroke!, width: Math.max(0, Math.min(12, Number(e.target.value) || 0)) } })} style={numBox} />
             <input type="color" value="#ffffff" onChange={(e) => setLayerStyle(layerId, { stroke: { ...styles.stroke!, color: e.target.value } })} title="描边颜色" style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }} />
           </>
@@ -265,7 +265,7 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
   return (
     <div style={{ marginTop: 14 }}>
       <div style={headStyle}>图片「{layerLabel}」</div>
-      <div style={{ fontSize: 11, color: '#8b8b88', marginBottom: 8, wordBreak: 'break-all' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 8, wordBreak: 'break-all' }}>
         当前:{typeof current === 'string' && current ? current : '(未设置)'}
       </div>
       <ImageLayerProps target={{ kind: 'slot', id: layerId, look: look ?? {}, geometry: isProduct }} />
@@ -300,12 +300,12 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
             onClick={generateBg}
             style={{
               width: '100%', marginTop: 6, padding: '8px 0', borderRadius: 8, border: 0, cursor: state.busy ? 'default' : 'pointer',
-              background: state.busy ? 'rgba(79,124,255,0.4)' : 'linear-gradient(135deg,#4f7cff,#22d3ee)', color: '#fff', fontSize: 12.5, fontWeight: 700,
+              background: state.busy ? 'var(--bg-pressed)' : 'var(--primary)', color: 'var(--on-primary)', fontSize: 12.5, fontWeight: 700,
             }}
           >{state.busy ? '生成中…(分钟级)' : '✦ AI 生成底图'}</button>
         </div>
       ) : null}
-      {state.msg ? <div style={{ marginTop: 6, fontSize: 11, color: state.ok ? '#22c55e' : '#f87171', wordBreak: 'break-all' }}>{state.msg}</div> : null}
+      {state.msg ? <div style={{ marginTop: 6, fontSize: 11, color: state.ok ? '#22c55e' : 'var(--err)', wordBreak: 'break-all' }}>{state.msg}</div> : null}
     </div>
   )
 }

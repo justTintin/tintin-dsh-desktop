@@ -36,15 +36,15 @@ function pushRecent(family: string): void {
 }
 
 const box: React.CSSProperties = { flex: 1, minWidth: 0, position: 'relative' }
-const field: React.CSSProperties = { width: '100%', boxSizing: 'border-box', background: '#101012', border: '1px solid #444', borderRadius: 6, color: '#e8e8e6', fontSize: 12, padding: '4px 7px', outline: 'none' }
+const field: React.CSSProperties = { width: '100%', boxSizing: 'border-box', background: 'var(--bg-app)', border: '1px solid #444', borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '4px 7px', outline: 'none' }
 const listStyle: React.CSSProperties = {
   position: 'absolute', left: 0, right: 0, top: 'calc(100% + 4px)', zIndex: 1200, maxHeight: 280, overflowY: 'auto',
-  background: '#1a1a1e', border: '1px solid #3a3a3e', borderRadius: 8, padding: 4, boxShadow: '0 10px 32px rgba(0,0,0,0.5)',
+  background: '#1a1a1e', border: '1px solid var(--border-strong)', borderRadius: 8, padding: 4, boxShadow: '0 10px 32px rgba(0,0,0,0.5)',
 }
-const groupHead: React.CSSProperties = { fontSize: 10, color: '#8b8b88', padding: '5px 7px 2px' }
+const groupHead: React.CSSProperties = { fontSize: 10, color: 'var(--text-faint)', padding: '5px 7px 2px' }
 const rowStyle = (active: boolean): React.CSSProperties => ({
   display: 'flex', alignItems: 'baseline', gap: 8, padding: '5px 7px', borderRadius: 6, cursor: 'pointer',
-  background: active ? 'rgba(79,124,255,0.18)' : 'transparent',
+  background: active ? 'var(--bg-selected)' : 'transparent',
 })
 
 const displayOf = (f: FontFamilyInfo | undefined, fallback: string): string => (f ? (f.local || f.family) : fallback)
@@ -52,8 +52,8 @@ const displayOf = (f: FontFamilyInfo | undefined, fallback: string): string => (
 function Row({ active, main, sub, onPick }: { active: boolean; main: string; sub: string; onPick: () => void }): React.ReactElement {
   return (
     <div className="tintin-cover-font-row" data-pick={main} onMouseDown={(e) => e.preventDefault()} onClick={onPick} style={rowStyle(active)}>
-      <span style={{ fontSize: 12, color: active ? '#cfe0ff' : '#e8e8e6', whiteSpace: 'nowrap' }}>{main}</span>
-      <span style={{ fontSize: 10.5, color: '#8b8b88', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</span>
+      <span style={{ fontSize: 12, color: active ? '#cfe0ff' : 'var(--text)', whiteSpace: 'nowrap' }}>{main}</span>
+      <span style={{ fontSize: 11, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</span>
     </div>
   )
 }
@@ -126,7 +126,7 @@ export function FontStylePicker({ font, weight, italic, onChange }: {
         const s = styles.find((x) => `${x.weight}:${x.italic ? 1 : 0}` === v)
         if (s) onChange({ weight: s.weight, italic: s.italic })
       }}
-      style={{ flex: 1, minWidth: 0, background: '#101012', border: '1px solid #444', borderRadius: 6, color: '#e8e8e6', fontSize: 12, padding: '4px 6px', outline: 'none' }}
+      style={{ flex: 1, minWidth: 0, background: 'var(--bg-app)', border: '1px solid #444', borderRadius: 6, color: 'var(--text)', fontSize: 12, padding: '4px 6px', outline: 'none' }}
     >
       <option value="">默认字面</option>
       {styles.map((s) => <option key={`${s.weight}:${s.italic ? 1 : 0}`} value={`${s.weight}:${s.italic ? 1 : 0}`}>{styleLabel(s)}</option>)}

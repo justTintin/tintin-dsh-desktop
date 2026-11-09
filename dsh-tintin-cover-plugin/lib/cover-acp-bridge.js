@@ -459,6 +459,7 @@ export async function startSession({ cwd, serverUrl, channelHome, agent = 'deeps
       const wasReady = state.ready
       state.ready = false
       state.conn = null
+      state.lastExitCode = code ?? null
       console.warn(`[cover-agent] exit code=${code} wasReady=${wasReady} stderr=${state.stderr.slice(-400)}`)
       if (wasReady) emit({ key: 'cover', kind: 'exit', code: code ?? null, stderr: state.stderr.slice(-2000) })
       resolve({ code: code ?? null })
@@ -531,14 +532,23 @@ export async function startSession({ cwd, serverUrl, channelHome, agent = 'deeps
     .connect(stream)
 
   /* 握手与退出竞速(2026-10-30 崩溃窗口实证):子进程秒退时 initialize/session 阻塞
-     永挂,发送侧只剩「正在处理」死路 —— 任一握手请求与 exitWaiter 竞速,死了立刻报错。 */
-  const raceExit = (p) => Promise.race([
-    p,
-    state.exitWaiter.then(({ code }) => {
-      throw new Error(`agent 进程在握手期间退出(code ${code ?? 'null'})。stderr 尾部: ${state.stderr.slice(-300)}`)
+     永挂,发送侧只剩「正在处理」死路 —— 任一握手请求与 exitWaiter 竞速,死了立刻报错。
+     2026-11-09 报障「Cannot read properties of null (reading 'agent')」:exit 看门狗在
+     spawn 与握手之间置 conn=null,而 p 的参数表达式(state.conn.agent.request)先于
+     race 开始同步求值 → 裸 TypeError 上屏。race 内先验 conn,死了报有意义错误。 */
+  const raceExit = (make) => {
+    if (!state.conn) {
+      return Promise.reject(new Error(`agent 进程在握手前退出(code ${state.lastExitCode ?? 'null'})。stderr 尾部: ${state.stderr.slice(-300)}`))
+    }
+    return Promise.race([
+      make(state.conn),
+      state.exitWaiter.then(({ code }) => {
+        throw new Error(`agent 进程在握手期间退出(code ${code ?? 'null'})。stderr 尾部: ${state.stderr.slice(-300)}`)
     }),
   ])
-  const init = await raceExit(state.conn.agent.request(sdk_.methods.agent.initialize, {
+  }
+  /* 三个握手请求都传 make(conn):参数在 race 内求值,conn 已死时不再裸读。 */
+  const init = await raceExit((conn) => conn.agent.request(sdk_.methods.agent.initialize, {
     protocolVersion: sdk_.PROTOCOL_VERSION,
     clientCapabilities: CLIENT_CAPABILITIES,
     clientInfo: CLIENT_INFO,
@@ -550,12 +560,12 @@ export async function startSession({ cwd, serverUrl, channelHome, agent = 'deeps
   const params = { cwd, mcpServers: [] }
   let sessionId = state.sessionId
   if (sessionId) {
-    const resumed = await raceExit(state.conn.agent.request(sdk_.methods.agent.session.resume, { ...params, sessionId })).then((r) => r, () => null)
+    const resumed = await raceExit((conn) => conn.agent.request(sdk_.methods.agent.session.resume, { ...params, sessionId })).then((r) => r, () => null)
     if (resumed) { sessionId = resumed.sessionId; state.session = resumed }
     else sessionId = null
   }
   if (!sessionId) {
-    const created = await raceExit(state.conn.agent.request(sdk_.methods.agent.session.new, params))
+    const created = await raceExit((conn) => conn.agent.request(sdk_.methods.agent.session.new, params))
     sessionId = created.sessionId
     state.session = created
   }

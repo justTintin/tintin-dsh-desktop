@@ -16,10 +16,10 @@ export type ImageTarget =
   | { kind: 'slot'; id: string; look: ImageLook & { dx?: number; dy?: number }; geometry: boolean }
 
 export const numBox: React.CSSProperties = {
-  width: 56, background: '#101012', border: '1px solid #444', borderRadius: 6,
-  color: '#e8e8e6', fontSize: 11, padding: '3px 5px', outline: 'none',
+  width: 56, background: 'var(--bg-app)', border: '1px solid #444', borderRadius: 6,
+  color: 'var(--text)', fontSize: 11, padding: '3px 5px', outline: 'none',
 }
-const label: React.CSSProperties = { fontSize: 11, color: '#8b8b88', flexShrink: 0 }
+const label: React.CSSProperties = { fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }
 const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }
 const chip = (on = true): React.CSSProperties => ({ ...ghostBtn, width: 'auto', padding: '3px 8px', fontSize: 11, opacity: on ? 1 : 0.4, cursor: on ? 'pointer' : 'default' })
 
@@ -65,7 +65,7 @@ export function PreviewSlider({ min, max, step, value, preview, commit }: {
       onPointerUp={(e) => commit(Number(e.currentTarget.value))}
       onKeyUp={(e) => commit(Number(e.currentTarget.value))}
       onBlur={(e) => commit(Number(e.currentTarget.value))}
-      style={{ flex: 1, minWidth: 0, accentColor: '#4f7cff' }}
+      style={{ flex: 1, minWidth: 0, accentColor: 'var(--accent)' }}
     />
   )
 }
@@ -168,7 +168,7 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
   )
 
   return (
-    <div data-image-props="" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(127,127,127,0.07)', border: '1px solid #2c2c30' }}>
+    <div data-image-props="" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(127,127,127,0.07)', border: '1px solid var(--border)' }}>
       <div style={{ ...row, marginTop: 0 }}>
         <select
           value={look.blend ?? 'normal'} title="混合模式"
@@ -183,7 +183,7 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
           commit={(v) => { if (v !== opacity) apply({ opacity: v / 100 }) }} />
         <NumField value={opacity} min={0} max={100} title="不透明度 %" onCommit={(v) => apply({ opacity: Math.round(v) / 100 })} />
       </div>
-      <label style={{ ...row, cursor: 'pointer', fontSize: 11, color: locked ? '#facc15' : '#c9c9cf' }}>
+      <label style={{ ...row, cursor: 'pointer', fontSize: 11, color: locked ? '#facc15' : 'var(--text-muted)' }}>
         <input type="checkbox" checked={locked} onChange={(e) => apply({ locked: e.target.checked ? true : undefined })} />
         🔒 锁定位置{locked ? '(移动/变换已禁用)' : ''}
       </label>
@@ -194,7 +194,7 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
         <button
           onClick={() => apply(look.shadow ? { shadow: undefined } : { shadow: { dx: 0, dy: 10, blur: 18, color: 'rgba(0,0,0,0.55)' } })}
           title={look.shadow ? '关闭投影' : '开启投影'}
-          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 10.5, color: look.shadow ? '#4f7cff' : '#8b8b88', borderColor: look.shadow ? 'rgba(79,124,255,0.6)' : undefined }}
+          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 11, color: look.shadow ? 'var(--accent)' : 'var(--text-faint)', borderColor: look.shadow ? 'var(--accent)' : undefined }}
         >{look.shadow ? '开' : '关'}</button>
         {look.shadow ? (
           <>
@@ -211,7 +211,7 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
             <span style={label}>W</span>
             <NumField value={size?.w ?? 0} disabled={locked || !size} min={1} max={8000} title="宽度(px)" onCommit={(v) => setSize({ w: v })} />
             <button onClick={() => setLinked(!linked)} title={linked ? '链接宽度和高度(点击解除)' : '宽高未链接(点击链接)'}
-              style={{ ...chip(), padding: '2px 6px', color: linked ? '#4f7cff' : '#8b8b88', borderColor: linked ? 'rgba(79,124,255,0.6)' : undefined }}>{linked ? '🔗' : '⛓'}</button>
+              style={{ ...chip(), padding: '2px 6px', color: linked ? 'var(--accent)' : 'var(--text-faint)', borderColor: linked ? 'var(--accent)' : undefined }}>{linked ? '🔗' : '⛓'}</button>
             <span style={label}>H</span>
             <NumField value={size?.h ?? 0} disabled={locked || !size} min={1} max={8000} title="高度(px)" onCommit={(v) => setSize({ h: v })} />
             <span style={label}>px</span>
@@ -250,13 +250,13 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
       {target.kind === 'custom' ? (
         <div style={{ ...row, flexWrap: 'wrap' }}>
           <button onClick={() => duplicateCustomLayer(id)} title="复制图层(Ctrl+J):全部属性照搬,副本在原图层之上" style={chip()}>⧉ 复制图层</button>
-          <button onClick={() => removeCustomLayer(id)} title="删除图层(Delete)" style={{ ...chip(), color: '#f87171' }}>🗑 删除图层</button>
+          <button onClick={() => removeCustomLayer(id)} title="删除图层(Delete)" style={{ ...chip(), color: 'var(--err)' }}>🗑 删除图层</button>
         </div>
       ) : null}
       {/* 单层导出(2026-11-02 对齐 PhotoCraft quick-export):隐藏其余全部图层后 render */}
       <div style={row}>
         <button onClick={() => void exportThisLayer()} title="隐藏其余图层,只渲染本图层为 PNG(落项目目录)" style={{ ...chip(), color: '#93c5fd' }}>⬇ 仅显示此图层导出</button>
-        {exportMsg ? <span style={{ fontSize: 10.5, color: exportMsg.startsWith('✓') ? '#7ee2a8' : '#f87171', wordBreak: 'break-all' }}>{exportMsg}</span> : null}
+        {exportMsg ? <span style={{ fontSize: 11, color: exportMsg.startsWith('✓') ? 'var(--ok)' : 'var(--err)', wordBreak: 'break-all' }}>{exportMsg}</span> : null}
       </div>
     </div>
   )

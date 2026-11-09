@@ -9,7 +9,10 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "paths": {
+      "openfilm/studio-ui/*": ["../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/*"]
+    }
   },
   "include": ["src", "templates", "test"]
 }

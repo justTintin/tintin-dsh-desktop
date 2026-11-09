@@ -90,13 +90,13 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
   }
 
   const input: React.CSSProperties = {
-    width: '100%', boxSizing: 'border-box', background: '#141416', color: '#e8e8e6',
-    border: '1px solid #3a3a3e', borderRadius: 8, padding: '8px 10px', fontSize: 13, outline: 'none',
+    width: '100%', boxSizing: 'border-box', background: 'var(--bg-field)', color: 'var(--text)',
+    border: '1px solid var(--border-strong)', borderRadius: 8, padding: '8px 10px', fontSize: 13, outline: 'none',
   }
   const btn = (tone: 'primary' | 'ghost'): React.CSSProperties => ({
-    flex: 1, padding: '8px 0', borderRadius: 8, border: tone === 'primary' ? 0 : '1px solid #3a3a3e',
+    flex: 1, padding: '8px 0', borderRadius: 8, border: tone === 'primary' ? 0 : '1px solid var(--border-strong)',
     cursor: busy ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700,
-    background: tone === 'primary' ? '#4f7cff' : 'transparent', color: tone === 'primary' ? '#fff' : '#c8c8c6',
+    background: tone === 'primary' ? 'var(--primary)' : 'transparent', color: tone === 'primary' ? 'var(--on-primary)' : 'var(--text-muted)',
     opacity: busy ? 0.6 : 1,
   })
 
@@ -105,20 +105,20 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
       onClick={onClose}>
       {/* 弹层尺寸=技能弹窗同款+右上角关闭钮(2026-11-03 三次裁决);内容保持左右布局
           (2026-10-29 二次裁决):左=地址表单,右=服务清单(内部滚动不撑破弹层) */}
-      <div style={{ width: 'min(1200px, calc(100vw - 64px))', height: 'min(800px, calc(100vh - 80px))', display: 'flex', flexDirection: 'column', background: '#1e1e20', borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,0.5)', overflow: 'hidden' }}
+      <div data-tintin-cover-scope="" style={{ fontFamily: 'var(--font-sans)', width: 'min(1200px, calc(100vw - 64px))', height: 'min(800px, calc(100vh - 80px))', display: 'flex', flexDirection: 'column', background: 'var(--bg-raised)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-lg)', overflow: 'hidden' }}
         onClick={(e) => e.stopPropagation()}>
         {/* 头部: 标题行(右上角关闭钮=技能弹窗同款排版) */}
         <div style={{ padding: '14px 18px 0', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 16, fontWeight: 800 }}>服务设置</span>
             <span style={{ flex: 1 }} />
-            <button onClick={onClose} title="关闭" style={{ width: 28, height: 28, borderRadius: 8, fontSize: 14, lineHeight: 1, color: '#9a9ba1', background: 'transparent', border: 0, cursor: 'pointer' }}>✕</button>
+            <button onClick={onClose} title="关闭" style={{ width: 28, height: 28, borderRadius: 8, fontSize: 14, lineHeight: 1, color: 'var(--text-faint)', background: 'transparent', border: 0, cursor: 'pointer' }}>✕</button>
           </div>
         </div>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <div style={{ width: 300, flexShrink: 0, padding: '12px 22px 22px', borderRight: '1px solid #2c2c30', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
-          <div style={{ fontSize: 11, lineHeight: 1.6, color: '#8b8b88', marginBottom: 16 }}>服务端地址与视频剪辑/总助手共用一份配置；封面与剪辑会话的 MCP 工具在会话创建时按此地址自动挂载。</div>
-          <div style={{ fontSize: 12, color: '#c8c8c6', fontWeight: 700, marginBottom: 6 }}>服务端地址</div>
+          <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-faint)', marginBottom: 16 }}>服务端地址与视频剪辑/总助手共用一份配置；封面与剪辑会话的 MCP 工具在会话创建时按此地址自动挂载。</div>
+          <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700, marginBottom: 6 }}>服务端地址</div>
           <input
             value={url}
             placeholder="http://192.168.x.x:8000"
@@ -131,27 +131,27 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
             <button onClick={discover} disabled={busy !== null || !url.trim()} style={btn('ghost')}>{busy === 'discover' ? '获取中…' : '获取 MCP 服务'}</button>
           </div>
           {message ? (
-            <div style={{ fontSize: 12, lineHeight: 1.6, color: messageOk ? '#7ee2a8' : '#ff8f8f', background: messageOk ? 'rgba(126,226,168,0.08)' : 'rgba(255,143,143,0.08)', borderRadius: 8, padding: '8px 10px' }}>
+            <div style={{ fontSize: 12, lineHeight: 1.6, color: messageOk ? 'var(--ok)' : 'var(--err)', background: messageOk ? 'rgba(76,194,122,0.1)' : 'rgba(242,102,95,0.1)', borderRadius: 8, padding: '8px 10px' }}>
               {message}
             </div>
           ) : null}
         </div>
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, padding: '12px 22px 22px', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
-          <div style={{ fontSize: 12, color: '#c8c8c6', fontWeight: 700, marginBottom: 8 }}>
-            发现的 MCP 服务（{tools.length}）{refreshing ? <span style={{ color: '#8b8b88', fontWeight: 400 }}> · 正在刷新…</span> : null}
-            {mcpUrl ? <span style={{ color: '#8b8b88', fontWeight: 400 }}> · {mcpUrl}</span> : null}
+          <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700, marginBottom: 8 }}>
+            发现的 MCP 服务（{tools.length}）{refreshing ? <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}> · 正在刷新…</span> : null}
+            {mcpUrl ? <span style={{ color: 'var(--text-faint)', fontWeight: 400 }}> · {mcpUrl}</span> : null}
           </div>
           {tools.length > 0 ? (
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, paddingRight: 4 }}>
               {tools.map((t) => (
-                <div key={t.name} style={{ background: '#141416', border: '1px solid #2c2c30', borderRadius: 8, padding: '6px 10px', flexShrink: 0 }}>
+                <div key={t.name} style={{ background: 'var(--bg-field)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', flexShrink: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: '#93c5fd' }}>{t.name}</div>
-                  {t.description ? <div style={{ fontSize: 11, color: '#8b8b88', marginTop: 2 }}>{t.description}</div> : null}
+                  {t.description ? <div style={{ fontSize: 12, color: 'var(--text-faint)', marginTop: 2 }}>{t.description}</div> : null}
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ flex: 1, fontSize: 12, color: '#8b8b88', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', lineHeight: 1.8 }}>
+            <div style={{ flex: 1, fontSize: 12, color: 'var(--text-faint)', display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', lineHeight: 1.8 }}>
               {loaded ? '还没有发现记录——填好服务端地址后点「获取 MCP 服务」。' : '正在加载…'}
             </div>
           )}
