@@ -11,9 +11,9 @@ type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: u
 
 const STYLE = [
   '.tintin-pd-fab{z-index:2147483000}',
-  /* 弹窗跟随聊天列(2026-11-07 用户裁决: 0.3 聊天列在左, 弹窗不得写死屏幕右侧) ——
-     打开时按 #of-chat 的实位 JS 定位贴其右缘, 这里的 left:8px 只是列不在时的兜底。 */
-  '.tintin-pd-panel{position:fixed;left:8px;bottom:120px;width:400px;max-height:480px;z-index:2147483001;background:#101114;border:1px solid #26272b;border-radius:12px;display:flex;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6;box-shadow:0 12px 32px rgba(0,0,0,.5)}',
+  /* 素材式嵌入(2026-11-09 用户裁决): 面板占聊天列的会话区域(列顶→输入框上缘), 不再浮在
+     Studio 画布上 —— 四边由打开时按 #of-chat 的实位 JS 设定, 这里只是形状兜底。 */
+  '.tintin-pd-panel{position:fixed;left:0;top:32px;width:420px;max-height:70vh;z-index:2147483001;background:#101114;border:1px solid #26272b;border-radius:12px;display:flex;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6;box-shadow:0 12px 32px rgba(0,0,0,.5)}',
   '.tintin-pd-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1c1d21}',
   '.tintin-pd-title{flex:1;font-weight:700;font-size:14px}',
   '.tintin-pd-close{background:#1a1b1f;border:1px solid #2a2b31;border-radius:8px;color:#c9c9cf;font-size:14px;cursor:pointer;min-width:28px;height:28px}',
@@ -104,11 +104,21 @@ const mount = (): void => {
     document.body.append(panel);
 
     const inject = (text: string): void => {
-      const editor = document.querySelector('[data-lexical-editor="true"]');
+      const editor = document.querySelector<HTMLElement>('[data-lexical-editor="true"]');
       if (!editor) { status.textContent = '未找到会话输入框'; return }
-      const dt = new DataTransfer();
-      dt.setData('text/plain', text);
-      editor.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      /* 0.3 Lexical 注入(2026-11-09 CDP 实验矩阵): 合成 paste 无视; 合成 beforeinput 可用,
+         但**第一个必被丢弃**(selection 未从 DOM 同步), 从第二个起可靠 —— 先发一个零宽
+         字符热身(视觉无污染), 再逐行 insertText / 行间 insertParagraph。 */
+      editor.focus();
+      const fire = (inputType: string, data: string | null): void => {
+        editor.dispatchEvent(new InputEvent('beforeinput', { inputType, data, bubbles: true, cancelable: true }));
+      };
+      fire('insertText', '\u200b');
+      const lines = text.split('\n');
+      for (const [i, line] of lines.entries()) {
+        if (i > 0) fire('insertParagraph', null);
+        fire('insertText', line);
+      }
       status.textContent = '已注入产品资料到会话输入框';
       panel.style.display = 'none';
     };
@@ -189,10 +199,20 @@ const mount = (): void => {
     };
     const open = (): void => {
       panel.style.display = 'flex';
-      /* 贴聊天列右缘: 0.3 聊天列在左, 弹窗落在列右边(列收起/不在=屏幕左侧兜底) */
+      /* 素材式嵌入: 面板占聊天列的会话区域(列左缘→列宽, 列顶→输入框上缘留 128px 给
+         composer), 不盖 Studio 画布(2026-11-09 用户裁决); 列不在=屏幕左侧兜底 */
       const columnRect = document.getElementById('of-chat')?.getBoundingClientRect();
-      if (columnRect && columnRect.width > 40) panel.style.left = `${Math.min(Math.round(columnRect.right) + 8, Math.max(8, innerWidth - 408))}px`;
-      else panel.style.left = '8px';
+      if (columnRect && columnRect.width > 40) {
+        panel.style.left = `${Math.round(columnRect.left)}px`;
+        panel.style.top = `${Math.round(columnRect.top)}px`;
+        panel.style.width = `${Math.round(columnRect.width)}px`;
+        panel.style.maxHeight = `${Math.max(240, Math.round(columnRect.height - 128))}px`;
+      } else {
+        panel.style.left = '0px';
+        panel.style.top = '32px';
+        panel.style.width = '420px';
+        panel.style.maxHeight = '70vh';
+      }
       if (!list.childElementCount && !status.textContent) void load('');
     };
     fab.onclick = open;
