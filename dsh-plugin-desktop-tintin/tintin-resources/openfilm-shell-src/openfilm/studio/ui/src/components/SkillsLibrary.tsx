@@ -202,7 +202,7 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
         onCoverChanged={(cover) => patch(opened.name, (k) => (k.source === 'mine' ? { ...k, cover: cover ?? undefined } : k))} />
     ) : null}
     <div className="pb-10" hidden={Boolean(opened)}>
-      <div className="sticky top-0 z-[1] flex items-center gap-1 bg-[var(--app-content-bg)] px-6 pb-4">
+      <div className="sticky top-0 z-[1] flex items-center gap-1 bg-[var(--app-content-bg,var(--bg-panel))] px-6 pb-4">
         <div role="tablist" className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
           {chip(view === 'installed', <>{t('gallery.installed')}{count ? <span className="text-[var(--text-faint)]">{count}</span> : null}</>, () => setView('installed'), 'installed')}
           {chip(view === 'discover', t('gallery.discover'), () => setView('discover'), 'discover')}

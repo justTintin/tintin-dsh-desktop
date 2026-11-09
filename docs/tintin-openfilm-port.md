@@ -195,6 +195,7 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | 注入 | 产品资料结构化文本(品牌·型号·品类·货号 + 性能参数 + 核心卖点逐条)写进官方 composer 输入框。**0.3 注入法(2026-11-09 CDP 实验矩阵)**: 合成 paste 被 0.3 Lexical 无视; 页面侧合成 beforeinput 可用但**第一个必被丢弃**(selection 未同步), 解法=零宽字符(U+200B)热身丢弃 + 逐行 insertText / 行间 insertParagraph —— 全文(含首行)可靠落地, pre-wrap 保排版 |
 | 数据 | 主进程代理 GET /api/product-library/search?q&limit 与 /items/{id}(实测顶层 items/item) |
 | @ 引用(2026-11-09 用户裁决「做」): 输入 @ 检索产品(「产品」组, 五语言组名), 点选/回车插入 product pill(图标 Package); 发送时 pill(服务端 id)经桥 products.texts 取 productContextOf 同源上下文块追加进消息。vendored 补丁面: prompt-text(kind/prefix/activatedProductIds)+PromptPill 图标+app-bridge products 可选面+App.tsx(状态/菜单组/pill/发送追加)+index.ts 导出+i18n 五语言 mention.groupProducts |
+| 技能库弹窗背景(2026-11-09 报障「技能库窗口半透明」): 恢复的 SkillsDialog/SkillsLibrary 用 `var(--app-content-bg)`, 该变量在 0.3 树只有使用无定义(0.2.7 时代由官方桌面宿主 CSS 提供, 壳页没有)→面板透明可见底下视频; 修=回退 `var(--app-content-bg,var(--bg-panel))`, CDP 实测 `rgb(24,24,24)` 不透明(弹窗体+粘性头部两处) |
 
 
 ## 11. 角色智能体名册(2026-10-24 实现; **2026-10-25 退役**, 见下; **2026-10-30 以「TinTin智能体」形态部分恢复**)
@@ -490,6 +491,34 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 ## 16.20 浏览器域：侧栏收起态标题裁字修复(2026-11-08, 用户报障「插件行图标只显示一个字」, 问「从哪个版本开始」)
 
 **自 `v0.2.2-rc.1-20261109-1021` 包始**(上一包 `v0.2.1-rc.1-20261104-1603` 正常)。两包之间宿主演示层(deepseek web)0.2.1-rc.1→0.2.2-rc.1 跟线 + openfilm-shell 0.2.7 升级落地 → 侧栏行 DOM 变形。坏的不是图标(注入的 16×16 线稿 svg 一直在)——坏的是 2026-10-19 的**收起态标题隐藏**：其「第一个叶子 span」启发式 + 侧栏类名宽度查询是按 0.2.1 行 DOM 写的，0.2.2 行 DOM 变形后失配 → 标题没隐藏，窄栏裁成首字(素/运/媒/封/视/浏)。`client.js` 该逻辑自 10-19 后从未改过(git -S 实证)——不是改坏的，是宿主演示层升级震坏的。修复(免疫演示层漂移)：注入标题时打 `data-tintin-title` 标记，隐藏按标记查(不再按 DOM 形状猜)；宽度优先读克隆行自身宿主容器实测值，旧侧栏选择器降为兜底。与并行会话在途 client.js 改动(动画白名单/openDir)不同区域无碰撞。验证: node --check + tintin-browser 全量 + check:tintin + 包 build 绿。
+
+## 16.21 浏览器域：设置入口+页内查找+右键菜单+缩放+快捷键(2026-11-08, 第一批 P0 五项, 裁决「先做第一批」)
+
+界面审计(同日)结论: 无设置面的根因=移植定位是「平台收藏+登录态采集+嗅探下载工具」从未有过设置面; 与 Chrome 差距按 P0/P1/P2 分级列全(多标签/浏览历史/用户书签在第二批)。本批实施第一批:
+
+- **设置入口(#1)**: 功能扩展行新增「设置」⚙; 新文件 `settings-store.ts`(settings.json 存储 + 平台分区 setProxy 应用 + clearStorageData 白名单清除 + 下载目录) —— 设置项: 主页按钮目标(空=平台首页, home 动作优先读)/地址栏搜索引擎(百度/必应/谷歌, normalizeAddress 接线)/代理(system/direct/manual+规则, 保存即生效, 取代 11-08 的纯 system 循环)/清除浏览数据(全部或单平台, Cookie 清除=退出登录带 confirm)/下载目录展示与打开;
+- **页内查找(#5)**: `browser:findInPage/stopFind` + found-in-page 回推(ordinal/total); 页面浮条(↑/↓/×, Enter 下一处 Shift+Enter 上一处, Esc 关); Ctrl+F 开;
+- **右键菜单(#6)**: 新文件 `context-menu.ts`(导航/链接三操作/图片复制另存/编辑剪切复制粘贴/缩放三档);
+- **缩放(#7)**: Ctrl+=/-/0 步进 ±0.5, 百分比 toast 上屏(右键菜单同走 zoomStep);
+- **快捷键(#8)**: 平台视图内 Ctrl+F/L/H/=/-/0/F5/Ctrl+R 由壳 before-input-event 转发 `tintin-browser-page:ui`(find-open/focus-addr/open-section/toast); 页面壳层同键直处理(查找/地址栏/历史视图), F5=刷新;
+- 验证: 页面语法+jsdom 冒烟(设置页 14 元素/扩展行含设置/查找条默认隐藏+Ctrl+F 打开)+tintin-browser 全量+包 build(严格 tsc 抓到 ClearStorageDataOptions storages 可选属性与 popup exactOptionalPropertyTypes 两处, 已收窄)绿。
+- 遗留对照: findBar 默认 display 由 style 属性首帧为空(jsdom 无初始解析)——实际浏览器有 style="display:none" 内联, 冒烟断言改读元素存在+Ctrl+F 开关行为, 非缺陷。
+
+## 16.22 共享聊天源码第二消费方(封面会话页)契约清偿(2026-11-09, 用户报障「新建封面项目右侧会话空白」)
+
+- **根因**:0.3.0 升级(§16.9)给共享桥契约 `AppBridge` 加了必选成员 `starterSkills`(空会话技能卡), 影片桥补了实现而**封面桥(chat-shell/cover-chat-bridge.ts)漏配**——封面载荷编译新共享源码后, 新项目=空会话挂 `ProjectStarters` 时 `app.starterSkills()` 同步抛 `not a function` → React 整树卸载=右栏白屏; 老项目走 `LiveConversation` 分支不挂该组件故无感。错误日志当日 11:41 三条实证。升级重放清单当时只盖了影片桥=第二个消费方不在名单。
+- **修复(方案 1+3, 用户确认)**:①封面桥补 `starterSkills: async () => []`(与影片侧同款空实现);②封面桥对象按共享 `AppBridge` 类型标注(`typeof import(app-bridge)['app']` + `Record<string, unknown>` 放行封面扩展成员)——上游契约再变, 缺方法即刻类型报错;③运行期双保险: 新增 `test/cover-chat-bridge-contract.test.ts` 结构门禁(jsdom 导入桥对象 ⇄ 解析 AppBridge 源码逐必选成员比对 + `starterSkills` 回归断言 + **staging 载荷含 starterSkills 调用链断言**防旧载荷带病上机);④流程: 本节即升级重放清单补项——**今后 OpenFilm shell 升级必须同步重建封面 chat-shell 载荷(node scripts/stage.mjs)并跑封面契约门禁**。
+- **契约对齐连带(类型层, 零行为变化)**:桥对象上类型后既有实现的 12 处类型松散显形, 已逐处收窄(helloMeta/libraryPage 的 catch 显式返回类型/`tintin-agent` 行 `as RosterAgent`(disabled 为封面扩展键)/agentStates `install: ''`(契约必选 string)/disconnect·describePaths·skills.list·texts 显式 Promise 断言/previewFolder `as const` 字面量); tsconfig 补 `paths` 映射 `openfilm/studio-ui/*`→vendor 的 `openfilm/studio/ui/src/*`(host.ts 仅依赖 React, 解析安全)。
+- **边界(架构事实)**:chat-shell 不进包 tsconfig include——include 会经 cover-chat-main→mount→App.tsx 把共享聊天树全量源码拉进编译(83 个上游类型债), 门禁面收缩为「桥文件经测试 import 链被 follow」。共享树本身仍无 tsc 覆盖(影片侧同样无 tsconfig), 上游债不归本仓清偿。
+- 验证: 封面 103 用例(含新契约 3 条)绿 + 包级 typecheck 恢复既有基线 37 红(全为 test 文件历史漂移, 本批净增 0) + root typecheck 0 红 + check:tintin 全绿 + staging 载荷重建(cover-chat-B9TxgjXe)逐字节新鲜。
+
+## 16.22 浏览器域：多标签页+浏览历史+用户书签(2026-11-08 第二批三项, 裁决「第二批开始」)
+
+- **多标签(#2, 架构项)**: 纯逻辑 `tab-model.ts`(建/关/激活/更新/平台查找, 上限 12, 关闭后继=右邻优先左邻兜底, 5 用例) + 引擎 `tab-engine.ts`(标签 view 创建=同平台共享分区/登录态隔离不变, 深链拦截/右键/快捷键/查找/历史与平台单视图同语义; 三 IPC tabOpen/tabClose/tabActivate, 池状态依赖注入回写宿主)。页面: 地址栏下 tab 栏(活跃态/×关/＋新=当前平台), 状态推送含 tabs+activeTabId。平台行单视图语义原样保留(标签池空走 browserViews 兜底);
+- **浏览历史(#3)**: `history-bookmark.ts` —— 分区 did-navigate 记录(同 URL 去重置顶, 全局 500/每平台 100 双环形上限), history.json 持久化; 「历史」视图改三段口径(访问 50+下载 30+嗅探 30, 打开按钮回跳); **地址栏建议**: 输入 ≥2 字符模糊匹配最近 8 条, ↑↓ 选择 Enter 跳转;
+- **用户书签(#4)**: 地址栏星标(☆/★, bookmarkToggle 翻转), bookmarks.json 持久化, 上限 200。(注: 11-04 删的「网页收藏」视图是嗅探媒体收藏口径, 与本批网页书签不同物, 未恢复);
+- **千行付账**: browser-service 1109→968 行 —— tab 引擎提取 `tab-engine.ts`(161 行, 依赖注入回写池状态) + 页面下载栏镜像提取 `page-downloads.ts`(锚点 browser:bili-ext-dl 随迁并登记注释);
+- 验证: tab-model 5 新用例(14 文件 107 用例全绿)+包 build(严格 tsc)+check:tintin(锚点迁移后 83 锚点一致)+页面语法绿。多标签端到端(切标签边界/关闭后继/标题回推)待重打包实机验收。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 

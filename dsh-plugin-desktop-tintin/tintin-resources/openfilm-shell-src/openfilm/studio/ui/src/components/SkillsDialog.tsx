@@ -34,7 +34,7 @@ export function SkillsDialog({ projectId, onClose }: { projectId: string; onClos
     <>
       <div className="fixed inset-0 z-[10040] bg-black/60" onMouseDown={onClose} />
       <div role="dialog" aria-modal="true" aria-label={t('skills.button')}
-        className="fixed left-1/2 top-1/2 z-[10050] flex -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--app-content-bg)] shadow-[0_24px_64px_rgba(0,0,0,0.35)]"
+        className="fixed left-1/2 top-1/2 z-[10050] flex -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--app-content-bg,var(--bg-panel))] shadow-[0_24px_64px_rgba(0,0,0,0.35)]"
         style={{ width: 'min(880px, calc(100vw - 64px))', height: 'min(720px, calc(100vh - 80px))' }}>
         <SkillsLibrary skills={skills} setSkills={setSkills} projectId={projectId}
           opened={opened} onOpen={setOpened} onBack={() => setOpened(null)}
