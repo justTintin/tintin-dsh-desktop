@@ -19,6 +19,7 @@ import { copyFile, mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { sharedHome } from '../../src/locations.mjs';
 import { writeAtomic } from './atomic.mjs';
+import { inProject } from './files.mjs';
 import { HttpError, json, readJson } from './http.mjs';
 import { moveToTrash } from './trash.mjs';
 
@@ -43,7 +44,8 @@ const clean = (v, max = NAME_MAX) => String(v ?? '').replace(/[\u0000-\u001f]+/g
 /** @param {string} id @returns {Promise<Kept | null>} */
 async function readKept(id) {
   if (!ID.test(id)) return null;
-  const raw = await readFile(join(charactersDir(), id, 'character.json'), 'utf8').then(JSON.parse, () => null);
+  const raw = await readFile(join(charactersDir(), id, 'character.json'), 'utf8')
+    .then((text) => { try { return JSON.parse(text); } catch { return null; } }, () => null);
   if (!raw || typeof raw.name !== 'string') return null;
   const pictures = (Array.isArray(raw.pictures) ? raw.pictures : []).filter((/** @type {any} */ p) => p && ROLES.includes(p.role) && FILE.test(String(p.file)));
   return { name: raw.name, ...(typeof raw.about === 'string' && raw.about ? { about: raw.about } : {}), created: Number(raw.created) || 0, pictures };
@@ -79,9 +81,8 @@ export async function saveCharacter(root, body) {
   const pictures = [];
   for (const [i, p] of given.entries()) {
     const path = String(p.path);
-    if (path.startsWith('/') || path.split('/').includes('..')) continue;
-    const from = join(root, path);
-    if (!(await stat(from).catch(() => null))?.isFile()) continue;
+    const from = inProject(root, path);
+    if (!from || !(await stat(from).catch(() => null))?.isFile()) continue;
     const role = ROLES.includes(p.role) ? p.role : 'other';
     const file = `${role}-${i + 1}${extname(path).toLowerCase()}`;
     await copyFile(from, join(dir, 'files', file));

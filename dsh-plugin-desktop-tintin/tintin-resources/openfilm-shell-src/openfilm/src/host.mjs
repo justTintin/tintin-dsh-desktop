@@ -81,9 +81,11 @@ const TYPES = {
  * `root`, or leads out of it through a link.
  * `swap(file)` may name another file to serve in a file's place (a render's fast-seeking copy of a video, seekable.mjs;
  * the preview's proxy of heavy footage, studio/server/proxies.mjs); not for `?film-facts`, which asks what the file is.
- * @param {string} root @param {{ inject?: string, timelineInject?: string, headers?: Record<string, string>, swap?: (file: string) => string | null }} [options]
+ * `missed(file)` is told of a file in the folder asked for and not there, or refused (a link out of the folder): a
+ * render keys its chunks on those too, as the page would draw otherwise once the file is there.
+ * @param {string} root @param {{ inject?: string, timelineInject?: string, headers?: Record<string, string>, swap?: (file: string) => string | null, missed?: (file: string) => void }} [options]
  */
-export function folderFiles(root, { inject = `<script>${HOST_FLAG}</script>`, timelineInject = inject, headers: extraHeaders = {}, swap } = {}) {
+export function folderFiles(root, { inject = `<script>${HOST_FLAG}</script>`, timelineInject = inject, headers: extraHeaders = {}, swap, missed } = {}) {
   root = resolve(root);
   return (req, res, path, query) => {
     /* beside any film, wherever in the folder it is (its page asks for them relative to itself) */
@@ -140,12 +142,12 @@ export function folderFiles(root, { inject = `<script>${HOST_FLAG}</script>`, ti
     if (rel.endsWith('/')) rel += 'index.html';
     const asked = normalize(join(root, rel));
     if (asked !== root && !asked.startsWith(root + sep)) return false;
-    try { statSync(asked); } catch { res.writeHead(404, extraHeaders).end('not found'); return true; }
+    try { statSync(asked); } catch { missed?.(asked); res.writeHead(404, extraHeaders).end('not found'); return true; }
     // a link out of the folder is not followed: a film from elsewhere can bring one to any of the person's files. Only
     // media the person linked is (src/media-links.mjs)
     let inRoot = false;
     try { inRoot = within(realpathSync(root), realpathSync(asked)) || readableLink(root, asked); } catch { /* gone meanwhile */ }
-    if (!inRoot) return false;
+    if (!inRoot) { missed?.(asked); return false; }
     /* what a file is (its length and size: `film-facts`) is the file's own, never its copy's */
     const file = (query?.has('film-facts') ? null : swap?.(asked)) ?? asked;
     let stat;
@@ -275,8 +277,8 @@ export async function listenLocal(server, port = 0) {
  * Serve `root`. HTML gets the host flag injected before any page script;
  * ?film-host=0 serves the page untouched, as a visitor would see it.
  */
-export async function serve(root, { port = 0, swap } = {}) {
-  const files = folderFiles(root, { swap });
+export async function serve(root, { port = 0, swap, missed } = {}) {
+  const files = folderFiles(root, { swap, missed });
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     if (!files(req, res, url.pathname, url.searchParams)) res.writeHead(403).end();
@@ -617,17 +619,6 @@ export class FilmPage {
         }
       });
     }
-    /* a page that never loads is closed: its tab would go on running. Windows sometimes has no socket buffer free for
-       a moment (net::ERR_NO_BUFFER_SPACE, seen with many browsers or servers at once): that page is loaded again */
-    for (let tries = 1; ; tries++) {
-      const missed = await film.page.goto(new URL(entry, origin + '/').href, { waitUntil: 'load', timeout: 60_000 }).then(() => null, (e) => e);
-      if (!missed) break;
-      if (tries === OPEN_TRIES || !/net::ERR_NO_BUFFER_SPACE/.test(String(missed?.message))) {
-        await film.context.close();
-        throw missed;
-      }
-      await new Promise((r) => setTimeout(r, 500 * tries));
-    }
     /* what else the page said, once (not what `said` already says), and failed files by their path in the folder */
     const failed = (said = '') => {
       const req = [...new Set(problems.filter((p) => p.kind === 'request').map((p) => p.message.replace(`${origin}/`, '')))]
@@ -636,11 +627,26 @@ export class FilmPage {
       const err = problems.filter((p) => p.kind === 'error').map((p) => p.message.replace(/^Error: /, '')).filter((m) => !said.includes(m.split('\n')[0]));
       return `${err.length ? `; the page threw: ${err.join(' | ')}` : ''}${req.length ? `; failed to load: ${req.join(', ')}` : ''}`;
     };
-    try {
-      await film.page.waitForFunction(() => window.film && typeof window.film.frame === 'function', null, { timeout: waitMs, polling: 50 });
-    } catch {
-      await film.context.close();
-      throw new FrameError(`window.film with a frame() function did not appear within ${waitMs / 1000} s${failed()}`);
+    /* Windows can briefly run out of network buffers while loading either the page or a module it needs to
+       initialize window.film. goto() still succeeds when only the module failed, so both steps belong to the retry.
+       Keep only the last attempt's problems; permanent errors are never retried. */
+    for (let tries = 1; ; tries++) {
+      problems.length = 0;
+      try {
+        await film.page.goto(new URL(entry, origin + '/').href, { waitUntil: 'load', timeout: 60_000 });
+        try {
+          await film.page.waitForFunction(() => window.film && typeof window.film.frame === 'function', null, { timeout: waitMs, polling: 50 });
+        } catch {
+          throw new FrameError(`window.film with a frame() function did not appear within ${waitMs / 1000} s${failed()}`);
+        }
+        break;
+      } catch (e) {
+        if (tries === OPEN_TRIES || !/net::ERR_NO_BUFFER_SPACE/.test(String(e?.message))) {
+          await film.context.close();
+          throw e;
+        }
+        await new Promise((r) => setTimeout(r, 500 * tries));
+      }
     }
     /* a ready that never comes (a file that never loads, a loop that never ends) is said, rather than waited on for ever */
     film.meta = await whileMoving(film.page, film.page.evaluate(async (laid) => {

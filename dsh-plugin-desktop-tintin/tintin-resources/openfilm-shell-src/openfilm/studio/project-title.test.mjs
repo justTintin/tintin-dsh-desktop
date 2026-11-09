@@ -8,7 +8,7 @@ import { filmHtml } from '../src/film-doc.mjs';
 import { openProject } from './server/projects.mjs';
 import { startStudio } from './server/server.mjs';
 
-test('the project title opens Projects immediately, keeps its hover card, and renames through its actions', { timeout: 60_000 }, async () => {
+test('project cards open on click and rename in place; desktop tabs keep switching and closing actions', { timeout: 60_000 }, async () => {
   const scratch = await mkdtemp(join(tmpdir(), 'of-project-title-'));
   const names = ['HOME', 'SHARED_HOME', 'LIBRARY', 'SAVED', 'EXPORTS', 'TRASH_DIR'];
   const saved = new Map(names.map((name) => [`OPENFILM_${name}`, process.env[`OPENFILM_${name}`]]));
@@ -27,20 +27,23 @@ test('the project title opens Projects immediately, keeps its hover card, and re
     studio = await startStudio({ port: 0, openBrowser: () => {} });
     browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader'] });
     const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, locale: 'en-US', reducedMotion: 'reduce' });
-    await page.addInitScript(({ id }) => {
-      window.tabEvents = [];
-      const tab = (id, projectId, title) => ({ id, projectId, title, active: id === 'self', working: false, asking: false, exporting: null });
-      window.openfilmHost = {
-        version: 1,
-        tabs: {
-          list: async () => ({ self: 'self', tabs: [tab('self', id, 'Title alignment'), tab('other', 'other-project', 'Other open film')] }),
-          onChange: () => () => {}, report: () => {}, onPick: () => () => {},
-          show: (id) => window.tabEvents.push(`show:${id}`),
-          close: (id) => window.tabEvents.push(`close:${id}`),
-          open: () => {}, move: () => {}, openRequest: () => {},
-        },
-      };
-    }, { id: project.id });
+    let posterRequests = 0;
+    await page.route(`**/api/projects/${project.id}/poster*`, (route) => {
+      if (++posterRequests === 1) return route.fulfill({ status: 503, contentType: 'application/json', body: '{"code":"drawing"}' });
+      return route.continue();
+    });
+
+    /* This test exercises a loaded cover's layout and actions. A first poster may correctly answer 503 while it
+       is drawn; wait for that fixture here. The pending-poster retry path has its own browser regression. */
+    let posterReady = false;
+    for (let i = 0; i < 30; i++) {
+      const response = await fetch(`${studio.origin}/api/projects/${project.id}/poster`, { headers: { 'x-studio-key': studio.key } });
+      if (response.ok) { await response.arrayBuffer(); posterReady = true; break; }
+      assert.equal(response.status, 503, 'only a poster still being drawn is waited for');
+      await response.body?.cancel();
+      await new Promise((done) => setTimeout(done, 500));
+    }
+    assert.equal(posterReady, true, 'the cover fixture finished drawing');
     await page.goto(`${studio.origin}/projects/${project.id}?key=${studio.key}`);
     const title = page.locator('[data-project-title]');
     const button = title.locator('[data-project-title-name]');
@@ -50,20 +53,22 @@ test('the project title opens Projects immediately, keeps its hover card, and re
     const projects = page.getByRole('dialog', { name: 'Projects', exact: true });
     await button.waitFor({ state: 'visible' });
     assert.equal(await arrow.isVisible(), true, 'the project arrow remains available');
-    await button.hover();
+    await button.click();
     await card.waitFor({ state: 'visible' });
     await card.hover();
     for (const name of ['Rename', 'Set current frame as cover', 'Show folder', 'All projects…']) {
-      assert.equal(await card.getByRole('button', { name, exact: true }).isVisible(), true, `${name} remains in the hover card`);
+      assert.equal(await card.getByRole('button', { name, exact: true }).isVisible(), true, `${name} remains in the project card`);
     }
     assert.match(await card.innerText(), /1 clip/);
-    assert.match(await card.innerText(), /Other open projects/);
-    assert.equal(await card.getByRole('button', { name: 'Other open film', exact: true }).isVisible(), true);
-    assert.equal(await card.getByRole('button', { name: 'Title alignment', exact: true }).count(), 0, 'the current project is outside the other open projects');
     assert.equal(await card.getByRole('button', { name: 'Recent only', exact: true }).count(), 0, 'recent projects stay in All projects');
-    assert.equal(await card.getByText('Recent', { exact: true }).count(), 0, 'the hover card has no recent section');
+    assert.equal(await card.getByText('Recent', { exact: true }).count(), 0, 'the project card has no recent section');
     assert.equal(await card.locator('img').count(), 1, 'the cover remains in a film with content');
+    await page.waitForFunction(() => {
+      const img = document.querySelector('[data-project-card] img');
+      return img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0;
+    });
     await card.locator('img').evaluate((img) => img.decode());
+    assert.ok(posterRequests >= 2, 'a poster still being drawn is asked for again without reopening the card');
     const cover = await card.locator('img').evaluate((img) => ({
       ratio: img.parentElement.clientWidth / img.parentElement.clientHeight,
       sourceRatio: img.naturalWidth / img.naturalHeight,
@@ -84,31 +89,27 @@ test('the project title opens Projects immediately, keeps its hover card, and re
     await updatedCover.waitFor({ state: 'visible' });
     await updatedCover.evaluate((img) => img.decode());
     assert.notEqual(await updatedCover.getAttribute('src'), oldCover, 'setting a cover refreshes the hover image without reloading');
-    await card.getByRole('button', { name: 'Other open film', exact: true }).click();
-    assert.deepEqual(await page.evaluate(() => window.tabEvents), ['show:other'], 'switching an open project keeps its action');
-    await arrow.click();
-    await card.getByRole('button', { name: 'Other open film', exact: true }).hover();
-    await card.getByRole('button', { name: 'Close', exact: true }).click();
-    assert.deepEqual(await page.evaluate(() => window.tabEvents), ['show:other', 'close:other'], 'closing another project keeps its action');
     await page.keyboard.press('Escape');
+    await card.waitFor({ state: 'detached' });
     await button.hover();
-    await card.hover();
-    await arrow.click();
+    assert.equal(await card.count(), 0, 'hovering does not open the click-driven card');
+    await button.click();
+    await card.waitFor({ state: 'visible' });
     await page.mouse.move(20, 60);
-    await page.waitForTimeout(300);
-    assert.equal(await card.isVisible(), true, 'clicking the arrow keeps the hover card open');
+    assert.equal(await card.isVisible(), true, 'the clicked card stays open after the pointer leaves');
     await arrow.click();
     await card.waitFor({ state: 'detached' });
-
-    await button.click();
-    assert.equal(await projects.isVisible(), true, 'the click opens Projects without waiting to distinguish a double click');
-    assert.equal(await card.count(), 0, 'opening Projects dismisses the hover card');
+    await arrow.click();
+    await card.getByRole('button', { name: 'All projects…', exact: true }).click();
+    assert.equal(await projects.isVisible(), true, 'All projects opens the complete project library');
+    assert.equal(await card.count(), 0, 'opening Projects dismisses the project card');
     /* recent projects stay reachable in All projects: its Sort has Recently opened */
     await projects.getByRole('button', { name: 'Sort', exact: true }).waitFor();
     await page.keyboard.press('Escape');
     await projects.waitFor({ state: 'detached' });
 
     const before = await button.boundingBox();
+    const titleBefore = await title.boundingBox();
     const typeBefore = await button.evaluate((el) => {
       const css = getComputedStyle(el);
       return [css.fontFamily, css.fontSize, css.fontWeight, css.lineHeight, css.paddingLeft, css.textAlign];
@@ -117,7 +118,9 @@ test('the project title opens Projects immediately, keeps its hover card, and re
     await card.getByRole('button', { name: 'Rename', exact: true }).click();
     await field.waitFor({ state: 'visible' });
     const during = await field.boundingBox();
-    for (const part of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(before[part] - during[part]) < 0.5, `${part} stays in place`);
+    for (const part of ['x', 'y', 'height']) assert.ok(Math.abs(before[part] - during[part]) < 0.5, `${part} stays in place`);
+    assert.ok(during.width <= before.width, 'the name editor stays inside the title');
+    assert.ok(Math.abs((await title.boundingBox()).width - titleBefore.width) < 0.5, 'renaming does not move neighbouring controls');
     const typeDuring = await field.evaluate((el) => {
       const css = getComputedStyle(el);
       return [css.fontFamily, css.fontSize, css.fontWeight, css.lineHeight, css.paddingLeft, css.textAlign];
@@ -146,7 +149,37 @@ test('the project title opens Projects immediately, keeps its hover card, and re
     await card.waitFor({ state: 'detached' });
     await button.focus();
     await button.press('Enter');
-    await projects.waitFor({ state: 'visible' });
+    await card.waitFor({ state: 'visible' });
+    await page.keyboard.press('Escape');
+
+    await page.addInitScript(({ id }) => {
+      window.tabEvents = [];
+      const tab = (id, projectId, title) => ({ id, projectId, title, active: id === 'self', working: false, asking: false, exporting: null });
+      window.openfilmHost = {
+        version: 1,
+        tabs: {
+          list: async () => ({ self: 'self', tabs: [tab('self', id, 'Title alignment'), tab('other', 'other-project', 'Other open film')] }),
+          onChange: () => () => {}, report: () => {}, onPick: () => () => {},
+          show: (id) => window.tabEvents.push(`show:${id}`),
+          close: (id) => window.tabEvents.push(`close:${id}`),
+          open: () => {}, move: () => {}, openRequest: () => {},
+        },
+      };
+    }, { id: project.id });
+    await page.reload();
+    const tabs = page.locator('[data-project-tabs]');
+    await tabs.getByRole('tab', { name: 'Renamed in place', exact: true }).waitFor();
+    assert.equal(await arrow.count(), 0, 'desktop projects use tabs instead of the browser card arrow');
+    await tabs.getByRole('tab', { name: 'Other open film', exact: true }).click();
+    assert.deepEqual(await page.evaluate(() => window.tabEvents), ['show:other']);
+    await tabs.locator('[data-project-tab="other"]').getByRole('button').last().click();
+    assert.deepEqual(await page.evaluate(() => window.tabEvents), ['show:other', 'close:other']);
+    await tabs.getByRole('tab', { name: 'Renamed in place', exact: true }).press('F2');
+    await field.waitFor({ state: 'visible' });
+    await field.fill('Discard desktop rename');
+    await field.press('Escape');
+    await tabs.getByRole('tab', { name: 'Renamed in place', exact: true }).waitFor();
+
   } finally {
     await browser?.close();
     await studio?.close();

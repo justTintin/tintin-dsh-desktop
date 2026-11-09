@@ -12,6 +12,33 @@ import { filmHead, filmHtml } from './film-doc.mjs';
 const page = (word, seconds) => `<!doctype html><body style="margin:0;background:#123"><p>${word}</p>
 <script>window.film={duration:${seconds},width:320,height:180,frame(){}}</script></body>`;
 
+test('a disabled clip retains its length and level, stays on the timeline, and can be enabled without hiding its neighbours', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-disabled-'));
+  writeFileSync(join(dir, 'card.html'), page('card', 4));
+  writeFileSync(join(dir, 'tone.wav'), silence(4));
+  const value = { stage: { w: 320, h: 180 }, tracks: [
+    { clips: [{ id: 'off', src: 'card.html', time: [0, 4], disabled: true }, { id: 'later', src: 'card.html', at: 4, time: [0, 4] }] },
+    { clips: [{ id: 'sound', src: 'tone.wav', volume: 0.37, disabled: true }] },
+  ] };
+  writeFileSync(join(dir, 'film.html'), filmHtml(value));
+  const s = await open(dir);
+  try {
+    await s.film.seek(1);
+    assert.equal(s.film.meta.duration, 8);
+    assert.deepEqual(await s.film.page.evaluate(() => window.__filmSounds()), []);
+    assert.equal(await s.film.page.locator('#off').evaluate((el) => el.style.visibility), 'hidden');
+    assert.equal((await s.film.page.evaluate(() => window.__filmSpans())).length, 3);
+    delete value.tracks[0].clips[0].disabled;
+    delete value.tracks[1].clips[0].disabled;
+    assert.equal(await s.film.page.evaluate((v) => window.__filmEditor.update(v), value), true);
+    await s.film.seek(1);
+    assert.equal(await s.film.page.locator('#off').evaluate((el) => el.style.visibility), 'visible');
+    assert.equal((await s.film.page.evaluate(() => window.__filmSounds()))[0].volume, 0.37);
+    await s.film.seek(5);
+    assert.equal(await s.film.page.locator('#later').evaluate((el) => el.style.visibility), 'visible');
+  } finally { await s.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('a hidden track\'s clips are still placed for an editor, but neither drawn nor counted in the film\'s length', { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-hidden-'));
   writeFileSync(join(dir, 'top.html'), page('top', 3));
@@ -1438,5 +1465,55 @@ test('a moving picture (a GIF) shows the frame its own timing has at the clip\'s
     assert.match(src, /^blob:/, 'the clip shows a frame of it, never the file playing by itself');
   } finally {
     await s.close();
+  }
+});
+
+
+test('a module without a network buffer is retried with the page; a permanent failure is reported once', { timeout: 30_000 }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-module-buffer-'));
+  writeFileSync(join(dir, 'p.html'), '<!doctype html><script type="module">import { duration } from "./needed.mjs"; window.film={duration,frame(){}};</script>');
+  writeFileSync(join(dir, 'needed.mjs'), 'export const duration = 1;');
+  const site = await serve(dir);
+  const browser = await launch();
+  const failing = (n, why) => {
+    const requests = { count: 0 };
+    const wrapped = { newContext: async (opts) => {
+      const context = await browser.newContext(opts);
+      const newPage = context.newPage.bind(context);
+      context.newPage = async () => {
+        const p = await newPage();
+        await p.route('**/needed.mjs', (route) => (++requests.count <= n ? route.abort('failed') : route.continue()));
+        const on = p.on.bind(p);
+        /* Chromium's Windows-only error code, on a real module request whose failure prevents initialization. */
+        p.on = (event, listener) => on(event, event !== 'requestfailed' ? listener : (request) => {
+          if (!request.url().endsWith('/needed.mjs')) return listener(request);
+          const failure = request.failure;
+          request.failure = () => ({ errorText: why });
+          try { listener(request); } finally { request.failure = failure; }
+        });
+        return p;
+      };
+      return context;
+    } };
+    return { browser: wrapped, requests };
+  };
+  try {
+    let f = failing(1, 'net::ERR_NO_BUFFER_SPACE');
+    const film = await FilmPage.open(f.browser, site.url, 'p.html', { waitMs: 300 });
+    assert.equal(film.meta.duration, 1);
+    assert.equal(f.requests.count, 2);
+    assert.deepEqual(film.problems, [], 'a recovered attempt leaves no old errors');
+    await film.close();
+    f = failing(3, 'net::ERR_NO_BUFFER_SPACE');
+    await assert.rejects(FilmPage.open(f.browser, site.url, 'p.html', { waitMs: 300 }), /ERR_NO_BUFFER_SPACE needed.mjs/);
+    assert.equal(f.requests.count, 3, 'bounded retries');
+    f = failing(1, 'net::ERR_CONNECTION_REFUSED');
+    await assert.rejects(FilmPage.open(f.browser, site.url, 'p.html', { waitMs: 300 }), /ERR_CONNECTION_REFUSED needed.mjs/);
+    assert.equal(f.requests.count, 1, 'a permanent failure is not retried');
+    assert.equal(browser.contexts().length, 0, 'failed pages are closed');
+  } finally {
+    await browser.close();
+    await site.close();
+    rmSync(dir, { recursive: true, force: true });
   }
 });

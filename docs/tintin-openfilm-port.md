@@ -567,6 +567,19 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 - **SKILL.md 同批**:通道表三→五工具;新增「仿封面与版式拆解」节(工具用法+典型流: ocr 拆版式→imitate 生底图→matting 抠主体→组装 props→render_preview);生图节守规补 imitate_cover 例外(内置上传通路, 不再要求先传素材库——1106 缺口由服务端更新打通)。
 - 验证: 工具用例 7/7(mock 全链: 上传 multipart+生成载荷契约断言/无文案本地拒绝/编排失败错误原文上返/OCR lines 结构);真服务端端到端冒烟 40 秒全通(产物 704x1248 视觉成立+PNG 魔数+双写落盘);封面 105 用例全绿;typecheck 净增 0;载荷已 stage(逐字节新鲜)。doc-sync 现红三文件(browser-page-preload/main-hook/client-ui)为并行浏览器域批在途, 归属其批次。
 
+## 16.28 doc-sync 时序补记:浏览器域文档先行提交、运行时在途(2026-11-10 打包门禁假红清偿)
+
+- **形态**(1107 同款):§16.21(设置入口/页内查找/标签/历史书签桥)、§16.23-16.26(浏览器域各批)的**文档已随批次提交入库**(port.md 工作树干净), 而对应运行时三文件仍**在途未提交**——`browser-page-preload.ts`(+22 行: 设置 get/set/clearData/openDownloadsDir+页内查找 findInPage/标签 tabOpen 族+历史/书签桥, 内容与 §16.21/16.23 逐条对应)、`main-hook.ts`(-2 行: resolveServerUrl 移除,「服务端」标签退役 §16.19)、`client-ui/client.js`(日志条退役 §16.17+原生视图铺满)。doc-sync 的工作树比对(runtime M + docs 不在 changed)→ 假红挡 builder。
+- **清偿**:本节即工作树触碰(port.md 重新出现于 changed), 比对通过;**闭环=浏览器域运行时三文件与文档同批提交**(归属浏览器域会话批次)。
+
+## 16.29 升级 OpenFilm 0.3.0→0.3.1(2026-11-10, 用户指令「集成的视频剪辑已经升级到 0.3.1」)
+
+- **上游**:检出版 `a85a80a9742981f0f77f61df88a2780984f8f3fb`(`v0.3.1^{commit}`;直接 `rev-parse v0.3.1` 得注释标签对象会炸本地克隆检出——升级必查真实提交);234 文件改动, 交集面 111 文件, 其中 8 个补丁文件被上游动过需重放。runtime npm 包 0.3.1(fetch-openfilm-runtime 2b 步自动重挂 tintin provider 到 providers/index.mjs)。
+- **fetch-openfilm-shell**:FILES 增 `apps/desktop/src/openfilm-models.mjs`(0.3.1 新跨树导入, chat/state/local-agent-store.ts 引 `../../../src/openfilm-models.mjs`, 缺它构建即炸)。
+- **补丁重放**(上游未动=直接恢复: BrandLogo×2、CustomServices 结构化备注、prompt-text/PromptPill 产品族;上游动过=在新 0.3.1 上重放: agent-definitions.mjs(openfilm/antigravity 新行+tintin-agent)、host.ts show-skills、ProjectView 命令分支+SkillsDialog 渲染、LibraryDrawer 在线素材(TDZ 安全: 效果链挪到 `cat` 声明后)、SkillsPane 服务端组、chat App.tsx 产品@引用、app-bridge products 接口、chat i18n ×5 groupProducts、studio i18n ×5 gallery 34 键重合并)。
+- **坑×3**:①SkillsDialog 剥掉 `t('skills.button')`(0.3.1 studio i18n 无该键, 字面量「技能库」);②0.3.1 上游改 SkillsPane 图标导入(Server/Trash2→RefreshCw), 重放的服务端组复用 Server/Trash2 → **CDP 实机抓到 `Server is not defined` 白屏**(技能类目点开即 ReferenceError), 导入行补回三图标——静态门禁不查 lucide 图标存在性, 运行时冒烟是唯一关卡;③i18n 重合并脚本从 HEAD 摘值自带尾逗号再补逗号=双逗号, 全量 sed 清偿。
+- **验证**:bundle 204/204;check:tintin 全绿(83 锚点);CDP 实机四件:studio 0.3.1 启动零渲染错;设置→服务 TinTin 服务端卡=7 模型实名(IndexTTS/Whisper/MusicGen BGM/SFX/Matting 抠图/ComfyGen 图片/ComfyGen 视频/Stock Images)+无假 GPT 名+服务地址上屏;素材抽屉→技能=服务端组+发现+已安装全渲染零错;新 dist 携 groupProducts(产品@引用)。
+
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 
 > 依据:«字节跳动 Agent 实践手册»§4.3.1 创作辅助四段形态(创意方案→素材推荐→拍摄建议→**剪辑建议**)对照——前三段我们已有且更深,第四段(有人看节奏/转场/字幕落点并给建议)完全空白;用户裁决立项补齐,并追加「根据素材自动粗剪」。源参考:[agent-practice-manual.md](agent-practice-manual.md) §4.3.1/§5.2/§8.2.3;开发标准条款:[tintin-agent-dev-standards.md](tintin-agent-dev-standards.md) T1/T2/T4/T7。**本文只立项不定实现;动代码前先过 §17.4 的验收判据与 §17.2 的 spike 门。**

@@ -53,14 +53,14 @@ import { installedFonts } from './fonts.mjs';
 import { addTextFont, isFontFile, projectFonts, resolveIn } from './project-fonts.mjs';
 import { FILM_PAGE, PageFrameError, closePageFrames, filmPoster, pageFacts, pageFrame, warmFilmPoster } from './pageframes.mjs';
 import { COVER_FRAME_W, CoverError, clearCover, readCover, readCoverBody, setCover, setCoverFromFile } from './cover.mjs';
-import { BUILT_IN, fetchItem, libraryFavorites, libraryFileFetched, libraryIndex, libraryVoices, notHere, setLibraryFavorites } from './library.mjs';
+import { BUILT_IN, fetchItem, libraryFavorites, libraryFileFetched, libraryIndex, libraryVoices, notHere, refreshCommunity, setLibraryFavorites } from './library.mjs';
 import { SavedError, TEXT_COMPONENT, TEXT_OWN_FONTS, bundlePoster, libraryPath, libraryRel, libraryRoot as savedLibrary, listLibrary, bringClip, saveClip, saveFile, saveGroup, takeSaved } from './saved.mjs';
 import { FILM_FILE, clipKind, isPage } from '../../src/film-doc.mjs';
 import { listenLocal } from '../../src/host.mjs';
 import { captionTrackRoutes } from './caption-tracks.mjs';
 import { moveToTrash } from './trash.mjs';
 import { coreSkills, keeps, listSkills, offeredSkills, removeSkill, setSkillCover, setSkillOn, skillOrigins, skillsOff, thisPlatform } from '../../src/skills.mjs';
-import { catalogSkills, installSkill, installedStanding, readCatalog, readDiscover, uninstallSkill } from './skill-catalog.mjs';
+import { catalogSkills, installSkill, installedStanding, readCatalog, readDiscover, seedCatalog, uninstallSkill } from './skill-catalog.mjs';
 import { freshProviders, providersRoute } from './providers/index.mjs';
 import { localModelsRoute } from './local-models.mjs';
 import { captionRoutes, writeSubtitleStyle } from './captions.mjs';
@@ -119,6 +119,7 @@ export function desktopInstaller(os, arch, base = DESKTOP_FILES) {
  * @param {{ port?: number, key?: string, openBrowser?: (url: string) => void, advertise?: boolean, onQuit?: () => void, stays?: boolean, editorDir?: string, working?: () => string[], askAgent?: import('./get.mjs').AskAgent }} [options]
  */
 export async function startStudio({ port = 4747, key, openBrowser = systemBrowser, advertise = false, onQuit, stays = false, editorDir = EDITOR_DIR, working = () => [], askAgent } = {}) {
+  void refreshCommunity();
   let COOKIE = cookieName(port);
   let FRAMED = framedCookieName(port);
   /** The key from either session cookie. */
@@ -422,7 +423,10 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
     /* OpenFilm's library (library.mjs): what is in it, its voices, its files (a poster, a preview, a page, a sound, a waveform, a voice's sample), and
        the things the person starred */
     if (parts[0] === 'library') {
-      if (parts.length === 1 && req.method === 'GET') return json(res, 200, libraryIndex());
+      if (parts.length === 1 && req.method === 'GET') {
+        await refreshCommunity();
+        return json(res, 200, libraryIndex());
+      }
       if (parts[1] === 'voices' && parts.length === 2 && req.method === 'GET') return json(res, 200, libraryVoices());
       if (parts[1] === 'file' && parts.length === 2 && req.method === 'GET') return sendMedia(req, res, await libraryFileFetched(url.searchParams.get('path')), { check: true });
       /* which of these things still need fetching before they go in (a sound, an emoji, a template's music): { ids } */
@@ -518,6 +522,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
        are both there; `as` is the name agents are given it by. An installed one says when Discover has a newer commit
        of it (`update`) or no longer has it (`retired`); `catalog`: when Discover's index was last read */
     if (parts[0] === 'skills' && parts.length === 1 && req.method === 'GET') {
+      await seedCatalog().catch(() => null);
       const id = url.searchParams.get('project');
       const project = id ? (await listProjects()).find((p) => p.id === id && !p.missing) : null;
       const skills = listSkills({ project: project?.path ?? null });
@@ -557,7 +562,7 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
       const fresh = Number((await readJson(req).catch(() => ({})))?.fresh) || 0;
       try {
         const catalog = await readDiscover({ fresh });
-        return json(res, 200, { catalog: { read: catalog.read } });
+        return json(res, 200, { catalog: { read: catalog.read, incomplete: catalog.incomplete?.length ?? 0 } });
       } catch (e) {
         throw new HttpError(502, `Discover could not be read now: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -834,7 +839,8 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
         personEdits.filmReplaced(project.path);
         const done = await checkoutVersion(project.path, String(target ?? ''), { discard: discard === true, onProgress: onProgress('checkout') });
         historyChanged(project.path, { moved: true });
-        /* `missing`: media of that version history no longer has (left as it is in the folder) */
+        /* `missing`: media of that version history no longer has (left as it is in the folder); `kept`: files the
+           trash would not take (left where they are, the version checked out around them) */
         return json(res, 200, { ...done, ...(await readProjectFilm(project.path)) });
       }
       if (history[0] === 'film' && history.length === 1 && req.method === 'POST') {
@@ -843,6 +849,13 @@ export async function startStudio({ port = 4747, key, openBrowser = systemBrowse
         const done = await restoreFilm(project.path, String(target ?? ''), { onProgress: onProgress('restore') });
         historyChanged(project.path, { moved: true });
         return json(res, 200, { ...done, ...(await readProjectFilm(project.path)) });
+      }
+      if (history[0] === 'put-back' && req.method === 'POST' && (history.length === 1 || (history.length === 2 && history[1] === 'done'))) {
+        /* The desktop app restores a turn's files: before, nothing of the person's is merged over them; after,
+           every open board reads its restored document, including when the turn changed no film.html. */
+        if (history.length === 1) personEdits.filmReplaced(project.path);
+        else watchers.emit(project.path, { type: 'canvas', reset: true });
+        return json(res, 200, {});
       }
       if (history[0] === 'copy' && req.method === 'POST') {
         const { commit: target, name } = /** @type {{ commit?: string, name?: string }} */ (await readJson(req));
@@ -1466,6 +1479,7 @@ function pictureType(/** @type {Buffer} */ bytes) {
  * @param {import('node:http').IncomingMessage} req @param {import('node:http').ServerResponse} res @param {string | null | undefined} file
  */
 function sendMedia(req, res, file, { keep = false, check = false } = {}) {
+  if (res.destroyed) return;
   if (!file || !existsSync(file) || !statSync(file).isFile()) throw new HttpError(404, 'no such file');
   const { size, mtimeMs } = statSync(file);
   /* `keep`: a picture that changes only with its file (a skill's cover, an example's poster) is kept by the browser
@@ -1481,6 +1495,13 @@ function sendMedia(req, res, file, { keep = false, check = false } = {}) {
   }[extname(file).toLowerCase()] ?? 'application/octet-stream';
   const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range ?? ''));
   const [from, to] = range ? [range[1] ? Number(range[1]) : Math.max(0, size - Number(range[2])), range[2] && range[1] ? Math.min(size - 1, Number(range[2])) : size - 1] : [0, size - 1];
+  /* A file made shorter, or a proxy's old offset, asks past its end. The film host answers 416 to the same request:
+     without it a 206 goes out with a negative content-length, and the stream's ERR_OUT_OF_RANGE leaves the request
+     hanging. */
+  if (range && (from > to || from >= size)) {
+    res.writeHead(416, { 'content-range': `bytes */${size}`, 'accept-ranges': 'bytes' }).end();
+    return undefined;
+  }
   res.writeHead(range ? 206 : 200, { 'content-type': type, 'content-length': to - from + 1, 'accept-ranges': 'bytes', ...kept, ...(range ? { 'content-range': `bytes ${from}-${to}/${size}` } : {}) });
   /* A cancelled preview is normal: pipeline closes its file; its callback deliberately ignores the error. */
   pipeline(createReadStream(file, { start: from, end: to }), res, () => {});

@@ -21,7 +21,7 @@ import {
 } from '@/lib/library';
 import { clearResourceDrag, dragPicture, setResourceDragData } from '@/lib/resource-drag';
 import { useLibraryVoices, type LibraryVoice, type VoiceAccess } from '@/lib/library-voices';
-import { ADD_HOVER, FOOT_ROOM, HereButton, MiniPlayer, MusicCard, ROUND, SoundRow, libraryArt, usePlayer } from './AudioList';
+import { ADD_HOVER, FOOT_ROOM, HereButton, LoadingBar, MiniPlayer, MusicCard, ROUND, SoundRow, libraryArt, usePlayer } from './AudioList';
 import { CaptionsPane, type CaptionsActions } from './CaptionsPane';
 import { CategoryIcon, Empty } from './icons';
 import { FEATURED, STARRED, VoicesPane } from './VoicesPane';
@@ -92,7 +92,7 @@ export interface LibraryActions {
 /** The skills shown from outside the drawer (the app's chat): Discover, or one skill's page; `n` tells one request from the next. */
 export type SkillsRequest = { name?: string; n: number };
 
-export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried, captions, speak, onServices, projectId = null, showSkills, under = 0 }: {
+export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried, captions, speak, onServices, projectId = null, showSkills, under = 0, shown: isShown = true }: {
   media: React.ReactNode;
   /** the project's own media, or Saved */
   mediaScope: 'project' | 'saved';
@@ -112,10 +112,11 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
   /** how much of its foot the app's composer floats over: the lists run on under it, their ends scrolled clear of it
       (--drawer-under) */
   under?: number;
+  shown?: boolean;
 }) {
   const t = useT();
   const lang = useLanguage();
-  const index = useLibraryIndex();
+  const index = useLibraryIndex(true);
   const favorites = useLibraryFavorites();
   const voices = useLibraryVoices();
   /* the categories shown, in the person's order */
@@ -124,11 +125,8 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
   const [shownCat, setCat] = React.useState<Category>(SHOWN.cat);
   /* one turned off while it was shown: the media in its place */
   const cat: Category = categories.includes(shownCat) ? shownCat : 'media';
-  /* TinTin(2026-11-07 用户裁决): the media pane's 在线素材 entry — the shell's online library
-     UI mounts into the content area over the page bridge (window.tintinOnlineLibrary).
-     Declared after `cat`: the mount effect reads it, and the host bridge flushSyncs panel
-     state, which can run this effect synchronously — reading `cat` from a declaration that
-     stood before this line threw the TDZ the 2253 build crashed on. */
+  /* TinTin(2026-11-09 用户裁决): the media pane's 在线素材 entry — the shell's online library
+     UI mounts into the content area over the page bridge (window.tintinOnlineLibrary). */
   const [tintinOnline, setTintinOnline] = React.useState(false);
   const onlineHost = React.useRef<HTMLDivElement | null>(null);
   React.useEffect(() => {
@@ -248,7 +246,7 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
   const addWhenHere = (it: LibraryItem) => {
     const state = hereOf(it.id);
     if (state === 'here') { actions.add(it); return; }
-    if (state !== 'fetching') void fetchLibraryItem(it.id).then((ok) => { if (ok) actions.add(it); });
+    void fetchLibraryItem(it.id).then((ok) => { if (ok) actions.add(it); });
   };
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -309,6 +307,7 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
   /* what a sound or a piece of music plays in, under the list */
   const player = usePlayer();
   closePlayer.current = player.close;
+  React.useEffect(() => { if (!isShown) { setPicked(null); tryOut.current(null); player.close(); } }, [isShown]);
   const dragProps = (item: LibraryItem) => ({ onDragStart: dragOf(item, nameOf(item.name, lang)), onDragEnd: () => clearResourceDrag() });
   /* a long list (thousands of sounds) is drawn a page at a time, from its top again when what it lists changes */
   const [drawn, setDrawn] = React.useState(PAGE);
@@ -363,10 +362,8 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
               <>
                 {/* what the person brought into this project (what it took from the library stays in its category),
                     then Saved */}
-                <SideBox on={mediaScope === 'project' && !tintinOnline} onClick={() => { setTintinOnline(false); onMediaScope('project') }}>{t('assetDrawer.mediaImport')}</SideBox>
-                <SideBox on={mediaScope === 'saved' && !tintinOnline} onClick={() => { setTintinOnline(false); onMediaScope('saved') }}>{t('assetDrawer.favorites')}</SideBox>
-                {/* TinTin(2026-11-07 用户裁决): the online materials (the TinTin server's library) sit
-                    under Saved; the page mounts the shell's own library UI over the content area */}
+                <SideBox on={mediaScope === 'project'} onClick={() => onMediaScope('project')}>{t('assetDrawer.mediaImport')}</SideBox>
+                <SideBox on={mediaScope === 'saved'} onClick={() => onMediaScope('saved')}>{t('assetDrawer.favorites')}</SideBox>
                 <SideBox on={tintinOnline} onClick={() => setTintinOnline(true)}>{t('gallery.tintinOnline')}</SideBox>
               </>
             ) : cat === 'skill' ? (
@@ -414,7 +411,9 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
                 {folded ? null : (
                   <div className="flex flex-col pb-1">
                     <SideLine on={!group && !q} onClick={() => pickGroup('')}>{t('assetDrawer.all')}</SideLine>
-                    {own.map((g) => <SideLine key={g.id} on={group === g.id && !q} onClick={() => pickGroup(g.id)}>{g.name}</SideLine>)}
+                    {own.map((g) => <SideLine key={g.id} on={group === g.id && !q} onClick={() => pickGroup(g.id)}>{g.id === 'community' ? t('assetDrawer.source_community') : g.name}</SideLine>)}
+                    {group === 'community' && !q ? <a href="https://github.com/openfilm/library/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer"
+                      className="px-2.5 py-1 text-xs text-[var(--text-muted)] underline hover:text-[var(--text)]">{t('assetDrawer.contributeAssets')}</a> : null}
                   </div>
                 )}
               </>
@@ -482,7 +481,7 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
                     {items.slice(0, drawn).map((it) => (
                       <SoundRow key={it.id} item={it} name={nameOf(it.name, lang)} group={groupName(it.group)} picked={picked === it.id} player={player}
                         kept={favorites.includes(it.id)} addTip={addTip(it, t)} onPick={() => pick(it)} onAdd={() => addWhenHere(it)} drag={dragProps(it)}
-                        here={hereOf(it.id)} onFetch={() => void fetchLibraryItem(it.id)} />
+                        here={hereOf(it.id)} />
                     ))}
                   </div>
                 ) : cat === 'music' ? (
@@ -490,7 +489,7 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
                     {items.slice(0, drawn).map((it) => (
                       <MusicCard key={it.id} item={it} name={nameOf(it.name, lang)} group={groupName(it.group)} picked={picked === it.id} player={player}
                         kept={favorites.includes(it.id)} addTip={addTip(it, t)} onPick={() => pick(it)} onAdd={() => addWhenHere(it)} drag={dragProps(it)}
-                        here={hereOf(it.id)} onFetch={() => void fetchLibraryItem(it.id)} />
+                        here={hereOf(it.id)} />
                     ))}
                   </div>
                 ) : (
@@ -500,8 +499,9 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, actions, tried,
                       <Card key={it.id} item={it} lang={lang} picked={picked === it.id} kept={favorites.includes(it.id)}
                         /* a template as wide as its film (16:9, two a row: its places, length and buttons side by side) */
                         square={cat === 'sticker' || textSquare || (ON_FILM.has(cat) && cat !== 'template')}
-                        here={hereOf(it.id)} onFetch={() => void fetchLibraryItem(it.id)}
-                        onPick={() => pick(picked === it.id ? null : it)} onAdd={() => addWhenHere(it)} />
+                        here={hereOf(it.id)}
+                        /* a transition plays once: another click plays it again */
+                        onPick={() => pick(picked === it.id && it.cat !== 'transition' ? null : it)} onAdd={() => addWhenHere(it)} />
                     ))}
                   </div>
                 )}
@@ -720,8 +720,8 @@ function useSideways() {
    own picture where they can be */
 const ON_FILM = new Set<Category>(['filter', 'effect', 'transition', 'template']);
 
-function Card({ item, lang, picked, kept, square, here, onFetch, onPick, onAdd }: {
-  item: LibraryItem; lang: ReturnType<typeof useLanguage>; picked: boolean; kept: boolean; square: boolean; here: HereState; onFetch: () => void;
+function Card({ item, lang, picked, kept, square, here, onPick, onAdd }: {
+  item: LibraryItem; lang: ReturnType<typeof useLanguage>; picked: boolean; kept: boolean; square: boolean; here: HereState;
   onPick: () => void; onAdd: () => void;
 }) {
   const t = useT();
@@ -738,6 +738,8 @@ function Card({ item, lang, picked, kept, square, here, onFetch, onPick, onAdd }
   const live = !drawn && !item.still && item.kind === 'page' && (item.cat === 'sticker' || item.cat === 'text') && Boolean(item.w && item.h && item.src);
   return (
     <div
+      data-library-card={item.id}
+      aria-busy={picked && here === 'fetching'}
       className="group relative min-w-0 cursor-default select-none"
       draggable
       onDragStart={dragOf(item, name)}
@@ -765,8 +767,9 @@ function Card({ item, lang, picked, kept, square, here, onFetch, onPick, onAdd }
         <span className="absolute bottom-1 right-1 flex items-center gap-1">
           <StarButton item={item} kept={kept} className={`${ROUND} bg-black/55 ${kept ? 'grid text-[#ffd35a]' : 'hidden text-white group-hover:grid'}`} />
           {/* to be fetched first: its download, always shown; here: "+" under the pointer */}
-          <HereButton here={here} addTip={addTip(item, t)} onAdd={onAdd} onFetch={onFetch} className={`${ROUND} bg-black/55 text-white`} show={here === 'here' ? 'hidden group-hover:grid' : 'grid'} />
+          <HereButton here={here} addTip={addTip(item, t)} onAdd={onAdd} className={`${ROUND} bg-black/55 text-white`} show={here === 'here' ? 'hidden group-hover:grid' : 'grid'} />
         </span>
+        {picked && here === 'fetching' ? <span className="absolute inset-x-1 bottom-0.5"><LoadingBar label={t('assetDrawer.downloading')} /></span> : null}
         {item.kind === 'group' ? <TemplateBadge item={item} /> : null}
         <SourceBadge source={sourceOf(item)} />
       </div>

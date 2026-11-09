@@ -234,7 +234,10 @@ export function safeName(raw: string): string {
   if (clean.length <= 120) return clean;
   const dot = clean.lastIndexOf('.');
   const ext = dot > 0 && clean.length - dot <= 13 ? clean.slice(dot) : '';
-  return `${clean.slice(0, 120 - ext.length).trimEnd()}${ext}`;
+  let cut = 120 - ext.length;
+  /* a cut between a surrogate pair would leave half a character in the name */
+  if (clean.charCodeAt(cut - 1) >= 0xd800 && clean.charCodeAt(cut - 1) <= 0xdbff) cut -= 1;
+  return `${clean.slice(0, cut).trimEnd()}${ext}`;
 }
 
 /** The extension a name ends in (`.mp4`), or '' when it has none: letters and digits after the last dot, 12 at most. */
@@ -355,7 +358,8 @@ export function warmProjectMedia(projectId: string, listing: MediaListing | null
  */
 export function srcHitsAsset(src: string, path: string): boolean {
   if (!src) return false;
-  return src === path || path.endsWith(`/${src}`) || src.endsWith(`/${path}`);
+  const file = src.split('#')[0]!;
+  return file === path || path.endsWith(`/${file}`) || file.endsWith(`/${path}`);
 }
 
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];

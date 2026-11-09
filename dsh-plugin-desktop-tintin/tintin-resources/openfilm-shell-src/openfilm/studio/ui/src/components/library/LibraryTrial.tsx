@@ -1,26 +1,59 @@
 /**
  * A thing of the library tried in the viewer (a click in the assets drawer, LibraryDrawer), over the picture there and
  * nothing written: a page laid over it; a sticker, and a text look or motion on the words a new line says, in the box
- * it gets when put in (libraryBox), so the try looks as the drop will; a transition played on the film's own picture
- * (OnPicture: its page over it, its dip or dissolve, its camera move), never on the library's sample; a filter grading
+ * it gets when put in (libraryBox), so the try looks as the drop will; a transition played once on the film's own
+ * picture (OnPicture: its page over it, its dip or dissolve, its camera move), never on the library's sample, the film
+ * free again when it has played; a filter grading
  * the whole picture through a backdrop-filter, as it will on its own track. A click on it lets it go. A template's
  * example plays in its place with its music, sharp, under controls of its own (TemplateTrial).
  */
 import * as React from 'react';
-import { Pause, Play, X } from 'lucide-react';
+import { AlertCircle, Pause, Play, RotateCw, X } from 'lucide-react';
 import { useLanguage, useT } from '@/i18n';
-import { TEXT_COMPONENT, builtInItem, BUILT_IN, defaultTextWords, libraryBox, libraryUrl, nameOf, pageUrl, previewUrl, type LibraryItem } from '@/lib/library';
+import { TEXT_COMPONENT, builtInItem, BUILT_IN, defaultTextWords, fetchLibraryItem, libraryBox, libraryUrl, mayNeedFetch, nameOf, pageUrl, previewUrl, type LibraryItem } from '@/lib/library';
 import { TransitionOnPicture } from './OnPicture';
+import { LoadingBar } from './AudioList';
 
 /* a motion tried again and again: in, a while shown, out */
 const MOTION_SECONDS = 2.6;
 
-export function LibraryTrial({ item, frame = null, onLetGo }: {
+interface TrialProps {
   item: LibraryItem;
   /** the film's picture at the playhead (else the person's own in the project), for what moves the picture itself */
   frame?: string | null;
   onLetGo: () => void;
-}) {
+}
+
+export function LibraryTrial(props: TrialProps) {
+  return <PreparedTrial key={props.item.id} {...props} />;
+}
+
+function PreparedTrial({ item, frame = null, onLetGo }: TrialProps) {
+  const t = useT();
+  const needed = mayNeedFetch(item);
+  const [status, setStatus] = React.useState(needed ? 'loading' : 'ready');
+  const [attempt, setAttempt] = React.useState(0);
+  React.useEffect(() => {
+    if (!needed) return;
+    let live = true;
+    setStatus('loading');
+    void fetchLibraryItem(item.id).then((ok) => { if (live) setStatus(ok ? 'ready' : 'error'); });
+    return () => { live = false; };
+  }, [item.id, needed, attempt]);
+  if (status !== 'ready') return (
+    <div data-library-trial="" data-library-preparing={status} aria-busy={status === 'loading'}
+      className="absolute inset-0 z-[6] cursor-default" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="absolute inset-x-3 bottom-3 flex items-center gap-3 rounded-md bg-black/65 px-3 py-2 text-white">
+        <span className="min-w-0 flex-1">
+          {status === 'loading' ? <LoadingBar label={t('assetDrawer.downloading')} />
+            : <AlertCircle size={14} className="text-[#ff8a80]" aria-label={t('assetDrawer.previewFailed')} />}
+        </span>
+        {status === 'error' ? <button type="button" aria-label={t('assetDrawer.previewRetry')}
+          className="grid h-6 w-6 place-items-center" onClick={() => setAttempt((n) => n + 1)}><RotateCw size={14} /></button> : null}
+        <button type="button" aria-label={t('assetDrawer.previewCancel')} className="grid h-6 w-6 place-items-center" onClick={onLetGo}><X size={14} /></button>
+      </div>
+    </div>
+  );
   if (item.kind === 'group') return <TemplateTrial key={item.id} item={item} onLetGo={onLetGo} />;
   return <PictureTrial item={item} frame={frame} onLetGo={onLetGo} />;
 }
@@ -45,6 +78,7 @@ function PictureTrial({ item, frame, onLetGo }: { item: LibraryItem; frame: stri
     seen.current.observe(el);
   }, []);
   const box = shape && size ? libraryBox(shape, size) : null;
+  const [played, setPlayed] = React.useState(false);
   /* a motion is shown from its start again, each time it has gone */
   const [round, setRound] = React.useState(0);
   React.useEffect(() => {
@@ -56,7 +90,7 @@ function PictureTrial({ item, frame, onLetGo }: { item: LibraryItem; frame: stri
     ? `${pageUrl(component)}?vars=${encodeURIComponent(JSON.stringify({ '--clip-length': `${MOTION_SECONDS}s`, ...(item.vars ?? {}) }))}&words=${encodeURIComponent(defaultTextWords())}`
     : page ? pageUrl(item) : null;
   return (
-    <div ref={measure} data-library-trial="" className="absolute inset-0 z-[6] cursor-default overflow-hidden" onPointerDown={(e) => { e.stopPropagation(); onLetGo(); }}>
+    <div ref={measure} data-library-trial="" className={`absolute inset-0 z-[6] cursor-default overflow-hidden ${played ? 'pointer-events-none' : ''}`} onPointerDown={(e) => { e.stopPropagation(); onLetGo(); }}>
       {/* a filter: over the whole picture, grading every layer of it, as it will on its own track */}
       {item.kind === 'look' && item.filter ? <div aria-hidden className="pointer-events-none absolute inset-0" style={{ backdropFilter: item.filter }} /> : null}
       {src && (!shape || box) ? (
@@ -69,7 +103,7 @@ function PictureTrial({ item, frame, onLetGo }: { item: LibraryItem; frame: stri
         />
       ) : null}
       {/* a transition: on the film's own picture */}
-      {item.cat === 'transition' ? <TransitionOnPicture item={item} picture={frame} playing live blur={0.35} /> : null}
+      {item.cat === 'transition' ? <TransitionOnPicture item={item} picture={frame} playing live blur={0.35} onEnded={() => setPlayed(true)} /> : null}
     </div>
   );
 }
@@ -87,9 +121,18 @@ function TemplateTrial({ item, onLetGo }: { item: LibraryItem; onLetGo: () => vo
   const lang = useLanguage();
   const video = React.useRef<HTMLVideoElement>(null);
   const [src, setSrc] = React.useState(() => libraryUrl(`examples/${item.id}.mp4`));
-  const [playing, setPlaying] = React.useState(true);
+  const [playing, setPlaying] = React.useState(false);
+  const [loading, setLoading] = React.useState(true);
+  const [failed, setFailed] = React.useState(false);
+  const wanted = React.useRef(true);
   const [time, setTime] = React.useState(0);
   const [length, setLength] = React.useState((item.durationMs ?? 0) / 1000);
+  React.useEffect(() => {
+    const v = video.current;
+    /* StrictMode replays effect cleanup on the same element. Restore the source before its second setup. */
+    if (v && !v.hasAttribute('src')) v.src = src;
+    return () => { if (v) { v.pause(); v.removeAttribute('src'); v.load(); } };
+  }, []);
   React.useEffect(() => {
     if (!playing) return undefined;
     let frame = 0;
@@ -100,7 +143,14 @@ function TemplateTrial({ item, onLetGo }: { item: LibraryItem; onLetGo: () => vo
   const toggle = () => {
     const v = video.current;
     if (!v) return;
-    if (v.paused) void v.play().catch(() => {}); else v.pause();
+    if (!failed && (loading || !v.paused)) { wanted.current = false; v.pause(); setLoading(false); return; }
+    wanted.current = true;
+    setLoading(true);
+    setFailed(false);
+    const example = libraryUrl(`examples/${item.id}.mp4`);
+    if (failed && src !== example) { setSrc(example); return; }
+    if (failed) v.load();
+    void v.play().catch((error) => { if (wanted.current && error?.name !== 'AbortError') { setLoading(false); setFailed(true); } });
   };
   const toggleRef = React.useRef(toggle);
   toggleRef.current = toggle;
@@ -124,16 +174,25 @@ function TemplateTrial({ item, onLetGo }: { item: LibraryItem; onLetGo: () => vo
       <video
         ref={video}
         src={src}
-        autoPlay
+        autoPlay={wanted.current}
         loop
         playsInline
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
+        onLoadStart={() => { if (wanted.current) setLoading(true); }}
+        onPlaying={(e) => {
+          if (!wanted.current) { e.currentTarget.pause(); return; }
+          setPlaying(true); setLoading(false); setFailed(false);
+        }}
+        onWaiting={() => { if (wanted.current) { setLoading(true); setPlaying(false); } }}
+        onPause={() => { setPlaying(false); setLoading(false); }}
         onLoadedMetadata={(e) => { if (Number.isFinite(e.currentTarget.duration)) setLength(e.currentTarget.duration); }}
         /* the example not had (offline, not published yet): the card's own preview */
-        onError={() => setSrc((was) => (was === previewUrl(item) ? was : previewUrl(item)))}
+        onError={() => {
+          if (src !== previewUrl(item)) { setSrc(previewUrl(item)); if (wanted.current) setLoading(true); }
+          else { setLoading(false); setPlaying(false); setFailed(true); }
+        }}
         className="pointer-events-none absolute inset-0 h-full w-full object-contain"
       />
+      {loading ? <span className="absolute inset-x-3 bottom-12"><LoadingBar label={t('assetDrawer.previewLoading')} /></span> : null}
       <div onPointerDown={stop} className="absolute left-2 top-2 flex h-7 items-center gap-1.5 rounded-md bg-black/60 pl-2.5 pr-1 text-[12px] text-white/90 backdrop-blur-sm">
         <span>{t('assetDrawer.previewing')}</span>
         <span className="text-white/40">·</span>
@@ -143,8 +202,8 @@ function TemplateTrial({ item, onLetGo }: { item: LibraryItem; onLetGo: () => vo
         </button>
       </div>
       <div onPointerDown={stop} className="absolute inset-x-2 bottom-2 flex h-8 items-center gap-2 rounded-md bg-black/60 px-1.5 text-[11px] tabular-nums text-white/85 backdrop-blur-sm">
-        <button type="button" data-template-trial-play={playing ? 'playing' : 'paused'} title={t(playing ? 'assetDrawer.pause' : 'assetDrawer.play')} aria-label={t(playing ? 'assetDrawer.pause' : 'assetDrawer.play')} onClick={toggle} className="grid h-6 w-6 shrink-0 place-items-center rounded text-white hover:bg-white/15">
-          {playing ? <Pause size={13} strokeWidth={2.4} fill="currentColor" /> : <Play size={13} strokeWidth={2.4} fill="currentColor" />}
+        <button type="button" data-template-trial-play={playing ? 'playing' : 'paused'} title={t(failed ? 'assetDrawer.previewRetry' : playing || loading ? 'assetDrawer.pause' : 'assetDrawer.play')} aria-label={t(failed ? 'assetDrawer.previewRetry' : playing || loading ? 'assetDrawer.pause' : 'assetDrawer.play')} onClick={toggle} className="grid h-6 w-6 shrink-0 place-items-center rounded text-white hover:bg-white/15">
+          {failed ? <RotateCw size={13} /> : playing || loading ? <Pause size={13} strokeWidth={2.4} fill="currentColor" /> : <Play size={13} strokeWidth={2.4} fill="currentColor" />}
         </button>
         <span data-template-trial-time="">{clock(time)}</span>
         <input

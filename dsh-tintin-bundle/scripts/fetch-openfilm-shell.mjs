@@ -2,7 +2,7 @@
 // film shell build (第三行形态, 2026-10-23 用户裁决). The npm package strips `studio/ui/src`
 // while its exports map still names it — sources come from the pinned git commit instead:
 //
-//   TINTIN_OPENFILM_GIT_COMMIT (default 7713d38…, v0.3.0 "Desktop release: built on macos-15")
+//   TINTIN_OPENFILM_GIT_COMMIT (default 1e90e3ae…, v0.3.1 "Release OpenFilm 0.3.1")
 //   TINTIN_OPENFILM_GIT_DIR    a local clone to copy from; its HEAD must match the pin
 //
 // Materialized under tintin-resources/openfilm-shell-src/:
@@ -16,7 +16,7 @@ import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const COMMIT = process.env.TINTIN_OPENFILM_GIT_COMMIT ?? '7713d38c8ddc860e1b8e517bb8b0f180988f8f73'
+const COMMIT = process.env.TINTIN_OPENFILM_GIT_COMMIT ?? 'a85a80a9742981f0f77f61df88a2780984f8f3fb'
 const LOCAL_CLONE = process.env.TINTIN_OPENFILM_GIT_DIR ?? 'D:\\Project\\openfilm'
 const here = dirname(fileURLToPath(import.meta.url))
 /* vendor 到 tintin-resources(第三方源树的指定去处, 1000 行门禁豁免该段; 见 verify-tintin-gate.mjs) */
@@ -32,6 +32,7 @@ const TREES = [
 /* 单文件 vendor:chat 两处相对导入桌面包的 agent 定义(纯数据,渲染层安全),落到 openfilm-shell/src/。 */
 const FILES = [
   { from: 'apps/desktop/src/agent-definitions.mjs', to: '../src/agent-definitions.mjs' },
+  { from: 'apps/desktop/src/openfilm-models.mjs', to: '../src/openfilm-models.mjs' }, // 0.3.1: local-agent-store 越树引用的模型表
 ]
 
 const fail = (message) => {

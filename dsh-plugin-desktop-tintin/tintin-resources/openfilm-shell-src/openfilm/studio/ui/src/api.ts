@@ -15,7 +15,7 @@ export interface StudioVersion { version: string; latest: string | null; newer: 
 
 /** `cover`: when the person set a cover of its own (studio/server/cover.mjs), absent when it has none. */
 export type Project = { id: string; path: string; name: string; openedAt: number; missing: boolean; missingReason?: 'folder' | 'film'; working?: boolean; cover?: number };
-export type Clip = { src: string; id: string; at?: number; time?: [number] | [number, number];
+export type Clip = { src: string; id: string; at?: number; time?: [number] | [number, number]; disabled?: true;
   box?: { x: number; y: number; w?: number; h?: number; r?: number }; volume?: number; speed?: number; overrides?: unknown[];
   /** a page that sets no size of its own: the px it is laid out at (the stage's without it) */
   size?: { w: number; h: number };
@@ -284,7 +284,7 @@ export type FolderEvent = { type: 'film'; rev: string } | { type: 'files'; paths
   | { type: 'history-progress'; op: string; phase: string; done: number; total: number }
   | { type: 'ask'; ask: SpendAsk } | { type: 'asked'; id: string } | { type: 'notice'; notice: StudioNotice } | { type: 'project'; project: Project }
   /* an agent changed the canvas (`openfilm canvas apply`) */
-  | { type: 'canvas' }
+  | { type: 'canvas', reset?: boolean }
   /* its folder is there but film.html is not (an agent writing it again, or it lost): the project stays open and
      says so, until a `film` event says it is back */
   | { type: 'film-missing' }
