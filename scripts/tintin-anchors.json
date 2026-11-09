@@ -730,5 +730,113 @@
     "path": "dsh-tintin-bundle/scripts/fetch-openfilm-shell.mjs",
     "pattern": "openfilm-models.mjs",
     "minCount": 2
+  },
+  {
+    "comment": "registry: the dshmarket patch keeps the dsh-market self-rename seam (client.js hunk)",
+    "path": ".yarn/patches/dshmarket-desktop.patch",
+    "pattern": "dsh-market",
+    "minCount": 4
+  },
+  {
+    "comment": "registry: the dshmarket patch keeps holdYoungReleases (desktop-host update gating)",
+    "path": ".yarn/patches/dshmarket-desktop.patch",
+    "pattern": "holdYoungReleases",
+    "minCount": 6
+  },
+  {
+    "comment": "registry: the dshmarket patch keeps provideNpmVersions (market version feeding)",
+    "path": ".yarn/patches/dshmarket-desktop.patch",
+    "pattern": "provideNpmVersions",
+    "minCount": 4
+  },
+  {
+    "comment": "registry: root keeps the dshmarket patch wired",
+    "path": "package.json",
+    "pattern": "dshmarket-desktop.patch",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: root keeps the app-builder-lib patch wired (packaging)",
+    "path": "package.json",
+    "pattern": "patch:app-builder-lib@npm",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: root keeps the esbuild patch wired",
+    "path": "package.json",
+    "pattern": "patch:esbuild@npm",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: the bundle keeps its dsh face (web boot graph)",
+    "path": "dsh-tintin-bundle/package.json",
+    "pattern": "\"dsh\": {",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: the media bundle keeps its dsh face",
+    "path": "dsh-tintin-media-bundle/package.json",
+    "pattern": "\"dsh\": {",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: the cover plugin keeps its dsh face",
+    "path": "dsh-tintin-cover-plugin/package.json",
+    "pattern": "\"dsh\": {",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: the creation bundle keeps its dsh face",
+    "path": "dsh-tintin-creation-bundle/package.json",
+    "pattern": "\"dsh\": {",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: the ops bundle keeps its dsh face",
+    "path": "dsh-tintin-ops-bundle/package.json",
+    "pattern": "\"dsh\": {",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: the channel keeps its dsh face",
+    "path": "dsh-plugin-desktop-tintin/package.json",
+    "pattern": "\"dsh\": {",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: the channel mounts the client-ui provider",
+    "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
+    "pattern": "tintin-client-ui",
+    "minCount": 2
+  },
+  {
+    "comment": "registry: the channel mounts the tintin host bridge",
+    "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
+    "pattern": "tintin-host",
+    "minCount": 1
+  },
+  {
+    "comment": "registry: the channel mounts the media bundle",
+    "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
+    "pattern": "tintin-media",
+    "minCount": 2
+  },
+  {
+    "comment": "registry: the channel mounts the cover plugin",
+    "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
+    "pattern": "tintin-cover",
+    "minCount": 2
+  },
+  {
+    "comment": "registry: the channel mounts the creation bundle",
+    "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
+    "pattern": "tintin-creation",
+    "minCount": 2
+  },
+  {
+    "comment": "registry: the channel mounts the ops bundle",
+    "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
+    "pattern": "tintin-ops",
+    "minCount": 2
   }
 ]
