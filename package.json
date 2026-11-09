@@ -24,7 +24,7 @@
     "dsh-plugin-desktop-tintin"
   ],
   "resolutions": {
-    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.1.0-desktop.c296f70ed4036.rc2b11bfc.tgz",
+    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.2.0-desktop.c2c25ea4aacc6.rc2b11bfc.tgz",
     "@deepseek-ai/cordis": "4.0.6-alpha.1",
     "@deepseek-ai/cordis-plugin-include": "1.0.11-alpha.1",
     "@deepseek-ai/cordis-plugin-loader": "1.0.7-alpha.1",
@@ -780,14 +780,14 @@
     "@vscode/ripgrep@npm:1.18.0": "patch:@vscode/ripgrep@npm%3A1.18.0#./patches/vscode-ripgrep@1.18.0.patch",
     "@vscode/ripgrep@npm:^1.18.0": "patch:@vscode/ripgrep@npm%3A1.18.0#./patches/vscode-ripgrep@1.18.0.patch",
     "app-builder-lib@npm:26.15.7": "patch:app-builder-lib@npm%3A26.15.7#./patches/app-builder-lib@26.15.7.patch",
-    "dshmarket@npm:1.73.11": "patch:dshmarket@npm%3A1.73.11#./.yarn/patches/dshmarket-desktop.patch",
     "esbuild@npm:^0.27.0 || ^0.28.0": "patch:esbuild@npm%3A0.28.2#~/.yarn/patches/esbuild-npm-0.28.2-cf50b560fa.patch",
     "fs-ext@npm:2.1.1": "patch:fs-ext@npm%3A2.1.1#./patches/fs-ext@2.1.1.patch",
     "koffi@npm:^3.1.0": "3.1.5",
     "open@npm:11.0.1": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
     "open@npm:^11.0.0": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
     "open@npm:^11.0.2": "patch:open@npm%3A11.0.4#./patches/open@11.0.4.patch",
-    "pnpm@npm:11.8.0": "patch:pnpm@npm%3A11.8.0#./patches/pnpm@11.8.0.patch"
+    "pnpm@npm:11.8.0": "patch:pnpm@npm%3A11.8.0#./patches/pnpm@11.8.0.patch",
+    "dshmarket@npm:1.73.16": "patch:dshmarket@npm%3A1.73.16#./.yarn/patches/dshmarket-desktop.patch"
   },
   "dependenciesMeta": {
     "@deepseek-ai/dsh-subprocess-local": {

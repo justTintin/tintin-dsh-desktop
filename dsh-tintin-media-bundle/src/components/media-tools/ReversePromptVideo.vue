@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // ═══════════════════════════════════════════════════════════════
-// OtReversePromptVideo — 运营工具「视频反推提示词」（2026-10-02 用户裁决启用）
-// 走仿视频拆解接口（POST /api/storyboard/scripts/imitate）一个调用返回
-// 【拆解脚本 + 反推提示词】——不单独调 /prompt/video；编排复用
-// useImitationVideo（上传入素材库→material://→拆解→unified 轮询）。
-// 结果 UI（2026-10-06 改造）：整体提示词卡（meta.prompt_en，完成后经
-// loadScript 读取，与仿视频第 1 步同源）+ 逐镜合一卡（拆解脚本与反推
-// 提示词不再重复两段展示；运镜走服务端枚举标签；每镜/整体一键复制）。
+// ReversePromptVideo.vue — 媒体工具「视频反推提示词」
+// 2026-11-09 用户裁决：自运营工具整体迁入（ops 侧功能随迁出删除）；走仿视频
+// 拆解接口（POST /api/storyboard/scripts/imitate）一个调用返回
+// 【拆解脚本 + 反推提示词】——不单独调 /prompt/video；编排消费本包既有
+// useImitationVideo（与仿爆款视频卡同源，函数内 state=每次调用独立实例，
+// 与仿视频卡互不干涉）。结果 UI（2026-10-06 改造）：整体提示词卡
+// （meta.prompt_en，完成后经 loadScript 读取，与仿视频第 1 步同源）+
+// 逐镜合一卡（拆解脚本与反推提示词不再重复两段展示；运镜走服务端枚举标签；
+// 每镜/整体一键复制）。
 // ═══════════════════════════════════════════════════════════════
 import { computed, onMounted, ref, watch } from 'vue'
 import TButton from '@/components/common/TButton.vue'

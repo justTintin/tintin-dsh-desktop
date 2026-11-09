@@ -147,13 +147,15 @@ function removePoolScene(idx: number): void {
 }
 /** 一键清空素材（2026-09-29 用户裁决：素材很多时逐条 × 删除太慢——标题行加
  *  「清空素材」，一次移除本地素材 + 选择池全部片段，便于重新选择）。带确认；
- *  磁盘文件/分割缓存不动；素材库 tab 的待加入勾选一并重置（干净重选）。 */
+ *  磁盘文件/分割缓存不动；素材库 tab 的待加入勾选一并重置（干净重选）。
+ *  2026-11-06 用户裁决：清空=此项目原绑定素材全清——分镜 clipGroups 绑定一并
+ *  清空（主编排层 clearAllVideos 包装），新操作的文件夹素材为唯一口径。 */
 function onClearAllMaterials(): void {
   if (!srcVideos.value.length && !filteredScenes.value.length) return
   if (!window.confirm(
     `确定清空全部素材吗？\n`
     + `将移除本地素材 ${srcVideos.value.length} 个、选择池 ${scenes.value.length} 条片段`
-    + `（分镜绑定关系随之失效，重新智能匹配即可重建）。\n`
+    + `（分镜绑定关系一并清空，重新智能匹配即可重建）。\n`
     + `磁盘文件与分割缓存不受影响。`,
   )) return
   clearAllVideos()
@@ -663,11 +665,12 @@ function scoreClass(score: number | undefined): string {
               </svg>
             </button>
             <span v-if="srcListCollapsed && srcVideos.length" class="muted">已折叠，共 {{ srcVideos.length }} 个素材</span>
-            <!-- 2026-09-29 用户裁决：一键清空素材——素材很多时逐条 × 太慢；分割进行中禁用 -->
-            <button class="src-clear-btn" type="button"
+            <!-- 2026-09-29 用户裁决：一键清空素材——素材很多时逐条 × 太慢；分割进行中禁用。
+                 2026-11-06 用户裁决：样式与「停止分割」保持一致（同款 TButton secondary） -->
+            <TButton label="清空素材" variant="secondary"
               :disabled="splitBusy || (!srcVideos.length && !filteredScenes.length)"
               title="清空本地素材与选择池全部片段（磁盘文件不受影响），便于重新选择"
-              @click="onClearAllMaterials">清空素材</button>
+              @click="onClearAllMaterials" />
           </div>
           <ul v-show="!srcListCollapsed" class="file-list src-video-list">
             <li v-for="(v, i) in srcVideos" :key="v" :title="v" class="split-status-row" :class="'split-' + (splitStatusOf(v) || 'none')">
@@ -1025,17 +1028,7 @@ function scoreClass(score: number | undefined): string {
 }
 .src-collapse:hover { color: var(--primary); border-color: var(--primary); }
 .src-collapse svg { transition: transform var(--duration-fast); }
-/* 一键清空素材（2026-09-29 用户裁决）：标题行右端 ghost 小按钮，hover 红色警示 */
-.src-clear-btn {
-  margin-left: auto;
-  height: 22px; padding: 0 10px;
-  font-size: 11px; font-weight: 600;
-  color: var(--muted-foreground); background: transparent;
-  border: 1px solid var(--border); border-radius: var(--radius-md);
-  cursor: pointer; transition: all var(--duration-fast);
-}
-.src-clear-btn:hover:not(:disabled) { color: var(--destructive, #e5484d); border-color: var(--destructive, #e5484d); }
-.src-clear-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+/* 一键清空素材（2026-11-06 用户裁决）：改用 TButton secondary 与「停止分割」同款，ghost 自绘样式退役 */
 .param-label { font-size: 13px; color: var(--foreground); white-space: nowrap; }
 /* 每脚本视频设置：当前绑定分镜名徽标（2026-09-23 用户裁决：设置按 tab 绑定的可视锚点） */
 .tab-bound-name {

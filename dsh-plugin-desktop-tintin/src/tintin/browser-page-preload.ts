@@ -41,6 +41,11 @@ const desktopBrowser = {
   sniffList: (payload?: unknown) => invoke('browser:sniffList', payload),
   sniffClear: (payload?: unknown) => invoke('browser:sniffClear', payload),
   sniffDownload: (payload: unknown) => invoke('browser:sniffDownload', payload),
+  // 设置（2026-11-08 第一批 P0「设置入口」）
+  getSettings: () => invoke('browser:getSettings'),
+  setSettings: (payload: unknown) => invoke('browser:setSettings', payload),
+  clearData: (payload: unknown) => invoke('browser:clearData', payload),
+  openDownloadsDir: () => invoke('browser:openDownloadsDir'),
   // 扩展管理
   extensionList: () => invoke('browser:extensionList'),
   extensionInstall: (payload: unknown) => invoke('browser:extensionInstall', payload),
@@ -90,6 +95,23 @@ const tintinBrowserPage = {
   action: (payload: unknown) => invoke(BROWSER_PAGE_ACTION, payload),
   /** 主进程导航态推送 */
   onState: (listener: (payload: unknown) => void) => on(BROWSER_PAGE_STATE, listener),
+  /** 页内查找（2026-11-08 第一批 P0 #5） */
+  findInPage: (payload: unknown) => invoke('browser:findInPage', payload),
+  findStop: () => invoke('browser:findStop'),
+  onFindResult: (listener: (payload: unknown) => void) => on('tintin-browser-page:find-result', listener),
+  /** 壳 → 页面 UI 消息（平台视图快捷键转发的查找开合/地址栏聚焦/区块跳转/toast） */
+  onUi: (listener: (payload: unknown) => void) => on('tintin-browser-page:ui', listener),
+  // 标签页（2026-11-08 第二批 #2）
+  tabOpen: (payload: unknown) => invoke('browser:tabOpen', payload),
+  tabClose: (payload: unknown) => invoke('browser:tabClose', payload),
+  tabActivate: (payload: unknown) => invoke('browser:tabActivate', payload),
+  onTabs: (listener: (payload: unknown) => void) => on('tintin-browser-page:tabs', listener),
+  // 历史/书签（2026-11-08 第二批 #3/#4）
+  historyList: () => invoke('history:list'),
+  historyClear: () => invoke('history:clear'),
+  historySuggest: (payload: unknown) => invoke('history:suggest', payload),
+  bookmarkToggle: (payload: unknown) => invoke('bookmarks:toggle', payload),
+  bookmarkIsStarred: (payload: unknown) => invoke('bookmarks:isStarred', payload),
 }
 
 contextBridge.exposeInMainWorld('dshDesktopBrowser', desktopBrowser)

@@ -247,8 +247,6 @@ export function installTinTinMainHook(): void {
       // 页面桥（dshDesktopBrowser/tintinBrowserPage）由此接通——构建产物与本文件同目录
       registerBrowserService(window, {
         pagePreloadPath: join(dirname(fileURLToPath(import.meta.url)), 'browser-page-preload.cjs'),
-        // 「服务端」按钮地址来源（2026-11-04 收尾）：通道 home tintin/config.json 的 server.url
-        resolveServerUrl: () => tinServerUrl(),
       })
     } catch (error) {
       console.error(

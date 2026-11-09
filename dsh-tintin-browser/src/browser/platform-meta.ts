@@ -68,6 +68,25 @@ export const PLATFORM_COOKIE_DOMAINS: Record<string, string[]> = {
   youtube: ['.youtube.com', '.google.com'],
 }
 
+// 登录态判据 cookie（2026-11-08 报障修复：原「分区有该平台任意 cookie」=匿名功能
+// cookie（ttwid/设备指纹等）也误报已登录；YouTube/小红书全程未登录仍亮绿）。
+// 各平台会话级 cookie 名——在任一条即视为已登录（服务端会话凭证，匿名 jar 不含）。
+export const LOGIN_COOKIE_NAMES: Record<string, string[]> = {
+  douyin: ['sessionid', 'sessionid_ss', 'sid_tt', 'sid_guard'],
+  bilibili: ['SESSDATA', 'DedeUserID'],
+  kuaishou: ['kuaishou.server.webday7_st', 'kuaishou.server.web_st', 'passToken'],
+  xiaohongshu: ['web_session', 'a1'],
+  weixin: ['sessionid', 'wap_sid2'],
+  youtube: ['SID', 'HSID', 'SSID', 'SAPISID', '__Secure-1PSID', '__Secure-3PSID'],
+}
+
+/** 会话 cookie 判定：平台会话 cookie 任一在 jar 中即已登录 */
+export function hasLoginCookie(names: string[], platform: string): boolean {
+  const wanted = LOGIN_COOKIE_NAMES[platform]
+  if (!wanted?.length) return false
+  return names.some((n) => wanted.includes(n))
+}
+
 export function detectPlatformFromUrl(url: string): string | null {
   if (!url) return null
   try {

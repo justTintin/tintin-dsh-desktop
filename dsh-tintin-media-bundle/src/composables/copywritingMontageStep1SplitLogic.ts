@@ -465,6 +465,102 @@ export function filterMaterialsByDupMode(
   return paths.filter((p) => kept.has(p))
 }
 
+// ── 素材装载统一语义（2026-11-06 用户裁决：手动选文件夹与拖入文件夹完全同语义，
+//  无入口差异——重复度算法输入=该文件夹收集到的全部素材，结果追加；再次操作也是
+//  追加，同路径去重不重复入列）──
+
+/** 视频扩展名判定（拖入回退直推用；VIDEO_EXTS 为带点小写集合） */
+const VIDEO_EXT_SET = new Set<string>(VIDEO_EXTS)
+export function hasVideoExt(p: string): boolean {
+  const dot = p.lastIndexOf('.')
+  return dot >= 0 && VIDEO_EXT_SET.has(p.slice(dot).toLowerCase())
+}
+
+/** 本批素材追加（原地改写 current；路径去重 + 总量上限截断）。
+ *  返回 added=实际新增、capBlocked=被上限拦下的个数（两个入口共用，杜绝语义分叉） */
+export function appendMaterialBatch(
+  current: string[], batch: string[], max: number,
+): { added: number; capBlocked: number } {
+  const present = new Set(current)
+  let added = 0
+  let capBlocked = 0
+  for (const p of batch) {
+    if (!p || present.has(p)) continue
+    if (current.length >= max) { capBlocked++; continue }
+    current.push(p)
+    present.add(p)
+    added++
+  }
+  return { added, capBlocked }
+}
+
+/** 装载摘要文案（两个入口共用同一份反馈；明示筛选/上限/去重，禁止静默丢弃）：
+ *  · 算法有筛选 → 「已按重复度筛选：素材 N 个 → 匹配 M 个」（匹配≠新增，重复操作新增可为 0）
+ *  · 匹配 0 → 给出可操作出路（分镜脚本/景别关键词/「全部选择」档） */
+export function materialLoadSummary(
+  collected: number, filtered: number, added: number, capBlocked: number, max: number,
+): string {
+  const parts: string[] = []
+  if (filtered < collected) parts.push(`已按重复度筛选：素材 ${collected} 个 → 匹配 ${filtered} 个`)
+  if (added > 0) parts.push(`新增 ${added} 个`)
+  if (capBlocked > 0) parts.push(`素材已达上限（${max}），${capBlocked} 个未导入`)
+  if (!added && !capBlocked && filtered > 0) parts.push('所选素材均已在清单中')
+  if (collected > 0 && filtered === 0) parts.push('未匹配到素材：需已加载分镜脚本且素材路径含景别关键词（特写/近景/中景/全景/远景），或把重复度切为「全部选择」')
+  return parts.join('；')
+}
+
+// ── 混剪项目标识（2026-11-06 用户裁决：一次完整的文案混剪=一个项目——相同提示词
+//  或相同产品在同一轮混剪里是同一项目；项目目录必须带时间戳，可辨识可排序。
+//  原 randomUUID 目录名无时间语义、且每次「开始分割」都换目录，停止续分时
+//  已完成素材的片段滞留旧目录，一个批次被拆散到多个目录）──
+
+/** 项目目录标识：`yyyyMMdd-HHmmss-<4hex>`（时间戳可排序可辨识，短随机防同秒碰撞） */
+export function montageProjectIdNow(now?: Date): string {
+  const t = now ?? new Date()
+  const p = (n: number, w: number): string => String(n).padStart(w, '0')
+  const ts = `${t.getFullYear()}${p(t.getMonth() + 1, 2)}${p(t.getDate(), 2)}-${p(t.getHours(), 2)}${p(t.getMinutes(), 2)}${p(t.getSeconds(), 2)}`
+  const rnd = Math.floor(Math.random() * 0xffff).toString(16).padStart(4, '0')
+  return `${ts}-${rnd}`
+}
+
+/** 项目身份签名=本轮生成口径的 product_desc（有产品按产品、无产品按提示词，与
+ *  genVoiceoverCandidates 同口径）；签名变化=换项目（下次分割开新时间戳目录） */
+export function projectIdentityOf(prompt: string, productDesc: string): string {
+  return (productDesc || '').trim() || (prompt || '').trim()
+}
+
+// ── 项目素材批次持久化（2026-11-06 用户裁决：恢复必须按项目身份校验——记录携带
+//  项目身份签名，启动恢复前先比对：本项目的批次才恢复；异项目/旧格式（HEAD 旧构建
+//  无项目概念，裸数组记录）一律视为异项目，丢弃且就地清除，不得复活到清单里）──
+
+export interface MaterialBatchRecord {
+  sig: string
+  src: string[]
+  pool: SplitSceneRow[]
+}
+
+export function serializeMaterialBatch(rec: MaterialBatchRecord): string {
+  return JSON.stringify(rec)
+}
+
+/** 解析持久化批次：签名缺失/不匹配、旧格式裸数组、JSON 损坏 → null（调用方丢弃记录）。
+ *  素材池行过滤无效行（同 HEAD 恢复口径：idx 有值且三种定位至少其一） */
+export function parseMaterialBatch(raw: string, currentSig: string): MaterialBatchRecord | null {
+  let rec: unknown = null
+  try { rec = JSON.parse(String(raw || '')) } catch { return null }
+  if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return null
+  const o = rec as Record<string, unknown>
+  if (typeof o.sig !== 'string' || !o.sig || o.sig !== currentSig) return null
+  const src = (Array.isArray(o.src) ? o.src : []).filter((p): p is string => typeof p === 'string' && !!p)
+  const poolOk = (r: unknown): r is SplitSceneRow => {
+    if (!r || typeof r !== 'object') return false
+    const row = r as SplitSceneRow
+    return row.idx != null && !!(row.serverPath || row.clipUrl || row.clipLocalPath)
+  }
+  const pool = (Array.isArray(o.pool) ? o.pool : []).filter(poolOk)
+  return { sig: o.sig, src, pool }
+}
+
 /** 已选素材摘要（2026-11-05 自 Step2Panel 迁入，铁律 10 行数付账；纯函数） */
 export function srcSummaryOf(srcCount: number, sceneCount: number): string {
   const parts: string[] = []

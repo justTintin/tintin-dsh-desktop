@@ -159,7 +159,7 @@
     "icons:export": "node ../scripts/export-app-icons.mjs --channel stable"
   },
   "dependencies": {
-    "@agents-anywhere/dsh-bridge-next": "file:../vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.1.0-desktop.c296f70ed4036.rc2b11bfc.tgz",
+    "@agents-anywhere/dsh-bridge-next": "file:../vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.2.0-desktop.c2c25ea4aacc6.rc2b11bfc.tgz",
     "@deepseek-ai/cordis": "4.0.6-alpha.1",
     "@deepseek-ai/cordis-plugin-group": "1.0.5",
     "@deepseek-ai/cordis-plugin-include": "1.0.11-alpha.1",
@@ -346,7 +346,7 @@
     "@shikijs/langs": "^4.3.1",
     "adm-zip": "^0.6.0",
     "dsh-community-market": "0.1.0-dev.0",
-    "dshmarket": "1.73.11",
+    "dshmarket": "1.73.16",
     "fs-ext": "2.1.1",
     "koffi": "3.1.5",
     "node-addon-require-builtin": "^0.1.9",

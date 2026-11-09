@@ -120,7 +120,7 @@ window.__ModuleLoader__.load({
         const style = document.createElement('style')
         style.id = 'tintin-openfilm-css'
         style.textContent = [
-          '.tintin-of-shell{position:absolute;inset:0;display:flex;background:#0b0c0f}.tintin-of-stage{position:relative;flex:1;min-width:0}.tintin-of-stage iframe{width:100%;height:100%;border:0;display:block;background:#0b0c0f}.tintin-of-logbar{position:absolute;left:0;right:428px;bottom:0;height:22px;box-sizing:border-box;background:#0d0e11;border-top:1px solid #26272b;color:#8fd6a4;font:11px/1.5 ui-monospace,monospace;padding:3px 12px;overflow:hidden;white-space:pre-wrap;z-index:3}.tintin-of-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;white-space:pre-wrap;cursor:pointer;color:#9a9a9a;font:14px/1.6 system-ui;background:#0b0c0f}.tintin-of-note-busy{display:flex;flex-direction:column;align-items:center;gap:12px}.tintin-of-spin{width:22px;height:22px;border:2px solid #33363d;border-top-color:#7aa2ff;border-radius:50%;animation:tintin-spin .9s linear infinite}@keyframes tintin-spin{to{transform:rotate(1turn)}}',
+          '.tintin-of-shell{position:absolute;inset:0;display:flex;background:#0b0c0f}.tintin-of-stage{position:relative;flex:1;min-width:0}.tintin-of-stage iframe{width:100%;height:100%;border:0;display:block;background:#0b0c0f}.tintin-of-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;white-space:pre-wrap;cursor:pointer;color:#9a9a9a;font:14px/1.6 system-ui;background:#0b0c0f}.tintin-of-note-busy{display:flex;flex-direction:column;align-items:center;gap:12px}.tintin-of-spin{width:22px;height:22px;border:2px solid #33363d;border-top-color:#7aa2ff;border-radius:50%;animation:tintin-spin .9s linear infinite}@keyframes tintin-spin{to{transform:rotate(1turn)}}',
           '.tintin-of-chat{position:relative;width:420px;flex:none;display:flex;flex-direction:column;border-left:1px solid #202126;background:#0f1013;color:#e8e8e6;font:13px/1.55 system-ui;min-width:0}.tintin-of-top{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid #1c1d21;min-height:38px}.tintin-of-top-session{flex:1;min-width:0;background:transparent;border:0;color:#c9c9cf;font:12px system-ui;outline:none;appearance:none}.tintin-of-top-session option{background:#16171a;color:#e8e8e6}.tintin-of-top-btn{width:26px;height:26px;border-radius:7px;border:1px solid #26272b;background:#15161a;color:#c9c9cf;cursor:pointer;font:13px system-ui;line-height:1;flex:none}',
           '.tintin-of-list{flex:1;min-height:0;overflow:auto;padding:16px 14px;display:flex;flex-direction:column;gap:10px}.tintin-of-empty2{margin:auto 0;padding:0 6px 20px;display:flex;flex-direction:column;gap:10px;max-width:360px}.tintin-of-mark{width:22px;height:28px;border-radius:3px;background:#e8e8e6;clip-path:polygon(0 0,100% 0,100% 70%,55% 70%,55% 100%,0 100%)}.tintin-of-h1{font-size:21px;font-weight:700;letter-spacing:.2px;margin-top:2px}.tintin-of-p{font-size:12px;color:#9a9aa0;margin-bottom:6px}',
           '.tintin-of-sugg-head{display:flex;align-items:center;justify-content:space-between;font-size:11px;color:#8a8a90;margin-top:4px}.tintin-of-sugg-head button{background:none;border:0;color:#8a8a90;font:11px system-ui;cursor:pointer}.tintin-of-sugg{display:flex;flex-direction:column;gap:7px}.tintin-of-sugg-card{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:10px;border:1px solid #26272b;background:#16171a;color:#e2e2e6;font:13px/1.45 system-ui;text-align:left;cursor:pointer}.tintin-of-sugg-card:hover{background:#1b1c20}.tintin-of-sugg-card span:last-child{color:#6f7076;font-size:13px}',
@@ -300,19 +300,8 @@ ${event.data.error.reason}` : result
         const atMenu = document.createElement('div'); atMenu.className = 'tintin-of-atmenu'
         chat.append(top, assetsPanel, list, approvalBar, questionBar, composer, status, atMenu)
         shell.append(stage, chat)
-        /* 底部日志条(2026-10-24 用户要求): 原生视图高度为此收缩 40px, 本条常驻可见 */
-        const logbar = document.createElement('div'); logbar.className = 'tintin-of-logbar'
-        stage.append(logbar)
-        const LOGHINT = '日志文件: %APPDATA%\\TinTin\\logs\\dsh-*.log（.error.log 同目录）'
-        const refreshLogbar = async () => {
-          try {
-            const r = await nativeView?.hasShellChat?.()
-            const diag = r?.diag ? JSON.stringify(r.diag) : ''
-            logbar.textContent = (r?.has === true ? '官方聊天已接管 ✓' : '官方聊天未接管') + (diag ? '  |  ' + diag : '') + '\n' + LOGHINT
-          } catch { logbar.textContent = LOGHINT }
-        }
-        setInterval(() => { void refreshLogbar() }, 4000)
-        setTimeout(() => { void refreshLogbar() }, 0)
+        /* 底部日志条已删(2026-11-07 用户裁决: 「官方聊天已经接管」调试条退役, 原生视图铺满舞台;
+           诊断走 console 与 %APPDATA%\TinTin\logs\dsh-*.log) */
         el.append(shell)
         // 系统字幕带（窗口顶条，titleBarOverlay）会吞掉原生 Studio 视图的顶栏点击（2026-10-19 裁决：编辑器
         // 不落到标题栏上）——只让本视图让出条高：壳顶内边距把舞台推到条下，聊天列顶部为纯背景；共享覆盖层
@@ -765,16 +754,14 @@ ${event.data.error.reason}` : result
             return
           }
           nativeShown = true
-          /* 原生视图 = 舞台矩形(底部让出 40px 给日志条); **不向上扩张** —— 曾经的
+          /* 原生视图 = 舞台矩形(日志条已删, 铺满全高); **不向上扩张** —— 曾经的
              TOP_FILL=40 让视图侵入窗口 chrome 条, 抽屉头部压在拖拽区边界上:
              双击触发窗口最大化、× 的点击落到 chrome(2026-10-24 报障的机制)。 */
-          // 顶部贴紧 chrome 底缘(2026-10-24 用户裁决: 顶部空隙要填满);
-          // 底部让出 40px 日志条。抽屉已下移 40px, × 不与 chrome 按钮重叠。
-          const LOG_STRIP = 22
+          // 顶部贴紧 chrome 底缘(2026-10-24 用户裁决: 顶部空隙要填满)。
           const nx = Math.round(rect.left)
           const ny = Math.round(rect.top - 40)
           const nw = Math.round(rect.width)
-          const nh = Math.max(8, Math.round(rect.height + 40 - LOG_STRIP))
+          const nh = Math.max(8, Math.round(rect.height + 40))
           const next = `${nx},${ny},${nw},${nh}`
           if (next === lastBounds) return
           lastBounds = next

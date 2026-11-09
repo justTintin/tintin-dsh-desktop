@@ -1,6 +1,6 @@
 /** Refresh the bundled market from npm latest without floating the committed lockfile. */
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -35,11 +35,47 @@ function install(directory) {
     throw new Error('Run corepack yarn market:prepare to use the repository Yarn release')
   }
   const result = spawnSync(process.execPath, [yarn, 'install'], {
-    cwd: directory, stdio: 'inherit', timeout: 600_000,
+    cwd: directory, timeout: 600_000, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, YARN_ENABLE_IMMUTABLE_INSTALLS: 'false' },
   })
+  // 输出透传保持既有可见性，同时留一份文本供补丁失配自愈判定
+  if (result.stdout) process.stdout.write(result.stdout)
+  if (result.stderr) process.stderr.write(result.stderr)
   if (result.error) throw result.error
-  if (result.status !== 0) throw new Error(`Market dependency install failed (${result.status})`)
+  if (result.status !== 0) {
+    throw new Error(`Market dependency install failed (${result.status})`, {
+      cause: new Error(`${(result.stdout || '')}${(result.stderr || '')}`),
+    })
+  }
+}
+
+/**
+ * 2026-11-07 用户需求：浮版补丁失配自动重接线——打包模式 1（联网+最新）因
+ * dshmarket 漂版导致「Cannot apply hunk #N」时，不再要求人工修改：
+ * 取新版原件（Yarn Berry 缓存优先，缺失走 registry tgz）重生成桌面补丁；
+ * 由调用方重试一次安装。版本钉版无需在此处理——prepareMarket 在 install 前
+ * 已把 resolutions/各 workspace manifests 全部写成新版本，失配的只有补丁文件本体。
+ * 前提：scripts/regen-dshmarket-patch.mjs 的语义锚点仍适用（锚点漂移时本自愈
+ * 会带 regen 输出失败——那是需要人工看上游 diff 的信号，不静默吞掉）。
+ */
+function healMarketPatch(directory, version) {
+  const regen = resolve(directory, 'scripts', 'regen-dshmarket-patch.mjs')
+  const patchPath = join(directory, '.yarn', 'patches', 'dshmarket-desktop.patch')
+  const patchBackup = existsSync(patchPath) ? readFileSync(patchPath) : null
+  console.log(`[market] dshmarket ${version} 补丁失配，自动重接线（重生成补丁）后重试…`)
+  const result = spawnSync(process.execPath, [regen, version, patchPath], {
+    encoding: 'utf8', timeout: 120_000, maxBuffer: 64 * 1024 * 1024,
+  })
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
+  if (result.stdout) process.stdout.write(result.stdout)
+  if (result.stderr) process.stderr.write(result.stderr)
+  if (result.status !== 0 || !existsSync(patchPath)) {
+    // 自愈失败：恢复原补丁，把上游 diff 的取证责任如实抛回
+    if (patchBackup === null) rmSync(patchPath, { force: true })
+    else writeFileSync(patchPath, patchBackup)
+    throw new Error(`patch auto-repair failed for dshmarket ${version}（语义锚点可能漂移，需人工看上游 diff）:\n${output.trim().slice(-1200)}`)
+  }
+  console.log(`[market] patch re-wired for dshmarket ${version} (auto-repair)`)
 }
 
 export async function prepareMarket(directory, { check = false, pinned = false, fetcher = fetch, runInstall = install } = {}) {
@@ -83,7 +119,24 @@ export async function prepareMarket(directory, { check = false, pinned = false, 
       manifest.dependencies.dshmarket = version
     }
     for (const [path, manifest] of manifests) writeFileSync(join(directory, path), `${JSON.stringify(manifest, null, 2)}\n`)
-    runInstall(directory)
+    // 自愈原子性：heal 前留补丁底片，重试仍失败时一并恢复（防「旧钉版+新补丁」错配残留）
+    const patchPath = join(directory, '.yarn', 'patches', 'dshmarket-desktop.patch')
+    const patchBackup = existsSync(patchPath) ? readFileSync(patchPath) : null
+    try {
+      runInstall(directory)
+    } catch (installError) {
+      // 2026-11-07 用户需求：浮版补丁失配自愈——只在「hunk 对不上」特征下重接线重试一次
+      const causeText = String(installError?.cause?.message ?? installError?.message ?? installError)
+      if (!/Cannot apply hunk/i.test(causeText)) throw installError
+      healMarketPatch(directory, version)
+      try {
+        runInstall(directory)
+      } catch (retryError) {
+        if (patchBackup === null) rmSync(patchPath, { force: true })
+        else writeFileSync(patchPath, patchBackup)
+        throw retryError
+      }
+    }
     for (const workspace of MARKET_WORKSPACES) {
       if (installedVersion(directory, workspace) !== version) throw new Error(`${workspace} did not install dshmarket ${version}`)
     }

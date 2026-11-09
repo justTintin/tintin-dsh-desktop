@@ -378,8 +378,8 @@
     "minCount": 2
   },
   {
-    "comment": "bili extension download push channel stays (SRC viewpool biliExtDlSubKey semantics)",
-    "path": "dsh-tintin-browser/src/browser/browser-service.ts",
+    "comment": "bili extension download push channel stays (SRC viewpool biliExtDlSubKey semantics; 2026-11-08 page-downloads.ts extraction)",
+    "path": "dsh-tintin-browser/src/browser/page-downloads.ts",
     "pattern": "browser:bili-ext-dl",
     "minCount": 1
   },

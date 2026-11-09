@@ -178,3 +178,52 @@ describe('importExcel / downloadImportTemplate（Excel 导入，服务端自解�
     expect(bridgeCalls().some((c) => c.kind === 'DIALOG')).toBe(false)
   })
 })
+
+describe('bindSixViewFromMaterial（图库选图绑定·绑定 B，2026-11-07）', () => {
+  afterEach(() => {
+    delete (globalThis as unknown as { fetch?: unknown }).fetch
+  })
+
+  it('fetch 字节 → File → 既有 uploadSixView（服务端 upload 端点只收文件，openapi 核实）', async () => {
+    const P = useOpsProductLibrary()
+    await P.selectNode('I1')
+
+    const blob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' })
+    ;(globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async (url: string) => ({
+      ok: true,
+      blob: async () => blob,
+      url,
+    }))
+
+    await P.bindSixViewFromMaterial('front', '88', 'http://s:8000/')
+
+    // 取图腿：/material/serve 带去尾斜杠后的 base + material_id（CORS=* 实测，直 fetch）
+    const fetchMock = (globalThis as unknown as { fetch: ReturnType<typeof vi.fn> }).fetch
+    expect(fetchMock).toHaveBeenCalledWith('http://s:8000/material/serve?material_id=88')
+    // 上传腿：走既有全局作用域 upload 端点，multipart file=取回字节包成的 File
+    const up = bridgeCalls().find((c) => c.kind === 'UPLOAD') as { path: string; file: File } | undefined
+    expect(up?.path).toBe('/api/product-library/items/I1/views/front/upload')
+    expect(up?.file?.type).toBe('image/jpeg')
+    expect(P.sixStatus.value).toContain('已替换')
+  })
+
+  it('取图失败（HTTP 404）→ 状态报错，不触发 upload', async () => {
+    const P = useOpsProductLibrary()
+    await P.selectNode('I1')
+    ;(globalThis as unknown as { fetch: unknown }).fetch = vi.fn(async () => ({ ok: false, status: 404 }))
+
+    await P.bindSixViewFromMaterial('front', '88', 'http://s:8000')
+
+    expect(P.sixStatus.value).toContain('素材选图失败')
+    expect(P.sixStatus.value).toContain('404')
+    expect(bridgeCalls().some((c) => c.kind === 'UPLOAD')).toBe(false)
+  })
+
+  it('serverUrl/materialId 缺失拦截', async () => {
+    const P = useOpsProductLibrary()
+    await P.selectNode('I1')
+    await P.bindSixViewFromMaterial('front', '', 'http://s:8000')
+    expect(P.sixStatus.value).toContain('素材无效')
+    expect(bridgeCalls().some((c) => c.kind === 'UPLOAD')).toBe(false)
+  })
+})

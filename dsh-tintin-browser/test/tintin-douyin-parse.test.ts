@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildDouyinShortUrl,
   buildDouyinVideoPageUrl,
+  extractDouyinCaption,
   extractDouyinPasscode,
   extractDouyinShareUrl,
   extractDouyinVideoIdFromUrl,
@@ -58,6 +59,19 @@ describe('口令支持（2026-11-04 用户报障裁决选 1，超出 SRC 的扩�
     expect(buildDouyinShortUrl('UYz')).toBe('https://v.douyin.com/UYz/')
     expect(buildDouyinShortUrl('bad_code!')).toBeNull()
     expect(buildDouyinShortUrl('')).toBeNull()
+  })
+})
+
+describe('extractDouyinCaption（2026-11-05 标题命名，用户报障裁决）', () => {
+  it('用户实报样本：码段之后、链接之前的描述段即标题', () => {
+    const text = '4.66 g@o.Qk :5pm 05/17 OxS:/ 操盘百亿的「地产神童」罗兆辉，为何沦为豪门弃子？   https://v.douyin.com/Fj247g5MTFg/ 复制此链接，打开Dou音搜索，直接观看视频！'
+    expect(extractDouyinCaption(text)).toBe('操盘百亿的「地产神童」罗兆辉，为何沦为豪门弃子？')
+  })
+  it('样板话剥离后为空 → null；无码段（纯链接）→ null', () => {
+    expect(extractDouyinCaption('8.99 HtC:/ 复制打开抖音 https://v.douyin.com/iRNBho6u/ 看看作品')).toBeNull()
+    expect(extractDouyinCaption('https://v.douyin.com/iRNBho6u/ 复制此链接')).toBeNull()
+    expect(extractDouyinCaption('')).toBeNull()
+    expect(extractDouyinCaption(null)).toBeNull()
   })
 })
 

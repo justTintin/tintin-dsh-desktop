@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { cleanMediaUrl, createMediaDownloaderIpc, partitionForPlatform } from '../src/browser/media-downloader.ts'
+import { cleanMediaUrl, createMediaDownloaderIpc, partitionForPlatform, resolveYtdlpTargetUrl } from '../src/browser/media-downloader.ts'
 
 describe('cleanMediaUrl（SRC _cleanMediaUrl 1:1）', () => {
   it('youtube/googlevideo 分块参数清洗 + range 全量', () => {
@@ -29,6 +29,21 @@ describe('partitionForPlatform（2026-11-04 cookie 注入分区修复）', () =>
     expect(partitionForPlatform('douyin')).toBe('persist:tintin-douyin')
     expect(partitionForPlatform('web')).toBe('persist:tintin-web')
     expect(partitionForPlatform(undefined)).toBe('persist:tintin-browser')
+  })
+})
+
+describe('resolveYtdlpTargetUrl（2026-11-05 解析链目标修复）', () => {
+  it('解析链：url=视频页优先，不被 referer=站点首页顶掉', () => {
+    expect(resolveYtdlpTargetUrl('https://www.douyin.com/video/7412345678901234567', 'https://www.douyin.com/'))
+      .toBe('https://www.douyin.com/video/7412345678901234567')
+  })
+  it('嗅探链：url=媒体直链（非视频页）保持 SRC 口径取 referer 页', () => {
+    expect(resolveYtdlpTargetUrl('https://v26-web.douyinvod.com/x/index.m3u8', 'https://www.douyin.com/video/741'))
+      .toBe('https://www.douyin.com/video/741')
+  })
+  it('两者皆非视频页回落 url；无 referer 原样', () => {
+    expect(resolveYtdlpTargetUrl('https://cdn.example.com/a.mp4', 'https://x.com/page')).toBe('https://x.com/page')
+    expect(resolveYtdlpTargetUrl('https://cdn.example.com/a.mp4', undefined)).toBe('https://cdn.example.com/a.mp4')
   })
 })
 
@@ -136,7 +151,7 @@ describe('createMediaDownloaderIpc：单流直链下载（本地 server 实测�
     expect(seenHeaders.referer).toBe('https://www.bilibili.com/video/BV1x')
   })
 
-  it('douyinParse 口令兜底：码拼短链 → 302 Location 取 video_id（2026-11-04 选 1）', async () => {
+  it('douyinParse 口令兜底：码拼短链 → 302 Location 取 video_id，标题随文本带回（2026-11-04 选 1 / 11-05 标题命名）', async () => {
     const { handlers } = build()
     const realFetch = globalThis.fetch
     const calls: string[] = []
@@ -149,9 +164,10 @@ describe('createMediaDownloaderIpc：单流直链下载（本地 server 实测�
       } as unknown as Response
     }) as typeof fetch
     try {
-      const r = (await handlers.get('browser:douyinParse')!(null, '7.97 Z@j.Cu 09/09 UYz:/国行iphone')) as { ok: boolean; videoPageUrl?: string }
+      const r = (await handlers.get('browser:douyinParse')!(null, '7.97 Z@j.Cu 09/09 UYz:/国行iphone终于能用AI了')) as { ok: boolean; videoPageUrl?: string; desc?: string }
       expect(r.ok).toBe(true)
       expect(r.videoPageUrl).toBe('https://www.douyin.com/video/7412345678901234567')
+      expect(r.desc).toBe('国行iphone终于能用AI了')
       expect(calls[0]).toBe('https://v.douyin.com/UYz/')
     } finally {
       globalThis.fetch = realFetch

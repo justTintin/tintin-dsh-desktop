@@ -3,27 +3,28 @@
 // here so the host entry stays within its locked line baseline (铁律 4:
 // 自己功能增长走提取付账).
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defaultWorkspaceDir } from '../context-task.js'
 import { syncProvidersAt, syncProvidersFile } from './providers-seed.js'
-import { lastStudioProject, resolveOpenfilmRuntime, seedStudioRecents, startStudio, tintinStudioHome } from './studio-runtime.js'
-import { syncBundledSkill } from './skill-sync.js'
+import { lastStudioProject, resolveOpenfilmRuntime, seedStudioRecents, startStudio, studioEnv, tintinStudioHome } from './studio-runtime.js'
+import { srtToVtt } from './srt-vtt.js'
 import { syncOpenfilmLibs } from './libs-sync.js'
 import { syncOpenfilmLibrary } from './library-sync.js'
 
 /** This package's root (lib/openfilm/ → ../../). */
 const bundleRoot = fileURLToPath(new URL('../../', import.meta.url))
-const skillSource = join(bundleRoot, 'resources', 'skills', 'openfilm', 'SKILL.md')
 /** 新建影片的默认库：客户端默认目录下的 OpenFilm/Projects（用户裁决 2026-10-18）。 */
 const libraryDir = () => join(defaultWorkspaceDir(), 'OpenFilm', 'Projects')
 
 /**
- * One idempotent sync of the bundled artifacts: the skill (into
- * <DSH_HOME>/skills/openfilm, managed marker), the `tintin` custom service
+ * One idempotent sync of the bundled artifacts: the `tintin` custom service
  * (into ~/.openfilm/providers.json, current server.url), three.js libs, and
  * the new-projects library (~/.openfilm/prefs.json → the TinTin workspace).
+ * (openfilm 技能的通用装位种子已删,2026-11-07 用户裁决:技能归属视频剪辑装位,
+ * 默认会话不带该技能——往已退役的 <DSH_HOME>/skills 回种是封面复活的源头。)
  * Never throws — an OpenFilm problem must not take the session bridge down.
  * @param {{ getServerUrl: () => string, logger?: { info: Function, warn: Function }, openaiCompat?: boolean }} options
  */
@@ -31,9 +32,6 @@ export function createOpenfilmSync({ getServerUrl, logger = console, openaiCompa
   return () => {
     const dshHome = process.env.DSH_HOME
     if (dshHome) {
-      const skill = syncBundledSkill({ dshHome, sourcePath: skillSource })
-      if (skill.status === 'installed' || skill.status === 'updated') logger.info('tintin-bundle: openfilm skill %s at %s', skill.status, skill.path)
-      else if (skill.status === 'error') logger.warn('tintin-bundle: openfilm skill sync failed: %s', skill.error)
       const runtime = resolveOpenfilmRuntime({ env: process.env, bundleDir: bundleRoot })
       if (runtime) {
         const libs = syncOpenfilmLibs({ dshHome, runtimeRoot: runtime.root })
@@ -315,6 +313,60 @@ export function createOpenfilmChannels({ sync, httpRequest, compatUrl }) {
         writeFileSync(join(project, 'film.html'), html)
         return { path: 'film.html' }
       } catch (error) { return { error: error instanceof Error ? error.message : String(error) } }
+    },
+    // 字幕旁挂（2026-11-07 用户需求：导出项目携带字幕轨）——film.html 严格解析不收
+    // 文本元素，OpenFilm 的字幕载体=媒体同目录同名 .vtt（SPEC §Words）；口播整段挂
+    // at 不裁剪，SRT cue（wav 自身秒）1:1 抄写零换算。宿主读 srt 转换后写盘。
+    'openfilm:stageVttFromSrt': async (args) => {
+      try {
+        const payload = args?.[0] ?? {}
+        const project = String(payload.project || '')
+        const rel = String(payload.rel || '').replace(/\\/g, '/')
+        const srtPath = String(payload.srtPath || '')
+        if (!project || !/^assets\/[a-z0-9_][a-z0-9_\-./]*$/i.test(rel) || rel.includes('..')) return { error: 'rel 必须在 assets/ 下且不含 ..' }
+        if (!existsSync(join(project, 'film.html'))) return { error: '不是影片项目（先 createProject）' }
+        if (!srtPath || !existsSync(srtPath)) return { error: `srt 不存在：${srtPath || '(空)'}` }
+        const vtt = srtToVtt(readFileSync(srtPath, 'utf8'))
+        if (!vtt.trim()) return { error: 'srt 无有效字幕行' }
+        const target = join(project, ...rel.split('/'))
+        if (!target.startsWith(join(project, 'assets'))) return { error: 'rel 越界' }
+        mkdirSync(dirname(target), { recursive: true })
+        writeFileSync(target, vtt)
+        return { rel }
+      } catch (error) { return { error: error instanceof Error ? error.message : String(error) } }
+    },
+    // 渲染成片（2026-11-07 用户需求：有视频剪辑插件时直接出视频）——时间线由调用方
+    // 写好后照 film_tools film_render 的口径 spawn vendored CLI render（本机
+    // Chromium+ffmpeg，默认超时 15 分钟），mp4 落 film.html 同级同名。
+    'openfilm:renderProject': async (args) => {
+      try {
+        const payload = args?.[0] ?? {}
+        const project = String(payload.project || '')
+        if (!project || !existsSync(join(project, 'film.html'))) return { error: '不是影片项目（缺 film.html）' }
+        const runtime = resolveOpenfilmRuntime({ env: process.env, bundleDir: bundleRoot })
+        if (!runtime) return { error: 'OpenFilm 运行时未安装：请重装 TinTin 安装包' }
+        const argv = [runtime.cli, 'render']
+        if (payload.out) argv.push(String(payload.out))
+        if (payload.fps) argv.push('--fps', String(payload.fps))
+        const started = Date.now()
+        const result = await new Promise((resolveFn, rejectFn) => {
+          const child = spawn(runtime.node, argv, { cwd: project, env: studioEnv(runtime, process.env), windowsHide: true })
+          let stdout = ''
+          let stderr = ''
+          const timer = setTimeout(() => { try { child.kill() } catch { /* already gone */ } }, Number(payload.timeout_ms) || 900_000)
+          child.stdout?.on('data', (chunk) => { stdout += String(chunk); if (stdout.length > 200_000) stdout = stdout.slice(-100_000) })
+          child.stderr?.on('data', (chunk) => { stderr += String(chunk); if (stderr.length > 200_000) stderr = stderr.slice(-100_000) })
+          child.on('error', (error) => { clearTimeout(timer); rejectFn(error) })
+          child.on('close', (code) => {
+            clearTimeout(timer)
+            if (code === 0) resolveFn({ stdout, stderr })
+            else rejectFn(new Error(`openfilm render 退出码 ${String(code)}：${(stderr || stdout).trim().slice(-600)}`))
+          })
+        })
+        const match = /([^\s"'\\/]+\.mp4)/i.exec(result.stdout) || /([^\s"'\\/]+\.mp4)/i.exec(result.stderr)
+        const path = match ? join(project, match[1]) : ''
+        return { ok: true, ms: Date.now() - started, ...(path && existsSync(path) ? { path } : {}) }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) } }
     },
     'openfilm:openProject': async (args) => {
       try {

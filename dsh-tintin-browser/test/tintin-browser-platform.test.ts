@@ -7,6 +7,7 @@ import {
   PLATFORM_COOKIE_DOMAINS,
   PLATFORM_DEFS,
   detectPlatformFromUrl,
+  hasLoginCookie,
   isDeepLinkScheme,
   isDetailPage,
 } from '../src/browser/platform-meta'
@@ -92,5 +93,24 @@ describe('netscape cookies serialization (SRC ytdlp-gate 1:1)', () => {
     expect(lines[2]).toContain('\ta\t1')
     expect(lines[3]).toContain('\tb\t2')
     expect(lines[4]).toBe('')
+  })
+})
+
+describe('login cookie gate (2026-11-08 报障：匿名功能 cookie 误报已登录)', () => {
+  it('session cookies log in; anonymous-only jars do not', () => {
+    expect(hasLoginCookie(['sessionid', 'ttwid'], 'douyin')).toBe(true)
+    expect(hasLoginCookie(['SESSDATA'], 'bilibili')).toBe(true)
+    expect(hasLoginCookie(['web_session'], 'xiaohongshu')).toBe(true)
+    expect(hasLoginCookie(['SID', '__Secure-1PSID'], 'youtube')).toBe(true)
+    // 匿名 jar（11-07 取证的 62 条匿名 cookie 形态）不得误报
+    expect(hasLoginCookie(['ttwid', '__ac_signature', 'UIFID', 'odin_tt'], 'douyin')).toBe(false)
+    expect(hasLoginCookie(['b_nut', 'buvid3'], 'bilibili')).toBe(false)
+    expect(hasLoginCookie(['NID', '1P_JAR'], 'youtube')).toBe(false)
+  })
+
+  it('unknown platforms and empty jars never log in', () => {
+    expect(hasLoginCookie(['anything'], 'web')).toBe(false)
+    expect(hasLoginCookie(['anything'], 'fxg')).toBe(false)
+    expect(hasLoginCookie([], 'douyin')).toBe(false)
   })
 })

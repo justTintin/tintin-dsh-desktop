@@ -108,7 +108,7 @@ const {
   exportAllToJianyingDraft,
   syncStoryboardsToServer,
   previewFinalVideo,
-  ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject,
+  ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject, filmPlugin, ofRendered, ofRendering, renderExportedProject,
   step4Candidates,
   toAbsolute: vdToAbsolute,
   fmtBgmTime,
@@ -773,8 +773,9 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() =>
               <TButton v-if="lastExportDraftPath" label="打开草稿目录" variant="secondary" size="small" @click="openExportDraftDir" />
             </div>
           </div>
-          <!-- 方案二改「导出到视频剪辑项目」（2026-10-21 用户裁决）；共用 UI 见 OpenFilmExportBar.vue -->
-          <OpenFilmExportBar :busy="ofBusy" :stage="ofStage" :project="ofProject" :progress="ofProgress" :checks="ofChecks" :disabled="finalBusy || exportBusy" @export="exportToEditingProject()" @open="openEditingProject()" />
+          <!-- 方案二改「导出到视频剪辑项目」（2026-10-21 用户裁决）；共用 UI 见 OpenFilmExportBar.vue。
+               2026-11-07：插件门禁+字幕轨+渲染成片（状态经 filmPlugin/ofRendered/ofRendering 单点传入） -->
+          <OpenFilmExportBar :busy="ofBusy" :stage="ofStage" :project="ofProject" :progress="ofProgress" :checks="ofChecks" :disabled="finalBusy || exportBusy" :plugin-ok="filmPlugin.state === 'ok' ? true : filmPlugin.state === 'missing' ? false : null" :plugin-reason="filmPlugin.reason" :rendering="ofRendering" :rendered-path="ofRendered" @export="exportToEditingProject()" @open="openEditingProject()" @render="renderExportedProject()" />
         </div>
       </section>
 

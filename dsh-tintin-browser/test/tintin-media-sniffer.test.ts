@@ -25,6 +25,21 @@ describe('media sniffer logic (SRC browser-webview 1:1)', () => {
     expect(mediaTypeFromUrl('https://x.com/v/a.mp4')).toBe('video')
   })
 
+  it('rejects tracking/log hosts even when query contains media-ish substrings (2026-11-08 B站刷屏修复)', () => {
+    expect(isMediaUrl('https://data.bilibili.com/log/web?00111x.ts&baz=.m4s')).toBe(false)
+    expect(isMediaUrl('https://data.bilibili.com/log/web?00111...456&m4s=1')).toBe(false)
+    expect(isMediaUrl('https://api.x.com/report/watch.ts')).toBe(false)
+  })
+
+  it('extension must appear in a path segment, not anywhere in the query (boundary fix)', () => {
+    expect(isMediaUrl('https://v.douyin.com/x.mp4?sig=1')).toBe(true)
+    expect(isMediaUrl('https://v.douyin.com/video/tos/cn/a.m4s?r=1')).toBe(true)
+    expect(isMediaUrl('https://cdn.x.com/v/clip.ts/seg')).toBe(true)
+    // query 里的 .ts/.m4s 字样不算媒体
+    expect(isMediaUrl('https://example.com/page?file=a.ts&x=.m4s')).toBe(false)
+    expect(isMediaUrl('https://data.bilibili.com/log/web?00111xxx')).toBe(false)
+  })
+
   it('builds short display names', () => {
     expect(mediaDisplayName('https://x.com/v/abc.mp4?sig=1')).toBe('abc.mp4')
     expect(mediaDisplayName('https://x.com/')).toBe('x.com')

@@ -38,6 +38,9 @@ const SOURCE_EXCLUDED_PARTS = new Set(['node_modules', 'dist', 'coverage', 'test
 // their handwritten host logic under lib/. Only the channel's lib/ is output.
 const BUILD_OUTPUT_PARTS_BY_PACKAGE = new Map([
   ['dsh-plugin-desktop-tintin', new Set(['lib'])],
+  // openfilm-shell 的未压缩构建产物（build.mjs 调试输出，与 dist 同待遇——
+  // 构建产物不适用手写源千行红线；2026-11-08 dist-unminified 入扫致红后补登记）
+  ['dsh-tintin-bundle', new Set(['dist-unminified'])],
 ])
 const MAX_SOURCE_LINES = 1000
 const MAX_BASELINE_LINES = 3528

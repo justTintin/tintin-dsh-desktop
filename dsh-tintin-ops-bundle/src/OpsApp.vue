@@ -12,8 +12,8 @@ import { useHostDark } from './composables/hostTheme'
 import OtProductLibrary from './components/ops-tools/OtProductLibrary.vue'
 // 自动上架（2026-09-29 用户裁决：UI 入口=运营工具卡；引擎=壳侧浏览器 fxg 分区）
 import OtAutoListingPanel from './components/ops-tools/OtAutoListingPanel.vue'
-// 视频反推提示词（2026-10-02 用户裁决启用）：走仿视频拆解接口一次返回脚本+提示词
-import OtReversePromptVideo from './components/ops-tools/OtReversePromptVideo.vue'
+// 智能问答系统（2026-11-08 用户裁决）：iframe 加载服务端 kb 问答前端（/system/kb/status 定位端口）
+import OtKbQaPanel from './components/ops-tools/OtKbQaPanel.vue'
 
 interface ToolCard {
   id: string
@@ -29,22 +29,20 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
   {
     group: '产品知识',
     tools: [
+      // 智能问答系统（2026-11-08 用户裁决：我的知识库前新增；进面板加载服务端 kb 问答前端）
+      { id: 'kb-qa', title: '智能问答系统', desc: '服务端知识库问答，智能检索应答', emoji: '💬', accent: 'linear-gradient(135deg,#6366F1 0%,#0EA5E9 100%)' },
       { id: 'product-library', title: '产品资料', desc: '品类/品牌/型号树状管理，服务端同步', emoji: '📦', accent: 'linear-gradient(135deg,#8B5CF6 0%,#EC4899 100%)' },
       { id: 'knowledge-base', title: '我的知识库', desc: '风格化画像 + 参考素材蒸馏', emoji: '📚', accent: 'linear-gradient(135deg,#0EA5E9 0%,#06B6D4 100%)', disabled: true },
     ],
   },
-  {
-    group: '提示词',
-    tools: [
-      { id: 'reverse-prompt-image', title: '图片反推提示词', desc: '上传图片，AI 生成绘画提示词', emoji: '🖼️', accent: 'linear-gradient(135deg,#10B981 0%,#14B8A6 100%)', disabled: true },
-      { id: 'reverse-prompt-video', title: '视频反推提示词', desc: '拆解视频 → 脚本 + 反推提示词（仿视频拆解接口）', emoji: '🎬', accent: 'linear-gradient(135deg,#3B82F6 0%,#8B5CF6 100%)' },
-    ],
-  },
+  // 提示词组已整体迁入媒体工具（2026-11-09 用户裁决：图片/视频反推提示词
+  // 组件与 useImitationVideo/imitationVideoLogic 域拷贝随迁出删除，本包不再有）
   {
     group: '视频运营',
     tools: [
-      // 2026-09-29 用户裁决：自动上架 UI 入口=运营工具卡（引擎=壳侧浏览器 fxg 分区）
-      { id: 'auto-listing', title: '自动上架', desc: '数据包校验 → 抖店工作台自动铺货（引擎在内置浏览器）', emoji: '🛒', accent: 'linear-gradient(135deg,#2563EB 0%,#7C3AED 100%)' },
+      // 自动上架改建设中（2026-11-08 用户裁决：入口收起；面板组件与 autoListing:* 桥保留，
+      // 恢复=去掉 disabled 并保留本分支）
+      { id: 'auto-listing', title: '自动上架', desc: '数据包校验 → 抖店工作台自动铺货（引擎在内置浏览器）', emoji: '🛒', accent: 'linear-gradient(135deg,#2563EB 0%,#7C3AED 100%)', disabled: true },
       { id: 'video-score', title: '视频评价预测', desc: '关键帧 → 视觉模型预测视频表现', emoji: '📈', accent: 'linear-gradient(135deg,#F59E0B 0%,#EF4444 100%)', disabled: true },
       { id: 'video-marketing', title: '视频营销检测', desc: '研判是否营销视频 + 品类 + 改进建议', emoji: '🎯', accent: 'linear-gradient(135deg,#10B981 0%,#14B8A6 100%)', disabled: true },
     ],
@@ -74,7 +72,7 @@ const isDark = useHostDark()
     <div v-if="!active" class="page">
         <div class="head">
           <div class="title">运营工具</div>
-          <div class="sub">产品资料 · 我的知识库 · 视频评价预测 · 视频营销检测 · 反推提示词</div>
+          <div class="sub">智能问答系统 · 产品资料 · 我的知识库 · 视频评价预测 · 视频营销检测</div>
         </div>
         <div v-for="g in GROUPS" :key="g.group" class="group-block">
           <div class="group-label">{{ g.group }}</div>
@@ -125,21 +123,32 @@ const isDark = useHostDark()
         </div>
         <!-- 2026-10-20 用户裁决：工具页 KeepAlive 缓存——返回运营工具/重进卡片时
              保留全部界面状态（含执行中任务的轮询与结果展示），与媒体工具同口径。 -->
-        <KeepAlive>
-          <OtProductLibrary v-if="active === 'product-library'" />
-          <OtAutoListingPanel v-else-if="active === 'auto-listing'" />
-          <OtReversePromptVideo v-else-if="active === 'reverse-prompt-video'" />
-        </KeepAlive>
+        <!-- 2026-11-07 用户裁决（产品资料左右联滚修复·方案1）：工具体独立滚动区——
+             其余工具页行为不变（滚动宿主从外层视图区换到本层，视觉一致）；
+             产品资料页组件根 height:100% 正好占满本层 → 左树/右栏各自内滚互不牵动。 -->
+        <div class="tool-body">
+          <KeepAlive>
+            <OtProductLibrary v-if="active === 'product-library'" />
+            <OtKbQaPanel v-else-if="active === 'kb-qa'" />
+            <OtAutoListingPanel v-else-if="active === 'auto-listing'" />
+          </KeepAlive>
+        </div>
       </div>
   </div>
 </template>
 
 <style scoped>
-/* 全页视图布局：容器 el 为 100% 宽 × 100% 高、overflow auto 的视图区
-   （tintin-bundle Tab 栏传入），本组件铺满宽度（样式与 App.vue 同基线）。 */
+/* 全页视图布局：容器 el 为 100% 宽 × min-height 100%、overflow auto 的视图区
+   （tintin-bundle chrome #tintin-view-overlay 传入，position:fixed inset:0）。
+   2026-11-07（产品资料左右联滚修复·方案1）：宿主链全是 min-height（高度不定，
+   百分比高度解析不了），但 overlay 是 fixed inset:0 → 高度恒等于 100vh——
+   .root 直接钉 100vh 并自滚，往下传导确定高度，详情页才能建立
+   「页头固定 + 工具体内滚」骨架；首页工具卡列表照常整页滚（滚动宿主
+   从视图区换到本层，视觉一致）。 */
 .root {
   width: 100%;
-  min-height: 100%;
+  height: 100vh;
+  overflow-y: auto;
   padding: var(--space-6);
 }
 
@@ -148,6 +157,8 @@ const isDark = useHostDark()
 .page {
   display: flex;
   flex-direction: column;
+  height: 100%; /* 2026-11-07 方案1：详情页固定为一屏高，滚动全部下沉到内部区域 */
+  overflow: hidden;
   animation: page-in 0.2s var(--easing-out, cubic-bezier(0, 0, 0.2, 1));
 }
 @keyframes page-in {
@@ -279,9 +290,19 @@ const isDark = useHostDark()
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  flex-shrink: 0; /* 2026-11-07 方案1：页头不被工具体挤压 */
   padding-bottom: var(--space-4);
   margin-bottom: var(--space-4);
   border-bottom: 1px solid var(--border);
+}
+
+/* 工具体（2026-11-07 方案1）：详情页的滚动层。普通工具页内容自然高 → 本层滚动
+   （等价于原先的视图区滚动）；产品资料页组件根 height:100% 占满本层不产生滚动，
+   内部左右栏各自 overflow 内滚。 */
+.tool-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .back {
   display: inline-flex;

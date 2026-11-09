@@ -35,6 +35,24 @@ export function extractDouyinPasscode(text: unknown): string | null {
   return generic?.[1] ?? null
 }
 
+/**
+ * 从口令/分享文本提取视频标题（码:/ 之后到首个链接前的描述段；2026-11-05 用户
+ * 裁决：文件名与结果卡按视频标题命名，不再「抖音视频」占位）。无码段不提取
+ * （纯链接文本的前缀是分享样板话）；样板话剥离后为空 → null。
+ */
+export function extractDouyinCaption(text: unknown): string | null {
+  const s = String(text || '')
+  const anchored = s.match(/[01]?\d\/[0123]?\d\s+[A-Za-z0-9]{2,12}:\//)
+  const generic = anchored ? null : s.match(/(?<![\w./:@~-])[A-Za-z0-9]{2,12}:\/(?!\/)/)
+  const codeMatch = anchored ?? generic
+  if (!codeMatch) return null
+  let rest = s.slice((codeMatch.index ?? 0) + codeMatch[0].length)
+  rest = rest.split(/https?:\/\//)[0] ?? ''
+  rest = rest.replace(/复制此链接.*$/g, '').replace(/复制打开抖音/g, '')
+  const title = rest.replace(/^[\s:：,，、.。]+/, '').replace(/[\s,，、.。]+$/, '').trim()
+  return title || null
+}
+
 /** 短链码拼 v.douyin.com 短链（302 探测入口与 API 兜底共用）；非法码 → null */
 export function buildDouyinShortUrl(code: unknown): string | null {
   const c = String(code || '').trim()

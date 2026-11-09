@@ -83,7 +83,7 @@ import type { VoiceoverCandidate } from './copywritingMontageStep2ConcatLogic'
 import type { PickerItem } from './useWorkbenchPickers'
 import { markdownListLines, stripProductCodeFromModel, parseProductKeywords } from './opsProductLibraryLogic'
 import { useCopywritingMontageStep1Split } from './copywritingMontage/useCopywritingMontageStep1Split'
-import { detectShotKeyword, filterMaterialsByDupMode } from './copywritingMontageStep1SplitLogic'
+import { detectShotKeyword, filterMaterialsByDupMode, projectIdentityOf } from './copywritingMontageStep1SplitLogic'
 import { useCopywritingMontageStep2Concat } from './copywritingMontage/useCopywritingMontageStep2Concat'
 import { useCopywritingMontageStep3Voice } from './copywritingMontage/useCopywritingMontageStep3Voice'
 import { useCopywritingMontageStep4Final } from './copywritingMontage/useCopywritingMontageStep4Final'
@@ -151,16 +151,21 @@ export function useCopywritingMontage() {
     }
     return filterMaterialsByDupMode(paths, { needs, sums, scripts }, dupMode.value)
   }
-  const step1 = useCopywritingMontageStep1Split({ statusText, ensureServerUrl, toAbsolute, materialFilter: applyMaterialFilter })
+  const step1 = useCopywritingMontageStep1Split({
+    statusText, ensureServerUrl, toAbsolute, materialFilter: applyMaterialFilter,
+    // 项目身份签名（2026-11-06 用户裁决：一次完整文案混剪=一个项目）=本轮生成口径的
+    // product_desc（有产品按产品、无产品按提示词）；签名变化=换项目，下次分割开新目录
+    projectSignature: () => projectIdentityOf(copyPrompt.value, productDescFromInfo(sharedProductInfo.value || {})),
+  })
   const {
     srcVideos, srcDurations, threshold, minSceneLen, imageDuration,
     scenes, scoreFilter, filteredScenes,
     splitBusy, splitError, splitMsg, splitProgress, splitResolution, splitFps,
     splitsJobId, splitsDownloading,
     previewUrl, previewTranscoding,
-    addVideos, selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, splitMode, requestStopSplit, splitStatusOf,
+    addVideos, selectFolder, onDrop, removeVideo, clearAllVideos: clearAllVideosStep1, runSplit, splitMode, requestStopSplit, splitStatusOf,
     updateSceneDesc, previewSourceVideo, previewScene, closePreview,
-    clearSplitCache, openSplitsDir,
+    clearSplitCache, openSplitsDir, restoreProjectBatch,
   } = step1
 
   // ── 出入场超长片段自动裁剪（已迁 useCopywritingMontageStep1Split.ts，铁律 10 纯搬迁）──
@@ -414,6 +419,17 @@ export function useCopywritingMontage() {
     openCloneParams, closeCloneParams, saveCloneParams,
   } = step3
 
+  // 清空素材=清此项目原绑定素材（2026-11-06 用户裁决）：列表/选择池/分割状态之外，
+  // 各分镜 tab 的 clipGroups 绑定一并清空——旧实现只清列表（确认文案却写「绑定随之
+  // 失效」），重应用脚本会经 restoreTabClipGroups 把旧批素材重新入池=清空后旧素材复活
+  function clearAllVideos(): void {
+    clearAllVideosStep1()
+    for (const t of storyboards.value) t.clipGroups = []
+  }
+  // 项目素材批次恢复（2026-11-06 用户裁决：按项目身份校验，本项目的批次才恢复）——
+  // 须在提示词/产品状态装配完成后调用（签名依赖两者），故挂在编排层 init 尾部
+  restoreProjectBatch()
+
   // ══ Step4 特效包装（已迁 montage/useCopywritingMontageStep4Final.ts，铁律 10 纯搬迁；
   //    ctx 消费 step2/step3 产物与上提 ref，见映射文档 §四）══
   const step4 = useCopywritingMontageStep4Final({
@@ -450,6 +466,7 @@ export function useCopywritingMontage() {
     toggleBgmPlay, stopBgmPlay, onBgmVolumeInput, seekBgm,
     // 导出到视频剪辑项目（2026-10-21 用户裁决：替换「服务端生成」占位）
     ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject,
+    filmPlugin, ofRendered, ofRendering, renderExportedProject,
   } = step4
 
   onUnmounted(() => {
@@ -570,6 +587,7 @@ export function useCopywritingMontage() {
     exportAllToJianyingDraft, previewFinalVideo, step4Candidates, toAbsolute,
     // 导出到视频剪辑项目（2026-10-21 用户裁决：替换「服务端生成」占位）
     ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject,
+    filmPlugin, ofRendered, ofRendering, renderExportedProject,
     fmtBgmTime,
     // 景别分类（UI 展示用）
     SHOT_TYPE_LABELS, SHOT_TYPE_COLORS,

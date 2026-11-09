@@ -553,6 +553,35 @@ export function useOpsProductLibrary() {
     }
   }
 
+  /* ── 素材库选图绑定视图（2026-11-07 用户裁决·绑定 B）：服务端 upload 端点只收
+       multipart file（openapi 核实无 material_id 绑定参数），客户端 fetch 图字节
+       （/material/serve 无鉴权 + 服务端 CORS=* 实测）包成 File 走既有 uploadSixView。
+       副作用=该图以 source=client 再入一次素材库（重复记录）；服务端支持
+       material_id 直绑后切 A 即消除。 */
+  async function bindSixViewFromMaterial(view: string, materialId: string, serverUrl: string): Promise<void> {
+    const base = String(serverUrl || '').trim().replace(/\/$/, '')
+    const mid = String(materialId || '').trim()
+    if (!base || !mid) { sixStatus.value = '素材无效：缺少服务端地址或素材 ID。'; return }
+    if (sixUploading.value) return
+    sixUploading.value = view
+    sixStatus.value = `正在从素材库取图并替换「${productViewLabel(view)}」视图...`
+    try {
+      const res = await fetch(`${base}/material/serve?material_id=${encodeURIComponent(mid)}`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
+      if (!blob.size) throw new Error('取回图片为空')
+      const ext = String(blob.type || '').split('/')[1]?.split(';')[0] || 'png'
+      const file = new File([blob], `tintin-view-${view}.${ext}`, { type: blob.type || 'image/png' })
+      // uploadSixView 内部有 sixUploading 守卫——先释放让其自接管（同一同步序列，
+      // 无双击窗口），其 finally 负责最终清位
+      sixUploading.value = ''
+      await uploadSixView(view, file)
+    } catch (e) {
+      sixStatus.value = `素材选图失败：${(e as Error)?.message || e}`
+      sixUploading.value = ''
+    }
+  }
+
   /* ── Excel 导入（2026-10-10：服务端 POST /import multipart 自解析，
        客户端只传文件不解析（原「待引入 SheetJS」待办作废）；模板 GET /import/template
        直下 .xlsx，走 dialog.saveFile→server.downloadResult→revealInFolder 既有链） ── */
@@ -624,7 +653,7 @@ export function useOpsProductLibrary() {
     mining, bulkMining, mineStatus, mineSingle, mineAll,
     // 六视图
     sixViews, sixMissing, sixLoading, sixAssembling, sixUploading, sixStatus,
-    allowWeb, allowAi, assembleSixViews, deleteSixView, uploadSixView,
+    allowWeb, allowAi, assembleSixViews, deleteSixView, uploadSixView, bindSixViewFromMaterial,
     // Excel 导入
     importing, importStatus, importExcel, downloadImportTemplate,
   }

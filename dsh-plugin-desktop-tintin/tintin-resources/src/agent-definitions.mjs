@@ -4,6 +4,7 @@
 const definitions = {
   codex: { name: 'Codex', install: 'https://chatgpt.com/download/' },
   claude: { name: 'Claude Code', install: 'https://claude.com/download' },
+  openfilm: { name: 'OpenFilm', install: null },
   copilot: { name: 'GitHub Copilot', install: 'https://github.com/features/copilot/cli' },
   cursor: { name: 'Cursor', install: 'https://cursor.com/cli' },
   opencode: { name: 'OpenCode', install: 'https://opencode.ai/download' },
@@ -16,6 +17,7 @@ const definitions = {
   // 按人设补丁直接拉起, 调度服务端子智能体(视频/图片/音乐/音频/口播/数字人生成); 无安装页。
   // 名册行来自主进程, 这里登记 id 使持久化的选择合法。
   'tintin-agent': { name: 'TinTin智能体', install: null },
+  antigravity: { name: 'Google Antigravity', install: 'https://antigravity.google/docs/getting-started?tab=cli' },
   byok: { name: 'Own key', install: null },
 };
 

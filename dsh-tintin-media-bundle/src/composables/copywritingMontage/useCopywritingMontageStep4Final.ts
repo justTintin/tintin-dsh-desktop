@@ -1176,10 +1176,10 @@ async function exportAllToJianyingDraft(): Promise<void> {
     finalPreviewUrl.value = 'file:///' + encodeURI(it.path.replace(/\\/g, '/')).replace(/#/g, '%23')
   }
 
-  const { ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject } =
-    useCopywritingMontageStep4Openfilm({ assemblePlans, getTabById, toAbsolute, readCacheDir, bgmPath, bgmVolume, exportDoneMsg })
+  const { ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject, filmPlugin, ofRendered, ofRendering, renderExportedProject } =
+    useCopywritingMontageStep4Openfilm({ assemblePlans, getTabById, toAbsolute, readCacheDir, bgmPath, bgmVolume, exportDoneMsg, getVoiceSrt: ensureProcessedSrt })
   return {
-    ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject,
+    ofBusy, ofStage, ofProject, ofProgress, ofChecks, exportToEditingProject, openEditingProject, filmPlugin, ofRendered, ofRendering, renderExportedProject,
     bgmPath, bgmName, bgmVolume, rowBgm, finalMode, exportBusy, exportProgress, exportStage,
     lastExportDraftPath, exportDoneMsg, exportWarnMsg, trackChecks, finalSelIdx, finalPreviewUrl, finalPreviewTitle,
     bgmSource, bgmGenPrompt, bgmGenStyle, bgmGenDuration, bgmGenBusy, bgmGenError, bgmGenUrl,

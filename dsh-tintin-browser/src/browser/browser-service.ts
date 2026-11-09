@@ -15,18 +15,25 @@
 //   分区（exportCurrentCookies/ensureBrowserView 时幂等触发）；宿主门另在 probe/download
 //   前经回环主动同步（免手动导出，用户裁决）。
 // ═══════════════════════════════════════════════════════════════
-import { app, BrowserWindow, dialog, ipcMain, session, shell, WebContentsView } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell, WebContentsView } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   PLATFORM_COOKIE_DOMAINS,
-  PLATFORM_DEFS,
+  hasLoginCookie,  PLATFORM_DEFS,
   PLATFORM_IDS,
   detectPlatformFromUrl,
   isDeepLinkScheme,
   type PlatformDef,
 } from './platform-meta.ts'
-import { formatNetscapeCookies } from './netscape-cookies.ts'
+import { browserCookiesDir, collectPlatformCookies, migrateDefaultSessionCookies, exportPlatformCookies } from './cookie-sync.ts'
+import { registerSettingsIpc } from './settings-store.ts'
+import { registerHistoryBookmarkIpc } from './history-bookmark.ts'
+import { attachContextMenu } from './context-menu.ts'
+import { registerTabEngine } from './tab-engine.ts'
+import { createPageDownloadMirror } from './page-downloads.ts'
+import { createThemeSync } from './theme-sync.ts'
+import type { TabPoolState } from './tab-model.ts'
 import { buildExtractorScript, extractionError, extractorScriptDir } from './extract-script.ts'
 import { createExtensionManager, platformSessions, findDouyinHelperDir, type ExtensionManager } from './ext-manager.ts'
 import { bilibiliHelperInstalled, findBilibiliHelperDir, injectBilibiliHelper } from './bilibili-ext.ts'
@@ -47,107 +54,52 @@ import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 
 /** 模块级日志（registerBrowserService 前也可能打点） */
+let pageDownloadMirror: ReturnType<typeof import('./page-downloads.ts').createPageDownloadMirror> | null = null
+function downloadMirror(): ReturnType<typeof import('./page-downloads.ts').createPageDownloadMirror> {
+  if (!pageDownloadMirror) pageDownloadMirror = createPageDownloadMirror(pageHost)
+  return pageDownloadMirror
+}
+
 function ctxLog(msg: string): void {
   console.log(`[TinTinBrowser] ${msg}`)
 }
 
-/** cookies 交接目录：与 harness 子进程的 DSH_HOME 同源（<userData>/harness） */
-export function browserCookiesDir(): string {
-  return join(app.getPath('userData'), 'harness', 'tintin', 'browser', 'cookies')
+// 导航意图 URL（主框架 commit 前地址栏占位；commit 后真实 URL 接管并清除）
+const pendingNavUrl = new Map<number, string>()
+function recordNavIntent(wc: import('electron').WebContents, url: string): void {
+  pendingNavUrl.set(wc.id, url)
+  pushPageState()
 }
 
-interface ElectronCookie {
-  domain: string
-  path: string
-  secure: boolean
-  expirationDate?: number
-  name: string
-  value: string
+
+// 底色主题判定引擎在 theme-sync.ts（2026-11-08 白底修复 §16.23）
+let themeSync: ReturnType<typeof import('./theme-sync.ts').createThemeSync> | null = null
+function themedBackground(): string {
+  if (!themeSync) themeSync = createThemeSync({
+    hostWebContents: () => (mainWindowRef && !mainWindowRef.isDestroyed() ? mainWindowRef.webContents : null),
+    views: () => [...browserViews.values(), ...tabViews.values(), ...(embedPageView && !embedPageView.webContents.isDestroyed() ? [embedPageView] : [])],
+  })
+  return themeSync.themedBackground()
+}
+function probeWebTheme(): void { themedBackground(); themeSync?.probe() }
+
+/** 壳 → 页面 UI 消息（页内查找开合/地址栏聚焦/区块跳转/提示 toast） */
+function sendUi(payload: Record<string, unknown>): void {
+  const host = pageHost()
+  if (!host) return
+  try { host.webContents.send('tintin-browser-page:ui', payload) } catch { /* 页面未就绪 */ }
 }
 
-/** 平台分区内的去重 cookie 集合（SRC ytdlp-gate exportCookiesForPlatform 同口径：
- *  domain 与去 . 变体双查 + domain|path|name 去重） */
-async function collectPlatformCookies(platform: string): Promise<ElectronCookie[]> {
-  const def: PlatformDef | undefined = PLATFORM_DEFS[platform]
-  const domains = PLATFORM_COOKIE_DOMAINS[platform]
-  if (!def || !domains || !domains.length) return []
-  const sess = session.fromPartition(def.partition)
-  const seen = new Set<string>()
-  const unique: ElectronCookie[] = []
-  for (const domain of domains) {
-    for (const d of [domain, domain.replace(/^\./, '')]) {
-      let cookies: ElectronCookie[] = []
-      try { cookies = await sess.cookies.get({ domain: d }) as unknown as ElectronCookie[] } catch { continue }
-      for (const c of cookies) {
-        const key = `${c.domain}|${c.path}|${c.name}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        unique.push(c)
-      }
-    }
-  }
-  return unique
-}
-
-/** 导出平台分区 cookies 为 Netscape 文件；无 cookie 返回 null（未登录不算错） */
-export async function exportPlatformCookies(
-  platform: string,
-  destPath: string,
-): Promise<{ count: number; path: string } | null> {
+/** 平台视图缩放（level 步进 ±0.5；0=实际大小），百分比 toast 上屏 */
+function zoomStep(view: WebContentsView, delta: number): void {
   try {
-    const cookies = await collectPlatformCookies(platform)
-    if (!cookies.length) return null
-    mkdirSync(join(destPath, '..'), { recursive: true })
-    writeFileSync(destPath, formatNetscapeCookies(cookies), 'utf-8')
-    return { count: cookies.length, path: destPath }
-  } catch {
-    return null
-  }
+    const level = delta === 0 ? 0 : Math.max(-4, Math.min(4, view.webContents.getZoomLevel() + delta))
+    view.webContents.setZoomLevel(level)
+    sendUi({ op: 'toast', message: `缩放 ${Math.round(Math.pow(1.2, level) * 100)}%` })
+  } catch { /* 销毁竞态 */ }
 }
 
-/** 默认 session → 平台分区的一次性登录态迁移（2026-09-28 分区事故救援）。
- *  事故期间用户在内置浏览器的登录全落在默认 session，而消费链只认分区；分区事故修复
- *  （view 挂 partition）后，把默认 session 里该平台域的存量 cookie 迁回分区，用户免重登。
- *  幂等：仅当分区对该平台域完全无 cookie 时迁移（有任意一条即认为分区已有自己的登录态，
- *  不覆盖不合并）；单条 set 失败不阻断。返回迁移条数。 */
-async function migrateDefaultSessionCookies(platform: string): Promise<number> {
-  const def = platformOf(platform)
-  const domains = PLATFORM_COOKIE_DOMAINS[platform]
-  if (!def || !domains?.length) return 0
-  try {
-    const existing = await collectPlatformCookies(platform)
-    if (existing.length > 0) return 0
-    const partSess = session.fromPartition(def.partition)
-    const seen = new Set<string>()
-    let migrated = 0
-    for (const domain of domains) {
-      let cookies: ElectronCookie[] = []
-      try { cookies = await session.defaultSession.cookies.get({ domain }) as unknown as ElectronCookie[] } catch { continue }
-      for (const c of cookies) {
-        const key = `${c.domain}|${c.path}|${c.name}`
-        if (seen.has(key)) continue
-        seen.add(key)
-        try {
-          await partSess.cookies.set({
-            url: `https://${String(c.domain || '').replace(/^\./, '')}${c.path || '/'}`,
-            name: c.name,
-            value: c.value,
-            domain: c.domain,
-            path: c.path,
-            secure: c.secure,
-            ...(c.expirationDate === undefined ? {} : { expirationDate: c.expirationDate }),
-          })
-          migrated++
-        } catch { /* 单条失败不阻断（如域/路径非法） */ }
-      }
-    }
-    if (migrated > 0) ctxLog(`login migrate: default session -> ${def.partition} (${migrated} cookies)`)
-    return migrated
-  } catch (err) {
-    ctxLog(`login migrate failed for ${platform}: ${err instanceof Error ? err.message : err}`)
-    return 0
-  }
-}
+/** cookies 交接目录与导出/迁移链见 cookie-sync.ts（2026-11-08 提取付账） */
 
 // ── 引擎状态（SRC viewPool 语义：每平台分区一个 view 常驻保登录态；active 跟随 currentPlatform）──
 // 2026-09-28 登录态分区事故：view 此前创建时未挂 partition，登录全部落到默认 session，
@@ -155,6 +107,10 @@ async function migrateDefaultSessionCookies(platform: string): Promise<number> {
 // 修复=按分区建 view + 默认 session 存量登录一次性迁移（见 migrateDefaultSessionCookies）。
 
 const browserViews = new Map<string, WebContentsView>()
+// 标签池（2026-11-08 第二批 #2）：tabId → view。同平台多标签各持一个 view、共享分区
+// （登录态分区隔离不变）；平台行单视图语义保留（标签池空时 browserViews 兜底路径照旧）。
+const tabViews = new Map<string, WebContentsView>()
+let tabPool: TabPoolState = { tabs: [], activeId: null }
 let browserWindow: BrowserWindow | null = null
 let currentPlatform: string | null = null
 let userQuit = false
@@ -171,7 +127,6 @@ void loopback
 let pageHostRect: { x: number; y: number; width: number; height: number } | null = null
 // 媒体嗅探（SRC webview 注入方案的壳侧等价；按平台分区缓冲，页面拉取）
 let mediaSniffer: MediaSniffer | null = null
-const pageDownloads = new Map<string, { taskId: string; file: string; percent: number; state: string; speed?: number }>()
 
 // ── 内嵌模式（2026-10-19 用户方案 4：浏览器=主窗内嵌界面，OpenFilm B 方案同款）──
 // UI 页（tintin-browser.html）作为 WebContentsView 挂主窗 contentView，外层矩形由
@@ -183,7 +138,6 @@ let embedPageView: WebContentsView | null = null
 let embedActive = false
 let embedOuterRect = { x: 0, y: 0, width: 0, height: 0 }
 let pagePreloadPath: string | null = null
-let serverUrlResolver: (() => string) | null = null
 
 export interface EmbedRect { x: number; y: number; width: number; height: number }
 
@@ -211,23 +165,39 @@ function hostWin(): BrowserWindow | null {
   return browserWindow && !browserWindow.isDestroyed() ? browserWindow : null
 }
 
-/** 从两个可能宿主上都摘下平台视图（形态切换/无矩形时的幂等卸载） */
+/** 从两个可能宿主上都摘下平台视图（形态切换/无矩形时的幂等卸载）。
+ *  摘下即静音（2026-11-08 报障修复）：摘下但存活的视图会继续出声（登录态驻留设计
+ *  不销毁视图），语义=看得见的平台才是出声的那个；挂回点统一解除静音。 */
 function detachPlatformView(view: WebContentsView): void {
   for (const win of [browserWindow, mainWindowRef]) {
     if (win && !win.isDestroyed()) {
       try { win.contentView.removeChildView(view) } catch { /* 未挂载 */ }
     }
   }
+  try { view.webContents.audioMuted = true } catch { /* 销毁竞态 */ }
 }
 
 function platformOf(p: string | null): PlatformDef | null {
   return p ? PLATFORM_DEFS[p] ?? null : null
 }
 
-/** 当前平台的活跃 view（未打开/已销毁 → null） */
+/** 当前活跃 view：标签池活跃标签优先（第二批 #2），否则平台行单视图兜底 */
 function activeView(): WebContentsView | null {
+  if (tabPool.activeId) {
+    const v = tabViews.get(tabPool.activeId)
+    return v && !v.webContents.isDestroyed() ? v : null
+  }
   const v = currentPlatform ? browserViews.get(currentPlatform) : null
   return v && !v.webContents.isDestroyed() ? v : null
+}
+
+/** 活跃标签的分区平台（标签池路径用；无标签回落 currentPlatform） */
+function activeTabPlatform(): string | null {
+  if (tabPool.activeId) {
+    const t = tabPool.tabs.find((x) => x.id === tabPool.activeId)
+    if (t) return t.platform
+  }
+  return currentPlatform
 }
 
 /** 本地页面资源路径（同 index.ts desktopResourcePath 口径） */
@@ -247,13 +217,17 @@ function pushPageState(): void {
   try {
     if (wc && !wc.isDestroyed()) {
       url = wc.getURL?.() || ''
-      canBack = wc.navigationHistory.canGoBack()
-      canForward = wc.navigationHistory.canGoForward()
       loading = wc.isLoading()
+      // commit 前 getURL=''→意图 URL 占位（2026-11-08 报障：发起跳转瞬间地址栏必须有目标网址）
+      if (!url && loading) url = pendingNavUrl.get(wc.id) || ''
+      if (url) {
+        canBack = wc.navigationHistory.canGoBack()
+        canForward = wc.navigationHistory.canGoForward()
+      }
     }
   } catch { /* 销毁竞态，按空态推 */ }
   try {
-    host.webContents.send('tintin-browser-page:state', { url, canBack, canForward, loading, platform: currentPlatform })
+    host.webContents.send('tintin-browser-page:state', { url, canBack, canForward, loading, platform: activeTabPlatform(), tabs: tabPool.tabs, activeTabId: tabPool.activeId })
   } catch { /* 页面未就绪 */ }
 }
 
@@ -273,12 +247,15 @@ function layoutBrowserWindow(): void {
     if (!win) return
     view.setBounds(composeEmbedBounds(embedOuterRect, rect))
     try { win.contentView.addChildView(view) } catch { /* 已挂载 */ }
+    // 挂载点统一恢复出声（与 detachPlatformView 的摘下静音配对）
+    try { view.webContents.audioMuted = false } catch { /* 销毁竞态 */ }
     return
   }
   const win = browserWindow
   if (!win || win.isDestroyed()) return
   view.setBounds({ x: rect.x, y: rect.y, width: rect.width, height: rect.height })
   try { win.contentView.addChildView(view) } catch { /* 已挂载 */ }
+  try { view.webContents.audioMuted = false } catch { /* 销毁竞态 */ }
 }
 
 function ensureBrowserView(platform: string): WebContentsView {
@@ -299,13 +276,13 @@ function ensureBrowserView(platform: string): WebContentsView {
       spellcheck: false,
     },
   })
-  view.setBackgroundColor('#ffffff')
+  view.setBackgroundColor(themedBackground())
   view.webContents.setWindowOpenHandler(({ url }) => {
     // 2026-11-04 限制清除批（用户裁决）：弹窗/新页语义回归普通浏览器 —— http(s) 就地
     // 在本分区视图打开（弹窗式 OAuth 登录态因此落进本分区，cookie 导出链可达）；
     // 其余协议一律拒绝，不再外投系统浏览器（原 SRC C7「外链交系统浏览器」红线退役）。
     if (/^https?:\/\//i.test(url)) {
-      try { view.webContents.loadURL(url).catch(() => { /* 页面自显示错误 */ }) } catch { /* 视图销毁竞态 */ }
+      try { recordNavIntent(view.webContents, url); view.webContents.loadURL(url).catch(() => { /* 页面自显示错误 */ }) } catch { /* 视图销毁竞态 */ }
     }
     return { action: 'deny' }
   })
@@ -321,6 +298,28 @@ function ensureBrowserView(platform: string): WebContentsView {
       }
     } catch { /* 非法 URL 不拦 */ }
   })
+  // 右键菜单（2026-11-08 第一批 P0 #6）：导航/链接/图片/编辑/缩放
+  attachContextMenu(view, { popupHost: () => hostWin(), zoom: (v, d) => zoomStep(v, d) })
+  // 快捷键（2026-11-08 第一批 P0 #8）：平台视图内 Ctrl+F 查找 / Ctrl+L 地址栏 / Ctrl+H 历史 /
+  // Ctrl+=/-/0 缩放 / F5·Ctrl+R 重载
+  view.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return
+    const ctrl = input.control || input.meta
+    const key = String(input.key || '').toLowerCase()
+    if (ctrl && key === 'f') { event.preventDefault(); sendUi({ op: 'find-open' }) }
+    else if (ctrl && (key === '=' || key === '+')) { event.preventDefault(); zoomStep(view, 0.5) }
+    else if (ctrl && key === '-') { event.preventDefault(); zoomStep(view, -0.5) }
+    else if (ctrl && key === '0') { event.preventDefault(); zoomStep(view, 0) }
+    else if (input.key === 'F5' || (ctrl && key === 'r')) { event.preventDefault(); view.webContents.reload() }
+    else if (ctrl && key === 'l') { event.preventDefault(); sendUi({ op: 'focus-addr' }) }
+    else if (ctrl && key === 'h') { event.preventDefault(); sendUi({ op: 'open-section', section: 'history' }) }
+  })
+  // 页内查找结果回推（2026-11-08 第一批 P0 #5）
+  view.webContents.on('found-in-page', (_e, result) => {
+    const host = pageHost()
+    if (!host) return
+    try { host.webContents.send('tintin-browser-page:find-result', { ordinal: result.activeMatchOrdinal, total: result.matches }) } catch { /* 页面未就绪 */ }
+  })
   // 登录态落盘：导航稳定后延迟导出（避免每帧请求写盘）；导航态同步推页面工具条
   let exportTimer: NodeJS.Timeout | null = null
   const onNavEvent = (): void => {
@@ -328,7 +327,9 @@ function ensureBrowserView(platform: string): WebContentsView {
     exportTimer = setTimeout(() => { void exportCurrentCookies() }, 2000)
     pushPageState()
   }
-  view.webContents.on('did-navigate', () => {
+  view.webContents.on('did-navigate', (_e, url) => {
+    pendingNavUrl.delete(view.webContents.id)
+    void url
     onNavEvent()
     // B站下载助手：随包扩展注入（SRC viewpool platformId==='bilibili' 分支同口径；
     // 装了插件 → B站下载交给插件，无需嗅探）。view 挂分区后此 session 即 view 所用 session
@@ -345,15 +346,15 @@ function ensureBrowserView(platform: string): WebContentsView {
   // console-message 推送捕获（冗余通道）+ 2s 主动轮询 shadow DOM（主通道）。
   // 轮询在 wc 销毁时自停；页面非 B站域名时该轮跳过。
   if (platform === 'bilibili') {
-    attachBiliDlConsoleCapture(view.webContents, pushBiliExtDl)
+    attachBiliDlConsoleCapture(view.webContents, (pl) => downloadMirror().pushBiliExtDl(pl))
     startBiliExtPolling({
       getWebContents: () => (view.webContents.isDestroyed() ? null : view.webContents),
-      push: pushBiliExtDl,
+      push: (pl) => downloadMirror().pushBiliExtDl(pl),
       log: (msg) => ctxLog(msg),
     })
   }
   // 分区存量救援：分区空而默认 session 有该平台登录（分区事故期间落的）→ 迁回
-  void migrateDefaultSessionCookies(platform)
+  void migrateDefaultSessionCookies(platform, ctxLog)
   browserViews.set(platform, view)
   return view
 }
@@ -363,19 +364,21 @@ function attachToWindow(): void {
   if (!win) return
   const view = activeView()
   if (!view) return
-  // 原生下载接管（幂等：session 每分区只挂一次）；挂 view 实际使用的分区 session
-  const sess = platformOf(currentPlatform)
-    ? session.fromPartition(platformOf(currentPlatform)!.partition)
+  // 原生下载接管（幂等：session 每分区只挂一次）；挂活跃标签/平台的分区 session
+  const focusPlatform = activeTabPlatform() ?? currentPlatform
+  const sess = platformOf(focusPlatform)
+    ? session.fromPartition(platformOf(focusPlatform)!.partition)
     : session.defaultSession
   if (downloadManager && !(sess as unknown as { __tintinDlAttached?: boolean }).__tintinDlAttached) {
     ;(sess as unknown as { __tintinDlAttached?: boolean }).__tintinDlAttached = true
     downloadManager.attachSession(sess)
   }
-  // 切平台：其余平台的 view 从窗口摘下（view 本体常驻保登录态，不销毁）
-  for (const [p, v] of browserViews) {
-    if (p !== currentPlatform) {
-      try { win.contentView.removeChildView(v) } catch { /* 未挂载/已销毁 */ }
-    }
+  // 切换焦点：其余 view（平台单视图+标签视图）全部摘下并静音（本体常驻保登录态）
+  for (const v of browserViews.values()) {
+    if (v !== view) detachPlatformView(v)
+  }
+  for (const v of tabViews.values()) {
+    if (v !== view) detachPlatformView(v)
   }
   win.contentView.addChildView(view)
   layoutBrowserWindow()
@@ -395,21 +398,25 @@ function activatePlatformView(platform: string): { ok: boolean; error?: string }
   return { ok: true }
 }
 
-// 已首载过种子页的平台（2026-11-04 收藏语义，用户裁决）：点击平台行=切到该站现场，
-// 不再强制重载种子页（原行为=每次点击回种子页，浏览到一半误点即丢现场）。
-const seededPlatforms = new Set<string>()
-
-/** 导航到平台：targetUrl 给定则直载；否则仅首次激活时载种子页，其后保留现场。 */
+/** 导航到平台：收藏语义 —— 跨平台点击=导航到该站首页（点收藏去那个站）；同平台重复
+ *  点击保持现场（2026-11-04 裁决：防种子页回跳丢现场）；fxg 抖店重入保持现场永不重载
+ *  （仅自动上架驱动，重载会打断在途任务；首次进入仍载种子页）。
+ *  ⚠️ 保持现场判定必须在 activatePlatformView **之前**：它会立刻翻转 currentPlatform
+ *  （2026-11-08 事故：判定放在翻转之后恒真 → 跨平台永不导航，视图停在 about:blank
+ *  白屏、网址栏为空）。 */
 function navigateTo(platform: string, targetUrl?: string): { ok: boolean; error?: string } {
   const def = platformOf(platform)
   if (!def) return { ok: false, error: `未知平台: ${platform}` }
+  const keepState = currentPlatform === platform || (platform === 'fxg' && browserViews.has(platform))
   const activated = activatePlatformView(platform)
   if (!activated.ok) return activated
-  const url = targetUrl ?? (seededPlatforms.has(platform) ? undefined : def.seedUrl)
+  const url = targetUrl ?? (keepState ? undefined : def.seedUrl)
   if (!url) return { ok: true }
-  seededPlatforms.add(platform)
   const view = activeView()
-  if (view) view.webContents.loadURL(url).catch(() => { /* 加载失败页面自显示错误 */ })
+  if (view) {
+    recordNavIntent(view.webContents, url)
+    void view.webContents.loadURL(url).catch(() => {})
+  }
   return { ok: true }
 }
 
@@ -419,10 +426,11 @@ function navigateTo(platform: string, targetUrl?: string): { ok: boolean; error?
 async function exportCurrentCookies(): Promise<Record<string, number>> {
   const dir = browserCookiesDir()
   mkdirSync(dir, { recursive: true })
-  const targets = currentPlatform ? [currentPlatform] : Object.keys(PLATFORM_COOKIE_DOMAINS)
+  const focused = activeTabPlatform() ?? currentPlatform
+  const targets = focused ? [focused] : Object.keys(PLATFORM_COOKIE_DOMAINS)
   const result: Record<string, number> = {}
   for (const platform of targets) {
-    await migrateDefaultSessionCookies(platform)
+    await migrateDefaultSessionCookies(platform, ctxLog)
     const out = await exportPlatformCookies(platform, join(dir, `cookies_${platform}.txt`))
     result[platform] = out?.count ?? 0
   }
@@ -483,53 +491,6 @@ function ensureBrowserWindow(mainWindow: BrowserWindow): BrowserWindow {
   return browserWindow
 }
 
-/** 下载广播镜像到浏览器窗口页面下载栏（payload.file 由 download-manager 附加；终态 4s 后撤行） */
-function mirrorPageDownload(
-  channel: 'downloads:progress' | 'downloads:done' | 'downloads:error',
-  payload: Record<string, unknown>,
-): void {
-  if (!pageHost()) return
-  const taskId = String(payload.taskId || '')
-  if (!taskId) return
-  const file = String(payload.file || '下载文件')
-  if (channel === 'downloads:progress') {
-    pageDownloads.set(taskId, {
-      taskId,
-      file,
-      state: payload.state === 'paused' ? 'paused' : 'downloading',
-      percent: Number(payload.percent) || 0,
-      speed: Number(payload.speed) || 0,
-    })
-  } else {
-    pageDownloads.set(taskId, {
-      taskId,
-      file,
-      state: channel === 'downloads:done' ? 'done' : 'error',
-      percent: channel === 'downloads:done' ? 100 : Number(payload.percent) || 0,
-    })
-    setTimeout(() => {
-      pageDownloads.delete(taskId)
-      pushPageDownloads()
-    }, 4000)
-  }
-  pushPageDownloads()
-}
-
-/** 下载列表推页面下载栏 */
-function pushPageDownloads(): void {
-  const host = pageHost()
-  if (!host) return
-  try { host.webContents.send('tintin-browser-page:downloads', [...pageDownloads.values()]) } catch { /* 页面未就绪 */ }
-}
-
-/** B站扩展下载链接推送页面（browser:bili-ext-dl；SRC viewpool biliExtDlSubKey 推送
- *  语义——右栏「下载助手」区渲染下载列表。轮询与 console 推送共用此出口） */
-function pushBiliExtDl(payload: unknown): void {
-  const host = pageHost()
-  if (!host) return
-  try { host.webContents.send('browser:bili-ext-dl', { platformId: 'bilibili', payload, ts: Date.now() }) } catch { /* 页面未就绪 */ }
-}
-
 /** 注册壳侧 IPC（createWindow 之后调用；mainWindow 用于独立窗口生命周期联动） */
 /** 登录态自动落盘（2026-09-28 用户裁决：客户端与内置浏览器一体，登录即同步，
  *  不存在手动导出）。分区 cookie 任何变化 / 内嵌页导航后防抖导出一次。 */
@@ -565,7 +526,7 @@ export function embedAttach(win: BrowserWindow): { ok: boolean; error?: string }
       spellcheck: false,
     },
   })
-  embedPageView.setBackgroundColor('#141416')
+  embedPageView.setBackgroundColor(themedBackground())
   try { embedPageView.webContents.loadFile(browserPagePath()).catch(() => { /* 页面自显示错误 */ }) } catch { /* 视图销毁竞态 */ }
   return { ok: true }
 }
@@ -623,15 +584,25 @@ export function embedClose(): void {
 
 export function registerBrowserService(
   mainWindow: BrowserWindow,
-  options: { pagePreloadPath?: string; resolveServerUrl?: () => string } = {},
+  options: { pagePreloadPath?: string } = {},
 ): void {
   mainWindowRef = mainWindow
   pagePreloadPath = options.pagePreloadPath ?? null
-  // 「服务端」按钮的地址来源（2026-11-04 限制清除批收尾）：通道 home 的 tintin/config.json
-  // 归宿主解析（dsh-tintin-browser 不依赖通道目录约定），注入回调取值
-  serverUrlResolver = options.resolveServerUrl ?? null
   // App 深链吞掉注册（进程内一次；registerBrowserService 只在首窗创建时进一次）
   registerDeepLinkSwallow(ctxLog)
+  probeWebTheme() // 主题初始化+导航探针（web 层真值，2026-11-08 白底修复 §16.23）
+  try {
+    const themeMo = (): void => probeWebTheme()
+    mainWindow.webContents.on('dom-ready', themeMo)
+    mainWindow.webContents.on('did-navigate', themeMo)
+    mainWindow.webContents.on('did-navigate-in-page', themeMo)
+  } catch { /* 窗口生命周期竞态 */ }
+  // 下载落盘根（2026-11-08 前移：设置页/下载目录展示在注册早期就要用）
+  const workspaceDir = (): string =>
+    process.env.TINTIN_WORKSPACE_DIR
+      || join(homedir(), 'Documents', 'tintin-workspace')
+  // 设置存储/代理应用/清除数据（2026-11-08 第一批 P0「设置入口」；注册即读盘并应用代理）
+  const settingsStore = registerSettingsIpc(ipcMain, { workspaceDir, log: ctxLog })
   // 媒体嗅探先于挂接创建（2026-11-04 修复：原创建语句在挂接循环之后约 200 行，
   // 可选链在 null 上静默吞掉 → 嗅探器从未挂上 session，功能自移植起不可用）
   const sniffer = createMediaSniffer()
@@ -658,6 +629,12 @@ export function registerBrowserService(
         ctxLog(`media sniffer attach failed for ${platform}: ${err instanceof Error ? err.message : err}`)
       }
     }
+    // 平台分区代理（2026-11-08）：由 settings-store 统一应用（system/direct/manual，
+    // 注册时读 settings.json 并生效——默认 system 保持「跟随系统」语义不变）
+    // 视图底色跟随系统主题（2026-11-08 报障白底）：主题切换事件同步所有存活视图
+    try {
+      nativeTheme.on('updated', () => { themedBackground(); themeSync?.probe() })
+    } catch { /* nativeTheme 事件不可用则保持创建时底色 */ }
   }
   // ── 浏览器窗口页面通道（2026-09-28 整体形态：页面承载 UI，原生视图按宿主矩形覆盖）──
   ipcMain.handle('tintin-browser-page:bounds', (_e, rect: unknown) => {
@@ -686,16 +663,12 @@ export function registerBrowserService(
       return navigateTo(routed, String(a.url))
     }
     if (type === 'home') {
+      // 主页按钮：设置里有主页网址则去主页（域名路由分区），否则当前平台首页
+      const hp = String(settingsStore.getSettings().homepage || '').trim()
+      if (hp && /^https?:\/\//i.test(hp)) return navigateTo(detectPlatformFromUrl(hp) ?? 'web', hp)
       const target = activeView() && currentPlatform ? currentPlatform : 'web'
       const seed = platformOf(target)?.seedUrl || PLATFORM_DEFS.web!.seedUrl
       return navigateTo(target, seed)
-    }
-    // 「服务端」按钮落地（2026-11-04 收尾，原=只返回错误文案的死端）：按按钮标题语义
-    // 打开主窗口设置里配置的服务端地址（web 分区承载）；未配置时错误文案由页面上屏
-    if (type === 'server') {
-      const url = (serverUrlResolver?.() || '').replace(/\/+$/, '')
-      if (!url) return { ok: false, error: '尚未配置服务端地址（主窗口设置 → 模型服务商）' }
-      return navigateTo('web', url)
     }
     const wc = activeView()?.webContents
     if (!wc) return { ok: false, error: '尚未打开任何平台页面' }
@@ -750,16 +723,13 @@ export function registerBrowserService(
 
   // ── 下载管理器 + 媒体存储（SRC thickShell ctx.downloadManager / media-storage 移植）──
   // 下载落盘根 = 默认工作区 materials（/tintin/media 白名单根内，产物可直接预览）
-  const workspaceDir = (): string =>
-    process.env.TINTIN_WORKSPACE_DIR
-      || join(homedir(), 'Documents', 'tintin-workspace')
   // 下载总线出口：download-manager（视图/URL 下载）与 media-downloader（媒体下载器
   // 复活件：yt-dlp 主链路/直链/音视频合并）共用，页面底部下载栏统一渲染进度
   const downloadEmit = (channel: 'downloads:progress' | 'downloads:done' | 'downloads:error', payload: Record<string, unknown>): void => {
     try {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
     } catch { /* 窗口已销毁 */ }
-    mirrorPageDownload(channel, payload)
+    downloadMirror().mirror(channel, payload)
   }
   downloadManager = createDownloadManager({
     workspacePath: workspaceDir,
@@ -848,24 +818,41 @@ export function registerBrowserService(
   ipcMain.handle('browser:sniffList', (_e, platform: unknown) => {
     return { success: true, data: mediaSniffer!.items(String(platform || '')) }
   })
+  // 页内查找（2026-11-08 第一批 P0 #5）：作用于当前活跃平台视图
+  ipcMain.handle('browser:findInPage', (_e, p: unknown) => {
+    const q = (p || {}) as { text?: unknown; forward?: unknown }
+    const wc = activeView()?.webContents
+    if (!wc) return { ok: false, error: '没有正在浏览的网页' }
+    const text = String(q.text || '')
+    if (!text) return { ok: false, error: '缺少查找词' }
+    wc.findInPage(text, { forward: q.forward !== false, findNext: true })
+    return { ok: true }
+  })
+  ipcMain.handle('browser:findStop', () => {
+    const wc = activeView()?.webContents
+    try { wc?.stopFindInPage('clearSelection') } catch { /* 视图销毁竞态 */ }
+    return { ok: true }
+  })
   ipcMain.handle('browser:sniffClear', (_e, platform: unknown) => {
     mediaSniffer!.clear(String(platform || '') || undefined)
     return { success: true }
   })
   ipcMain.handle('browser:sniffDownload', async (_e, payload: unknown) => {
-    const p = (payload || {}) as { url?: unknown }
+    const p = (payload || {}) as { url?: unknown; audioUrl?: unknown; filename?: unknown }
     const url = String(p.url || '')
     if (!/^https?:\/\/.*/.test(url)) return { success: false, error: '非法媒体地址' }
+    const audioUrl = String(p.audioUrl || '').trim() // 伴生音频流（2026-11-08 配对下载：双流+FFmpeg 合并）
     const tail = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'media.mp4').slice(0, 120) || 'media.mp4'
-    // 2026-10-26 复活：改走 media-downloader 引擎（SRC SniffTab downloadSniffedMedia 口径：
-    // 分区 Cookie/Referer 注入；真分片流 m3u8/flv 与 videoplayback 交 yt-dlp）。此前为
-    // 最简直链 startUrlDownload（无 Cookie/Referer，签名 CDN 直链会 403）。
+    // 显式文件名（2026-11-07：解析链捕获下载按标题命名，URL 尾段是 CDN 哈希名）
+    const filename = String(p.filename || '').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 120)
+    // media-downloader 引擎（SRC downloadSniffedMedia：Cookie/Referer 注入；m3u8/flv/videoplayback 交 yt-dlp）
     const cur = currentPlatform && PLATFORM_DEFS[currentPlatform] ? currentPlatform : undefined
     const viewUrl = activeView()?.webContents.getURL?.() || ''
     const needsYtdlp = /\.(m3u8|flv)/i.test(url) || url.includes('videoplayback')
     const r = await mediaDownloader.startMedia({
       url,
-      filename: tail,
+      ...(audioUrl ? { audioUrl } : {}),
+      filename: filename || tail,
       ...(viewUrl ? { referer: viewUrl } : {}),
       ...(cur ? { platformId: cur, subDir: cur } : {}),
       useYtdlp: needsYtdlp,
@@ -905,11 +892,43 @@ export function registerBrowserService(
   }
   ipcMain.handle('browser:open', (_e, platform: unknown) => openPlatform(String(platform || '')))
 
+  // ── 标签页（2026-11-08 第二批 #2）：引擎在 tab-engine.ts（千行付账提取），
+  // 池状态归宿主（tabPool/tabViews/currentPlatform），依赖注入回写 ──
+  registerTabEngine({
+    ipcMain,
+    getPool: () => tabPool,
+    setPool: (next) => { tabPool = next },
+    setTabView: (id, view) => { tabViews.set(id, view) },
+    getTabView: (id) => tabViews.get(id),
+    delTabView: (id) => { tabViews.delete(id) },
+    tabViews: () => tabViews.entries(),
+    focusPlatform: (platform) => { currentPlatform = platform },
+    attachActive: () => attachToWindow(),
+    activeView: () => activeView(),
+    clearFocus: () => { currentPlatform = null },
+    hostWin: () => hostWin(),
+    mainWindow: () => mainWindowRef,
+    pageHost: () => pageHost(),
+    seedUrl: (platform) => platformOf(platform)?.seedUrl ?? PLATFORM_DEFS.web!.seedUrl,
+    zoom: (view, delta) => zoomStep(view, delta),
+    recordIntent: (wc, url) => recordNavIntent(wc, url),
+    clearIntent: (wc) => { pendingNavUrl.delete(wc.id) },
+    sendUi: (payload) => sendUi(payload),
+    pushState: () => pushPageState(),
+    log: ctxLog,
+  }, themedBackground)
+
+  // 历史/书签（2026-11-08 第二批 #3/#4）：标签 did-navigate 与地址栏星标共用
+  registerHistoryBookmarkIpc(ipcMain)
+
   // 各平台登录态条数（只读，不写文件；浏览器 tab 面板状态展示用）
   ipcMain.handle('browser:loginStatus', async () => {
+    // 已登录=平台会话 cookie 在 jar（2026-11-08：原「任意 cookie>0」被匿名功能 cookie
+    // 误报已登录；counts 值=1/0，页面徽标判定 n>0 不变）
     const counts: Record<string, number> = {}
     for (const platform of Object.keys(PLATFORM_COOKIE_DOMAINS)) {
-      counts[platform] = (await collectPlatformCookies(platform)).length
+      const names = (await collectPlatformCookies(platform)).map((c) => c.name)
+      counts[platform] = hasLoginCookie(names, platform) ? 1 : 0
     }
     return { counts, cookiesDir: browserCookiesDir() }
   })

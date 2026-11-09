@@ -24,8 +24,11 @@
     body { font: 13px/1.4 "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--ink); background: var(--bg); display: flex; flex-direction: column; }
     button { font: inherit; cursor: pointer; }
     @media (prefers-color-scheme: dark) {
-      :root { --bg: #141416; --surface: #1e1e20; --line: #333; --ink: #e8e8e6; --muted: #8b8b88; }
+      html:not([data-theme='light']) { --bg: #141416; --surface: #1e1e20; --line: #333; --ink: #e8e8e6; --muted: #8b8b88; }
     }
+    /* 手动主题（2026-11-08 用户要求：工具栏三态切换，localStorage 记忆；auto=无属性走系统） */
+    html[data-theme='dark'] { --bg: #141416; --surface: #1e1e20; --line: #333; --ink: #e8e8e6; --muted: #8b8b88; color-scheme: dark; }
+    html[data-theme='light'] { color-scheme: light; }
     /* ── 工具条 ── */
     #bar { height: var(--bar-h); flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 0 10px; background: var(--surface); border-bottom: 1px solid var(--line); }
     .ic { width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 15px; }
@@ -34,6 +37,24 @@
     #addr { flex: 1 1 auto; min-width: 0; height: 30px; padding: 0 12px; border: 1px solid var(--line); border-radius: 15px; background: var(--bg); color: var(--ink); font-size: 12px; outline: none; user-select: text; }
     #addr:focus { border-color: var(--primary); }
     #dlBtn { position: relative; }
+    /* ── 标签栏（2026-11-08 第二批 #2）+ 地址栏星标（#4）── */
+    #tabbar { display: none; flex-shrink: 0; align-items: center; gap: 4px; padding: 3px 10px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: thin; }
+    .tb-tab { display: inline-flex; align-items: center; gap: 5px; max-width: 160px; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 11px; cursor: pointer; flex-shrink: 0; }
+    .tb-tab.active { background: rgba(127,127,127,.18); font-weight: 600; }
+    .tb-tab .tt { max-width: 118px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tb-tab .tx { width: 14px; height: 14px; line-height: 13px; border-radius: 4px; text-align: center; flex-shrink: 0; font-size: 10px; }
+    .tb-tab .tx:hover { background: rgba(127,127,127,.3); }
+    #tbNew { width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 14px; cursor: pointer; flex-shrink: 0; }
+    #tbNew:hover { background: rgba(127,127,127,.18); }
+    #starBtn { width: 26px; flex-shrink: 0; color: var(--muted); }
+    #starBtn.starred { color: #f5b301; }
+    /* ── 地址栏历史建议（2026-11-08 第二批 #3）── */
+    #addrSug { display: none; position: absolute; top: 40px; left: 108px; right: 60px; z-index: 6; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 4px 12px rgba(0,0,0,.3); overflow: hidden; }
+    #addrSug .sg { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; color: var(--ink); cursor: pointer; }
+    #addrSug .sg:hover, #addrSug .sg.hl { background: rgba(127,127,127,.15); }
+    #addrSug .sg .st { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #addrSug .sg .su { flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
+    #addrWrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; }
     #dlBadge { position: absolute; top: 1px; right: 1px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--primary); color: #fff; font-size: 10px; line-height: 15px; text-align: center; display: none; }
     /* ── 书签栏（平台/功能扩展；2026-10-26 用户裁决：原左栏改地址栏下方书签栏）── */
     #bmbar { flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
@@ -101,18 +122,38 @@
     .sn-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
     .sn-badge { padding: 1px 6px; border-radius: 4px; font-size: 10px; border: 0.5px solid var(--line); color: var(--muted); flex-shrink: 0; }
     .sn-btn { margin-left: auto; height: 20px; padding: 0 8px; border: 0; border-radius: 5px; background: var(--primary); color: #fff; font: inherit; font-size: 11px; cursor: pointer; }
+    /* ── 设置页（2026-11-08 第一批 P0「设置入口」）── */
+    .set-row { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+    .set-row > label:first-child { width: 96px; flex-shrink: 0; font-size: 12px; color: var(--muted); }
+    .set-row input[type="text"], .set-row input:not([type]), .set-row select { height: 26px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; font-size: 12px; outline: none; }
+    .set-hint { font-size: 11px; color: var(--muted); }
+    /* ── 页内查找条（2026-11-08 第一批 P0 #5）── */
+    #findBar { display: none; position: absolute; top: 8px; right: 16px; z-index: 5; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+    #findBar input { width: 160px; height: 24px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--ink); font: inherit; font-size: 12px; outline: none; }
+    #findBar button { height: 24px; min-width: 24px; padding: 0 6px; border: 0.5px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; }
+    #findCount { font-size: 11px; color: var(--muted); min-width: 36px; text-align: center; }
     /* ── 提示条（2026-11-04 限制清除批：动作错误不再静默丢弃）── */
     #toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(8px); max-width: 72%; padding: 6px 14px; border-radius: 8px; background: rgba(20,20,22,.92); color: #fff; font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .18s ease, transform .18s ease; z-index: 9; }
     #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   </style>
 </head>
 <body>
+  <div id="tabbar">
+    <div id="tbTabs" style="display:flex;align-items:center;gap:4px;"></div>
+    <button id="tbNew" title="新建标签（当前平台）">＋</button>
+    <span style="flex:1 1 auto;"></span>
+  </div>
   <div id="bar">
     <button class="ic" id="b-back" title="后退">‹</button>
     <button class="ic" id="b-fwd" title="前进">›</button>
     <button class="ic" id="b-rel" title="刷新">⟳</button>
     <button class="ic" id="b-home" title="主页">⌂</button>
-    <input id="addr" spellcheck="false" placeholder="输入网址，回车打开" />
+    <div id="addrWrap">
+      <input id="addr" spellcheck="false" placeholder="输入网址，回车打开" />
+      <div id="addrSug"></div>
+    </div>
+    <button class="ic" id="starBtn" title="收藏此页">☆</button>
+    <button class="ic" id="themeBtn" title="主题（跟随系统）">◐</button>
     <button class="ic" id="dlBtn" title="下载">
       ⬇<span id="dlBadge">0</span>
     </button>
@@ -123,11 +164,17 @@
     <span class="bm-sep"></span>
     <span class="bm-title">功能扩展</span>
     <div id="extList" style="display:flex;align-items:center;gap:2px;"></div>
-    <span style="flex:1 1 auto;"></span>
-    <button class="plat-btn" id="serverBtn" title="打开系统设置中配置的服务端地址"><span class="plat-badge">服</span><span class="plat-name">服务端</span></button>
   </div>
   <div id="body">
     <main id="main">
+      <!-- 页内查找条（2026-11-08 第一批 P0 #5；作用于当前活跃平台视图） -->
+      <div id="findBar">
+        <input id="findText" placeholder="页内查找" spellcheck="false" />
+        <span id="findCount"></span>
+        <button id="findPrev" title="上一个">↑</button>
+        <button id="findNext" title="下一个">↓</button>
+        <button id="findClose" title="关闭（Esc）">×</button>
+      </div>
       <section class="view active" id="view-browser">
         <div id="view-host"></div>
         <div id="hostTip">浏览器</div>
@@ -171,6 +218,45 @@
         </div>
         <div id="extViewList" style="display:flex;flex-direction:column;gap:6px;"></div>
       </section>
+      <section class="view" id="view-settings">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;"><span style="font-weight:700;">设置</span></div>
+        <div class="set-row">
+          <label>主页按钮</label>
+          <input id="setHome" type="text" style="width:280px;" placeholder="留空=当前平台首页，如 https://www.baidu.com/" />
+          <button id="setHomeSave" class="da-btn" style="height:26px;">保存</button>
+        </div>
+        <div class="set-row">
+          <label>地址栏搜索</label>
+          <select id="setSearch" style="padding:0 8px;">
+            <option value="baidu">百度</option>
+            <option value="bing">必应</option>
+            <option value="google">谷歌（需代理）</option>
+          </select>
+        </div>
+        <div class="set-row">
+          <label>代理</label>
+          <select id="setProxyMode" style="padding:0 8px;">
+            <option value="system">跟随系统</option>
+            <option value="direct">直连（不走代理）</option>
+            <option value="manual">手动</option>
+          </select>
+          <input id="setProxyRules" type="text" style="width:260px; display:none;" placeholder="127.0.0.1:7890 或 http=…;https=…" />
+          <button id="setProxyApply" class="da-btn" style="height:26px;">应用代理</button>
+        </div>
+        <div class="set-row">
+          <label>清除浏览数据</label>
+          <select id="setClearPlatform" style="padding:0 8px;"><option value="all">全部平台</option></select>
+          <label class="set-hint" style="width:auto;"><input type="checkbox" id="setClearCookies" checked /> Cookie（将退出登录）</label>
+          <label class="set-hint" style="width:auto;"><input type="checkbox" id="setClearCache" checked /> 缓存</label>
+          <label class="set-hint" style="width:auto;"><input type="checkbox" id="setClearLs" /> 本地存储</label>
+          <button id="setClearBtn" class="da-btn" style="height:26px;">清除</button>
+        </div>
+        <div class="set-row">
+          <label>下载目录</label>
+          <span id="setDlDir" class="set-hint" style="user-select:text;"></span>
+          <button id="setDlOpen" class="da-btn" style="height:26px;">打开目录</button>
+        </div>
+      </section>
     </main>
     <aside id="right">
       <h4>媒体嗅探 <button id="sniffClear" title="清空当前平台嗅探列表" style="float:right;border:0.5px solid var(--line);border-radius:5px;background:transparent;color:var(--muted);font:inherit;font-size:11px;padding:2px 8px;cursor:pointer;">清空</button></h4>
@@ -181,11 +267,21 @@
       <!-- 抖音分享链接解析（SRC SniffTab dy-parse-section；chrom-douyin 预装扩展能力） -->
       <div id="douyinParseSec" style="display:none;">
         <h4>抖音视频下载助手</h4>
-        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">预装扩展能力：粘贴分享链接或口令，解析后自动开始下载（无水印完整视频）</div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">预装扩展能力：粘贴分享链接或口令，解析出视频后点「下载」（无水印完整视频）</div>
         <input id="dyShare" placeholder="粘贴分享链接或口令（App 内分享→复制链接/口令）" spellcheck="false"
           style="width:100%;height:26px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:11px;outline:none;user-select:text;" />
-        <button id="dyParseBtn" style="width:100%;height:26px;margin-top:6px;border:0;border-radius:5px;background:var(--primary);color:#fff;font:inherit;font-size:11px;cursor:pointer;">解析下载</button>
+        <button id="dyParseBtn" style="width:100%;height:26px;margin-top:6px;border:0;border-radius:5px;background:var(--primary);color:#fff;font:inherit;font-size:11px;cursor:pointer;">解析</button>
         <div id="dyMsg" style="margin-top:6px;font-size:11px;color:var(--muted);user-select:text;"></div>
+        <!-- 解析/下载分离（2026-11-05 用户裁决）：解析出视频先出结果卡，点「下载视频」才下载 -->
+        <div id="dyResult" style="display:none;">
+          <div class="sn-card" style="margin-top:6px;">
+            <div id="dyResultTitle" class="sn-name" style="white-space:normal;"></div>
+            <div class="sn-meta" style="margin-top:6px;">
+              <span class="sn-badge">无水印</span>
+              <button id="dyDownloadBtn" class="sn-btn">下载视频</button>
+            </div>
+          </div>
+        </div>
       </div>
     </aside>
   </div>
@@ -212,6 +308,7 @@
     if (document.activeElement !== $('addr')) $('addr').value = st.url || ''
     var names = { web: '网页浏览器', douyin: '抖音', weixin: '视频号', kuaishou: '快手', xiaohongshu: '小红书', bilibili: 'B站', youtube: 'YouTube', jimeng: '即梦AI', fxg: '抖店' }
     $('hostTip').textContent = (st.platform && (names[st.platform] || st.platform)) || '浏览器'
+    $('hostTip').dataset.platform = st.platform || ''
   }
 
   // 提示条（2026-11-04 限制清除批）：动作失败不再静默——错误/提示统一上屏
@@ -235,13 +332,15 @@
   $('b-rel').onclick = function () { nav(relState === 'loading' ? 'stop' : 'reload') }
   $('b-home').onclick = function () { nav('home') }
   // 地址栏归一（2026-11-04 限制清除批）：显式 http(s) 直过；域名/IP/localhost 补协议；
-  // 其余输入不再硬拼 https://（无效主机白屏），按关键词走搜索兜底。
+  // 其余输入不再硬拼 https://（无效主机白屏），按关键词走搜索兜底（引擎随设置，11-08 第一批）。
+  var SEARCH_BASES = { baidu: 'https://www.baidu.com/s?wd=', bing: 'https://www.bing.com/search?q=', google: 'https://www.google.com/search?q=' }
+  var pageSettings = {}
   function normalizeAddress(v) {
     if (/^https?:\/\//i.test(v)) return v
     if (/^localhost(:\d+)?([/?#].*)?$/i.test(v)) return 'http://' + v
     if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?([/?#].*)?$/.test(v)) return 'http://' + v
     if (/^[^\s/?#]+\.[^\s/?#]+(:\d+)?([/?#].*)?$/.test(v)) return 'https://' + v
-    return 'https://www.baidu.com/s?wd=' + encodeURIComponent(v)
+    return (SEARCH_BASES[pageSettings.searchEngine] || SEARCH_BASES.baidu) + encodeURIComponent(v)
   }
   $('addr').addEventListener('keydown', function (e) {
     if (e.key !== 'Enter') return
@@ -251,11 +350,89 @@
   })
   var relState = ''
 
+  // ── 主题切换（2026-11-08 用户要求）：auto 跟随系统 / light / dark 三态循环，localStorage 记忆 ──
+  var themeMode = 'auto'
+  try { themeMode = localStorage.getItem('tintin-browser-theme') || 'auto' } catch { /* 无存储保持 auto */ }
+  function applyTheme() {
+    if (themeMode === 'auto') {
+      document.documentElement.removeAttribute('data-theme')
+      $('themeBtn').textContent = '◐'
+    } else {
+      document.documentElement.setAttribute('data-theme', themeMode)
+      $('themeBtn').textContent = themeMode === 'dark' ? '🌙' : '☀'
+    }
+    $('themeBtn').title = '主题（当前：' + (themeMode === 'auto' ? '跟随系统' : themeMode === 'dark' ? '深色' : '浅色') + '，点击切换）'
+    try { localStorage.setItem('tintin-browser-theme', themeMode) } catch { /* ignore */ }
+  }
+  $('themeBtn').onclick = function () {
+    themeMode = themeMode === 'auto' ? 'light' : themeMode === 'light' ? 'dark' : 'auto'
+    applyTheme()
+  }
+  applyTheme()
+
+  // ── 设置（2026-11-08 第一批 P0「设置入口」；存储在壳侧 settings.json，代理保存即生效）──
+  function stFillPlatformSelect() {
+    var sel = document.getElementById('setClearPlatform')
+    var cur = sel.value
+    sel.textContent = ''
+    var all = document.createElement('option'); all.value = 'all'; all.textContent = '全部平台'; sel.appendChild(all)
+    platforms.forEach(function (p) {
+      var o = document.createElement('option'); o.value = p.id; o.textContent = p.name || p.id; sel.appendChild(o)
+    })
+    sel.value = cur
+    if (!sel.value) sel.value = 'all'
+  }
+  function stApply(s) {
+    pageSettings = s || {}
+    $('setHome').value = pageSettings.homepage || ''
+    $('setSearch').value = pageSettings.searchEngine || 'baidu'
+    $('setProxyMode').value = pageSettings.proxyMode || 'system'
+    $('setProxyRules').value = pageSettings.proxyRules || ''
+    $('setProxyRules').style.display = $('setProxyMode').value === 'manual' ? '' : 'none'
+    if (pageSettings.downloadsDir) $('setDlDir').textContent = pageSettings.downloadsDir
+    stFillPlatformSelect()
+  }
+  function stLoad() {
+    if (!bridge || !bridge.getSettings) return
+    bridge.getSettings().then(stApply).catch(function () { /* 桥不可达保持原状 */ })
+  }
+  $('setHomeSave').onclick = function () {
+    if (!bridge) return
+    bridge.setSettings({ homepage: $('setHome').value.trim() }).then(function (s) { stApply(s); toast('已保存') }).catch(function (e) { toast('保存失败：' + (e && e.message || e)) })
+  }
+  $('setSearch').onchange = function () {
+    if (!bridge) return
+    bridge.setSettings({ searchEngine: this.value }).then(function (s) { stApply(s); toast('已保存') }).catch(function () {})
+  }
+  $('setProxyMode').onchange = function () { $('setProxyRules').style.display = this.value === 'manual' ? '' : 'none' }
+  $('setProxyApply').onclick = function () {
+    if (!bridge) return
+    bridge.setSettings({ proxyMode: $('setProxyMode').value, proxyRules: $('setProxyRules').value.trim() }).then(function (s) {
+      stApply(s)
+      toast($('setProxyMode').value === 'manual' && !$('setProxyRules').value.trim() ? '手动模式需填代理地址' : '代理已应用')
+    }).catch(function (e) { toast('应用失败：' + (e && e.message || e)) })
+  }
+  $('setClearBtn').onclick = function () {
+    if (!bridge) return
+    var storages = []
+    if ($('setClearCookies').checked) storages.push('cookies')
+    if ($('setClearCache').checked) storages.push('cachestorage')
+    if ($('setClearLs').checked) storages.push('localstorage')
+    if (!storages.length) { toast('先勾选要清除的数据类型'); return }
+    if (storages.indexOf('cookies') >= 0 && !window.confirm('清除 Cookie 将退出对应平台登录（下载链的登录态也会失效），确定？')) return
+    bridge.clearData({ platform: $('setClearPlatform').value, storages: storages }).then(function (r) {
+      if (r && r.success) { toast('已清除 ' + (r.cleared || 0) + ' 个分区'); refreshLogin() }
+      else toast((r && r.error) || '清除失败')
+    }).catch(function (e) { toast('清除失败：' + (e && e.message || e)) })
+  }
+  $('setDlOpen').onclick = function () { if (bridge) bridge.openDownloadsDir() }
+
   // ── 左栏：平台 + 功能扩展 ──
   var EXT_ITEMS = [
     { id: 'autolisting', name: '自动上架', badge: '⬆' },
     { id: 'collect', name: '素材采集', badge: '🧺' },
     { id: 'extensions', name: '扩展管理', badge: '🧩' },
+    { id: 'settings', name: '设置', badge: '⚙' },
   ]
   function paintSidebar() {
     var list = $('platList')
@@ -297,13 +474,10 @@
     if (name === 'collect') clLoad()
     else if (name === 'history') hsLoad()
     else if (name === 'extensions') extMgrLoad()
+    else if (name === 'settings') stLoad()
   }
 
-  $('serverBtn').onclick = function () {
-    // 2026-11-04 收尾：按按钮标题语义打开配置的服务端地址（壳侧 web 分区承载）；未配置时壳侧
-    // 返回错误文案，经 nav 统一上屏。原 SRC「系外浏览器提示位」死端退役。
-    nav('server')
-  }
+  // 「服务端」按钮已按 2026-11-08 用户裁决整体移除（含壳侧 server 动作与 resolveServerUrl 注入链）
 
   // ── 登录态 ──
   function refreshLogin() {
@@ -361,12 +535,166 @@
   window.addEventListener('resize', sendBounds)
 
   // ── 主进程状态推送 ──
-  if (page) page.onState(function (st) { relState = st.loading ? 'loading' : ''; paintBar(st) })
+  var lastTabs = { tabs: [], activeTabId: null }
+  function paintTabs() {
+    var bar = document.getElementById('tabbar')
+    var list = document.getElementById('tbTabs')
+    list.textContent = ''
+    if (!lastTabs.tabs.length) { bar.style.display = 'none'; return }
+    bar.style.display = 'flex'
+    lastTabs.tabs.forEach(function (t) {
+      var el = document.createElement('div')
+      el.className = 'tb-tab' + (t.id === lastTabs.activeTabId ? ' active' : '')
+      var tt = document.createElement('span'); tt.className = 'tt'; tt.textContent = t.title || t.platform; tt.title = t.title || t.url || t.platform
+      var tx = document.createElement('span'); tx.className = 'tx'; tx.textContent = '×'
+      tx.onclick = function (e) { e.stopPropagation(); if (page) page.tabClose({ id: t.id }) }
+      el.append(tt, tx)
+      el.onclick = function () { if (page) page.tabActivate({ id: t.id }) }
+      list.appendChild(el)
+    })
+  }
+  if (page && page.onTabs) page.onTabs(function (p) {
+    p = p || {}
+    lastTabs.tabs = Array.isArray(p.tabs) ? p.tabs : []
+    lastTabs.activeTabId = p.activeTabId || null
+    paintTabs()
+    if (lastTabs.activeTabId) { document.getElementById('starBtn').style.display = ''; if (page) page.action({ type: 'noop' }).catch(function () {}) }
+  })
+  document.getElementById('tbNew').onclick = function () {
+    if (!page) return
+    var plat = ($('hostTip').dataset.platform) || 'web'
+    page.tabOpen({ platform: plat }).then(function (r) {
+      if (r && r.ok === false) toast(r.error || '新建标签失败')
+    }).catch(function (e) { toast('新建标签失败：' + (e && e.message || e)) })
+  }
+
+  // ── 地址栏星标（2026-11-08 第二批 #4）──
+  function paintStar(url) {
+    var btn = $('starBtn')
+    if (!url || !/^https?:\/\//i.test(url) || !bridge || !bridge.bookmarkIsStarred) { btn.classList.remove('starred'); btn.textContent = '☆'; return }
+    bridge.bookmarkIsStarred({ url: url }).then(function (r) {
+      var on = !!(r && r.starred)
+      btn.classList.toggle('starred', on)
+      btn.textContent = on ? '★' : '☆'
+    }).catch(function () {})
+  }
+  $('starBtn').onclick = function () {
+    var url = $('addr').value.trim()
+    if (!/^https?:\/\//i.test(url)) { toast('当前不是可收藏的网页'); return }
+    if (!bridge || !bridge.bookmarkToggle) return
+    bridge.bookmarkToggle({ url: url, title: $('hostTip').textContent === '浏览器' ? url : url }).then(function (r) {
+      if (r && r.success) {
+        var on = !!r.starred
+        $('starBtn').classList.toggle('starred', on)
+        $('starBtn').textContent = on ? '★' : '☆'
+        toast(on ? '已收藏' : '已取消收藏')
+        if (activeViewName === 'favorites') fvLoad()
+      } else toast((r && r.error) || '收藏失败')
+    }).catch(function (e) { toast('收藏失败：' + (e && e.message || e)) })
+  }
+
+  // ── 地址栏历史建议（2026-11-08 第二批 #3）──
+  var sugItems = []
+  var sugIdx = -1
+  function paintSug() {
+    var box = document.getElementById('addrSug')
+    box.textContent = ''
+    if (!sugItems.length) { box.style.display = 'none'; return }
+    sugItems.forEach(function (h, i) {
+      var el = document.createElement('div')
+      el.className = 'sg' + (i === sugIdx ? ' hl' : '')
+      var st = document.createElement('span'); st.className = 'st'; st.textContent = h.title || h.url
+      var su = document.createElement('span'); su.className = 'su'; su.textContent = h.url
+      el.append(st, su)
+      el.onclick = function () { $('addr').value = h.url; box.style.display = 'none'; nav('go', h.url) }
+      box.appendChild(el)
+    })
+    box.style.display = 'block'
+  }
+  $('addr').addEventListener('input', function () {
+    var v = this.value.trim()
+    sugIdx = -1
+    if (!v || !bridge || !bridge.historySuggest || v.length < 2) { sugItems = []; paintSug(); return }
+    bridge.historySuggest({ query: v }).then(function (r) {
+      sugItems = (r && r.success && Array.isArray(r.data)) ? r.data : []
+      paintSug()
+    }).catch(function () {})
+  })
+  $('addr').addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown' && sugItems.length) { e.preventDefault(); sugIdx = Math.min(sugIdx + 1, sugItems.length - 1); paintSug() }
+    else if (e.key === 'ArrowUp' && sugItems.length) { e.preventDefault(); sugIdx = Math.max(sugIdx - 1, -1); paintSug() }
+    else if (e.key === 'Escape') { sugItems = []; paintSug() }
+    else if (e.key === 'Enter' && sugIdx >= 0 && sugItems[sugIdx]) {
+      e.preventDefault()
+      $('addr').value = sugItems[sugIdx].url
+      sugItems = []; paintSug()
+      nav('go', document.getElementById('addr').value)
+    }
+  })
+  document.addEventListener('click', function (e) {
+    if (!document.getElementById('addrWrap').contains(e.target)) { sugItems = []; paintSug() }
+  })
+
+  // ── 主进程状态推送 ──
+  var baseOnState = function (st) { relState = st.loading ? 'loading' : ''; paintBar(st) }
+  if (page) page.onState(function (st) {
+    baseOnState(st)
+    if (st.tabs) { lastTabs.tabs = st.tabs; lastTabs.activeTabId = st.activeTabId || null; paintTabs() }
+    paintStar(st.url || '')
+  })
+
+  // ── 页内查找（2026-11-08 第一批 P0 #5；作用于当前活跃平台视图）──
+  var findOpen = false
+  function openFind() {
+    if (activeViewName !== 'browser') { toast('切到网页视图后才能页内查找'); return }
+    findOpen = true
+    $('findBar').style.display = 'flex'
+    $('findText').focus(); $('findText').select()
+  }
+  function closeFind() {
+    findOpen = false
+    $('findBar').style.display = 'none'
+    $('findCount').textContent = ''
+    if (page) page.findStop()
+  }
+  function findRun(forward) {
+    var v = $('findText').value.trim()
+    if (!v || !page) return
+    page.findInPage({ text: v, forward: forward !== false })
+  }
+  $('findText').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); findRun(!e.shiftKey) }
+    else if (e.key === 'Escape') { closeFind() }
+  })
+  $('findText').addEventListener('input', function () { var v = this.value.trim(); if (v && page) page.findInPage({ text: v, forward: false }) })
+  $('findPrev').onclick = function () { findRun(false) }
+  $('findNext').onclick = function () { findRun(true) }
+  $('findClose').onclick = closeFind
+  if (page && page.onFindResult) page.onFindResult(function (r) {
+    r = r || {}
+    $('findCount').textContent = (r.ordinal || 0) + '/' + (r.total || 0)
+  })
+
+  // ── 快捷键（页面壳层；平台视图内的快捷键由壳 before-input-event 经 onUi 转发）──
+  window.addEventListener('keydown', function (e) {
+    var ctrl = e.ctrlKey || e.metaKey
+    if (e.key === 'F5' || (ctrl && (e.key === 'r' || e.key === 'R'))) { e.preventDefault(); nav('reload'); return }
+    if (ctrl && (e.key === 'f' || e.key === 'F')) { e.preventDefault(); openFind(); return }
+    if (ctrl && (e.key === 'l' || e.key === 'L')) { e.preventDefault(); switchView('browser'); $('addr').focus(); $('addr').select(); return }
+    if (ctrl && (e.key === 'h' || e.key === 'H')) { e.preventDefault(); switchView('history'); return }
+    if (e.key === 'Escape' && findOpen) closeFind()
+  })
+  if (page && page.onUi) page.onUi(function (p) {
+    p = p || {}
+    if (p.op === 'find-open') openFind()
+    else if (p.op === 'focus-addr') { switchView('browser'); $('addr').focus(); $('addr').select() }
+    else if (p.op === 'open-section' && p.section) switchView(p.section)
+    else if (p.op === 'toast' && p.message) toast(p.message)
+  })
 
   // ── 媒体嗅探（SRC SniffTab；壳侧 webRequest 采集，按当前平台拉取）──
   var sniffPlatform = ''
   var sniffTimer = null
-  var sniffBusy = {}
   function sniffType(t) { return t === 'audio' ? '音频' : '视频' }
   function sniffRender(items) {
     var list = document.getElementById('sniffList')
@@ -378,21 +706,14 @@
       list.appendChild(empty)
       return
     }
+    // 面板=纯诊断展示（2026-11-08 用户裁决「一个视频不要有两个下载按钮」：下载入口收敛到
+    // 解析卡「下载视频」；B站助手有独立按钮不受影响）
     items.forEach(function (m) {
       var card = document.createElement('div'); card.className = 'sn-card'
       var nm = document.createElement('div'); nm.className = 'sn-name'; nm.textContent = m.displayName || m.url; nm.title = m.url
       var meta = document.createElement('div'); meta.className = 'sn-meta'
       var badge = document.createElement('span'); badge.className = 'sn-badge'; badge.textContent = sniffType(m.type)
-      var btn = document.createElement('button'); btn.className = 'sn-btn'; btn.textContent = sniffBusy[m.url] ? '下载中…' : '下载'
-      btn.onclick = function () {
-        if (!bridge || sniffBusy[m.url]) return
-        sniffBusy[m.url] = true; btn.textContent = '下载中…'
-        bridge.sniffDownload({ url: m.url }).then(function (r) {
-          sniffBusy[m.url] = false; btn.textContent = r && r.success ? '已提交 ✓' : '失败'
-          setTimeout(function () { btn.textContent = '下载' }, 2500)
-        }).catch(function () { sniffBusy[m.url] = false; btn.textContent = '失败' })
-      }
-      meta.append(badge, btn)
+      meta.append(badge)
       card.append(nm, meta)
       list.appendChild(card)
     })
@@ -423,39 +744,19 @@
   //    douyinParseDownload + 扩展管理浮面板，统一并入本页面）──
   // B站下载助手推送（browser:bili-ext-dl：console 捕获 + 2s 轮询双通道，主进程去重后推送）
   var biliExt = { title: '', items: [] }
-  var biliBusy = {}
   function biliExtRender() {
     var head = document.getElementById('biliExtState')
     head.textContent = biliExt.items.length ? (biliExt.title ? biliExt.items.length + ' 条 · ' + biliExt.title : biliExt.items.length + ' 条') : '播放视频后由扩展解析下载地址…'
     var list = document.getElementById('biliExtList')
     list.textContent = ''
     if (!biliExt.items.length) return
+    // B站助手推送区=纯展示（2026-11-08 裁决同上：下载入口收敛到解析卡）
     biliExt.items.forEach(function (dl) {
       var card = document.createElement('div'); card.className = 'sn-card'
       var nm = document.createElement('div'); nm.className = 'sn-name'; nm.textContent = dl.text || dl.url; nm.title = dl.url
       var meta = document.createElement('div'); meta.className = 'sn-meta'
       var badge = document.createElement('span'); badge.className = 'sn-badge'; badge.textContent = dl.sizeText || (dl.audioUrl ? '音视频' : '视频')
-      var btn = document.createElement('button'); btn.className = 'sn-btn'; btn.textContent = biliBusy[dl.url] ? '下载中…' : '下载'
-      btn.onclick = function () {
-        if (!bridge || biliBusy[dl.url]) return
-        biliBusy[dl.url] = true; btn.textContent = '下载中…'
-        // SRC downloadBiliExtLink 口径：直链 + Referer=当前页 + 音视频分离时双流下载 FFmpeg 合并
-        bridge.downloadMediaStart({
-          url: dl.url,
-          ...(dl.audioUrl ? { audioUrl: dl.audioUrl } : {}),
-          title: dl.text || '',
-          filename: dl.download || dl.text || 'video.mp4',
-          referer: $('addr').value || 'https://www.bilibili.com/',
-          platformId: 'bilibili',
-          subDir: 'bilibili',
-          useYtdlp: false,
-        }).then(function (r) {
-          biliBusy[dl.url] = false
-          btn.textContent = r && r.success ? '已提交 ✓' : '失败'
-          setTimeout(function () { btn.textContent = '下载' }, 2500)
-        }).catch(function () { biliBusy[dl.url] = false; btn.textContent = '失败' })
-      }
-      meta.append(badge, btn)
+      meta.append(badge)
       card.append(nm, meta)
       list.appendChild(card)
     })
@@ -474,32 +775,117 @@
     el.style.color = ok ? 'var(--ok)' : 'var(--bad)'
     el.textContent = text
   }
+  // 解析/下载分离（2026-11-05 用户裁决）：解析只出结果卡，「下载视频」单独触发
+  var dyParsed = null
+  function dyResetResult() {
+    dyParsed = null
+    document.getElementById('dyResult').style.display = 'none'
+  }
   function dyParse() {
     if (!bridge) { dySetMsg(false, '桥不可达（客户端需更新）'); return }
     var text = document.getElementById('dyShare').value.trim()
-    if (!text) { dySetMsg(false, '先粘贴抖音分享链接或口令'); return }
+    if (!text) { var m0 = '先粘贴抖音分享链接或口令'; dySetMsg(false, m0); toast(m0); return }
     var btn = document.getElementById('dyParseBtn')
     btn.disabled = true; btn.textContent = '解析中…'; dySetMsg(true, '')
+    dyResetResult()
     bridge.douyinParse(text).then(function (r) {
-      btn.disabled = false; btn.textContent = '解析下载'
-      // 失败原因 toast 上屏（2026-11-04：原只有 11px 小红字，面板窄时不可见=「没反应」错觉）
+      btn.disabled = false; btn.textContent = '解析'
       if (!r || !r.ok) { var m = (r && r.reason) || '解析失败'; dySetMsg(false, m); toast(m); return }
-      var baseName = String(r.desc || r.author || ('douyin_video_' + Date.now())).slice(0, 40).replace(/[\\/:*?"<>|\s]+/g, '_') || ('douyin_video_' + Date.now())
-      var params = r.videoPageUrl
-        ? { url: r.videoPageUrl, filename: baseName + '.mp4', referer: 'https://www.douyin.com/', platformId: 'douyin', subDir: 'douyin', useYtdlp: true }
-        : { url: r.videoUrl, filename: baseName + '.mp4', referer: 'https://www.douyin.com/', platformId: 'douyin', subDir: 'douyin', useYtdlp: false }
-      return bridge.downloadMediaStart(params).then(function (d) {
-        var ok = !!(d && d.success)
-        dySetMsg(ok, ok
-          ? ('解析成功，已开始下载' + (r.videoPageUrl ? '（无水印完整视频）' : ''))
-          : ((d && d.error) || '下载发起失败'))
-        if (!ok) toast((d && d.error) || '下载发起失败')
-      })
+      dyParsed = r
+      document.getElementById('dyResultTitle').textContent = r.desc || r.author || '抖音视频'
+      document.getElementById('dyResult').style.display = 'block'
+      dySetMsg(true, '解析成功' + (r.videoPageUrl ? '（无水印完整视频）' : '') + '，点下方「下载视频」')
     }).catch(function (e) {
-      btn.disabled = false; btn.textContent = '解析下载'
+      btn.disabled = false; btn.textContent = '解析'
       var m = '解析失败：' + (e && e.message || e)
       dySetMsg(false, m); toast(m)
     })
+  }
+  document.getElementById('dyDownloadBtn').onclick = function () {
+    var btn = this
+    if (!bridge || !dyParsed) return
+    var r = dyParsed
+    // 视频页路线（2026-11-07 修复）：上游 yt-dlp 抖音抽取器不会算 a_bogus 签名
+    // （tiktok.py 源码 TODO 明写），裸请求 aweme/detail 必 403 误报 Fresh cookies；
+    // 第三方解析 API 也已失联。改走自家已验证链路：打开视频页 → 嗅探捕获播放地址
+    // → sniffDownload 流式下载（分区 cookie+referer）。直链路线保留（API 复活时用）。
+    if (r.videoPageUrl) { dyStartSniffDownload(r, btn); return }
+    btn.disabled = true; btn.textContent = '下载中…'
+    var baseName = String(r.desc || r.author || ('douyin_video_' + Date.now())).slice(0, 40).replace(/[\\/:*?"<>|\s]+/g, '_') || ('douyin_video_' + Date.now())
+    var params = { url: r.videoUrl, filename: baseName + '.mp4', referer: 'https://www.douyin.com/', platformId: 'douyin', subDir: 'douyin', useYtdlp: false }
+    bridge.downloadMediaStart(params).then(function (d) {
+      btn.disabled = false; btn.textContent = '下载视频'
+      var ok = !!(d && d.success)
+      dySetMsg(ok, ok ? '已开始下载（进度见底部下载栏）' : ((d && d.error) || '下载发起失败'))
+      if (!ok) toast((d && d.error) || '下载发起失败')
+    }).catch(function (e) {
+      btn.disabled = false; btn.textContent = '下载视频'
+      var m = '下载发起失败：' + (e && e.message || e)
+      dySetMsg(false, m); toast(m)
+    })
+  }
+  // 打开视频页 → 轮询嗅探缓冲捕获新出现的播放地址 → sniffDownload（25s 超时给指引）
+  function dyStartSniffDownload(r, btn) {
+    dySetMsg(true, '后台标签打开视频页，正在捕获播放地址…（当前页面不受影响）')
+    btn.disabled = true; btn.textContent = '捕获中…'
+    // 后台标签捕获（2026-11-08 报障修复：原在当前视图 go 导航 → 反复从头播放+退出全屏+
+    // Chromium 原生下载接管落 media.mp4；改开后台标签承载视频页，当前页面零打扰）
+    var capTabId = null
+    if (page) page.tabOpen({ platform: 'douyin' }).then(function (tr) {
+      capTabId = tr && tr.ok ? tr.tabId : null
+      if (!capTabId) { dySetMsg(false, (tr && tr.error) || '后台标签打开失败'); btn.disabled = false; btn.textContent = '下载视频' }
+    }).catch(function () { /* 兜底走无标签路径 */ })
+    var base = null
+    var polls = 0
+    var timer = setInterval(function () {
+      polls++
+      if (!base) {
+        bridge.sniffList('douyin').then(function (res) {
+          base = {}
+          ;((res && res.data) || []).forEach(function (x) { base[x.url] = true })
+        }).catch(function () { /* 下一轮再取基线 */ })
+        return
+      }
+      bridge.sniffList('douyin').then(function (res) {
+        var items = (res && res.data) || []
+        // 音视频配对（2026-11-08 报障修复）：抖音播放器同时发视频流+音频流（原「抓第一条」
+        // 命中先到的音频流→只下音频且秒完成无进度）。差分里：badge=视频的第一条=主视频流，
+        // 同批新出现的音频流作为 audioUrl 一并交给引擎 → 双流下载+FFmpeg 合并（B站扩展链同款）。
+        var fresh = items.filter(function (x) { return !base[x.url] })
+        var hit = null, audio = null
+        for (var i = 0; i < fresh.length; i++) {
+          if (fresh[i].type !== 'audio' && !hit) hit = fresh[i]
+          else if (fresh[i].type === 'audio' && !audio) audio = fresh[i]
+          if (hit && audio) break
+        }
+        if (!hit) {
+          if (polls >= 25) {
+            clearInterval(timer)
+            if (capTabId && page) page.tabClose({ id: capTabId })
+            capTabId = null
+            btn.disabled = false; btn.textContent = '重试捕获'
+            var m = '未捕获到播放地址：后台视频页已开 25 秒（需页面播放一次媒体流），点「重试捕获」再试'
+            dySetMsg(false, m); toast('未捕获到播放地址')
+          }
+          return
+        }
+        // 等一拍让同批音频流也落进缓冲（视频流常先到 1-2s）
+        if (!audio && polls < 6) return
+        clearInterval(timer)
+        if (capTabId && page) page.tabClose({ id: capTabId })
+        capTabId = null
+        bridge.sniffDownload({ url: hit.url, ...(audio ? { audioUrl: audio.url } : {}), filename: (r.desc || '抖音视频') + '.mp4' }).then(function (d) {
+          btn.disabled = false; btn.textContent = '下载视频'
+          var ok = !!(d && d.success)
+          dySetMsg(ok, ok ? '已捕获' + (audio ? '音视频双流' : '视频流') + '，开始下载（进度见底部下载栏）' : ((d && d.error) || '下载发起失败'))
+          if (!ok) toast((d && d.error) || '下载发起失败')
+        }).catch(function (e) {
+          btn.disabled = false; btn.textContent = '下载视频'
+          var m = '下载发起失败：' + (e && e.message || e)
+          dySetMsg(false, m); toast(m)
+        })
+      }).catch(function () { /* 桥抖动下一轮再试 */ })
+    }, 1000)
   }
   document.getElementById('dyParseBtn').onclick = dyParse
   document.getElementById('dyShare').addEventListener('keydown', function (e) { if (e.key === 'Enter') dyParse() })
@@ -593,20 +979,35 @@
     })
     return card
   }
-  var hsData = { downloads: [], sniffed: [] }
+  var hsData = { visits: [], downloads: [], sniffed: [] }
   function hsLoad() {
     if (!bridge) { hsRender(); return }
-    Promise.all([bridge.mediaStorageGetDownloads(), bridge.mediaStorageGetSniffed()]).then(function (rs) {
-      hsData.downloads = (rs[0] && rs[0].success && Array.isArray(rs[0].data)) ? rs[0].data : []
-      hsData.sniffed = (rs[1] && rs[1].success && Array.isArray(rs[1].data)) ? rs[1].data : []
+    var jobs = [
+      bridge.historyList ? bridge.historyList().catch(function () { return null }) : Promise.resolve(null),
+      bridge.mediaStorageGetDownloads ? bridge.mediaStorageGetDownloads().catch(function () { return null }) : Promise.resolve(null),
+      bridge.mediaStorageGetSniffed ? bridge.mediaStorageGetSniffed().catch(function () { return null }) : Promise.resolve(null),
+    ]
+    Promise.all(jobs).then(function (rs) {
+      hsData.visits = (rs[0] && rs[0].success && Array.isArray(rs[0].data)) ? rs[0].data : []
+      hsData.downloads = (rs[1] && rs[1].success && Array.isArray(rs[1].data)) ? rs[1].data : []
+      hsData.sniffed = (rs[2] && rs[2].success && Array.isArray(rs[2].data)) ? rs[2].data : []
       hsRender()
     }).catch(function () { hsRender() })
   }
   function hsRender() {
-    document.getElementById('hsCount').textContent = '下载 ' + hsData.downloads.length + ' · 嗅探 ' + hsData.sniffed.length
+    document.getElementById('hsCount').textContent = '访问 ' + hsData.visits.length + ' · 下载 ' + hsData.downloads.length + ' · 嗅探 ' + hsData.sniffed.length
     var list = document.getElementById('hsList')
     list.textContent = ''
-    if (!hsData.downloads.length && !hsData.sniffed.length) { list.appendChild(mkEmpty('暂无记录（抽取/下载后在此显示）')); return }
+    if (!hsData.visits.length && !hsData.downloads.length && !hsData.sniffed.length) { list.appendChild(mkEmpty('暂无记录（浏览/下载/嗅探后在此显示）')); return }
+    hsData.visits.slice(0, 50).forEach(function (v) {
+      list.appendChild(liCard({
+        name: v.title || v.url, sub: v.url || '',
+        badge: '访问',
+        actions: [
+          { label: '打开', on: function () { nav('go', v.url) } },
+        ],
+      }))
+    })
     hsData.downloads.slice(0, 30).forEach(function (d) {
       list.appendChild(liCard({
         name: d.name || d.fileName || d.id, sub: (d.path || '') + (d.size ? ' · ' + d.size + 'B' : ''),
@@ -621,6 +1022,7 @@
   hsLoad()
 
   // ── 启动 ──
+  if (bridge && bridge.getSettings) bridge.getSettings().then(stApply).catch(function () {})
   if (bridge) {
     bridge.platforms().then(function (list) {
       platforms = Array.isArray(list) ? list : []

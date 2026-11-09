@@ -19,6 +19,12 @@ import {
   backfillRowsFromAnalysis,
   VIDEO_EXTS,
   MAX_SOURCE_VIDEOS,
+  hasVideoExt,
+  appendMaterialBatch,
+  materialLoadSummary,
+  montageProjectIdNow,
+  serializeMaterialBatch,
+  parseMaterialBatch,
   type SplitSceneRow,
 } from '../copywritingMontageLogic'
 import { notify, unwrapIpc, errText, joinPath } from './context'
@@ -31,10 +37,13 @@ export interface MontageStep1Context {
   /** 素材重复度筛选（2026-11-05 用户裁定：导入量过大——按分镜脚本景别需求×重复度
    *  三档过滤导入素材；实现+dupMode 状态在主编排层） */
   materialFilter: (paths: string[]) => string[]
+  /** 项目身份签名（2026-11-06 用户裁决：本轮生成口径的 product_desc=有产品按产品、
+   *  无产品按提示词；签名变化=换项目，下次分割开新时间戳目录；主编排层组装） */
+  projectSignature: () => string
 }
 
 export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
-  const { statusText, ensureServerUrl, toAbsolute, materialFilter } = ctx
+  const { statusText, ensureServerUrl, toAbsolute, materialFilter, projectSignature } = ctx
 
   // ══ Step1 素材解析（/montage/split，同步）═══════════════════
   const srcVideos = ref<string[]>([])
@@ -58,26 +67,39 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
   const minSceneLen = ref(0.5)     // 最小镜头秒（原版 L76 默认 0.5，范围 0.1-60）
   const imageDuration = ref(3)     // 精华时长（原版 L85 默认 3；无法分割的视频自动挑出多长的精华片段）
   const scenes = ref<SplitSceneRow[]>([])
-  // ── 素材池持久化（2026-09-23 用户报障：重启后分镜卡全部「未绑定素材」）——
-  //  分镜的 clipGroups 绑定已随 A5 持久化恢复，但素材池（scenes）此前是内存态，
-  //  重启即空 → 绑定引用悬空。现持久化素材池与原始视频清单：启动时恢复，
-  //  分割/清空/入池变化即保存（deep watch）。清空缓存入口会显式清空本键。──
-  const POOL_LS_KEY = 'copywriting-montage.pool'
-  const SRC_LS_KEY = 'copywriting-montage.srcVideos'
-  try {
-    const savedPool: unknown = JSON.parse(localStorage.getItem(POOL_LS_KEY) || '[]')
-    if (Array.isArray(savedPool) && savedPool.length) {
-      scenes.value = (savedPool as SplitSceneRow[]).filter((r) => r && r.idx != null && (r.serverPath || r.clipUrl || r.clipLocalPath))
+  // ── 项目素材批次持久化（2026-11-06 用户再裁决：恢复必须按项目身份校验——
+  //  记录携带 projectSignature() 身份签名；restoreProjectBatch 由主编排层装配完成后
+  //  调用，签名一致（本项目）才恢复；异项目/旧格式（HEAD 旧构建无项目概念的裸数组）
+  //  记录丢弃且就地清除。曾因无差别跨会话恢复旧清单与新选文件夹混装两次报障
+  //  （GPROX2/GPW 幽灵素材）——根因即「不校验身份」，本项目批次的恢复仍保留）──
+  const BATCH_LS_KEY = 'copywriting-montage.batch.v1'
+  function persistProjectBatch(): void {
+    try {
+      if (!srcVideos.value.length && !scenes.value.length) {
+        localStorage.removeItem(BATCH_LS_KEY) // 清空态不落记录（清空素材=无批次可恢复）
+        return
+      }
+      localStorage.setItem(BATCH_LS_KEY, serializeMaterialBatch(
+        { sig: projectSignature(), src: srcVideos.value, pool: scenes.value },
+      ))
+    } catch (_) { /* 超限/隐私模式静默 */ }
+  }
+  // getter 形式监听：push 原地变更也触发（旧 shallow watch 曾漏 push 导致探测/持久化失灵）
+  watch(() => [...srcVideos.value], persistProjectBatch)
+  watch(scenes, persistProjectBatch, { deep: true })
+  /** 启动恢复（主编排层 init 尾部调用——身份签名依赖提示词/产品状态，须等其装配） */
+  function restoreProjectBatch(): void {
+    let raw = ''
+    try { raw = localStorage.getItem(BATCH_LS_KEY) || '' } catch (_) { return }
+    if (!raw) return
+    const rec = parseMaterialBatch(raw, projectSignature())
+    if (!rec) {
+      try { localStorage.removeItem(BATCH_LS_KEY) } catch (_) {} // 异项目记录就地丢弃
+      return
     }
-    const savedSrc: unknown = JSON.parse(localStorage.getItem(SRC_LS_KEY) || '[]')
-    if (Array.isArray(savedSrc) && savedSrc.length) srcVideos.value = savedSrc as string[]
-  } catch (_) { /* 恢复失败走空池 */ }
-  watch(scenes, (list) => {
-    try { localStorage.setItem(POOL_LS_KEY, JSON.stringify(list)) } catch (_) { /* 超限静默 */ }
-  }, { deep: true })
-  watch(srcVideos, (list) => {
-    try { localStorage.setItem(SRC_LS_KEY, JSON.stringify(list)) } catch (_) {}
-  })
+    if (rec.src.length) srcVideos.value = rec.src
+    if (rec.pool.length) scenes.value = rec.pool
+  }
   const scoreFilter = ref(0)       // 默认不过滤（0=全部显示；原版 L116 默认 ≥6，用户要求默认不过滤）
   const splitBusy = ref(false)
   const splitError = ref('')
@@ -105,52 +127,73 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     })()
   }
 
-  /** 选择素材文件夹，递归收集内部全部视频文件（对齐 PR#3 allow_dirs + collect_video_files）。
-   *  2026-11-06 用户报障裁决：选择文件夹=替换语义——清单=该文件夹（含子目录递归）的
-   *  素材，旧清单清掉。原追加语义曾把上次选的上层目录素材（localStorage 跨会话恢复）
-   *  与新选混在一起，看起来像「扫了同层兄弟文件夹」。换文件夹=换批次；累加走拖入。 */
+  // ── 素材装载（2026-11-06 用户再裁决：选文件夹与拖入完全同语义，无入口差异——
+  //  重复度算法输入=该文件夹（含子目录递归）收集到的全部素材，结果按当前档位过滤后
+  //  追加；再次操作也是追加（同路径去重不重复入列）。早前「选文件夹=替换」裁决的
+  //  动机（localStorage 跨会话幽灵素材混装）已随持久化摘除而消失。收集上限取宿主
+  //  硬顶 5000：截断只发生在算法之后而非之前，真超限在摘要里明示）──
+  const COLLECT_LIMIT = 5000 // 宿主 dialog:collectVideos 硬顶（channel-table min(limit,5000)）
+
+  function collectFolderVideos(root: string): Promise<string[]> {
+    return window.tintin.dialog.collectVideos({ root, exts: [...VIDEO_EXTS], limit: COLLECT_LIMIT })
+  }
+
+  /** 本批素材入列：重复度算法过滤（2026-11-05 用户裁定）→ 追加（去重+上限截断）→ 摘要文案 */
+  function loadMaterialBatch(collected: string[]): string {
+    if (!collected.length) return '所选文件夹内未找到视频文件'
+    const filtered = materialFilter(collected)
+    const { added, capBlocked } = appendMaterialBatch(srcVideos.value, filtered, MAX_SOURCE_VIDEOS)
+    let msg = materialLoadSummary(collected.length, filtered.length, added, capBlocked, MAX_SOURCE_VIDEOS)
+    if (collected.length >= COLLECT_LIMIT) msg += `；素材数超过收集上限，仅处理前 ${COLLECT_LIMIT} 个`
+    return msg
+  }
+
+  /** 选择素材文件夹：递归收集内部全部视频（对齐 PR#3 allow_dirs + collect_video_files）。
+   *  摘要首段回显所选根目录（2026-11-06 用户报障：根目录反推失真曾静默导入整库
+   *  素材——根目录可见即可当场发现） */
   function selectFolder(): void {
     void (async () => {
       const dir = await window.tintin.dialog.openDir({ title: '选择素材文件夹（自动遍历子文件夹内全部视频）' })
-      if (!dir) return
-      const videos = await window.tintin.dialog.collectVideos({
-        root: dir,
-        exts: [...VIDEO_EXTS],
-        limit: MAX_SOURCE_VIDEOS,
-      })
-      // 重复度筛选（2026-11-05 用户裁定：按分镜脚本景别需求过滤导入素材）
-      const filtered = materialFilter(videos)
-      srcVideos.value = filtered.slice(0, MAX_SOURCE_VIDEOS)
-      if (filtered.length < videos.length) {
-        splitMsg.value = `已按重复度筛选：文件夹 ${videos.length} 个 → 导入 ${filtered.length} 个`
+      // 取消/校验拒绝不再静默（2026-11-06 用户报障：静默返回时上一轮提示语挂着，
+      // 用户以为导入发生了没显示）；校验拒绝细节从 bundle 的 localStorage trace
+      // （tintin.openDir.lastTrace）读出并直接上屏，不再依赖 devtools console
+      if (!dir) {
+        let why = ''
+        try {
+          const raw = localStorage.getItem('tintin.openDir.lastTrace')
+          const tr = raw ? JSON.parse(raw) as { ok?: boolean; why?: string; rel?: string; abs?: string; r?: string; a?: string } : null
+          if (tr && tr.ok === false && tr.why && tr.why !== 'cancel') {
+            const sample = tr.rel !== undefined
+              ? `rel=${JSON.stringify(String(tr.rel).slice(-70))} abs=${JSON.stringify(String(tr.abs).slice(-70))}`
+              : `r=${JSON.stringify(String(tr.r || '').slice(-70))} a=${JSON.stringify(String(tr.a || '').slice(-70))}`
+            why = `；校验拒绝[${tr.why}；${sample}]`
+          }
+        } catch (_) { /* trace 读取失败退回纯取消文案 */ }
+        splitMsg.value = `已取消选择文件夹（未导入）${why}`
+        return
       }
-      if (!filtered.length) splitMsg.value = splitMsg.value.includes('筛选') ? splitMsg.value : '所选文件夹内未找到视频文件'
+      const collected = await collectFolderVideos(dir)
+      splitMsg.value = `已选文件夹：${dir}；${loadMaterialBatch(collected)}`
     })()
   }
 
-  /** 拖入：目录递归展开内部全部视频（原版 _expand_dropped_paths 同口径），文件回退原路径。
+  /** 拖入：与选文件夹完全同语义（统一装载）；单个视频文件回退原路径直推（显式拖文件不过算法）。
    *  修旧缺陷：旧实现把拖入的文件夹路径直接 push，后续 /montage/split 传目录会失败 */
   async function onDrop(e: DragEvent): Promise<void> {
     e.preventDefault()
     const files = e.dataTransfer?.files
     if (!files) return
     for (const f of Array.from(files)) {
-      const remaining = MAX_SOURCE_VIDEOS - srcVideos.value.length
-      if (remaining <= 0) { splitError.value = `素材已达上限（${MAX_SOURCE_VIDEOS}）`; return }
       const p = filePathOf(f)
       if (!p) continue
-      // 目录→collectVideos 递归展开；文件路径→主进程 isDirectory 检查不通过返回 []，回退原路径
-      const expanded = await window.tintin.dialog.collectVideos({
-        root: p, exts: [...VIDEO_EXTS], limit: remaining,
-      })
+      // 目录→统一装载（递归收集+算法过滤+追加）；collectVideos 对文件/空目录都返回 []——
+      // 按扩展名判定，只有视频文件才回退直推（旧实现会把无视频目录路径当素材推入）
+      const expanded = await collectFolderVideos(p)
       if (expanded.length) {
-        // 重复度筛选（2026-11-05 用户裁定，同选择文件夹口径）
-        const filtered = materialFilter(expanded)
-        for (const fp of filtered) {
-          if (fp && !srcVideos.value.includes(fp)) srcVideos.value.push(fp)
-        }
-      } else if (!srcVideos.value.includes(p)) {
-        srcVideos.value.push(p)
+        splitMsg.value = loadMaterialBatch(expanded)
+      } else if (hasVideoExt(p)) {
+        if (srcVideos.value.length >= MAX_SOURCE_VIDEOS) { splitError.value = `素材已达上限（${MAX_SOURCE_VIDEOS}）`; return }
+        if (!srcVideos.value.includes(p)) srcVideos.value.push(p)
       }
     }
   }
@@ -165,21 +208,28 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
    *  移除全部本地素材 + 选择池片段。仅清列表态——磁盘文件/分割缓存不动
    *  （clearSplitCache 另有入口）；分割状态随素材清理（断点续分基准重置）；
    *  预览弹层同步关闭；分镜绑定关系不在此清（方案构建会点名失效，重新智能匹配重建）。
-   *  分割进行中由调用方禁用入口（避免分割回写已清空的行）。 */
+   *  分割进行中由调用方禁用入口（避免分割回写已清空的行）。
+   *  2026-11-06 用户报障：清空不重置提示语——上一次导入的话还挂着，与「暂无素材」
+   *  并存让人误以为导入发生了没显示。清空必须同步清提示语（禁止陈旧状态共存）。 */
   function clearAllVideos(): void {
     closePreview()
+    splitMsg.value = '已清空素材'
+    splitError.value = ''
     splitAnalysisGen++ // 在途快速模式分析轮询作废（行已清空，回填无消费方）
     splitStatusByVideo.value = {}
     srcVideos.value = []
     scenes.value = []
   }
 
-  /** 混剪任务缓存索引（原版 _montage_job_id = uuid4hex；本轮分割生成一次） */
-  // 2026-09-23 用户裁决：任务 ID 持久化——重启沿用同一任务目录，消除
-  //  「持久化恢复老任务状态 + 分割又生成新目录」的资产错位；清空缓存时清除
-  const splitsJobId = ref((() => {
-    try { return localStorage.getItem('copywriting-montage.splitJobId') || '' } catch (_) { return '' }
-  })())
+  /** 混剪项目目录标识（原版 _montage_job_id）。
+   *  2026-11-06 用户裁决：一次完整的文案混剪=一个项目，相同提示词或相同产品在同一
+   *  轮混剪里是同一项目，项目目录带时间戳（montageProjectIdNow，可辨识可排序）。
+   *  开新目录的时机=分割启动时判定：断点续分（本批有已完成素材）且身份签名未变
+   *  →沿用当前目录（修复旧实现每次「开始分割」都换 UUID 目录、停止续分把一个
+   *  批次的片段拆散到多个目录）；否则开新时间戳目录。不再跨会话持久化——
+   *  素材/状态均会话内口径，重启=新会话=新项目。清空缓存入口仍显式重置。 */
+  const splitsJobId = ref('')
+  let splitJobIdentity = ''
   const splitsDownloading = ref(false)
   /** 解析进度 0-100（对照原版 step1_split_controller _progress：按素材数推进，每素材开始前更新） */
   const splitProgress = ref(0)
@@ -253,10 +303,15 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     splitMsg.value = '正在解析素材…'
     // 2026-09-22 用户报障：分割未完成期间确认合成时 splitsJobId 为空，产物落
     // montage_cache\session 兜底目录；分割完成 jobId 才生成 → 该产物孤儿化
-    // （后续步骤按新 jobId 找成片 =「合成丢失」）。jobId 改在分割启动时即生成，
-    // 合成中途产物始终落当前任务目录
-    splitsJobId.value = (crypto?.randomUUID?.() || `${Date.now()}_${Math.floor(Math.random() * 1e8)}`).replace(/-/g, '')
-    try { localStorage.setItem('copywriting-montage.splitJobId', splitsJobId.value) } catch (_) {}
+    // （后续步骤按新 jobId 找成片 =「合成丢失」）。项目目录在分割启动时定档：
+    // 断点续分（本批有已完成素材）且项目身份（提示词/产品）未变 → 沿用当前目录；
+    // 否则开新时间戳目录（2026-11-06 用户裁决，见 splitsJobId 注释）
+    const identity = projectSignature()
+    const continuing = srcVideos.value.some((v) => splitStatusByVideo.value[v] === 'done')
+    if (!continuing || identity !== splitJobIdentity || !splitsJobId.value) {
+      splitsJobId.value = montageProjectIdNow()
+      splitJobIdentity = identity
+    }
     // 断点续分：上一轮「停止分割」已完成的素材跳过（其镜头行已保留在 scenes 中，
     // rows 从已完成素材的镜头行起步，避免重复分割/丢行）
     splitStopRequested.value = false
@@ -586,7 +641,7 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
   async function clearSplitCache(): Promise<void> {
     splitAnalysisGen++ // 在途快速模式分析轮询作废（行已清空，回填无消费方）
     scenes.value = []
-    try { localStorage.removeItem('copywriting-montage.splitJobId') } catch (_) {}
+    splitJobIdentity = '' // 项目身份随缓存清空重置（下次分割开新时间戳目录）
     splitResolution.value = ''
     splitFps.value = 0
     splitError.value = ''
@@ -611,6 +666,6 @@ export function useCopywritingMontageStep1Split(ctx: MontageStep1Context) {
     // fns
     addVideos, selectFolder, onDrop, removeVideo, clearAllVideos, runSplit, splitMode, requestStopSplit, splitStatusOf,
     updateSceneDesc, previewSourceVideo, previewScene, closePreview,
-    clearSplitCache, openSplitsDir,
+    clearSplitCache, openSplitsDir, restoreProjectBatch,
   }
 }

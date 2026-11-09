@@ -42,9 +42,9 @@ import { registerWorkspaceEnsureRoute } from './lib/workspace-ensure-route.js'
 // 封面插件化(2026-10-30 用户裁决):路由/会话桥/工具组迁入 dsh-tintin-cover-plugin
 // 独立挂载;宿主桥只保留跨域消费——视频剪辑工具组的 renderCover 仍吃封面引擎单例。
 import { loadCoverEngine } from 'dsh-tintin-cover-plugin/lib/cover-plugin-route.js'
-import { createYtdlpApi } from './lib/ytdlp.js'
 import { loadPresetDefinitions } from './lib/preset-definitions.js'
 import { createOpenfilmChannels, createOpenfilmSync } from './lib/openfilm/plugin.js'
+import { createYtdlpApi } from './lib/ytdlp.js'
 import { createChannelTable } from './lib/channel-table.js'
 
 const PING_PATH = '/tintin/ping'

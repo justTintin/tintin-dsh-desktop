@@ -18,11 +18,15 @@ import {
 } from '@/composables/opsProductLibraryLogic'
 import { useOpsProductLibrary } from '@/composables/useOpsProductLibrary'
 import OtCopywritingPanel from './OtCopywritingPanel.vue'
+import OtPickMaterialDialog from './OtPickMaterialDialog.vue'
 
 const P = useOpsProductLibrary()
 
 /* ── 六视图（2026-10-09 服务端 8f073bbf：详情内嵌 item.six_views；
-   2026-10-10 e44a8b66：+逐视图上传替换，纯替换语义=其余五张不动）── */
+   2026-10-10 e44a8b66：+逐视图上传替换，纯替换语义=其余五张不动；
+   2026-11-08 用户裁决：图库选图收拢为顶部一枚「图库」钮——弹窗右栏改为
+   六视图槽位格，左侧卡片拖入槽位=绑定该视图（已有图=替换），替代原
+   逐视图「图库」钮（一视图一选一往返）── */
 const serverUrl = ref('')
 const sixSlots = computed(() => productSixViewSlots(P.sixViews.value))
 /** 服务端 url/thumbnail 为相对路径（/material/serve|thumbnail?material_id=N），拼服务端地址 */
@@ -47,6 +51,30 @@ function onSixFilePicked(e: Event): void {
   const view = sixPendingView
   sixPendingView = ''
   if (file && view) void P.uploadSixView(view, file)
+}
+
+/* ── 图库拖放绑定（2026-11-08 用户裁决）：选择素材弹窗六视图模式——
+   右栏=当前六视图槽位（已有图显示、拖入即替换）；槽位缩略图随
+   P.sixViews 响应式刷新（每次绑定成功 loadSixViews 回读）。绑定走
+   既有绑定 B（fetch 字节→File→uploadSixView，服务端 upload 端点
+   暂只收文件）。 ── */
+const sixPickOpen = ref(false)
+function onSearchGallery(): void {
+  if (!P.editingId.value || P.sixUploading.value) return
+  sixPickOpen.value = true
+}
+/** 弹窗槽位格数据（view/label/绝对化 url；空 url=缺图虚位） */
+const sixPickSlots = computed(() => sixSlots.value.map((s) => ({
+  view: s.view,
+  label: s.label,
+  url: s.entry ? sixImgUrl(s.entry.thumbnail || s.entry.url) : '',
+})))
+function onSixAssign(payload: { view: string; item: Record<string, unknown> }): void {
+  const mid = String(payload?.item?.material_id ?? payload?.item?.id ?? '').trim()
+  if (!mid) { P.sixStatus.value = '未取到素材 ID，未绑定。'; return }
+  if (!P.editingId.value) { P.sixStatus.value = '请先在左侧选择产品。'; return }
+  if (P.sixUploading.value) { P.sixStatus.value = '上一张视图仍在处理中，请等状态栏提示后再拖入。'; return }
+  void P.bindSixViewFromMaterial(payload.view, mid, serverUrl.value)
 }
 
 /* ── Excel 导入（服务端 /import 自解析，客户端只传文件）── */
@@ -140,6 +168,7 @@ function onDelete() {
               v-for="hit in P.searchHits.value"
               :key="hit.id"
               class="tree-leaf"
+              :class="{ active: P.editingId.value === hit.id }"
               @click="P.selectNode(hit.id)"
             >{{ hit.label }}</button>
           </template>
@@ -235,6 +264,12 @@ function onDelete() {
           <div class="card-title-row">
             <div class="card-title">产品六视图（{{ P.sixViews.value.length }}/6）</div>
             <div class="six-actions">
+              <button
+                class="btn primary"
+                :disabled="!P.editingId.value || !!P.sixUploading.value"
+                :title="P.editingId.value ? '打开素材图库：左侧图片拖到右侧视图位绑定（已有图=替换），一次弹窗可填满六个视图' : '请先在左侧选择产品'"
+                @click="onSearchGallery"
+              >🖼 从图库选择</button>
               <label class="six-opt" title="素材库匹配永远第一优先；此开关只决定缺图时是否网络搜图兜底（服务端缺省=关）">
                 <input type="checkbox" v-model="P.allowWeb.value" /> 网络搜图兜底</label>
               <label class="six-opt" title="素材库匹配永远第一优先；此开关只决定缺图时是否 AI 生成兜底（服务端缺省=开）">
@@ -261,14 +296,26 @@ function onDelete() {
               </div>
               <div v-else class="six-cell six-cell--empty">
                 <span class="six-miss">缺</span>
-                <button class="six-up six-up--empty" :disabled="!P.editingId.value || !!P.sixUploading.value"
-                  :title="!P.editingId.value ? '请先在左侧选择产品' : '上传该视图（仅补此张，其余五张不动；上传图入素材库）'"
-                  @click="onUploadView(s.view)">{{ P.sixUploading.value === s.view ? '上传中…' : '上传' }}</button>
+                <div class="six-empty-actions">
+                  <button class="six-up six-up--empty" :disabled="!P.editingId.value || !!P.sixUploading.value"
+                    :title="!P.editingId.value ? '请先在左侧选择产品' : '上传该视图（仅补此张，其余五张不动；上传图入素材库）'"
+                    @click="onUploadView(s.view)">{{ P.sixUploading.value === s.view ? '上传中…' : '上传' }}</button>
+                </div>
                 <span class="six-label">{{ s.label }}</span>
               </div>
             </template>
           </div>
           <input ref="sixFileInput" class="six-file" type="file" accept="image/*" @change="onSixFilePicked" />
+          <OtPickMaterialDialog
+            :visible="sixPickOpen"
+            title="搜索图库（拖入右侧视图位绑定）"
+            image-only
+            purpose="product"
+            :six-slots="sixPickSlots"
+            :six-busy="P.sixUploading.value"
+            @close="sixPickOpen = false"
+            @assign="onSixAssign"
+          />
           <div v-if="P.sixStatus.value" class="mine-status">{{ P.sixStatus.value }}</div>
         </div>
 
@@ -323,13 +370,15 @@ function onDelete() {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* 主区 */
+/* 主区（2026-11-07 用户裁决·方案1：左树/右栏各自独立内滚——此前 .opl height:100%
+   对 auto 父级解析失效，整页只有宿主视图区一个滚动点，滚左树右栏跟着跑） */
 .opl-main { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: var(--space-4); flex: 1; min-height: 0; }
 .opl-left, .opl-card {
   background: var(--card); border: 1px solid var(--border);
   border-radius: var(--radius-lg); padding: var(--space-4);
   display: flex; flex-direction: column; gap: var(--space-3);
 }
+.opl-left { min-height: 0; overflow: hidden; } /* 网格项默认 min-height:auto 放不下约束，收掉后 .tree 的 overflow-y:auto 才生效 */
 .card-title { font-size: 14px; font-weight: 700; color: var(--foreground); }
 .card-title-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .card-tip { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
@@ -399,13 +448,15 @@ function onDelete() {
 .six-up:hover { background: var(--primary); }
 .six-up:disabled { opacity: 0.6; cursor: wait; }
 .six-cell--empty .six-up { position: static; height: 20px; padding: 0 10px; font-size: 11px; border-radius: 10px; }
+.six-empty-actions { display: flex; gap: 4px; }
+/* 逐视图「图库」浮层钮已随 2026-11-08 收拢裁决删除——图库入口=顶部一枚（.six-actions 内） */
 
 /* 底部操作条 */
 .opl-actions { display: flex; align-items: center; gap: var(--space-3); }
 .form-status { flex: 1; min-width: 0; font-size: 12px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 1000px) {
-  .opl-main { grid-template-columns: 1fr; }
+  .opl-main { grid-template-columns: 1fr; overflow-y: auto; } /* 单列堆叠时主区自身滚动，两卡都能看到 */
   .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mine-grid { grid-template-columns: 1fr; }
 }

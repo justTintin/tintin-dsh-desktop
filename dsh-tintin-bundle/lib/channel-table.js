@@ -3,6 +3,7 @@
 // entry stays inside its locked line baseline (iron rule 4); the factory takes
 // the host bridge seam it used to close over.
 import { spawn } from 'node:child_process'
+import { createYtdlpApi } from './ytdlp.js'
 import { createHash } from 'node:crypto'
 import { mkdirSync, rmSync, existsSync, readdirSync, statSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -16,7 +17,6 @@ import { createMontageFinalApi } from './montage/final-ipc.js'
 import { preprocessTtsKeepingPause } from './montage/voice-tts-logic.js'
 import { createRembgApi, createAudioArchiveApi, createVsrApi, createTtsUploadSampleApi } from './media-proxy.js'
 import { createContextTaskApi, defaultWorkspaceDir } from './context-task.js'
-import { createYtdlpApi } from './ytdlp.js'
 import { createDreaminaApi } from 'dsh-tintin-shared/lib/dreamina.js'
 import { createVersionInfoApi } from './version-info.js'
 import { createOpenfilmChannels } from './openfilm/plugin.js'
