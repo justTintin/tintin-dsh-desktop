@@ -57,9 +57,9 @@ const tintinClient = (() => {
         if (sched && activeCls && activeId !== 'workbench') sched.classList.toggle(activeCls, false)
         for (const [id, b] of entryButtons) {
           if (activeCls) b.classList.toggle(activeCls, activeId === id)
-          // 收起态跟随原生：原生收起由 React 重渲染拿掉文字，克隆行不重渲染→按侧栏宽隐藏标题，否则文字裁成半字（2026-10-19 报障）
-          const t = [...b.querySelectorAll('span,div')].find((e) => e.childElementCount === 0 && e.textContent.trim())
-          if (t) t.style.display = (document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')?.getBoundingClientRect().width ?? 280) > 120 ? '' : 'none'
+          // 收起态隐藏标题（2026-10-19；2026-11-08 改按注入标记 data-tintin-title 查+行宿主实测宽——宿主 0.2.2 行 DOM 变形后叶子启发式失配，窄栏裁成首字）
+          const t = b.querySelector('[data-tintin-title]'); const rail = b.parentElement || document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')
+          if (t) t.style.display = ((rail && rail.getBoundingClientRect().width) || 280) > 120 ? '' : 'none'
         }
       }
       function setActive(id) { activeId = id; render() }
@@ -89,7 +89,7 @@ const tintinClient = (() => {
           b.removeAttribute('id'); b.removeAttribute('aria-keyshortcuts'); b.removeAttribute('aria-label')
           b.setAttribute('data-tintin-entry', v.id)
           const title = [...b.querySelectorAll('span,div')].find((e) => e.childElementCount === 0 && e.textContent.trim() === '插件')
-          if (title) title.textContent = v.label
+          if (title) { title.textContent = v.label; title.dataset.tintinTitle = '1' } // 标记=收起态隐藏查点（2026-11-08 免疫宿主演示层漂移）
           else b.textContent = v.label
           // 图标：语义参考原版 Electron，风格对齐 DSH 侧栏 16×16 线稿（stroke currentColor / 线宽 1）
           const GLYPHS = {
@@ -141,6 +141,7 @@ const tintinClient = (() => {
       }
       const sidebarMo = new MutationObserver(() => {
         syncOverlayBounds() // 兜底：React 重建侧栏节点会孤儿化 ResizeObserver，随变动重测
+        watchRail() // 根被 React 替换后重挂 RO（2026-11-09 收起双修）
         if (!injectEntries()) return
         paintEntries() // 联动自愈：React 重渲染恢复插件行高亮时重摘
         detectNativeOverlay()
@@ -184,7 +185,7 @@ const tintinClient = (() => {
         }
       })
       const armSidebarObserver = () => {
-        sidebarMo.observe(document.querySelector('[class*=sidebarCol]') || document.body, { childList: true, subtree: true }); bodyMo.observe(document.body, { childList: true })
+        sidebarMo.observe(document.querySelector('[class*=sidebarCol]') || document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] }); bodyMo.observe(document.body, { childList: true })
         injectEntries()
         // 不可在此直调 detectNativeOverlay()：overlay 的 const 声明在本闭包更后，
         // arm 在脚本求值期同步执行会踩 TDZ（1017 启动失败事故）；首个 mutation
@@ -219,8 +220,30 @@ const tintinClient = (() => {
       }
       try {
         // 观察与测量同源（2026-10-19 实机：收侧栏变宽的是 [data-pane=sidebar] 根，sidebarCol 宽度不变→观察者永不触发、left 恒 280 钉死原生视图）
-        const col = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]') || document.body
-        new ResizeObserver(() => syncOverlayBounds()).observe(col)
+        // 2026-11-09 报障双修（收起残字+63px 空隙钉在过渡中间值）：宿主收起=class/宽度
+        // 过渡，childList 观察不到；React 重渲染还会替换根节点孤儿化 RO —— 单 RO 不够，
+        // 改四路触发（全部幂等）：RO（根替换即重挂）+ class/style 属性观察 + width 过渡
+        // 结束 + 800ms 值守卫兜底。实测收起后 2.5s 内 paintEntries/syncOverlayBounds 均
+        // 不再有任何触发（hidden:0/6、stage 钉 119）。
+        let railObserved = null
+        const railRO = new ResizeObserver(() => { syncOverlayBounds(); paintEntries() })
+        const watchRail = () => {
+          const root = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')
+          if (root && railObserved !== root) {
+            railRO.observe(root)
+            railObserved = root
+          }
+        }
+        let lastRailW = -1
+        setInterval(() => {
+          watchRail()
+          const w = Math.round((document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')?.getBoundingClientRect().width) ?? -1)
+          if (w !== lastRailW) { lastRailW = w; syncOverlayBounds(); paintEntries() }
+        }, 800)
+        document.addEventListener('transitionend', (e) => {
+          const prop = e.propertyName || ''
+          if (prop.includes('width') || prop.includes('padding') || prop.includes('flex')) { syncOverlayBounds(); paintEntries() }
+        })
       } catch { /* 无 ResizeObserver 时保持整窗 */ }
       // 插件重启/HMR 重求值时旧 overlay 仍挂 body（拆载不清 DOM）→ 残壳顶行叠在新聊天列上方（2026-10-19 报障）；安装即清残核
       for (const stale of [...document.querySelectorAll('#tintin-view-overlay')]) stale.remove()
@@ -243,10 +266,11 @@ const tintinClient = (() => {
         overlay.style.display = 'block'; let el = viewEls.get(activeId)
         if (!el) {
           el = document.createElement('div')
-          // 视频剪辑免入场动画（2026-10-30 用户裁决）：满屏 iframe，切换是 display:none
-          // 切换 → CSS 动画每次重放，在密集编辑器上读感是「加载界面抖一次」。
-          // 封面制作 2026-11-02 方案 B 页内化后与卡片视图同为页内挂载，动画恢复。
-          if (activeId !== 'openfilm') el.className = 'tintin-view-el'
+          // 入场动画=白名单制（2026-11-09 用户裁决）：默认无动画，仅运营工具/媒体工具
+          // 两个卡片视图保留 slide-up 入场。其余（视频剪辑/封面/浏览器/素材创作）满屏
+          // 密集视图，KeepAlive 靠 display:none 切换 → CSS 动画每次进入重放，
+          // 读感是「加载抖一次」（视频剪辑 2026-10-30 首裁、封面 1109 同诉）。
+          if (activeId === 'ops' || activeId === 'media') el.className = 'tintin-view-el'
           el.style.cssText = 'width:100%;min-height:100%;box-sizing:border-box;'
           container.appendChild(el); viewEls.set(activeId, el)
           const provider = registry.providers.get(activeId); if (provider) {
@@ -618,13 +642,41 @@ const tintinClient = (() => {
           return paths.length ? paths : null
         },
         openDir: async () => {
-          const first = (await pickInputFiles({ directory: true }))[0]
-          const rel = first && String(first.webkitRelativePath || '').replace(/\\/g, '/')
-          let abs = pickedPath(first).replace(/\\/g, '/')
-          if (!abs) return null
-          // 根目录 = 首文件绝对路径剥掉 webkitRelativePath 尾段
-          if (rel && abs.endsWith('/' + rel)) abs = abs.slice(0, abs.length - rel.length - 1)
-          return abs || null
+          // 每次结果落 localStorage trace（tintin.openDir.lastTrace）：UI 在「已取消选择文件夹」时读取上屏，根目录失真取证不再只留控制台。
+          const trace = (r) => { try { localStorage.setItem('tintin.openDir.lastTrace', JSON.stringify(r).slice(0, 600)) } catch (_) {} }
+          const files = await pickInputFiles({ directory: true })
+          const first = files[0]
+          // Windows 扩展长度路径归一（\\?\C:\… 与 \\?\UNC\host\share\… → 常规形式；不归一会让尾段校验误杀合法长路径选择）
+          const normWin = (p) => {
+            let s = String(p || '').replace(/\\/g, '/')
+            if (s.startsWith('//?/UNC/')) s = s.slice(8)
+            else if (s.startsWith('//?/')) s = s.slice(4)
+            return s
+          }
+          if (!first) { trace({ ok: false, why: 'cancel', files: 0 }); return null }
+          const rel = String(first.webkitRelativePath || '').replace(/\\/g, '/')
+          const abs = normWin(pickedPath(first))
+          // 根目录推导（2026-11-06 连环事故总根因，一次修死「选 A 导 B/幽灵素材/整库导入」）：webkitRelativePath 首段=所选文件夹名，
+          // 而绝对路径里该名只出现一次（属 root 段）——要剥的尾段=「rel 去掉首段后的剩余子路径」；旧实现剥整个 rel=多剥一层，
+          // 根目录永远变成所选文件夹的父目录：选 K828 实扫整个素材入库（机械革命/GPROX2 误入皆源于此）。
+          const slash = rel.indexOf('/')
+          // 拒绝统一走 fail：trace 上屏 + console 留痕 + 返回 null；对不上宁可取消也绝不猜更大的根目录
+          const fail = (why, detail) => { trace({ ok: false, why, files: files.length, ...(detail || {}) }); console.warn('[openDir] 取消：', why, JSON.stringify(detail || {})); return null }
+          if (!abs || !rel || slash < 0) return fail('rel 缺少子路径', { rel, abs })
+          const under = rel.slice(slash + 1) // 去掉首段（所选文件夹名）后的剩余子路径
+          if (!abs.endsWith('/' + under)) return fail('abs 不以子路径结尾', { rel, abs })
+          const root = abs.slice(0, abs.length - under.length - 1)
+          if (!root || root.split('/').pop() !== rel.slice(0, slash)) return fail('root 名 ≠ 所选文件夹名', { rel, root })
+          for (const f of files.slice(1)) {
+            const r = String(f.webkitRelativePath || '').replace(/\\/g, '/')
+            const a = normWin(pickedPath(f))
+            if (!r || !a) continue
+            if (!a.startsWith(root + '/')) return fail('交叉验证失败（桥路径不在根下）', { root, r, a })
+            break // 首个可校验文件通过即可
+          }
+          trace({ ok: true, root, files: files.length })
+          console.info('[openDir] 根目录=', JSON.stringify(root), '文件数=', files.length)
+          return root
         },
         // 浏览器无保存对话框：恒 null（=取消）。2026-10-12 定案：宿主 bundle 跑在
         // Harness 子进程（纯 node）无 electron 对话框能力（两次实障）；原生保存
@@ -686,7 +738,6 @@ const tintinClient = (() => {
         openLoginBrowser: (payload) => call('ytdlp:openLoginBrowser', { args: [payload] }),
         onProgress: () => () => {},
       })
-
       // ── env.log：渲染层业务日志回流 host（C-6 闭环，2026-09-23 补）──────
       // 源链路 clientError → env:log IPC → logger.logError → 落盘+服务端上报；
       // 无 env 命名空间时 clientLog 退化 console.*（浏览器 DevTools，不落盘）。

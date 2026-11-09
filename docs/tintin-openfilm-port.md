@@ -196,6 +196,7 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | 数据 | 主进程代理 GET /api/product-library/search?q&limit 与 /items/{id}(实测顶层 items/item) |
 | @ 引用(2026-11-09 用户裁决「做」): 输入 @ 检索产品(「产品」组, 五语言组名), 点选/回车插入 product pill(图标 Package); 发送时 pill(服务端 id)经桥 products.texts 取 productContextOf 同源上下文块追加进消息。vendored 补丁面: prompt-text(kind/prefix/activatedProductIds)+PromptPill 图标+app-bridge products 可选面+App.tsx(状态/菜单组/pill/发送追加)+index.ts 导出+i18n 五语言 mention.groupProducts |
 | 技能库弹窗背景(2026-11-09 报障「技能库窗口半透明」): 恢复的 SkillsDialog/SkillsLibrary 用 `var(--app-content-bg)`, 该变量在 0.3 树只有使用无定义(0.2.7 时代由官方桌面宿主 CSS 提供, 壳页没有)→面板透明可见底下视频; 修=回退 `var(--app-content-bg,var(--bg-panel))`, CDP 实测 `rgb(24,24,24)` 不透明(弹窗体+粘性头部两处) |
+| 侧栏收起双修(2026-11-09 报障「收起后图标后残字+空隙过一会才消失」): 宿主收起=class/宽度过渡，childList 观察不到且 React 重渲染孤儿化 RO——CDP 采样实证收起后 2.5s 零触发(标题 0/6 隐藏、stage 钉过渡中间值 119 露 63px 空隙)。修=四路幂等触发(class/style 属性观察+width 过渡结束+800ms 值守卫+RO 根替换重挂 watchRail)，实测 173ms 内 6/6 标题隐藏+stage 紧贴 rail 零空隙 |
 
 
 ## 11. 角色智能体名册(2026-10-24 实现; **2026-10-25 退役**, 见下; **2026-10-30 以「TinTin智能体」形态部分恢复**)
@@ -519,6 +520,10 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 - **用户书签(#4)**: 地址栏星标(☆/★, bookmarkToggle 翻转), bookmarks.json 持久化, 上限 200。(注: 11-04 删的「网页收藏」视图是嗅探媒体收藏口径, 与本批网页书签不同物, 未恢复);
 - **千行付账**: browser-service 1109→968 行 —— tab 引擎提取 `tab-engine.ts`(161 行, 依赖注入回写池状态) + 页面下载栏镜像提取 `page-downloads.ts`(锚点 browser:bili-ext-dl 随迁并登记注释);
 - 验证: tab-model 5 新用例(14 文件 107 用例全绿)+包 build(严格 tsc)+check:tintin(锚点迁移后 83 锚点一致)+页面语法绿。多标签端到端(切标签边界/关闭后继/标题回推)待重打包实机验收。
+
+## 16.23 浏览器域：视图底色改 web 层主题判定(2026-11-08, 用户报障「白底还在, 不是说跟客户端主题吗」)
+
+11-08 前批的 `themedBackground` 读 `nativeTheme.shouldUseDarkColors` —— 其语义=「系统深浅 + themeSource 覆盖」, 而应用的深色是 **web 层刷的 `body[data-ds-dark-theme]`**(theme-presenter, 不经过 nativeTheme): 应用内主题偏好=「跟随系统」且 Windows 本身为浅色时, 界面深色(误导)而 nativeTheme 报浅色 → 视图白底。这正是媒体三视图 1018 报障「三视图深色与原生不统一」的同一判定洞(hostTheme.ts 头注的教训, 此处又踩一遍)。修复: `themedBackground` 改 **web 层真值判定** —— 主进程从宿主窗口 `executeJavaScript` 探测 `body[data-ds-dark-theme]`/`html[data-ds-theme-source]`(hostTheme 同链), 注册时+宿主 dom-ready/did-navigate(含页内)探针持续刷新, 变化即同步全部存活视图; `nativeTheme` 降为探测不可达时的兜底。教训入册: **凡视觉主题跟随, 一律读 web 层挂载点, 不读 nativeTheme**(1003 二次触犯)。行数: browser-service 1000 压线内。验证: 14 文件 107 用例+包 build+check:tintin 绿。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 
