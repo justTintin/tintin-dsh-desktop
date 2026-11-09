@@ -496,5 +496,239 @@
     "path": "dsh-tintin-cover-plugin/lib/cover-acp-routes.js",
     "pattern": "/tintin/cover/api/acp/",
     "minCount": 1
+  },
+  {
+    "comment": "replay: TinTin brand icon in the chat shell survives upgrades (upstream has no such file)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/components/BrandLogo.tsx",
+    "pattern": "TinTin",
+    "minCount": 2
+  },
+  {
+    "comment": "replay: TinTin brand icon in the studio UI survives upgrades",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/BrandLogo.tsx",
+    "pattern": "TinTin",
+    "minCount": 2
+  },
+  {
+    "comment": "replay: the 0.2.7 skills dialog stays the one wired in (aria-label is TinTin-only)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/SkillsDialog.tsx",
+    "pattern": "'技能库'",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the 0.2.7 skills library component is restored wholesale",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/SkillsLibrary.tsx",
+    "pattern": "SkillsLibrary",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: custom-service notes render as the structured ServiceNote list",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/settings/CustomServices.tsx",
+    "pattern": "ServiceNote",
+    "minCount": 2
+  },
+  {
+    "comment": "replay: prompt-editor carries the product pill kind",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/components/prompt-editor/prompt-text.ts",
+    "pattern": "'product:'",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the product pill ships its Package icon",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/components/prompt-editor/PromptPill.tsx",
+    "pattern": "Package",
+    "minCount": 2
+  },
+  {
+    "comment": "replay: the prompt-editor barrel exports the product pieces",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/components/prompt-editor/index.ts",
+    "pattern": "from './prompt-text'",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the show-skills host command exists",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/lib/host.ts",
+    "pattern": "'show-skills'",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: ProjectView wires the skills dialog through the host command",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/ProjectView.tsx",
+    "pattern": "command.type === 'show-skills'",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the online-library drawer seam (window.tintinOnlineLibrary page bridge)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/LibraryDrawer.tsx",
+    "pattern": "tintinOnlineLibrary",
+    "minCount": 4
+  },
+  {
+    "comment": "replay: SkillsPane server group keeps its hook and lines",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/SkillsPane.tsx",
+    "pattern": "useServerSkills",
+    "minCount": 2
+  },
+  {
+    "comment": "replay: SkillsPane keeps Server/Trash2 icons the 0.3.1 import dropped (CDP-caught blank pane)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/SkillsPane.tsx",
+    "pattern": "RefreshCw, Server, Star, Trash2",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the chat composer keeps product @ references on send",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/App.tsx",
+    "pattern": "setProductRefs([])",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the chat composer keeps the product state",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/App.tsx",
+    "pattern": "tintinProducts",
+    "minCount": 3
+  },
+  {
+    "comment": "replay: the chat bridge exposes the optional products surface",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/app-bridge.ts",
+    "pattern": "products?",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: chat zh-CN keeps the product @ menu group",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/i18n/locales/zh-CN.ts",
+    "pattern": "groupProducts",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: chat en-US keeps the product @ menu group",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/i18n/locales/en-US.ts",
+    "pattern": "groupProducts",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: chat es keeps the product @ menu group",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/i18n/locales/es.ts",
+    "pattern": "groupProducts",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: chat ja keeps the product @ menu group",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/i18n/locales/ja.ts",
+    "pattern": "groupProducts",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: chat ko keeps the product @ menu group",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/i18n/locales/ko.ts",
+    "pattern": "groupProducts",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio zh-CN keeps the TinTin server-skill keys (tintinOnline + server group)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/zh-CN.ts",
+    "pattern": "serverRemoveHint",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio en keeps the TinTin server-skill keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/en.ts",
+    "pattern": "serverRemoveHint",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio es keeps the TinTin server-skill keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/es.ts",
+    "pattern": "serverRemoveHint",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio ja keeps the TinTin server-skill keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/ja.ts",
+    "pattern": "serverRemoveHint",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio ko keeps the TinTin server-skill keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/ko.ts",
+    "pattern": "serverRemoveHint",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio zh-CN keeps the online-library label",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/zh-CN.ts",
+    "pattern": "tintinOnline",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio en keeps the online-library label",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/en.ts",
+    "pattern": "tintinOnline",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio es keeps the online-library label",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/es.ts",
+    "pattern": "tintinOnline",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio ja keeps the online-library label",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/ja.ts",
+    "pattern": "tintinOnline",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio ko keeps the online-library label",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/ko.ts",
+    "pattern": "tintinOnline",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the agent roster keeps the tintin-agent row beside the 0.3.1 upstream rows",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/src/agent-definitions.mjs",
+    "pattern": "tintin-agent",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the agent roster keeps the 0.3.1 openfilm row",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/src/agent-definitions.mjs",
+    "pattern": "openfilm: { name:",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the agent roster keeps the 0.3.1 antigravity row",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/src/agent-definitions.mjs",
+    "pattern": "antigravity: { name:",
+    "minCount": 1
+  },
+  {
+    "comment": "anchor: the TinTin first-class provider keeps its id and connection basis",
+    "path": "dsh-tintin-bundle/lib/openfilm/providers/tintin.mjs",
+    "pattern": "TINTIN_SERVER_URL",
+    "minCount": 3
+  },
+  {
+    "comment": "anchor: providers-seed keeps the TinTin merge (fake-OpenAI retire path)",
+    "path": "dsh-tintin-bundle/lib/openfilm/providers-seed.js",
+    "pattern": "mergeTinTinProvider",
+    "minCount": 2
+  },
+  {
+    "comment": "anchor: studio-runtime injects TINTIN_SERVER_URL for the provider",
+    "path": "dsh-tintin-bundle/lib/openfilm/studio-runtime.js",
+    "pattern": "TINTIN_SERVER_URL",
+    "minCount": 2
+  },
+  {
+    "comment": "anchor: every runtime refetch re-vendors and re-registers the tintin provider (2b step)",
+    "path": "dsh-tintin-bundle/scripts/fetch-openfilm-runtime.mjs",
+    "pattern": "providers/index.mjs",
+    "minCount": 1
+  },
+  {
+    "comment": "anchor: every shell refetch carries openfilm-models.mjs (0.3.1 cross-tree import)",
+    "path": "dsh-tintin-bundle/scripts/fetch-openfilm-shell.mjs",
+    "pattern": "openfilm-models.mjs",
+    "minCount": 2
   }
 ]
