@@ -175,6 +175,7 @@ export const ko: Words = {
     currentTime: '현재 시간',
     currentTimeUnavailable: '영상이 준비되면 사용할 수 있습니다',
     groupAssets: '에셋',
+    groupProducts: "제품",
     groupMoment: '순간',
     menu: '참조 메뉴',
   },

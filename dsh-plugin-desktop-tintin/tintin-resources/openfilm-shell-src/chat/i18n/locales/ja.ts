@@ -179,6 +179,7 @@ export const ja: Words = {
     currentTime: '現在の時刻',
     currentTimeUnavailable: '映像の準備ができたら使えます',
     groupAssets: '素材',
+    groupProducts: "製品",
     groupMoment: 'タイミング',
     menu: '参照メニュー',
   },

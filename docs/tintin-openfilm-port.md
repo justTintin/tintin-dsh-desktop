@@ -194,6 +194,8 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | 面板 | 搜索(品类/品牌/型号)+ 产品列表(名称/品类/货号), 点选即注入; **面板形态(2026-11-09 用户裁决)=素材式嵌入会话区**: 打开时占聊天列的会话区域(列左缘/列宽/列顶, 底部留 128px 给 composer), 不浮在 Studio 画布上; 列不在时回屏幕左侧兜底 |
 | 注入 | 产品资料结构化文本(品牌·型号·品类·货号 + 性能参数 + 核心卖点逐条)写进官方 composer 输入框。**0.3 注入法(2026-11-09 CDP 实验矩阵)**: 合成 paste 被 0.3 Lexical 无视; 页面侧合成 beforeinput 可用但**第一个必被丢弃**(selection 未同步), 解法=零宽字符(U+200B)热身丢弃 + 逐行 insertText / 行间 insertParagraph —— 全文(含首行)可靠落地, pre-wrap 保排版 |
 | 数据 | 主进程代理 GET /api/product-library/search?q&limit 与 /items/{id}(实测顶层 items/item) |
+| @ 引用(2026-11-09 用户裁决「做」): 输入 @ 检索产品(「产品」组, 五语言组名), 点选/回车插入 product pill(图标 Package); 发送时 pill(服务端 id)经桥 products.texts 取 productContextOf 同源上下文块追加进消息。vendored 补丁面: prompt-text(kind/prefix/activatedProductIds)+PromptPill 图标+app-bridge products 可选面+App.tsx(状态/菜单组/pill/发送追加)+index.ts 导出+i18n 五语言 mention.groupProducts |
+
 
 ## 11. 角色智能体名册(2026-10-24 实现; **2026-10-25 退役**, 见下; **2026-10-30 以「TinTin智能体」形态部分恢复**)
 
@@ -471,6 +473,23 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 
 **yt-dlp 二进制与拉取脚本**: fetch-tintin-binaries.mjs 重写 —— yt-dlp 改为**每次打包下载最新 release**(PE 头校验+--version 探针; GitHub 不可达回落旧拷贝并大声告警, 不阻塞打包), ffmpeg/ffprobe 维持旧拷贝; 本机实拉 2026.08.19→**2026.10.26** 成功(curl 直连可用, node fetch 曾超时=间歇阻断)。**二进制刷新对抖音无效但对 B站 m3u8 嗅探/YouTube videoplayback 等 yt-dlp 路线仍是必要升级**。
 - 验证: 页面语法 + tintin-browser 全量 + check:tintin + 包 build 绿; 端到端待用户实机(依赖分区播放行为)。
+
+## 16.18 浏览器域：切换机制修复 + 视图底色随主题 + 主题切换(2026-11-08, 用户报障「抖音切 YouTube 无法跳转/网址为空/声音还在/空白界面白底」, 三项裁决)
+
+**切换机制双 bug(11-08 批自查认账)**: ①`activatePlatformView` 会立刻翻转 `currentPlatform`, 而 `navigateTo` 的「同平台重击保持现场」判定写在翻转之后 → 恒真 → **跨平台导航永不发生**, 点击 YouTube 只是切到一个 about:blank 分区视图(白屏+网址栏空); ②种子页加载失败(YouTube 需代理)也标记已播种 → 白屏永久化。修复: 判定前置(`keepState = currentPlatform === platform || (fxg && 视图已存在)`), `seededPlatforms` 整个移除 —— 跨平台点击**必导航**到该站首页, 同平台重击保持现场, fxg 重入保持现场(首入仍载种子)。声音静音(11-08 前批)已在该构建。
+
+**视图底色随主题**: 平台分区视图与内嵌 UI 视图底色原硬编码(#ffffff/#141416) —— 暗色应用里未加载视图白底刺眼; 改 `nativeTheme.shouldUseDarkColors` 动态取值 + `updated` 事件同步全部存活视图。
+
+**主题切换(用户要求新功能)**: 浏览器工具栏新增 ◐ 按钮, auto(跟随系统)/light/dark 三态循环, `localStorage tintin-browser-theme` 记忆; CSS: 暗色媒体查询改 `html:not([data-theme='light'])` 门控 + `html[data-theme]` 显式覆盖 + color-scheme。注意: 切换的是**浏览器壳**(工具栏/面板/各视图), 平台分区里的第三方网页内容仍由各站点自身主题决定。
+- 验证: 页面语法 + tintin-browser 全量 + 包 build 绿; check:tintin 红点均属并行会话在途 openfilm-shell 重构(逐次查证归属, 与本批零交集)。
+
+## 16.19 浏览器域：「服务端」标签整体移除(2026-11-08, 用户裁决「浏览器里的服务器这个标签删除」)
+
+11-04 收尾批补活的「服务端」按钮按本裁决整体退役, 整链清除: 页面按钮(bmbar 右侧+onclick)/壳侧 `server` 动作分支/`resolveServerUrl` 注入链(browser-service options+main-hook 传值)/`serverUrlResolver` 模块量。背景沿革: 该按钮原为 SRC「系外浏览器提示位」死端(只回错误文案不上屏) → 11-04 补活(打开配置的服务端地址) → 本批用户裁决移除。验证: 全链零残留(仅存一行墓碑注释)+页面语法+tintin-browser 全量+包 build 绿。
+
+## 16.20 浏览器域：侧栏收起态标题裁字修复(2026-11-08, 用户报障「插件行图标只显示一个字」, 问「从哪个版本开始」)
+
+**自 `v0.2.2-rc.1-20261109-1021` 包始**(上一包 `v0.2.1-rc.1-20261104-1603` 正常)。两包之间宿主演示层(deepseek web)0.2.1-rc.1→0.2.2-rc.1 跟线 + openfilm-shell 0.2.7 升级落地 → 侧栏行 DOM 变形。坏的不是图标(注入的 16×16 线稿 svg 一直在)——坏的是 2026-10-19 的**收起态标题隐藏**：其「第一个叶子 span」启发式 + 侧栏类名宽度查询是按 0.2.1 行 DOM 写的，0.2.2 行 DOM 变形后失配 → 标题没隐藏，窄栏裁成首字(素/运/媒/封/视/浏)。`client.js` 该逻辑自 10-19 后从未改过(git -S 实证)——不是改坏的，是宿主演示层升级震坏的。修复(免疫演示层漂移)：注入标题时打 `data-tintin-title` 标记，隐藏按标记查(不再按 DOM 形状猜)；宽度优先读克隆行自身宿主容器实测值，旧侧栏选择器降为兜底。与并行会话在途 client.js 改动(动画白名单/openDir)不同区域无碰撞。验证: node --check + tintin-browser 全量 + check:tintin + 包 build 绿。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 

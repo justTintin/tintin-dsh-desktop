@@ -15,10 +15,12 @@ export {
   type MentionProvider,
 } from './mention-menu';
 export {
+  activatedProductNames,
   activatedSkillIds,
   collectPromptReferences,
   fileReferenceId,
   fileReferencePath,
+  productReferenceId,
   promptReferenceToken,
   resolvePromptReferences,
   skillReferenceId,

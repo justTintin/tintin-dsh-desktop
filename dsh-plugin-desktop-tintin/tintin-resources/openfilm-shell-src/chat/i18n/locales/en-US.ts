@@ -179,6 +179,7 @@ export const enUS = {
     currentTime: 'Current time',
     currentTimeUnavailable: 'Once the film is ready',
     groupAssets: 'Assets',
+    groupProducts: "Products",
     groupMoment: 'Moments',
     menu: 'Reference menu',
   },

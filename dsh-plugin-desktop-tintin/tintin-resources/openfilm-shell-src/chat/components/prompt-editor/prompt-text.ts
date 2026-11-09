@@ -44,6 +44,7 @@ export interface PromptReference extends StoredPromptReference {
  */
 export type PromptReferenceKind =
   | 'element' | 'region' | 'time' | 'range' | 'track' | 'subtitle' | 'showcase' | 'file' | 'card' | 'skill' | 'example' | 'voice'
+  | 'product'
   | 'clipMg' | 'clipVideo' | 'clipVoice' | 'clipSfx' | 'clipMusic' | 'clipCaption';
 
 /* The id prefix of a file reference, followed by the workspace-relative path, which is
@@ -86,6 +87,37 @@ export function activatedSkillIds(
   const out: string[] = [];
   for (const ref of references) {
     const name = skillReferencePackage(ref.id);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
+}
+
+/* The id prefix of a TinTin product reference, followed by the product's name on the
+   server (TinTin 2026-11-09 用户裁决: 产品进 @ 菜单). As with skills, the name is all
+   the reference holds, so it expands without the host. */
+const PRODUCT_REFERENCE_PREFIX = 'product:';
+
+export function productReferenceId(productName: string): string {
+  return `${PRODUCT_REFERENCE_PREFIX}${productName}`;
+}
+
+/** Null if not a product reference (or the name is empty). */
+export function productReferenceName(id: string): string | null {
+  if (!id.startsWith(PRODUCT_REFERENCE_PREFIX)) return null;
+  return id.slice(PRODUCT_REFERENCE_PREFIX.length) || null;
+}
+
+/** The TinTin products this message names, deduplicated, in order. */
+export function activatedProductNames(
+  references: readonly { id: string }[] | undefined,
+): string[] {
+  if (!references?.length) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const ref of references) {
+    const name = productReferenceName(ref.id);
     if (!name || seen.has(name)) continue;
     seen.add(name);
     out.push(name);

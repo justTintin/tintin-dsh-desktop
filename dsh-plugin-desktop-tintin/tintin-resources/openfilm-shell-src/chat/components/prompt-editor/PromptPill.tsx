@@ -12,7 +12,7 @@
 
 import React from 'react';
 import {
-  AudioLines, Blocks, Brackets, Captions, Clapperboard, Clock3, Crop, Film, Loader2, Mic, MousePointer2, Music, Paperclip,
+  AudioLines, Blocks, Brackets, Captions, Clapperboard, Clock3, Crop, Film, Loader2, Mic, MousePointer2, Music, Package, Paperclip,
   Quote, Rows3, Shapes, SquareDashed, Video, Waves,
 } from 'lucide-react';
 import {
@@ -43,6 +43,9 @@ export const PILL_ICON: Record<PromptReferenceKind, React.ComponentType<{ size?:
   /* A skill: blocks, a piece of craft inserted into the sentence. Other pills point at
      things in the film; this one points at a way of working. */
   skill: Blocks,
+  /* TinTin(2026-11-09 用户裁决): a product of the server's library, referenced for its
+     selling points and specs - a tag on the goods. */
+  product: Package,
   /* An example film (another film, not this one): a clapperboard. */
   example: Clapperboard,
   /* A voice of the library, to speak a voice-over in: a sound's lines, not a clip's microphone. */

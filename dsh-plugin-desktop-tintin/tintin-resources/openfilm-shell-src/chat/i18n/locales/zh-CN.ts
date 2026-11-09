@@ -179,6 +179,7 @@ export const zhCN: Words = {
     currentTime: '当前时间',
     currentTimeUnavailable: '影片准备好后可用',
     groupAssets: '素材',
+    groupProducts: "产品",
     groupMoment: '时刻',
     menu: '引用菜单',
   },

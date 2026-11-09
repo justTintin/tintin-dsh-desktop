@@ -27,6 +27,40 @@ const STYLE = [
   '.tintin-pd-status{padding:6px 12px 12px;color:#8a8a90;font-size:11px;min-height:18px;white-space:pre-wrap}',
 ].join('\n');
 
+type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: unknown; goods_no?: unknown; spec_no?: unknown; features?: unknown; selling_points?: unknown; notes?: unknown; keywords?: unknown; barcode?: unknown; warehouse?: unknown };
+
+/** 产品资料的结构化文本(品牌·型号·品类·货号 + 性能参数 + 卖点逐条 + 备注/关键词/条码/仓库)。
+   面板注入与 @ 引用(壳桥 products.texts)共用这一份, 智能体拿到的上下文同源。 */
+export function productContextOf(item: Record<string, unknown>): string {
+  const str = (keys: string[]): string => {
+    for (const k of keys) { const v = item[k]; if (typeof v === 'string' && v.trim()) return v.trim() }
+    return ''
+  };
+  const lines: string[] = [];
+  const head4 = [str(['brand']), str(['model']), str(['category']), str(['goods_no']), str(['spec_no'])].filter(Boolean).join(' · ');
+  lines.push(`【产品】${head4 || name0(item)}`);
+  const features = str(['features']);
+  if (features) lines.push(`性能参数：${features}`);
+  const selling = str(['selling_points']);
+  if (selling) for (const line of selling.split('\n')) if (line.trim()) lines.push(`卖点：${line.trim()}`);
+  /* 资料补全(2026-10-25 报障: 部分产品 features/selling_points 为空): notes/keywords/
+     规格/条码/仓库一并带上, 智能体拿到的上下文尽量全。 */
+  const notes = str(['notes']);
+  if (notes) lines.push(`备注：${notes}`);
+  const keywords = item.keywords;
+  if (Array.isArray(keywords) && keywords.length) lines.push(`关键词：${keywords.map(String).join('、')}`);
+  const barcode = str(['barcode']);
+  if (barcode) lines.push(`条码：${barcode}`);
+  const warehouse = str(['warehouse']);
+  if (warehouse) lines.push(`仓库：${warehouse}`);
+  return lines.join('\n');
+}
+
+function name0(item: ProductRow): string {
+  const parts = [item.brand, item.model, item.category].map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean);
+  return parts.length ? parts.join(' ') : '未命名产品';
+}
+
 const mount = (): void => {
   try {
     const native = (window as unknown as {
@@ -123,35 +157,6 @@ const mount = (): void => {
       panel.style.display = 'none';
     };
 
-    const contextOf = (item: Record<string, unknown>): string => {
-      const str = (keys: string[]): string => {
-        for (const k of keys) { const v = item[k]; if (typeof v === 'string' && v.trim()) return v.trim() }
-        return ''
-      };
-      const lines: string[] = [];
-      const head4 = [str(['brand']), str(['model']), str(['category']), str(['goods_no']), str(['spec_no'])].filter(Boolean).join(' · ');
-      lines.push(`【产品】${head4 || name0(item)}`);
-      const features = str(['features']);
-      if (features) lines.push(`性能参数：${features}`);
-      const selling = str(['selling_points']);
-      if (selling) for (const line of selling.split('\n')) if (line.trim()) lines.push(`卖点：${line.trim()}`);
-      /* 资料补全(2026-10-25 报障: 部分产品 features/selling_points 为空): notes/keywords/
-         规格/条码/仓库一并带上, 智能体拿到的上下文尽量全。 */
-      const notes = str(['notes']);
-      if (notes) lines.push(`备注：${notes}`);
-      const keywords = item.keywords;
-      if (Array.isArray(keywords) && keywords.length) lines.push(`关键词：${keywords.map(String).join('、')}`);
-      const barcode = str(['barcode']);
-      if (barcode) lines.push(`条码：${barcode}`);
-      const warehouse = str(['warehouse']);
-      if (warehouse) lines.push(`仓库：${warehouse}`);
-      return lines.join('\n');
-    };
-    const name0 = (item: Record<string, unknown>): string => {
-      const parts = [item.brand, item.model, item.category].map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean);
-      return parts.length ? parts.join(' ') : '未命名产品';
-    };
-
     const rowOf = (item: Record<string, unknown>): HTMLElement => {
       const row = document.createElement('div'); row.className = 'tintin-pd-row';
       const main = document.createElement('div'); main.className = 'tintin-pd-main';
@@ -161,12 +166,12 @@ const mount = (): void => {
       meta.textContent = [item.category, item.goods_no ? `货号 ${item.goods_no}` : ''].map((v) => String(v)).filter(Boolean).join(' · ');
       main.append(name, meta); row.append(main);
       row.onclick = () => {
-        /* 注入 = 产品资料结构化文本进会话输入框(粘贴事件, Lexical 原生接住) */
+        /* 注入 = 产品资料结构化文本进会话输入框(零宽热身 + 逐行 beforeinput, 2026-11-09) */
         void (async () => {
           try {
             const detail = await native.products.call({ op: 'detail', id: item.id });
             const item0 = (detail && typeof detail === 'object' && 'item' in detail ? (detail as { item?: Record<string, unknown> }).item : detail) ?? item;
-            inject(contextOf(item0));
+            inject(productContextOf(item0));
           } catch (error) {
             status.textContent = '产品资料获取失败：' + (error instanceof Error ? error.message : String(error));
           }
@@ -174,8 +179,6 @@ const mount = (): void => {
       };
       return row;
     };
-    const name0Of = (item: Record<string, unknown>): string => name0(item);
-    void name0Of;
 
     const load = async (q: string): Promise<void> => {
       status.textContent = '搜索产品…';
@@ -224,10 +227,8 @@ const mount = (): void => {
   }
 };
 
-function name0(item: Record<string, unknown>): string {
-  const parts = [item.brand, item.model, item.category].map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean);
-  return parts.length ? parts.join(' ') : '未命名产品';
-}
-
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
 else setTimeout(mount, 0);
+
+/** The product row as the products.call channel returns it (TinTin panel + @ 引用同源). */
+export type TinTinProduct = ProductRow;

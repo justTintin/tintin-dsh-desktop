@@ -108,6 +108,14 @@ interface AppBridge {
     discard(id: string): Promise<unknown>;
     reveal(): Promise<unknown>;
   };
+  /** TinTin(2026-11-09 用户裁决: 产品进 @ 菜单): the server's product library, for @ references.
+      Optional - only the TinTin shell provides it; a draft restored elsewhere loses its label. */
+  products?: {
+    /** The library's products (a search, empty = the first page): id, name, and what it is. */
+    search(q: string): Promise<Array<{ id: string; name: string; description: string }>>;
+    /** What the agent reads for each named product: its specs and selling points, as one block. */
+    texts(names: string[]): Promise<Array<{ name: string; text: string }>>;
+  };
   /** Settings → Developer: `logs`, each turn shows its full log; `changes`, what it changed in the files, under its reply */
   developer: { get(): Promise<DeveloperPrefs>; onChange(listener: (prefs: DeveloperPrefs) => void): () => void };
 }

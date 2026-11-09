@@ -179,6 +179,7 @@ export const es: Words = {
     currentTime: 'Momento actual',
     currentTimeUnavailable: 'Cuando la película esté lista',
     groupAssets: 'Recursos',
+    groupProducts: "Productos",
     groupMoment: 'Momentos',
     menu: 'Menú de referencias',
   },

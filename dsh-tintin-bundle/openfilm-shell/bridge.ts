@@ -15,6 +15,7 @@
  *   4. capture/审批由主进程实现(审批=官方 approve 口径自动放行,阶段 1 已定)。
  */
 import { flushSync } from 'react-dom';
+import { productContextOf } from './tintin-products';
 import type { CommunityItem, HostAgent, HostAsk, HostProject as Project, HostUpdate, HostUpdateState, StudioCommand, StudioHost, StudioRef, StudioSelection } from 'openfilm/studio-ui/lib/host.ts';
 
 type Listener<T> = (value: T) => void;
@@ -35,6 +36,8 @@ interface Native {
   chat: Record<string, (...args: never[]) => Promise<unknown>>;
   /* the composer's Skills button */
   skills: Record<string, (...args: never[]) => Promise<unknown>>;
+  /* TinTin(2026-11-09): the server's product library, proxied by the main process */
+  products: { call(payload: { op: 'search' | 'detail'; q?: string; limit?: number; id?: unknown }): Promise<unknown> };
   prefs: { get(): Promise<AppPrefs>; set(next: Partial<AppPrefs>): Promise<unknown>; onChange(listener: Listener<AppPrefs>): Stop };
   saveLayout(layout: { chatOpen: boolean; chatWidth: number }): void;
   setTheme(theme: Theme): void;
@@ -458,6 +461,35 @@ function commandFor(ref: StudioRef): StudioCommand {
         listing.openfilm = listing.openfilm.filter((s) => String(s.source ?? '') !== 'server' || s.installed === true);
       }
       return listing;
+    },
+  },
+  /* TinTin(2026-11-09 用户裁决「做」): the server's product library as @ references —
+     search feeds the @ menu, texts turns named pills into the agent's context block
+     (productContextOf, the same text the picker panel injects). */
+  products: {
+    search: async (q: string) => {
+      const out = await native.products.call({ op: 'search', q, limit: 50 }) as { items?: Array<Record<string, unknown>> } | undefined;
+      return (out?.items ?? []).map((item) => ({
+        id: String(item.id ?? ''),
+        name: [item.brand, item.model].map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean).join(' ')
+          || [item.brand, item.model, item.category].map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean).join(' ')
+          || '未命名产品',
+        description: [item.category, item.goods_no ? `货号 ${item.goods_no}` : ''].map((v) => String(v)).filter(Boolean).join(' · '),
+      })).filter((p) => p.id);
+    },
+    texts: async (names: string[]) => {
+      /* names = pill id 里的服务端产品 id(product: 前缀已被剥掉) —— 直取详情, 无搜索回环 */
+      const texts: Array<{ name: string; text: string }> = [];
+      for (const id of names) {
+        try {
+          const detail = await native.products.call({ op: 'detail', id }) as { item?: Record<string, unknown> } & Record<string, unknown>;
+          const item0 = detail.item ?? detail;
+          const brand = typeof item0.brand === 'string' ? item0.brand.trim() : '';
+          const model = typeof item0.model === 'string' ? item0.model.trim() : '';
+          texts.push({ name: [brand, model].filter(Boolean).join(' ') || id, text: productContextOf(item0) });
+        } catch { /* one product failing must not lose the others */ }
+      }
+      return texts;
     },
   },
   asks: { get: asks.get, onChange: asks.on, answer: (id: string, allow: boolean) => answerAsk(id, allow) },
