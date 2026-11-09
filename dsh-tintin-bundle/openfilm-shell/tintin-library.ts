@@ -250,12 +250,20 @@ const drawer = document.createElement('div');
         page += 1;
         more.style.display = exhausted ? 'none' : 'block';
         status.textContent = '';
+        /* 首屏不满一屏时自动续填(2026-11-09 用户要求: 滚动到底自动翻页; 容器高时滚动条
+           永远不出现, 只靠滚动事件会卡在第一页) */
+        if (!exhausted) window.setTimeout(() => { if (!busy && !exhausted && list.scrollHeight <= list.clientHeight + 4) void load(false) }, 60);
       } catch (error) {
         status.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
       } finally {
         busy = false;
       }
     }
+    /* 滚动到底自动翻页(2026-11-09 用户要求, 对齐官方面板的无限滚动): 距底 ≤120px 即续一页 */
+    list.addEventListener('scroll', () => {
+      if (busy || exhausted) return;
+      if (list.scrollTop + list.clientHeight >= list.scrollHeight - 120) void load(false);
+    });
     more.onclick = () => { void load(false) };
     let searchTimer = 0;
     search.oninput = () => { window.clearTimeout(searchTimer); searchTimer = window.setTimeout(() => { page = 1; exhausted = false; void load(true) }, 300) };
