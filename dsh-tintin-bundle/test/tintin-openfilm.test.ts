@@ -1,14 +1,13 @@
 // test/tintin-openfilm.test.ts — OpenFilm 服务端驱动接缝回归
-// （lib/openfilm/*：providers.json 注入、Studio 地址解析/运行时定位、技能同步）。
+// （lib/openfilm/*：providers.json 注入、Studio 地址解析/运行时定位）。
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mergeOpenaiCompat, mergeTinTinService, syncProvidersAt, syncProvidersFile, TINTIN_SERVICE_ID } from '../lib/openfilm/providers-seed.js'
+import { mergeTinTinProvider, mergeTinTinService, syncProvidersAt, syncProvidersFile, TINTIN_SERVICE_ID } from '../lib/openfilm/providers-seed.js'
 import {
   editorFingerprint, lastStudioProject, parseStudioAddress, parseStudioProject, readStudioRun, reconcileStudioInstance, resolveOpenfilmRuntime, seedStudioRecents, serverServesOwnedEditor, studioEnv, studioPageUrl,
 } from '../lib/openfilm/studio-runtime.js'
-import { MANAGED_MARKER, syncBundledSkill } from '../lib/openfilm/skill-sync.js'
 import { syncOpenfilmLibs, THREE_FILES, threeLibDir } from '../lib/openfilm/libs-sync.js'
 import { syncOpenfilmLibrary } from '../lib/openfilm/library-sync.js'
 import { createOpenfilmChannels } from '../lib/openfilm/plugin.js'
@@ -261,35 +260,6 @@ describe('studio-runtime', () => {
   })
 })
 
-describe('skill-sync', () => {
-  const source = (dir) => {
-    const path = join(dir, 'source.md')
-    writeFileSync(path, `---\nname: openfilm\n---\n${MANAGED_MARKER}\nbody`)
-    return path
-  }
-
-  it('缺失时安装、相同则 current、我们改过则 updated', () => {
-    const home = tempDir()
-    const dir = tempDir()
-    const src = source(dir)
-    expect(syncBundledSkill({ dshHome: home, sourcePath: src }).status).toBe('installed')
-    expect(syncBundledSkill({ dshHome: home, sourcePath: src }).status).toBe('current')
-    writeFileSync(src, `---\nname: openfilm\n---\n${MANAGED_MARKER}\nnew body`)
-    expect(syncBundledSkill({ dshHome: home, sourcePath: src }).status).toBe('updated')
-  })
-
-  it('同名但非本插件管理的技能不覆盖', () => {
-    const home = tempDir()
-    const dir = tempDir()
-    const src = source(dir)
-    const target = join(home, 'skills', 'openfilm')
-    mkdirSync(target, { recursive: true })
-    writeFileSync(join(target, 'SKILL.md'), '---\nname: openfilm\n---\nperson wrote this')
-    expect(syncBundledSkill({ dshHome: home, sourcePath: src }).status).toBe('skipped')
-    expect(readFileSync(join(target, 'SKILL.md'), 'utf8')).toContain('person wrote this')
-  })
-})
-
 describe('libs-sync（离线 three.js）', () => {
   const seedRuntime = (version = '0.184.0') => {
     const root = tempDir()
@@ -537,36 +507,37 @@ describe('openfilm skills channel', () => {
   })
 })
 
-describe('openai 兼容注入（server.openfilmCompat，2026-10-22 服务端 /v1 实测对齐）', () => {
-  it('mergeOpenaiCompat 只补未设置的 use，不覆盖人的选择；asr+tts 都指向兼容 provider', () => {
-    expect(mergeOpenaiCompat({ use: { asr: 'elevenlabs' }, keys: { elevenlabs: 'k' } }).use).toEqual({ asr: 'elevenlabs', tts: 'openai' })
-    const filled = mergeOpenaiCompat({})
-    expect(filled.use).toEqual({ asr: 'openai', tts: 'openai' })
+describe('tintin provider 接线（server.openfilmCompat，2026-11-09 用户裁决：一等 provider 取代假 OpenAI）', () => {
+  it('mergeTinTinProvider 补未设置的动词、把假 OpenAI 的旧选择迁到 tintin；真 openai key 与人的其它选择不动', () => {
+    expect(mergeTinTinProvider({ use: { asr: 'elevenlabs' }, keys: { elevenlabs: 'k' } }).use).toEqual({ asr: 'elevenlabs', tts: 'tintin', music: 'tintin', sfx: 'tintin', cutout: 'tintin', image: 'tintin', 'image-search': 'tintin', video: 'tintin' })
+    expect(mergeTinTinProvider({ use: { tts: 'openai' }, keys: {} }).use.tts).toBe('tintin')
+    expect(mergeTinTinProvider({ use: { tts: 'openai' }, keys: { openai: 'real' } }).use.tts).toBe('openai')
+    const filled = mergeTinTinProvider({})
+    expect(filled.use.tts).toBe('tintin')
+    expect(filled.use.music).toBe('tintin')
+    expect(filled.use.video).toBe('tintin')
   })
 
-  it('syncProvidersAt openaiCompat=true 时隔离 home 补 use.asr 且幂等；缺省不动 use', () => {
+  it('syncProvidersAt openaiCompat=true 时隔离 home 补 use.asr 指向 tintin 且幂等；缺省不动 use', () => {
     const file = join(tempDir(), 'providers.json')
     expect(syncProvidersAt({ filePath: file, serverUrl: 'http://a:1', openaiCompat: true }).changed).toBe(true)
     const stored = JSON.parse(readFileSync(file, 'utf8'))
-    expect(stored.use.asr).toBe('openai')
+    expect(stored.use.asr).toBe('tintin')
     expect(stored.custom[0].id).toBe(TINTIN_SERVICE_ID)
     expect(syncProvidersAt({ filePath: file, serverUrl: 'http://a:1', openaiCompat: true }).changed).toBe(false)
     const plain = syncProvidersAt({ filePath: join(tempDir(), 'plain.json'), serverUrl: 'http://a:1' })
     expect(JSON.parse(readFileSync(plain.path, 'utf8')).use).toBeUndefined()
   })
 
-  it('studioEnv 注入 OPENFILM_OPENAI_URL+占位 key；已有 env key 或人的 keys.openai 时让位', () => {
+  it('studioEnv 注入 TINTIN_SERVER_URL（tintin provider 的连接判据）；已注入时不重复', () => {
     const root = tempDir()
     const injected = studioEnv(null, { DSH_HOME: root }, { openaiCompatUrl: 'http://192.168.111.31:8000/' })
-    expect(injected.OPENFILM_OPENAI_URL).toBe('http://192.168.111.31:8000')
-    expect(injected.OPENAI_API_KEY).toBe('tintin-server')
-    const keepEnv = studioEnv(null, { DSH_HOME: root, OPENAI_API_KEY: 'sk-person' }, { openaiCompatUrl: 'http://x:1' })
-    expect(keepEnv.OPENFILM_OPENAI_URL).toBeUndefined()
-    expect(keepEnv.OPENAI_API_KEY).toBe('sk-person')
-    mkdirSync(join(root, 'openfilm-studio'), { recursive: true })
-    writeFileSync(join(root, 'openfilm-studio', 'providers.json'), JSON.stringify({ keys: { openai: 'sk-real-openai' } }))
-    const keepFile = studioEnv(null, { DSH_HOME: root }, { openaiCompatUrl: 'http://x:1' })
-    expect(keepFile.OPENFILM_OPENAI_URL).toBeUndefined()
-    expect(keepFile.OPENAI_API_KEY).toBeUndefined()
+    expect(injected.TINTIN_SERVER_URL).toBe('http://192.168.111.31:8000')
+    expect(injected.OPENAI_API_KEY).toBeUndefined()
+    expect(injected.OPENFILM_OPENAI_URL).toBeUndefined()
+    const keepEnv = studioEnv(null, { DSH_HOME: root, TINTIN_SERVER_URL: 'http://x:1' }, { openaiCompatUrl: 'http://x:1' })
+    expect(keepEnv.TINTIN_SERVER_URL).toBe('http://x:1')
+    const noCompat = studioEnv(null, { DSH_HOME: root }, { openaiCompatUrl: '' })
+    expect(noCompat.TINTIN_SERVER_URL).toBeUndefined()
   })
 })

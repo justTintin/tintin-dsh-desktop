@@ -258,17 +258,10 @@ export function studioEnv(runtime, env = process.env, { openaiCompatUrl } = {}) 
   if (String(next.OPENFILM_HOME || '').trim() === '') next.OPENFILM_HOME = tintinStudioHome(env)
   if (String(next.OPENFILM_STUDIO_PORT || '').trim() === '') next.OPENFILM_STUDIO_PORT = '4788'
   if (runtime?.browsers && !next.PLAYWRIGHT_BROWSERS_PATH) next.PLAYWRIGHT_BROWSERS_PATH = runtime.browsers
+  /* TinTin 服务端=一等 provider（2026-11-09 用户裁决：不再借 OpenAI 兼容外皮）：
+     把服务端地址交给内置 tintin provider（providers/tintin.mjs，ready 以此判连接）。 */
   const compat = String(openaiCompatUrl || '').trim().replace(/\/+$/, '')
-  if (compat && String(next.OPENFILM_OPENAI_URL || '').trim() === '' && String(next.OPENAI_API_KEY || '').trim() === '') {
-    let personOpenaiKey = false
-    try {
-      personOpenaiKey = Boolean(JSON.parse(readFileSync(join(next.OPENFILM_HOME, 'providers.json'), 'utf8'))?.keys?.openai)
-    } catch { /* 无文件或坏文件：照常注入 */ }
-    if (!personOpenaiKey) {
-      next.OPENFILM_OPENAI_URL = compat
-      next.OPENAI_API_KEY = 'tintin-server'
-    }
-  }
+  if (compat && String(next.TINTIN_SERVER_URL || '').trim() === '') next.TINTIN_SERVER_URL = compat
   return next
 }
 

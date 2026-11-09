@@ -126,6 +126,8 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 
 ## 8. 媒体 provider(服务端为默认)
 
+> **TinTin 服务端=一等内置 provider(2026-11-09 用户裁决: 不再借 OpenAI 兼容外皮)**:`providers/tintin.mjs`(源在 dsh-tintin-bundle/lib/openfilm/providers/,fetch-openfilm-runtime 每次 fetch 重拷+重挂 index.mjs OWN——npm install 会重置 openfilm 包)。连接判据=`TINTIN_SERVER_URL`(studio-runtime 从 server.url 注入,ready() 以此判,无密钥)。卡面模型=服务端真名:配音 IndexTTS(/indextts/tts,/voice/samples 选音色)、转写 Whisper(/whisper/transcribe 带词级时间戳)、音乐 MusicGen BGM(MCP create_music 同步直出)、音效 SFX(/audio/gen/sfx——**2026-11-09 服务端 500 KeyError path 待修**,REST/MCP 同源)、抠图 Matting(/matting→PNG 本体)、图片/视频 ComfyGen(MCP create_image/create_video 异步任务轮询)、图片搜索 /material/stock_search。verbs 接线由 providers-seed mergeTinTinProvider 完成(补未设置+把假 OpenAI 时代的 use 种子迁到 tintin——keys.openai 存在时不动人的真选择);OPENFILM_OPENAI_URL/OPENAI_API_KEY 注入同步退役。CDP 实测:卡面已连接+全模型名+假 GPT 名消失。
+
 - `server.openfilmCompat` **默认开,仅显式 `false` 关闭**(2026-10-24 用户裁决:服务端的服务商 = 视频剪辑默认服务商;门控在 channel-table `compatUrl` 与 bundle `createOpenfilmSync` 两处同口径);隔离 Studio home 种 `use.asr/tts=openai` 并注入 `OPENFILM_OPENAI_URL` + 占位 key;人的真 openai key 存在时自动让位;
 - 实证(2026-10-24):影片智能体补丁 `<channelHome>/tintin/film-agent.patch.yml` = provider `tintin-server`(openai-completions, `<server>/llm`)+ 模型 deepseek-v4-flash/pro,`provider`/`model` 默认路由已实测落盘;
 - 服务端 `/v1/audio/transcriptions` 对齐(asr form 字段 + verbose_json words);`/v1/audio/speech` wav 对齐;
@@ -524,6 +526,38 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 ## 16.23 浏览器域：视图底色改 web 层主题判定(2026-11-08, 用户报障「白底还在, 不是说跟客户端主题吗」)
 
 11-08 前批的 `themedBackground` 读 `nativeTheme.shouldUseDarkColors` —— 其语义=「系统深浅 + themeSource 覆盖」, 而应用的深色是 **web 层刷的 `body[data-ds-dark-theme]`**(theme-presenter, 不经过 nativeTheme): 应用内主题偏好=「跟随系统」且 Windows 本身为浅色时, 界面深色(误导)而 nativeTheme 报浅色 → 视图白底。这正是媒体三视图 1018 报障「三视图深色与原生不统一」的同一判定洞(hostTheme.ts 头注的教训, 此处又踩一遍)。修复: `themedBackground` 改 **web 层真值判定** —— 主进程从宿主窗口 `executeJavaScript` 探测 `body[data-ds-dark-theme]`/`html[data-ds-theme-source]`(hostTheme 同链), 注册时+宿主 dom-ready/did-navigate(含页内)探针持续刷新, 变化即同步全部存活视图; `nativeTheme` 降为探测不可达时的兜底。教训入册: **凡视觉主题跟随, 一律读 web 层挂载点, 不读 nativeTheme**(1003 二次触犯)。行数: browser-service 1000 压线内。验证: 14 文件 107 用例+包 build+check:tintin 绿。
+
+## 16.24 浏览器域：登录徽标误报修复 + 标签导航地址栏补线(2026-11-08, 用户报障「只有抖音登录了但都显示已登录」+「跳 YouTube 地址栏空」)
+
+- **登录徽标误报(用户实锤: 小红书弹登录框行上亮「已登录」)**: 判据原=「分区里该平台域 cookie 数>0」——任何访问都会落匿名功能 cookie(ttwid/设备指纹等, 11-07 取证匿名 jar 即 62 条), YouTube/小红书全程未登录也亮。修复: platform-meta 新增 `LOGIN_COOKIE_NAMES`(各平台会话级 cookie: douyin=sessionid 族/bilibili=SESSDATA/kuaishou=web_st 族/xiaohongshu=web_session/youtube=SID 族/weixin)+纯函数 `hasLoginCookie`, `browser:loginStatus` 改会话 cookie 判定(counts 值语义=1/0, 页面 n>0 判定不变); 2 新用例(会话判登录/匿名 jar 不误报/未知平台不登录);
+- **标签导航地址栏空**: 标签路径回推了 tab 栏但**漏推 `tintin-browser-page:state`**(地址栏/导航按钮数据源, 平台单视图有 pushPageState、标签五处焦点/导航点全漏)——跳几次后有了=某次平台行路径补推。修复: tab-engine 五点(tabs did-navigate/page-title-updated/tabOpen/tabActivate/tabClose 焦点迁移)接 `deps.pushState`(宿主 pushPageState 注入);
+- 验证: 14 文件 109 用例+包 build+check:tintin 绿。
+
+## 16.25 浏览器域：地址栏「发起即显示」正常浏览器语义修复(2026-11-08, 用户报障「点 YouTube 地址栏还是空, 等加载才有」, 质问「加载逻辑是不是把正常浏览器改了」)
+
+是——地址栏显示时机接错了信号：只依赖 did-navigate（导航**确认后**）推地址栏，did-start-loading 只推平台单视图、标签路径没有；YouTube 慢/不可达时 did-navigate 迟迟不来 → 地址栏一直空（commit 前 `getURL()` 返回 ''，页面还因焦点保护保留旧值）。修复=正常浏览器三段语义:
+
+- **发起即显示**: 新增 `pendingNavUrl` 意图池——平台行 navigateTo/标签 seed/弹窗就地打开三处 loadURL **之前**登记目标 URL 并立即 pushPageState; pushPageState 加载中且主框架 URL 未定时用意图 URL 占位;
+- **转圈**: 标签视图补 did-start-loading/did-stop-loading 推送（原只有平台单视图有）;
+- **真实接管**: did-navigate（commit 确认）清意图、标签 URL 元数据更新; did-navigate-in-page 补标签 URL 同步（did-commit 事件在当前 Electron 类型面不存在, 已验证改用）;
+- 验证: 14 文件 109 用例+包 build 绿。点击 YouTube 瞬间: 地址栏= https://www.youtube.com/ + 转圈; 不可达时保持占位+终态回真实值（空/错误页）。
+
+## 16.26 浏览器域：抖音配对下载修复(2026-11-08, 用户报障「解析后点下载只下音频无进度, 嗅探列表点视频那条才对, 每点一次列表多两条」
+
+三问同根: **嗅探器修复后第一次正常工作暴露了「抓第一条流」的缺陷** —— 抖音播放器同时发视频流+音频流两组 douyinvod 请求(嗅探列表成对出现=问题3), 解析链捕获差分里 `break` 在第一条 → 抖音音频流先到 → 只下音频且秒完成(无进度=小文件直下 1-2s 完成即撤行, 问题1); 用户在列表手点 badge=「视频」的那条=确实点中了视频流(问题2, 与按钮同引擎、唯一差别是选没选对流)。修复:
+
+- **配对捕获**(页面 dyStartSniffDownload): 差分里选 badge=视频 的首条为主流, 同批音频流作 `audioUrl` 一并交引擎; 视频流先到而音频未现时多等一拍(6s 内);
+- **audioUrl 直通**(壳层 sniffDownload): 可选 audioUrl 透传 startMedia → 引擎既有**双流下载+FFmpeg 合并**路线(B站扩展链同款), 进度=双流聚合(视频 x% · 音频 y%);
+- 嗅探面板逐条「下载」保持单流语义不变(高级用户可单下音频/视频); 行数: browser-service 1000 压线内。验证: 14 文件 109 用例+包 build+check:tintin 绿; 端到端待重打包实机(标题命名+双流合并+聚合进度)。
+
+## 16.27 浏览器域：下载入口收敛+后台标签捕获+嗅探误判修复(2026-11-08, 用户三问「media.mp4 谁下的/两个下载按钮/捕获中反复从头播放退全屏」+ B站嗅探刷屏)
+
+三问同源互咬: **media.mp4=Chromium 原生 will-download 接管**（douyinvod 无尾段文件名→占位名；来源=捕获流程把当前视图导航到视频页，部分媒体响应触发原生下载）——同时这个导航让**正在看的页面被切走、配对窗口跨导航边界混乱、多轮 go 反复重载**（=反复从头播放+退出全屏, 问题 3）; 面板逐条「下载」与解析卡「下载视频」双入口并存（问题 2）。**B站嗅探刷屏**: isMediaUrl 的 SRC 照搬规则是无边界 `includes('.ts'/'.m4s')`——B站埋点 `data.bilibili.com/log/web` 的 query 恰含这些子串, 每次上报被抓成「音频」刷屏。修复:
+
+- **后台标签捕获**: dyStartSniffDownload 改 `tabOpen({platform:'douyin'})` 开后台标签承载视频页, 当前页面/全屏/播放**零打扰**; 捕获成功或 25s 超时都关后台标签（media.mp4 随原生接管源消失而绝迹）;
+- **下载入口收敛(用户裁决「一个视频不要有两个下载按钮」+「全删面板下载按钮」)**: 媒体嗅探面板与 B站助手推送区改**纯诊断展示**（名称+类型徽标）, 下载入口唯一=解析卡「下载视频」; sniffBusy/biliBusy 孤儿清理;
+- **isMediaUrl 边界修复**: 扩展名必须出现在**路径段**（/ 后 ? 前）, 替代无边界 includes; 新增埋点/日志主机黑名单（/log//data.bilibili.com/report）; 2 新用例(埋点不误报/路径段边界), 14 文件 **111 用例**全绿;
+- 验证: 页面语法+包 build+check:tintin 绿; 行数 browser-service 1000 内。端到端待重打包实机。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 

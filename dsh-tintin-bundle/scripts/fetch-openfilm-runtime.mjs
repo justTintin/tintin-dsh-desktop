@@ -117,6 +117,21 @@ if (!existsSync(npmCli)) {
   }
 }
 
+// 2b. TinTin 一等 provider（2026-11-09 用户裁决：TinTin 服务=内置连接服务，不借 OpenAI 外皮）：
+// 源文件在 dsh-tintin-bundle/lib/openfilm/providers/tintin.mjs（tracked）；npm install 重置整个
+// openfilm 包，因此每次 fetch 后重拷并重挂 index.mjs（幂等，含 install 跳过时）。
+const tintinSrc = join(repoRoot, 'dsh-tintin-bundle', 'lib', 'openfilm', 'providers', 'tintin.mjs')
+const tintinDst = join(openfilmDir, 'node_modules', 'openfilm', 'studio', 'server', 'providers', 'tintin.mjs')
+const tintinIdx = join(openfilmDir, 'node_modules', 'openfilm', 'studio', 'server', 'providers', 'index.mjs')
+if (existsSync(tintinSrc) && existsSync(tintinIdx)) {
+  copyFileSync(tintinSrc, tintinDst)
+  let idx = readFileSync(tintinIdx, 'utf8')
+  const importLine = "import keenable from './keenable.mjs';"
+  if (!idx.includes("from './tintin.mjs'")) idx = idx.replace(importLine, `${importLine}\nimport tintin from './tintin.mjs';`)
+  if (!idx.includes('openfilm, tintin, local')) idx = idx.replace('keenable, openfilm, local]', 'keenable, openfilm, tintin, local]')
+  writeFileSync(tintinIdx, idx)
+  console.log('tintin provider vendored + registered in providers/index.mjs')
+}
 // 3. Playwright browsers — the build matching the vendored playwright-core,
 // into PLAYWRIGHT_BROWSERS_PATH so the packaged app never first-run-downloads.
 const playwrightCli = join(openfilmDir, 'node_modules', 'playwright-core', 'cli.js')

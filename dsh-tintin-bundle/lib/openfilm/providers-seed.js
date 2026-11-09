@@ -18,13 +18,14 @@ export const TINTIN_SERVICE_NAME = 'TinTin 服务端'
  * (ui CustomServices.tsx), so '\n' shows each service on its own row instead of one wrapped blob. */
 export const TINTIN_SERVICE_NOTE = [
   'TinTin AI service platform (no key).',
+  'Generation (preferred): MCP tools at /mcp - create_image (mode=t2i text-to-image | mode=cover), create_video (comfygen t2v, async task), create_music (MusicGen BGM, sync), create_audio (kind=sfx | kind=tts voice clone), create_digital_human (image|lipsync), upload_file, task_status_unified (polling), server_health.',
   'tts: POST /indextts/tts {text, resp:"json", sample_id} -> {audio_url} (relative; call again with --path <audio_url> --out <name>);',
   'voices: GET /voice/samples, GET /indextts/qwen3/voices;',
   'asr: POST /whisper/transcribe multipart file=<wav|mp4> + fmt=json + mode=raw -> {segments:[{text,start,end,words:[{word,start,end}]}]} (word timings);',
-  'music: POST /audio/gen/bgm {prompt, style, duration} -> {url, duration} (absolute);',
-  'sfx: POST /audio/gen/sfx;',
+  'matting: POST /matting multipart file=<image> -> PNG bytes (binary image body, no JSON wrapper);',
+  'music: POST /audio/gen/bgm {prompt, style, duration} -> {url, duration} (absolute; first call may take minutes while the model loads);',
+  'sfx: POST /audio/gen/sfx {prompt} -> {url} (BROKEN 2026-11-09: 500 KeyError path, trace tt_bc0775a9a7b1 / tt_586738f76833; MCP create_audio kind=sfx returns the same - server-side fix pending);',
   'stock images: POST /material/stock_search {query, kind:"image"} -> {items:[{url}]}.',
-  'No text-to-image or text-to-video endpoint is available yet (comfygen-based generation is pending server-side).',
 ].join('\n')
 
 const plain = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {})
@@ -58,22 +59,25 @@ export function mergeTinTinService(raw, serverUrl) {
 }
 
 /**
- * Verbs the OpenAI-compat provider (`openai` pointed at the TinTin server via
- * OPENFILM_OPENAI_URL) serves for Studio's built-in features, and the providers
- * document with `use` defaulted for them. Both measured aligned against the
- * server's /v1 surface (2026-10-22 20:1x): transcriptions answers
- * verbose_json with word timings; speech honors response_format=wav (RIFF) and
- * falls back gracefully on the picker's OpenAI voice names (alloy → default
- * voice, 200).
+ * Verbs the TinTin provider serves for Studio's built-in features (Settings → Services 的
+ * 动词矩阵)。Everything the server serves itself — the fake-OpenAI facade (2026-10-22 的
+ * OPENFILM_OPENAI_URL 注入) is retired 2026-11-09 用户裁决: TinTin 服务=一等连接服务。
  */
-export const OPENAI_COMPAT_VERBS = ['asr', 'tts']
+export const TINTIN_PROVIDER_VERBS = ['tts', 'asr', 'music', 'sfx', 'cutout', 'image', 'image-search', 'video']
 
-/** The person's `use` choices are never overwritten: only unset kinds get the compat provider. */
-export function mergeOpenaiCompat(doc) {
+/**
+ * The providers document with `use` pointed at the TinTin provider: unset kinds default to it,
+ * and choices still naming the retired OpenAI facade migrate over — but only while the person
+ * has no real OpenAI key (their own choices are never overwritten).
+ * @param {unknown} raw the parsed providers.json
+ */
+export function mergeTinTinProvider(doc) {
   const next = { ...plain(doc) }
   const use = { ...plain(next.use) }
-  for (const verb of OPENAI_COMPAT_VERBS) {
-    if (!String(use[verb] || '').trim()) use[verb] = 'openai'
+  const hasRealOpenai = Boolean(plain(next.keys).openai)
+  for (const verb of TINTIN_PROVIDER_VERBS) {
+    const current = String(use[verb] || '').trim()
+    if (!current || (current === 'openai' && !hasRealOpenai)) use[verb] = 'tintin'
   }
   next.use = use
   return next
@@ -108,7 +112,7 @@ export function syncProvidersAt({ filePath, serverUrl, openaiCompat = false }) {
   const path = filePath
   const before = readProvidersAt(path)
   let after = mergeTinTinService(before, serverUrl)
-  if (openaiCompat) after = mergeOpenaiCompat(after)
+  if (openaiCompat) after = mergeTinTinProvider(after)
   const changed = JSON.stringify(before) !== JSON.stringify(after)
   if (!changed && existsSync(path)) return { path, changed: false }
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
