@@ -14,6 +14,37 @@ import { SettingsButton, SettingsField, SettingsGroup, SettingsInset, SettingsIt
 export const customProblem = (hook: ProvidersHook) => hook.problemFor === 'custom' || Boolean(hook.state?.custom.some((s) => s.id === hook.problemFor));
 
 /**
+ * A service note rendered as a structured list (2026-11-09 用户裁决「更美观的列表显示」):
+ * lines of the form `name: spec` become one row each — the name left, the spec beside it in
+ * mono — and prose lines stay a paragraph above. The note text itself is untouched (the
+ * agent reads it whole in `openfilm get`); only the display is structured. A row whose
+ * spec says BROKEN shows its name in the warning color until the service is fixed.
+ */
+function ServiceNote({ note }: { note: string }) {
+  const lines = note.split('\n').map((line) => line.trim()).filter(Boolean);
+  const caps = lines.filter((line) => /^[^:]{1,40}: /.test(line));
+  if (!caps.length) return <span className="mt-0.5 block whitespace-pre-line">{note}</span>;
+  const intro = lines.filter((line) => !caps.includes(line));
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      {intro.length ? <span className="text-[var(--text-muted)]">{intro.join(' ')}</span> : null}
+      {caps.map((line) => {
+        const at = line.indexOf(':');
+        const head = line.slice(0, at).trim();
+        const spec = line.slice(at + 1).trim().replace(/[;.]$/, '');
+        const broken = /BROKEN/i.test(spec);
+        return (
+          <div key={head} className="flex items-start gap-2.5 rounded-[8px] bg-[var(--bg-field)] px-2.5 py-1.5">
+            <span className={`shrink-0 pt-[1px] text-[12px] font-medium ${broken ? 'text-[var(--warn)]' : 'text-[var(--text)]'}`}>{head}</span>
+            <span className="min-w-0 flex-1 break-words font-mono text-[11px] leading-[1.5] text-[var(--text-faint)]">{spec}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/**
  * The person's own services: each with what it does and how it is called, and a form to add one. `adding`: counted up
  * to open that form and bring it into view (Add a provider's "Add a custom service").
  */
@@ -41,7 +72,7 @@ export function CustomServices({ hook, adding = 0 }: { hook: ProvidersHook; addi
             description={(
               <>
                 <span className="font-mono text-[13px] text-[var(--text-faint)]">{service.url}</span>
-                {service.note ? <span className="mt-0.5 block whitespace-pre-line">{service.note}</span> : null}
+                {service.note ? <ServiceNote note={service.note} /> : null}
               </>
             )}
             control={open === service.id ? null : (

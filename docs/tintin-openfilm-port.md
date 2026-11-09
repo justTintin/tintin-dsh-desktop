@@ -199,6 +199,7 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | @ 引用(2026-11-09 用户裁决「做」): 输入 @ 检索产品(「产品」组, 五语言组名), 点选/回车插入 product pill(图标 Package); 发送时 pill(服务端 id)经桥 products.texts 取 productContextOf 同源上下文块追加进消息。vendored 补丁面: prompt-text(kind/prefix/activatedProductIds)+PromptPill 图标+app-bridge products 可选面+App.tsx(状态/菜单组/pill/发送追加)+index.ts 导出+i18n 五语言 mention.groupProducts |
 | 技能库弹窗背景(2026-11-09 报障「技能库窗口半透明」): 恢复的 SkillsDialog/SkillsLibrary 用 `var(--app-content-bg)`, 该变量在 0.3 树只有使用无定义(0.2.7 时代由官方桌面宿主 CSS 提供, 壳页没有)→面板透明可见底下视频; 修=回退 `var(--app-content-bg,var(--bg-panel))`, CDP 实测 `rgb(24,24,24)` 不透明(弹窗体+粘性头部两处) |
 | 侧栏收起双修(2026-11-09 报障「收起后图标后残字+空隙过一会才消失」): 宿主收起=class/宽度过渡，childList 观察不到且 React 重渲染孤儿化 RO——CDP 采样实证收起后 2.5s 零触发(标题 0/6 隐藏、stage 钉过渡中间值 119 露 63px 空隙)。修=四路幂等触发(class/style 属性观察+width 过渡结束+800ms 值守卫+RO 根替换重挂 watchRail)，实测 173ms 内 6/6 标题隐藏+stage 紧贴 rail 零空隙 |
+| 自定义服务说明结构化列表(2026-11-09 用户裁决「更美观的列表显示」):CustomServices.tsx 的 note 渲染从 whitespace-pre-line 整块改为 ServiceNote 结构化行——`name: spec` 行=一行一条(名称左/等宽 spec 右/BROKEN 行名称走 --warn 警色), 散文行留段首; note 文本本身不动(智能体仍整读)。CDP 实测:行渲染+假 blob 消失+sfx 警色 rgb(240,176,60) |
 
 
 ## 11. 角色智能体名册(2026-10-24 实现; **2026-10-25 退役**, 见下; **2026-10-30 以「TinTin智能体」形态部分恢复**)
@@ -558,6 +559,13 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 - **下载入口收敛(用户裁决「一个视频不要有两个下载按钮」+「全删面板下载按钮」)**: 媒体嗅探面板与 B站助手推送区改**纯诊断展示**（名称+类型徽标）, 下载入口唯一=解析卡「下载视频」; sniffBusy/biliBusy 孤儿清理;
 - **isMediaUrl 边界修复**: 扩展名必须出现在**路径段**（/ 后 ? 前）, 替代无边界 includes; 新增埋点/日志主机黑名单（/log//data.bilibili.com/report）; 2 新用例(埋点不误报/路径段边界), 14 文件 **111 用例**全绿;
 - 验证: 页面语法+包 build+check:tintin 绿; 行数 browser-service 1000 内。端到端待重打包实机。
+
+## 16.27 封面工具面:仿封面生成+拆解提字(2026-11-09, 服务端能力批核实后接线, 用户裁决「开工」)
+
+- **服务端能力核实(先于实施, 探针全实测)**:comfygen 健康(v4.30, 1020 的 422 已消);`/generate/cover` 参考图三选一(script_id/images/material_ids)+文案至少其一(title/prompt/selling_points), `images` 收**服务端路径**(base64 会被当路径报「产品图不存在」);本机参考图上传端点=`POST /api/storyboard/scripts/product-upload`(multipart files 数组→返回服务端路径数组, 实测 645KB 全链 completed);**新增 `/material/ocr`**:逐行文本+`box` 像素坐标+`box_rel` 相对比例+置信度(带字图实测两行全中)。
+- **工具接线**(cover-tools-mcp.js, 三工具→五):①`imitate_cover`(仿封面生成): 参考图 resolve→product-upload 上传→/generate/cover 接单→/tasks/unified 轮询(3s 间隔/420s 上限)→产物下载→PNG 魔数校验→落盘双写(项目目录+素材三写位, imitate-<ts>.png);产物=无分层整图, 返回 note 指引组装路径(看图→matting 抠元素→写 props→render_preview)。②`ocr_image`(拆解提字): /material/ocr 透传 text/lines(含位置框)+note 指引按 box_rel×模板宽高换算文字层位置。**服务端地址/路径安全复用 matting 同款**(getServerUrl+resolveImagePath 越界守卫, 冒烟实证项目目录外路径被正确拒绝)。
+- **SKILL.md 同批**:通道表三→五工具;新增「仿封面与版式拆解」节(工具用法+典型流: ocr 拆版式→imitate 生底图→matting 抠主体→组装 props→render_preview);生图节守规补 imitate_cover 例外(内置上传通路, 不再要求先传素材库——1106 缺口由服务端更新打通)。
+- 验证: 工具用例 7/7(mock 全链: 上传 multipart+生成载荷契约断言/无文案本地拒绝/编排失败错误原文上返/OCR lines 结构);真服务端端到端冒烟 40 秒全通(产物 704x1248 视觉成立+PNG 魔数+双写落盘);封面 105 用例全绿;typecheck 净增 0;载荷已 stage(逐字节新鲜)。doc-sync 现红三文件(browser-page-preload/main-hook/client-ui)为并行浏览器域批在途, 归属其批次。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 
