@@ -139,17 +139,12 @@ const tintinClient = (() => {
         sidebarMo.disconnect(); bodyMo.disconnect(); releaseDragIsolation()
         for (const el of [...document.querySelectorAll('[data-tintin-entry]'), ...document.querySelectorAll('#tintin-view-overlay')]) el.remove()
       }
-      /* 四路触发的 RO 与 watchRail(2026-11-09 收起双修;2026-11-10 作用域修复:原定义在
-         try 块内,sidebarMo 回调在外层引用=块级作用域不可见,每次侧栏变动必抛
-         ReferenceError 且回调后续自愈全停——提升到回调可见的函数作用域) */
+      /* watchRail 提升到回调可见作用域(原困 try 块,回调外层引用=ReferenceError 每次侧栏变动必炸且自愈全停;2026-11-10) */
       let railObserved = null
       const railRO = new ResizeObserver(() => { syncOverlayBounds(); paintEntries() })
       const watchRail = () => {
         const root = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')
-        if (root && railObserved !== root) {
-          railRO.observe(root)
-          railObserved = root
-        }
+        if (root && railObserved !== root) { railRO.observe(root); railObserved = root }
       }
       const sidebarMo = new MutationObserver(() => {
         syncOverlayBounds() // 兜底：React 重建侧栏节点会孤儿化 ResizeObserver，随变动重测
