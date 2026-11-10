@@ -22,6 +22,13 @@ if (process.platform === 'win32') {
 const browsers = join(resources, 'playwright-browsers')
 if (!existsSync(browsers) || readdirSync(browsers).length === 0) problems.push(`Playwright browsers: ${browsers}`)
 
+/* vendored PhotoCraft(2026-11-10 打包链补登记): exe 双双入库存,extraResources 现已带上——
+   缺失时封面顶栏「PhotoCraft 精修」打开即报「未找到 photocraft-cli」。 */
+const photocraftCli = join(resources, 'photocraft', 'photocraft-cli.exe')
+if (!existsSync(photocraftCli)) problems.push(`vendored PhotoCraft CLI: ${photocraftCli}`)
+const photocraftApp = join(resources, 'photocraft', 'photocraft.exe')
+if (!existsSync(photocraftApp)) problems.push(`vendored PhotoCraft app: ${photocraftApp}`)
+
 if (problems.length > 0) {
   process.stderr.write('verify-tintin-resources: the OpenFilm runtime is incomplete; packaging would ship a broken entry:\n')
   for (const problem of problems) process.stderr.write(`- ${problem}\n`)

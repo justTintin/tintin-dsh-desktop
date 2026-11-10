@@ -350,7 +350,7 @@
     "dsh-tintin-media-bundle": "0.1.0-dev.0",
     "dsh-tintin-ops-bundle": "0.1.0-dev.0",
     "dsh-tintin-shared": "0.1.0-dev.0",
-    "dshmarket": "1.73.16",
+    "dshmarket": "1.73.17",
     "fs-ext": "2.1.1",
     "koffi": "3.1.5",
     "node-addon-require-builtin": "^0.1.9",
@@ -480,6 +480,10 @@
           "to": "cover-plugin"
         },
         {
+          "from": "tintin-resources/photocraft",
+          "to": "photocraft"
+        },
+        {
           "from": "tintin-resources/cover-plugin/node_modules",
           "to": "cover-plugin/node_modules"
         }
@@ -514,6 +518,10 @@
         {
           "from": "tintin-resources/cover-plugin",
           "to": "cover-plugin"
+        },
+        {
+          "from": "tintin-resources/photocraft",
+          "to": "photocraft"
         },
         {
           "from": "tintin-resources/cover-plugin/node_modules",

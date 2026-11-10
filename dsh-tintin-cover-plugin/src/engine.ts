@@ -304,10 +304,15 @@ export async function renderCover(input: RenderCoverInput): Promise<RenderCoverR
 
 /** Photocraft CLI 定位:env > 通道包 vendored > 打包 resources/photocraft */
 export function resolvePhotocraftCli(): string | null {
+  /* 候选与 lib/photocraft.js resolvePhotocraftDir 同源对齐(2026-11-10 用户报障「PhotoCraft
+     打开失败」): 安装形态=resources/photocraft(extraResources 打包链带入)与本机便携版,
+     此前只有开发树结构候选,装包后三个全落空。 */
   for (const dir of [
     process.env.TINTIN_PHOTOCRAFT_DIR,
     join(pluginRoot, '..', 'dsh-plugin-desktop-tintin', 'tintin-resources', 'photocraft'),
     join(pluginRoot, '..', 'photocraft'),
+    join(pluginRoot, '..', '..', '..', 'photocraft'),
+    'D:\localprogram\photocraft-0.16.0-windows-x64-portable',
   ]) {
     if (dir && existsSync(join(dir, 'photocraft-cli.exe'))) return join(dir, 'photocraft-cli.exe')
     if (dir && existsSync(join(dir, 'photocraft-cli'))) return join(dir, 'photocraft-cli')
