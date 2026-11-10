@@ -518,6 +518,17 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
         sendJson(res, 400, { ok: false, error: 'props 记录形状不对(需 templateId + props)' })
         return
       }
+      /* 乐观锁(2026-11-10 会话报障「编辑器覆盖 agent 写入」): 编辑器回写携带它最后见到的
+         updatedAt;期间 agent 已写过(文件 updatedAt 更新)则拒绝回写并退回最新记录——
+         否则编辑器 600ms 防抖的陈旧快照会盖掉 agent 的连续写入(多步任务必中)。 */
+      const seen = typeof p.seenUpdatedAt === 'number' ? p.seenUpdatedAt : null
+      if (seen !== null) {
+        const latest = readCoverPropsRecord(dir)
+        if (latest && typeof latest.updatedAt === 'number' && latest.updatedAt > seen && latest.origin === 'agent') {
+          sendJson(res, 409, { ok: false, stale: true, record: latest })
+          return
+        }
+      }
       writeCoverPropsRecord(dir, { templateId: p.templateId, props: p.props, hiddenLayers: Array.isArray(p.hiddenLayers) ? p.hiddenLayers : [] }, 'editor')
       sendJson(res, 200, { ok: true })
     } catch (err) {

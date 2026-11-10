@@ -103,11 +103,13 @@ function useAgentPropsSync(isBusy: () => boolean): void {
     let lastAgentTs = 0
     let lastOwnWrite = 0
     let pushing = false
+    let seenUpdatedAt = 0
     const tick = async (): Promise<void> => {
       try {
         const r = await fetch('/tintin/ipc/cover/acp/props').then((x) => x.json())
         if (stop) return
         const record = r?.record as { origin?: string; updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
+        if (record && typeof record.updatedAt === 'number') seenUpdatedAt = record.updatedAt
         if (record && record.origin === 'agent' && typeof record.updatedAt === 'number'
           && record.updatedAt > lastAgentTs && record.updatedAt > lastOwnWrite) {
           lastAgentTs = record.updatedAt
@@ -145,8 +147,24 @@ function useAgentPropsSync(isBusy: () => boolean): void {
         void fetch('/tintin/ipc/cover/acp/props', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ templateId: s.templateId, props: s.props, hiddenLayers: s.hiddenLayers }),
-        }).catch(() => {}).finally(() => { pushing = false })
+          body: JSON.stringify({ templateId: s.templateId, props: s.props, hiddenLayers: s.hiddenLayers, seenUpdatedAt }),
+        })
+          .then((x) => x.json())
+          .then((j) => {
+            /* 被乐观锁拒(409=agent 期间写过): 丢弃陈旧快照, 立即套用 agent 最新记录 */
+            if (j?.stale && j?.record?.origin === 'agent') {
+              const record = j.record as { updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] }
+              if (typeof record.updatedAt === 'number') seenUpdatedAt = record.updatedAt
+              if (typeof record.templateId === 'string' && record.templateId && record.templateId !== useEditor.getState().templateId) {
+                useEditor.getState().setTemplate(record.templateId)
+              }
+              const defaults = getTemplate(useEditor.getState().templateId).defaultProps
+              const merged = { ...defaults, ...(record.props && typeof record.props === 'object' ? record.props : {}) }
+              merged.customLayers = sanitizeCustomLayers(useEditor.getState().templateId, merged.customLayers)
+              useEditor.setState({ props: merged, hiddenLayers: Array.isArray(record.hiddenLayers) ? [...record.hiddenLayers] : [] })
+            }
+          })
+          .catch(() => {}).finally(() => { pushing = false })
       }, 600)
     })
     return () => { stop = true; clearInterval(timer); unsubscribe(); if (pushTimer) clearTimeout(pushTimer) }

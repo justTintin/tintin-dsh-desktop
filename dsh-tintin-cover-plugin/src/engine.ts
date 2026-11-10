@@ -216,6 +216,35 @@ export async function renderCover(input: RenderCoverInput): Promise<RenderCoverR
     const bundled = resolveBundledBrowser()
     if (!bundled) await ensureBrowser()
 
+    // 运行时新图进渲染 staticFile 根(2026-11-10 用户报障「render_preview 无法读取新图片」):
+    // staticFile 只认 serveUrl 的 public/(=打包时快照),项目目录里 text-remove/matting/AI 生成的
+    // 新图不在其中 → localhost:3000/public/... 404。渲染前按 props 引用清单,从项目目录→public/
+    // 依序找到源复制进 serveUrl/public(幂等,同名校验内容尺寸一致才跳过)。191 行的「同步」
+    // 注释此前从未有实现——本段即其补齐。
+    {
+      const { copyFileSync, statSync } = await import('node:fs')
+      const layers = Array.isArray(inputProps.customLayers) ? (inputProps.customLayers as Array<{ image?: unknown }>) : []
+      const wanted = [inputProps.bgImage, inputProps.image, ...layers.map((l) => l.image)]
+        .filter((n): n is string => typeof n === 'string' && n !== '' && !/^(https?:|data:)/i.test(n))
+        .map((n) => n.replace(/^public\//, ''))
+      const servePublic = join(serveUrl, 'public')
+      mkdirSync(servePublic, { recursive: true })
+      for (const name of [...new Set(wanted)]) {
+        const dest = join(servePublic, name)
+        const sources = [join(outDir, name), join(publicDir, name)]
+        const src = sources.find((c) => existsSync(c))
+        if (!src) continue
+        if (existsSync(dest)) {
+          try {
+            if (statSync(dest).size === statSync(src).size) continue // 已同图(幂等)
+          } catch { /* stat 失败则覆盖 */ }
+        }
+        try {
+          copyFileSync(src, dest)
+        } catch { /* 单图复制失败不阻断渲染(错误会以图片加载失败呈现,可读) */ }
+      }
+    }
+
     // 文档流:selectComposition({serveUrl, id, inputProps}) → renderStill({composition, ...})
     // (selectComposition 的入参字段是 id;实测 4.0.539 对象形态 composition 会丢 props)
     // 全程套总超时:任何环节(下载/启动/渲染)卡死都转为可读错误响应,不再永挂。
