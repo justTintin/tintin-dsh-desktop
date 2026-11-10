@@ -413,7 +413,20 @@ export function lastEventSeq() {
  * 服务端就绪后放开)。补丁/home/会话仍按 id 分键。
  * @returns {Promise<{ok:true,key:string,info:object}|{ok:false,error:string}>}
  */
-export async function startSession({ cwd, serverUrl, channelHome, agent = 'deepseek' }) {
+export async function startSession({ cwd, serverUrl, channelHome, agent = 'deepseek' }, retryAllowed = true) {
+  const attempt = await startSessionOnce({ cwd, serverUrl, channelHome, agent })
+  /* 自愈加固(2026-11-10 秒退取证): 服务端 /mcp 闪断窗口内 spawn, mcp-tintin-server 的
+     failOnStartupError:true 会让孩子起不来(11:31 两次连败、22 秒后第三次成功=服务端恢复
+     的时间差)。握手前退出且只重试一次: 短暂闪断自愈, 真坏死(参数/磁盘)不进入重试风暴。 */
+  if (!attempt.ok && retryAllowed && /握手前退出|握手期间退出/.test(String(attempt.error ?? ''))) {
+    console.warn(`[cover-agent] start failed once (${String(attempt.error).slice(0, 120)}) — retry in 2.5s`)
+    await new Promise((r) => setTimeout(r, 2500))
+    return startSession({ cwd, serverUrl, channelHome, agent }, false)
+  }
+  return attempt
+}
+
+async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek' }) {
   const agentId = 'deepseek'
   const homeName = agentId === 'deepseek' ? 'cover-deepseek-agent-home' : 'cover-agent-home'
   if (isRunning() && state.cwd === cwd && state.agentId === agentId) return { ok: true, key: 'cover', info: sessionInfo() }
@@ -455,14 +468,27 @@ export async function startSession({ cwd, serverUrl, channelHome, agent = 'deeps
      session/prompt 请求永远不会落定(轮次卡「正在处理」)——每次 spawn 挂一个 exit
      Promise,prompt 用它竞速;死亡必现在统一日志(此前 wasReady=false 时完全静默)。 */
   state.exitWaiter = new Promise((resolve) => {
-    state.child.once('exit', (code) => {
+    const onExit = (code, signal) => {
       const wasReady = state.ready
       state.ready = false
       state.conn = null
       state.lastExitCode = code ?? null
-      console.warn(`[cover-agent] exit code=${code} wasReady=${wasReady} stderr=${state.stderr.slice(-400)}`)
+      state.lastExitSignal = signal ?? null
+      /* 措辞避开裸词 code(mask-secrets 把 `code=` 后的值当敏感字段抹成 ****, 2026-11-10
+         取证事故: exit code 真值从此不可见);signal 在 Windows 被强杀时可见。 */
+      console.warn(`[cover-agent] child ended (exitStatus=${code} signal=${signal ?? 'none'} wasReady=${wasReady} stderrTail=${state.stderr.slice(-400) || 'empty'})`)
       if (wasReady) emit({ key: 'cover', kind: 'exit', code: code ?? null, stderr: state.stderr.slice(-2000) })
       resolve({ code: code ?? null })
+    }
+    state.child.once('exit', onExit)
+    /* spawn 层失败(ENOENT/权限/AV 拦截)只发 error 不发 exit——不监听则静默无日志,
+       startSession 的握手 race 永挂或裸错(2026-11-10 秒退取证缺口)。 */
+    state.child.once('error', (err) => {
+      state.ready = false
+      state.conn = null
+      state.lastSpawnError = err instanceof Error ? err.message : String(err)
+      console.warn(`[cover-agent] spawn failed: ${state.lastSpawnError}`)
+      resolve({ code: null })
     })
   })
 
@@ -538,7 +564,10 @@ export async function startSession({ cwd, serverUrl, channelHome, agent = 'deeps
      race 开始同步求值 → 裸 TypeError 上屏。race 内先验 conn,死了报有意义错误。 */
   const raceExit = (make) => {
     if (!state.conn) {
-      return Promise.reject(new Error(`agent 进程在握手前退出(code ${state.lastExitCode ?? 'null'})。stderr 尾部: ${state.stderr.slice(-300)}`))
+      const why = state.lastSpawnError
+        ? `spawn 失败:${state.lastSpawnError}`
+        : `进程启动后立即结束(exitStatus=${state.lastExitCode ?? 'null'} signal=${state.lastExitSignal ?? 'none'})。stderr 尾部: ${state.stderr.slice(-300) || 'empty'}`
+      return Promise.reject(new Error(`agent 进程在握手前退出——${why}`))
     }
     return Promise.race([
       make(state.conn),
