@@ -152,14 +152,15 @@ export const useEditor = create<EditorState>()(
           })
           return { props: { ...s.props, customLayers: layers } }
         }),
-      guides: true,
-      canvasGrid: false,
+      /* 对齐/网格开关持久化(2026-11-10 T2.5): localStorage 记忆,进视图不再重置为开 */
+      guides: typeof localStorage !== 'undefined' && localStorage.getItem('tintin.cover.guides') !== null ? localStorage.getItem('tintin.cover.guides') === '1' : true,
+      canvasGrid: typeof localStorage !== 'undefined' && localStorage.getItem('tintin.cover.grid') === '1',
       zoom: 1,
       setZoom: (z) => set({ zoom: Math.min(4, Math.max(0.25, Number.isFinite(z) ? z : 1)) }),
       fitScale: 1,
       setFitScale: (v) => set({ fitScale: Number.isFinite(v) && v > 0 ? v : 1 }),
-      setGuides: (v) => set({ guides: v }),
-      setCanvasGrid: (v) => set({ canvasGrid: v }),
+      setGuides: (v) => { if (typeof localStorage !== 'undefined') localStorage.setItem('tintin.cover.guides', v ? '1' : '0'); set({ guides: v }) },
+      setCanvasGrid: (v) => { if (typeof localStorage !== 'undefined') localStorage.setItem('tintin.cover.grid', v ? '1' : '0'); set({ canvasGrid: v }) },
       moveLayer: (id, dir) =>
         set((s) => {
           const order = effectiveOrder(s)
