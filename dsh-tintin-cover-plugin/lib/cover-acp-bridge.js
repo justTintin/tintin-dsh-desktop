@@ -65,12 +65,12 @@ const TOOL_CALL_GUARD = { warn: 40, stop: 60 }
 const isPollingToolCall = (title) => typeof title === 'string' && /__task_status_unified$/.test(title)
 
 /** 计一步并裁决动作;状态挂在 state.guard(prompt 建立、done 清除)。 */
-function bumpGuard() {
-  const g = state.guard
+function bumpGuard(sess = state) {
+  const g = sess.guard
   if (!g) return
   g.count += 1
   if (g.count >= TOOL_CALL_GUARD.stop) {
-    emit({ key: 'cover', kind: 'limit', level: 'stop', toolCalls: g.count, limit: TOOL_CALL_GUARD.stop })
+    emitFrom(sess, { key: 'cover', kind: 'limit', level: 'stop', toolCalls: g.count, limit: TOOL_CALL_GUARD.stop })
     cancel().catch(() => { /* 会话已死则无事可做 */ })
     return
   }
@@ -99,30 +99,32 @@ function extractAsyncTaskIds(text) {
 const TASK_SETTLED_RE = /(completed|succeeded|failed|cancelled|done\b)/i
 
 /** 从 tool_call_update 观察异步任务: create_* 结果提取 task_id 登记; 终态词+id 同现=结算。 */
-function noteAsyncTask(update) {
+function noteAsyncTask(sess, update) {
   if (!update || update.sessionUpdate !== 'tool_call_update') return
   const text = typeof update.content === 'string' ? update.content : JSON.stringify(update.content ?? '')
-  const title = state.toolNames.get(String(update.toolCallId ?? '')) ?? ''
+  const title = sess.toolNames.get(String(update.toolCallId ?? '')) ?? ''
   if (isAsyncCreateTool(title)) {
     for (const id of extractAsyncTaskIds(text)) {
-      if (!state.asyncTasks.has(id)) state.asyncTasks.set(id, { tool: title, createdAt: Date.now(), settled: false, reminded: false })
+      if (!sess.asyncTasks.has(id)) sess.asyncTasks.set(id, { tool: title, createdAt: Date.now(), settled: false, reminded: false })
     }
   }
   if (TASK_SETTLED_RE.test(text)) {
-    for (const [id, entry] of state.asyncTasks) if (!entry.settled && text.includes(id)) entry.settled = true
+    for (const [id, entry] of sess.asyncTasks) if (!entry.settled && text.includes(id)) entry.settled = true
   }
 }
 
-/* 看门狗: 超预算未观察到终态 → task-stale 事件+日志, 只提醒一次。 */
+/* 看门狗: 超预算未观察到终态 → task-stale 事件+日志, 只提醒一次。扫全部会话(活跃+挂起)。 */
 setInterval(() => {
   const now = Date.now()
-  for (const [id, entry] of state.asyncTasks) {
-    if (entry.settled || entry.reminded) continue
-    const ageMinutes = Math.round((now - entry.createdAt) / 60000)
-    if (ageMinutes < ASYNC_TASK_BUDGET_MINUTES) continue
-    entry.reminded = true
-    console.warn(`[cover-agent][task-stale] ${entry.tool} 任务 ${id} 超过 ${ASYNC_TASK_BUDGET_MINUTES} 分钟未观察到终态(已 ${ageMinutes} 分钟)`)
-    emit({ key: 'cover', kind: 'task-stale', taskId: id, tool: entry.tool, ageMinutes })
+  for (const sess of [state, ...sessionsPool.values()]) {
+    for (const [id, entry] of sess.asyncTasks) {
+      if (entry.settled || entry.reminded) continue
+      const ageMinutes = Math.round((now - entry.createdAt) / 60000)
+      if (ageMinutes < ASYNC_TASK_BUDGET_MINUTES) continue
+      entry.reminded = true
+      console.warn(`[cover-agent][task-stale] ${entry.tool} 任务 ${id} 超过 ${ASYNC_TASK_BUDGET_MINUTES} 分钟未观察到终态(已 ${ageMinutes} 分钟)`)
+      emitFrom(sess, { key: 'cover', kind: 'task-stale', taskId: id, tool: entry.tool, ageMinutes })
+    }
   }
 }, 60_000)
 
@@ -327,7 +329,13 @@ function formContent(questions, answers) {
 
 // ── 会话状态 ─────────────────────────────────────────────────────────────
 
-const state = {
+/* 会话池(2026-11-10 方案 3, 用户裁决「每个项目独立、每个会话相互独立」):
+   state=当前活跃会话;切换项目时不杀子进程,整份快照(子进程/连接/事件环/轮次/待答
+   权限)存池,切回即原样恢复——运行中任务继续跑,完成后自动收尾。 */
+const sessionsPool = new Map()
+
+function freshState() {
+  return {
   ready: false,
   child: null,
   conn: null,
@@ -359,7 +367,10 @@ const state = {
   toolNames: new Map(),
   asyncTasks: new Map(),
   stderr: '',
+  }
 }
+
+let state = freshState()
 
 export function isRunning() {
   return state.ready && state.child !== null && state.child.exitCode === null
@@ -379,15 +390,20 @@ export function setCoverToolsEndpoint(endpoint) {
   state.coverTools = endpoint && endpoint.url && endpoint.token ? { url: endpoint.url, token: endpoint.token } : null
 }
 
-function emit(event) {
-  const entry = { seq: ++state.seq, event }
-  state.ring.push(entry)
-  if (state.ring.length > RING_CAP) state.ring.splice(0, state.ring.length - RING_CAP)
-  const turn = state.currentTurnId ? state.turns.get(state.currentTurnId) : null
+/* 事件环/订阅按会话对象归属(2026-11-10 方案 3): active 走 emit, 挂起会话的协议回调
+   传各自快照——挂起期间子进程仍在跑,事件累积进自己的 ring/turn,切回时重放。 */
+function emitFrom(sess, event) {
+  const entry = { seq: ++sess.seq, event }
+  sess.ring.push(entry)
+  if (sess.ring.length > RING_CAP) sess.ring.splice(0, sess.ring.length - RING_CAP)
+  const turn = sess.currentTurnId ? sess.turns.get(sess.currentTurnId) : null
   if (turn) turn.events.push({ ...event, kind: event.kind })
-  for (const sub of state.subscribers) {
+  for (const sub of sess.subscribers) {
     try { sub(entry) } catch { /* 单个订阅者故障不杀通道 */ }
   }
+}
+function emit(event) {
+  emitFrom(state, event)
 }
 
 /** 订阅实时事件(路由侧 SSE);返回退订函数。`since` 给断线重放起点。 */
@@ -430,6 +446,21 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
   const agentId = 'deepseek'
   const homeName = agentId === 'deepseek' ? 'cover-deepseek-agent-home' : 'cover-agent-home'
   if (isRunning() && state.cwd === cwd && state.agentId === agentId) return { ok: true, key: 'cover', info: sessionInfo() }
+  /* 方案 3(2026-11-10 用户裁决「每个项目独立、每个会话相互独立」): 目标 cwd 的快照在池里
+     且子进程仍活 → 原样恢复(连接/事件环/运行中轮次全在,会话页 running() 接回);当前会话
+     是别的项目 → 挂起进池(**不杀子进程**,任务继续跑,完成后自清扫),state 换全新对象。 */
+  const targetSnap = sessionsPool.get(cwd)
+  if (targetSnap && targetSnap.ready && targetSnap.child && targetSnap.child.exitCode === null) {
+    if (state.child && state.cwd && state.cwd !== cwd) sessionsPool.set(state.cwd, state)
+    sessionsPool.delete(cwd)
+    state = targetSnap
+    return { ok: true, key: 'cover', info: sessionInfo(state) }
+  }
+  sessionsPool.delete(cwd) // 死快照(进程已退)丢弃
+  if (state.child && state.cwd && state.cwd !== cwd) {
+    sessionsPool.set(state.cwd, state) // 挂起:不杀,任务与连接随快照保留
+    state = freshState()
+  }
   /* 跨智能体切换=人设不同,不续接对方会话;同智能体按内存会话续接 */
   const resumeId = state.agentId === agentId ? state.sessionId : null
   stopSession()
@@ -466,28 +497,31 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
   state.stderr = ''
   /* 退出看门狗(2026-10-30 用户报障「正在处理无消息」):agent 静默死亡时,挂起的
      session/prompt 请求永远不会落定(轮次卡「正在处理」)——每次 spawn 挂一个 exit
-     Promise,prompt 用它竞速;死亡必现在统一日志(此前 wasReady=false 时完全静默)。 */
+     Promise,prompt 用它竞速;死亡必现在统一日志(此前 wasReady=false 时完全静默)。
+     方案 3:回调引用捕获时刻的会话对象(self)——挂起后被换下的快照,死亡写到自己的
+     快照上,不污染当前活跃会话。 */
+  const self = state
   state.exitWaiter = new Promise((resolve) => {
     const onExit = (code, signal) => {
-      const wasReady = state.ready
-      state.ready = false
-      state.conn = null
-      state.lastExitCode = code ?? null
-      state.lastExitSignal = signal ?? null
+      const wasReady = self.ready
+      self.ready = false
+      self.conn = null
+      self.lastExitCode = code ?? null
+      self.lastExitSignal = signal ?? null
       /* 措辞避开裸词 code(mask-secrets 把 `code=` 后的值当敏感字段抹成 ****, 2026-11-10
          取证事故: exit code 真值从此不可见);signal 在 Windows 被强杀时可见。 */
-      console.warn(`[cover-agent] child ended (exitStatus=${code} signal=${signal ?? 'none'} wasReady=${wasReady} stderrTail=${state.stderr.slice(-400) || 'empty'})`)
-      if (wasReady) emit({ key: 'cover', kind: 'exit', code: code ?? null, stderr: state.stderr.slice(-2000) })
+      console.warn(`[cover-agent] child ended (exitStatus=${code} signal=${signal ?? 'none'} wasReady=${wasReady} stderrTail=${self.stderr.slice(-400) || 'empty'})`)
+      if (wasReady) emitFrom(self, { key: 'cover', kind: 'exit', code: code ?? null, stderr: self.stderr.slice(-2000) })
       resolve({ code: code ?? null })
     }
-    state.child.once('exit', onExit)
+    self.child.once('exit', onExit)
     /* spawn 层失败(ENOENT/权限/AV 拦截)只发 error 不发 exit——不监听则静默无日志,
        startSession 的握手 race 永挂或裸错(2026-11-10 秒退取证缺口)。 */
-    state.child.once('error', (err) => {
-      state.ready = false
-      state.conn = null
-      state.lastSpawnError = err instanceof Error ? err.message : String(err)
-      console.warn(`[cover-agent] spawn failed: ${state.lastSpawnError}`)
+    self.child.once('error', (err) => {
+      self.ready = false
+      self.conn = null
+      self.lastSpawnError = err instanceof Error ? err.message : String(err)
+      console.warn(`[cover-agent] spawn failed: ${self.lastSpawnError}`)
       resolve({ code: null })
     })
   })
@@ -522,11 +556,13 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
     Writable.toWeb(state.child.stdin),
     agentOut,
   )
+  /* 方案 3: 协议回调复用 exit 看门狗捕获的 self(spawn 时刻快照)——挂起后子进程继续
+     发 update/权限/提问,事件与待答项写进各自快照,切回时原样可用;active 时 self===state。 */
   state.conn = sdk_.client({ name: CLIENT_INFO.name })
     .onRequest(sdk_.methods.client.session.requestPermission, (ctx) => new Promise((resolve) => {
       const requestId = randomUUID()
-      state.permissions.set(requestId, resolve)
-      emit({
+      self.permissions.set(requestId, resolve)
+      emitFrom(self, {
         key: 'cover', kind: 'permission', requestId,
         params: {
           toolCall: { title: String(ctx.params.toolCall?.title ?? '') },
@@ -538,8 +574,8 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
       const questions = formQuestions(ctx.params)
       if (!questions) { resolve({ action: 'decline' }); return }
       const requestId = randomUUID()
-      state.questions.set(requestId, { resolve, questions })
-      emit({ key: 'cover', kind: 'question', requestId, message: String(ctx.params.message ?? ''), toolCallId: null, questions })
+      self.questions.set(requestId, { resolve, questions })
+      emitFrom(self, { key: 'cover', kind: 'question', requestId, message: String(ctx.params.message ?? ''), toolCallId: null, questions })
     }))
     .onRequest(sdk_.methods.client.fs.writeTextFile, () => ({}))
     .onRequest(sdk_.methods.client.fs.readTextFile, () => ({ content: '' }))
@@ -548,12 +584,12 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
       /* 回合护栏(2026-11-01 防空转第 2 步, 与影片侧 film-acp.ts 同款): 逐次计非轮询类
          工具调用, 40 告警 / 60 中止本回合(cancel 不杀进程, 会话可续)。 */
       if (update?.sessionUpdate === 'tool_call') {
-        state.toolNames.set(String(update.toolCallId ?? ''), String(update.title ?? ''))
-        if (!isPollingToolCall(update.title)) bumpGuard()
+        self.toolNames.set(String(update.toolCallId ?? ''), String(update.title ?? ''))
+        if (!isPollingToolCall(update.title)) bumpGuard(self)
       }
       /* 任务层兜底(第 3 步): create_* 的 task_id 登记/结算观察 */
-      noteAsyncTask(update)
-      emit({ key: 'cover', kind: 'update', update: { sessionUpdate: String(update?.sessionUpdate ?? 'unknown'), ...update } })
+      noteAsyncTask(self, update)
+      emitFrom(self, { key: 'cover', kind: 'update', update: { sessionUpdate: String(update?.sessionUpdate ?? 'unknown'), ...update } })
     })
     .connect(stream)
 
@@ -563,16 +599,16 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
      spawn 与握手之间置 conn=null,而 p 的参数表达式(state.conn.agent.request)先于
      race 开始同步求值 → 裸 TypeError 上屏。race 内先验 conn,死了报有意义错误。 */
   const raceExit = (make) => {
-    if (!state.conn) {
-      const why = state.lastSpawnError
-        ? `spawn 失败:${state.lastSpawnError}`
-        : `进程启动后立即结束(exitStatus=${state.lastExitCode ?? 'null'} signal=${state.lastExitSignal ?? 'none'})。stderr 尾部: ${state.stderr.slice(-300) || 'empty'}`
+    if (!self.conn) {
+      const why = self.lastSpawnError
+        ? `spawn 失败:${self.lastSpawnError}`
+        : `进程启动后立即结束(exitStatus=${self.lastExitCode ?? 'null'} signal=${self.lastExitSignal ?? 'none'})。stderr 尾部: ${self.stderr.slice(-300) || 'empty'}`
       return Promise.reject(new Error(`agent 进程在握手前退出——${why}`))
     }
     return Promise.race([
-      make(state.conn),
-      state.exitWaiter.then(({ code }) => {
-        throw new Error(`agent 进程在握手期间退出(code ${code ?? 'null'})。stderr 尾部: ${state.stderr.slice(-300)}`)
+      make(self.conn),
+      self.exitWaiter.then(({ code }) => {
+        throw new Error(`agent 进程在握手期间退出(exitStatus ${code ?? 'null'})。stderr 尾部: ${self.stderr.slice(-300)}`)
     }),
   ])
   }
@@ -582,36 +618,36 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
     clientCapabilities: CLIENT_CAPABILITIES,
     clientInfo: CLIENT_INFO,
   }))
-  state.init = init
-  state.steering = init?._meta?.steering?.supported === true
+  self.init = init
+  self.steering = init?._meta?.steering?.supported === true
   /* MCP 挂载走补丁行(2026-10-30):rc.2 会话参数挂载死路, writePatch 已补 dsh-mcp-client
      行;此键仍是 schema 必需 —— 留空数组防双挂同名冲突。 */
   const params = { cwd, mcpServers: [] }
-  let sessionId = state.sessionId
+  let sessionId = self.sessionId
   if (sessionId) {
     const resumed = await raceExit((conn) => conn.agent.request(sdk_.methods.agent.session.resume, { ...params, sessionId })).then((r) => r, () => null)
-    if (resumed) { sessionId = resumed.sessionId; state.session = resumed }
+    if (resumed) { sessionId = resumed.sessionId; self.session = resumed }
     else sessionId = null
   }
   if (!sessionId) {
     const created = await raceExit((conn) => conn.agent.request(sdk_.methods.agent.session.new, params))
     sessionId = created.sessionId
-    state.session = created
+    self.session = created
   }
-  state.sessionId = String(sessionId)
-  state.ready = true
-  return { ok: true, key: 'cover', info: sessionInfo() }
+  self.sessionId = String(sessionId)
+  self.ready = true
+  return { ok: true, key: 'cover', info: sessionInfo(self) }
 }
 
 /** 会话信息(聊天侧 start 的返回;LocalAgentSessionInfo 形状) */
-function sessionInfo() {
-  const session = state.session ?? {}
+function sessionInfo(sess = state) {
+  const session = sess.session ?? {}
   const available = Array.isArray(session.models?.availableModels) ? session.models.availableModels : []
   return {
-    sessionId: state.sessionId ?? '',
+    sessionId: sess.sessionId ?? '',
     resumed: false,
-    ...(state.steering ? { steering: true } : {}),
-    agentInfo: state.init?.agentInfo ?? null,
+    ...(sess.steering ? { steering: true } : {}),
+    agentInfo: sess.init?.agentInfo ?? null,
     authMethods: [],
     mcp: false,
     models: available.length ? {
@@ -632,57 +668,76 @@ function sessionInfo() {
  * @returns {Promise<{ok:true,stopReason:string}|{ok:false,error:string}>}
  */
 export async function prompt(text, meta, images) {
-  if (!state.ready || !state.conn) {
+  /* 方案 3: 整轮等待期间可能发生项目切换(state 被换)——self 绑定发起时刻的会话,
+     轮次与完成事件写进自己的快照;切回时 running()/ring 重放原样接回。 */
+  const self = state
+  if (!self.ready || !self.conn) {
     /* 自愈(2026-10-30 用户报障:会话死亡后首轮「正在处理」死路)——agent 进程死亡后
        不再返回死路错误,而是用保留的启动参数自动重启一次并继续本条消息。 */
     console.warn('[cover-agent] prompt 时会话未就绪,自动重启…')
     /* 带 state.agentId 重启(2026-11-01):不传会回落默认角色,deepseek 会话死亡自愈
        会被重启成别的角色人设(角色与默认不一致时 = 换人设续会话)。 */
-    const restarted = await startSession({ cwd: state.cwd, serverUrl: state.serverUrl, channelHome: state.channelHome, agent: state.agentId })
+    const restarted = await startSession({ cwd: self.cwd, serverUrl: self.serverUrl, channelHome: self.channelHome, agent: self.agentId })
     if (!restarted.ok) return { ok: false, error: `ACP 会话未启动(自动重启失败):${restarted.error}` }
     /* 重启后二次校验(2026-11-01 用户报障 Cannot read properties of null):startSession 返回 ok
        与实际发 prompt 之间存在竞态窗口——agent 进程可能在握手完成后立即退出(exit 看门狗置
        conn=null),此时不裸抛而是报告有意义错误。 */
-    if (!state.conn || !state.ready) {
-      return { ok: false, error: `封面智能体启动后立即退出(stderr: ${state.stderr.slice(-200) || '空'})——请检查服务端可达性与封面项目目录` }
+    if (!self.conn || !self.ready) {
+      return { ok: false, error: `封面智能体启动后立即退出(stderr: ${self.stderr.slice(-200) || '空'})——请检查服务端可达性与封面项目目录` }
     }
   }
   /* prompt 发出前再校验一次(拖动/轮询等并发操作可能在 startSession 与 prompt 之间触发 exit) */
-  if (!state.conn || !state.ready) {
+  if (!self.conn || !self.ready) {
     return { ok: false, error: '封面智能体会话已断开——请重试(系统会自动重启)' }
   }
   const sdk_ = acpSdk()
   const turnId = typeof meta?.turnId === 'string' && meta.turnId ? meta.turnId : randomUUID()
-  const turn = state.turns.get(turnId) ?? {
-    key: 'cover', agent: state.agentId, cwd: state.cwd, meta: meta ?? null, done: null, events: [],
+  const turn = self.turns.get(turnId) ?? {
+    key: 'cover', agent: self.agentId, cwd: self.cwd, meta: meta ?? null, done: null, events: [],
   }
-  state.turns.set(turnId, turn)
-  state.currentTurnId = turnId
+  self.turns.set(turnId, turn)
+  self.currentTurnId = turnId
   /* 回合护栏计数清零(每回合一个作用域;轮询类工具不计) */
-  state.guard = { count: 0, warned: false }
+  self.guard = { count: 0, warned: false }
   try {
     const blocks = [{ type: 'text', text }, ...((images ?? []).map((i) => ({ type: 'image', data: i.data, mimeType: i.mimeType })))]
     const result = await Promise.race([
-      state.conn.agent.request(sdk_.methods.agent.session.prompt, {
-        sessionId: state.sessionId, prompt: blocks,
+      self.conn.agent.request(sdk_.methods.agent.session.prompt, {
+        sessionId: self.sessionId, prompt: blocks,
       }),
-      state.exitWaiter.then(({ code }) => {
-        throw new Error(`agent 进程退出(code ${code ?? 'null'})——轮次中止。stderr 尾部: ${state.stderr.slice(-300)}`)
+      self.exitWaiter.then(({ code }) => {
+        throw new Error(`agent 进程退出(exitStatus ${code ?? 'null'})——轮次中止。stderr 尾部: ${self.stderr.slice(-300)}`)
       }),
     ])
     const stopReason = String(result?.stopReason ?? 'end_turn')
     turn.done = { ok: true, stopReason }
-    emit({ key: 'cover', kind: 'done', turnId, ok: true, stopReason, toolCalls: state.guard.count })
+    emitFrom(self, { key: 'cover', kind: 'done', turnId, ok: true, stopReason, toolCalls: self.guard.count })
+    /* 方案 3 自动收尾: 轮次已完结且本会话在池里挂起(无页面挂靠) → 停进程清池 */
+    if (self !== state) sweepIfIdle(self)
     return { ok: true, stopReason }
   } catch (e) {
     const message = errText(e)
     turn.done = { ok: false, error: message }
-    emit({ key: 'cover', kind: 'done', turnId, ok: false, error: message, toolCalls: state.guard?.count ?? 0 })
+    emitFrom(self, { key: 'cover', kind: 'done', turnId, ok: false, error: message, toolCalls: self.guard?.count ?? 0 })
+    if (self !== state) sweepIfIdle(self)
     return { ok: false, error: message }
   } finally {
-    state.currentTurnId = null
-    state.guard = null
+    self.currentTurnId = null
+    self.guard = null
   }
+}
+
+/* 挂起会话的空闲清扫(方案 3): 所有轮次已完结且无待答事项 → 停进程、出池。 */
+function sweepIfIdle(sess) {
+  const busy = [...sess.turns.values()].some((t) => t.done === null)
+  const pending = sess.permissions.size > 0 || sess.questions.size > 0
+  if (busy || pending) return
+  console.warn(`[cover-agent] suspended session for ${String(sess.cwd).slice(-40)} finished — stopping child`)
+  try { sess.child?.kill() } catch { /* 已退出 */ }
+  sess.child = null
+  sess.conn = null
+  sess.ready = false
+  sessionsPool.delete(sess.cwd)
 }
 
 /** 插话(ACP 报告支持 steering 才发;否则明确不支持) */
