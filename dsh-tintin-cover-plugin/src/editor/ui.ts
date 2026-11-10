@@ -18,6 +18,25 @@ export const inputStyle = (extra: React.CSSProperties = {}): React.CSSProperties
 
 export const chatFrameRef: { current: HTMLIFrameElement | null } = { current: null }
 
+/** 右键菜单样式(2026-11-11 WP-B 自 panels.tsx 上收:素材面板与图层面板共用同一菜单皮肤;
+ *  :hover 语义 inline 无法表达,一次性注入,幂等)。 */
+let menuStyleInjected = false
+export function ensureMenuStyle(): void {
+  if (menuStyleInjected || typeof document === 'undefined') return
+  menuStyleInjected = true
+  const s = document.createElement('style')
+  s.dataset.plugin = 'dsh-tintin-cover-plugin'
+  s.textContent = [
+    '.tintin-as-menu{position:fixed;z-index:2300;min-width:200px;background:var(--bg-raised);border:1px solid var(--border-strong);border-radius:10px;box-shadow:0 14px 40px rgba(0,0,0,.5);padding:5px}',
+    '.tintin-as-menu button{display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;color:#d9d9de;font:400 12px/1.6 system-ui;padding:7px 10px;border-radius:8px;cursor:pointer;text-align:left;white-space:nowrap}',
+    '.tintin-as-menu button:hover{background:var(--bg-hover)}',
+    '.tintin-as-menu button.danger{color:var(--err)}',
+    '.tintin-as-menu button .ico{width:16px;text-align:center;flex-shrink:0;color:#a9a9af}',
+    '.tintin-as-menu button.danger .ico{color:var(--err)}',
+  ].join('\n')
+  document.head.append(s)
+}
+
 /* 画布操作 live 值通道(2026-11-10 对齐 PhotoCraft #128):拖动/缩放中 DOM 预览-提交分离,
    编辑卡数值经此读实时值(不经 store——每帧写 store 会撑爆撤销栈与重渲染)。
    id=null=无 live 操作(编辑卡回落 store 值)。v=版本号,变更自增,useSyncExternalStore 订阅。 */

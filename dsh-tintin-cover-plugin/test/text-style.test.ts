@@ -45,3 +45,21 @@ describe('layerStyle(§9.7-2 样式细调)', () => {
     expect(layerStyle({}, 'title', { fontSize: 88, color: '#fff' }).translate).toBe('')
   })
 })
+
+describe('gscale 几何缩放(2026-11-11 WP-A4: 画布角柄=几何变换不改字号)', () => {
+  const base = { fontSize: 88, color: '#fff' }
+  it('折入 translate 链尾 scale(g)', () => {
+    expect(layerStyle({ styles: { title: { gscale: 1.5 } } }, 'title', base).translate).toBe('scale(1.5)')
+    expect(layerStyle({ styles: { title: { dx: 10, rotate: -4, gscale: 2 } } }, 'title', base).translate).toBe('translate(10px, 0px) rotate(-4deg) scale(2)')
+  })
+  it('缺省/1 不输出 scale 段', () => {
+    expect(layerStyle(undefined, 'title', base).translate).toBe('')
+    expect(layerStyle({ styles: { title: { gscale: 1 } } }, 'title', base).translate).toBe('')
+    expect(layerStyle({ styles: { title: { dx: 6 } } }, 'title', base).translate).toBe('translate(6px, 0px)')
+  })
+  it('夹取 0.3..3;非数忽略', () => {
+    expect(layerStyle({ styles: { title: { gscale: 9 } } }, 'title', base).translate).toBe('scale(3)')
+    expect(layerStyle({ styles: { title: { gscale: 0.1 } } }, 'title', base).translate).toBe('scale(0.3)')
+    expect(layerStyle({ styles: { title: { gscale: 'x' as unknown as number } } }, 'title', base).translate).toBe('')
+  })
+})

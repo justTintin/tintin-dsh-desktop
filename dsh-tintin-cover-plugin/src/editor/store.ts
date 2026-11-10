@@ -30,6 +30,10 @@ export interface EditorState {
   selectedLayer: string | null
   /** 素材区当前选中项(2026-10-31 §2.5 P1:编辑卡「从素材替换/设为产品图」的数据源) */
   selectedAsset: string | null
+  /** 图层显示名(2026-11-11 WP-B 对齐 PhotoCraft 双击重命名;会话内存态,不进 props 契约、
+   *  不进导出;空名=还原默认名。项目切换/回读时整体清空) */
+  layerNames: Record<string, string>
+  renameLayer: (id: string, name: string) => void
   lastExport: { ok: boolean; file?: string; error?: string } | null
   setTemplate: (id: string) => void
   /** 横竖屏切换(2026-10-27 裁决):同族变体切换,内容 props 尽量保留 */
@@ -94,6 +98,15 @@ export const useEditor = create<EditorState>()(
       hiddenLayers: [] as string[],
       selectedLayer: null as string | null,
       selectedAsset: null as string | null,
+      layerNames: {} as Record<string, string>,
+      renameLayer: (id, name) =>
+        set((s) => {
+          const next = { ...s.layerNames }
+          const v = name.trim()
+          if (!v || next[id] === v) delete next[id] // 空名/未变=还原默认名
+          else next[id] = v
+          return { layerNames: next }
+        }),
       lastExport: null as EditorState['lastExport'],
       genEngine: 'server',
       setGenEngine: (engine) => set({ genEngine: engine }),

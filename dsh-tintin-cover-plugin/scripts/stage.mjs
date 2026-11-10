@@ -83,6 +83,7 @@ if (smoke) {
   const propsFile = join(outDir, 'props.json')
   writeFileSync(propsFile, JSON.stringify({
     hookLines: ['竖版', '冒烟测试'],
+    subtitle: '冒烟测试副标题',
     subTag: 'stage',
     brand: 'tintin',
     image: 'mouse.jpg',

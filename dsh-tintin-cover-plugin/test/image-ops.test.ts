@@ -1,6 +1,6 @@
 // 选中图片图层基本操作(2026-11-01 对齐 PhotoCraft)的纯逻辑与 store 动作回归面。
 import { beforeEach, describe, expect, it } from 'vitest'
-import { arrangeOrder, clampScale, cloneLayer, cornerResize, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
+import { arrangeOrder, centerResize, clampScale, cloneLayer, cornerResize, edgeResize, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
 import { effectiveOrder, useEditor } from '../src/editor/store'
 import { backdropStyle, lookBlend, lookOpacity, lookTransform } from '../templates/image-style'
 
@@ -147,5 +147,32 @@ describe('store actions: duplicate + arrange', () => {
     useEditor.getState().arrangeLayer('product', 'front')
     const order = effectiveOrder(useEditor.getState())
     expect(order[order.length - 1]).toBe('product')
+  })
+})
+
+describe('centerResize (旋转层中心锚,2026-11-11 WP-A3)', () => {
+  it('视觉中心不动:x/y 随新宽高补偿', () => {
+    const r = centerResize({ x: 100, y: 80, w: 200, h: 100 }, 1.5, 100)
+    expect(r).toEqual({ x: 50, y: 55, width: 300, height: 150 })
+    expect(r.x + r.width / 2).toBe(200)
+    expect(r.y + (r.height ?? 0) / 2).toBe(130)
+  })
+  it('未显式高: 高随比例,y 补偿按视觉高', () => {
+    const r = centerResize({ x: 100, y: 100, w: 200, h: null }, 2, 100)
+    expect(r).toEqual({ x: 0, y: 50, width: 400, height: null })
+  })
+})
+
+describe('edgeResize (边柄单维,2026-11-11 WP-A3)', () => {
+  it('w/e 改宽对面边锚;n/s 改高', () => {
+    const box = { left: 100, top: 80, w: 200, h: 100 }
+    expect(edgeResize(box, 'w', { x: 60, y: 0 })).toEqual({ x: 60, width: 240 })
+    expect(edgeResize(box, 'e', { x: 400, y: 0 })).toEqual({ width: 300 })
+    expect(edgeResize(box, 'n', { x: 0, y: 30 })).toEqual({ y: 30, height: 150 })
+    expect(edgeResize(box, 's', { x: 0, y: 230 })).toEqual({ height: 150 })
+  })
+  it('最小 20px 钳制(穿越锚点也不反向)', () => {
+    const box = { left: 100, top: 80, w: 200, h: 100 }
+    expect(edgeResize(box, 'w', { x: 500, y: 0 })).toEqual({ x: 280, width: 20 })
   })
 })

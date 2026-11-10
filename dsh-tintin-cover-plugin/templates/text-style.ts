@@ -22,6 +22,9 @@ export interface TextStyleOverride {
   stroke?: { width: number; color: string }
   /** 旋转(度,±180;画布旋转手柄写入;2026-11-10 对齐 PhotoCraft 文字变换) */
   rotate?: number
+  /** 几何缩放(0.3..3,等比,原点=层中心;画布角柄写入;2026-11-11 对齐 PhotoCraft
+   *  Free Transform——文字画布缩放=几何变换不改字号,字号仍由 scale/编辑卡管) */
+  gscale?: number
 }
 
 /** 图片槽位(产品图)的条目另带外观/变换字段(image-style.ts,2026-11-01 对齐 PhotoCraft) */
@@ -64,9 +67,14 @@ export function layerStyle(
   const dx = clampOffset(s?.dx)
   const dy = clampOffset(s?.dy)
   const rotate = typeof s?.rotate === 'number' && Number.isFinite(s.rotate) ? Math.min(180, Math.max(-180, Math.round(s.rotate))) : undefined
-  const translate = dx === undefined && dy === undefined && rotate === undefined
-    ? ''
-    : `translate(${dx ?? 0}px, ${dy ?? 0}px)${rotate ? ` rotate(${rotate}deg)` : ''}`
+  const gscale = typeof s?.gscale === 'number' && Number.isFinite(s.gscale) ? Math.min(3, Math.max(0.3, s.gscale)) : undefined
+  // 变换链: translate → rotate → uniform scale(scale 段缺省不输出;顺序对均匀缩放无关)
+  const xform = [
+    dx === undefined && dy === undefined ? null : `translate(${dx ?? 0}px, ${dy ?? 0}px)`,
+    rotate ? `rotate(${rotate}deg)` : null,
+    gscale !== undefined && gscale !== 1 ? `scale(${gscale})` : null,
+  ].filter((v): v is string => v !== null)
+  const translate = xform.join(' ')
   const font = sanitizeFontFamily(s?.font)
   const weight = clampWeight(s?.weight)
   const shadow = s?.shadow && typeof s.shadow.blur === 'number' && typeof s.shadow.color === 'string'

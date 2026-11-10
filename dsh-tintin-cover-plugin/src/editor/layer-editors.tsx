@@ -103,13 +103,15 @@ function DelayedTextEditor({ value, isArray, rows, onCommit }: {
 /** 文字样式(PhotoCraft 式,2026-10-28):字体 / 大小(px 绝对,基准字号×倍率换算)/
  *  位置(X·Y 数值输入+滑条)/ 颜色(色板+自由取色器)。存储契约不变(styles.scale 等)。 */
 function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontSize: number }): React.ReactElement {
-  const styles = useEditor((s) => (s.props.styles as Record<string, { scale?: number; color?: string; dx?: number; dy?: number; font?: string; weight?: number; italic?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }> | undefined)?.[layerId])
+  const styles = useEditor((s) => (s.props.styles as Record<string, { scale?: number; gscale?: number; color?: string; dx?: number; dy?: number; font?: string; weight?: number; italic?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }> | undefined)?.[layerId])
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   /* live 值(2026-11-10 对齐 PhotoCraft #128): 画布拖动/缩放中编辑卡实时跟随——
      useSyncExternalStore 订阅 liveLayer(v 变化即重渲),选中层匹配时显示 live 值。 */
   React.useSyncExternalStore(subscribeLiveLayer, liveLayerSnapshot)
   const scale = typeof styles?.scale === 'number' ? styles.scale : 1
-  const px = liveLayer.scaleId === layerId ? liveLayer.scalePx : Math.round(baseFontSize * scale)
+  const gs = typeof styles?.gscale === 'number' ? styles.gscale : 1
+  // 有效视觉字号 = 基准 × 字号倍率 × 几何缩放(2026-11-11 WP-A4:画布角柄=几何缩放)
+  const px = liveLayer.scaleId === layerId ? liveLayer.scalePx : Math.round(baseFontSize * scale * gs)
   const [liveSlide, setLiveSlide] = React.useState<number | null>(null)
   const shownPx = liveSlide ?? px
   const setPx = (v: number): void => {

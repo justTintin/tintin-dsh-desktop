@@ -50,11 +50,12 @@ export function useInlineEditor(deps: InlineEditorDeps): {
     const key = def.propsKey ?? def.id
     const raw = (d.props as Record<string, unknown>)[key]
     const multiline = Array.isArray(raw)
-    const styles = (d.props.styles as Record<string, { scale?: number; color?: string }> | undefined)?.[id]
+    const styles = (d.props.styles as Record<string, { scale?: number; gscale?: number; color?: string }> | undefined)?.[id]
+    const fs = (def.fontSize ?? 24) * (typeof styles?.scale === 'number' ? styles.scale : 1) * (typeof styles?.gscale === 'number' ? styles.gscale : 1)
     setState({
       id,
       def: { id: def.id, propsKey: key },
-      px: Math.round((def.fontSize ?? 24) * (typeof styles?.scale === 'number' ? styles.scale : 1)),
+      px: Math.round(fs),
       color: styles?.color ?? '#ffffff',
       initial: multiline ? (raw as string[]).join('\n') : String(raw ?? ''),
       multiline,

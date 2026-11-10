@@ -3,6 +3,13 @@
 状态：**优化方向文档**（2026-10-31 用户裁决与诊断汇总，待排期实施；本文不描述已实现行为，引用处均标注"现状/目标"）。
 参照系：PhotoCraft（ArtCraft，`D:\Project\photocraft`，纯 Rust 的 Photoshop 复刻）——我们封面编辑器在 PhotoCraft 模式下镜像其画布，其图层/交互实现是本领域最权威的参照。
 
+### 0. 参照系定案与编辑态架构（2026-11-10/11 用户裁决）
+
+1. **参照 = 行为规格,代码不可复制**:PhotoCraft 是 100% Rust 桌面程序(egui/wgpu,仓库零 package.json)——画布=自研合成器直接画像素,面板=每帧 immediate-mode 绘制,没有任何一行可拷进 React 工程的代码。能"复制"的只有行为规格(交互纪律/面板结构/视觉语言),本文件全部 PhotoCraft 引用均为 file.rs:line 级行为证据。
+2. **编辑态弃 Remotion Player(2026-11-10 用户裁决「操作上匹配 photocraft 可以不使用 remotion」)**:预览/编辑画布不再经 `<Player>`,改为**自持画布**——同一份模板组件直接渲染(编辑器 bundle 内 'remotion' 经 esbuild alias 解析到 `remotion-shim.tsx`:AbsoluteFill/Img/staticFile/useRemotionEnvironment 四导出),几何/命中/选择框/手柄全归编辑器;**导出仍走 renderStill 同一模板,质量不变**(双路径同组件,单测+冒烟双向把关)。附带收益:client.js 514KB→164KB(Player 运行时出包),`[data-cover-layer]{pointer-events:auto!important}` 补丁随 Player 壳一起退役。
+3. **范围 = 文字/图片图层的基本操作**(2026-11-10 用户裁决):对齐 PhotoCraft 的选择框/手柄/拖动/吸附/图层区面板;非目标=像素级描边(蚂蚁线/从像素 trace 选区,需自建合成器)、Photoshop 高级语义(蒙版/智能对象/调整层)。
+4. **文字画布缩放语义定案(2026-11-11)**:画布角柄=**几何缩放**(`styles.gscale` 折入 layerStyle 变换链,不改字号不重排,对照 PS Free Transform);字号仍由编辑卡 scale 管——两个语义分离,与 PhotoCraft「Character 面板字号 vs 变换缩放」同构。
+
 ---
 
 ## 一、图层组模型
@@ -205,3 +212,49 @@
 **T3(纯预览体验)✅已实施**(`canvas-aux.ts` 提取付账): 悬停预亮(T3.6,ref 直写零重渲染)/Alt+点击循环选层(T3.7)/高倍缩放像素化(zoom>2 image-rendering)/空格纯净预览(T3.9)。
 
 **实施备注**: 勾账时 `templates/text-style.ts` rotate 与重构建 `client.js` 尚在工作树,随下一提交入库。
+
+---
+
+## 六、编辑态自持画布与图层区 PhotoCraft 化(2026-11-11 批,用户裁决「按你的方案开工,要实现更好的操作」)
+
+### 6.1 已实施(全部随本批提交)
+
+**WP-A 编辑态架构(§0-2 定案落地)**:
+
+| 件 | 内容 | 证据 |
+|---|---|---|
+| `src/editor/remotion-shim.tsx` | 编辑器 bundle 内顶替 'remotion'(AbsoluteFill 对齐上游默认样式/Img=纯 img/staticFile 语义对齐+逐段编码/useRemotionEnvironment 预览恒预览分支) | 模板源码零改动;导出路径仍用真 remotion |
+| `scripts/build-editor-bundle.mjs` | esbuild `alias: { remotion → shim }` | client.js 514KB→164KB |
+| `src/editor/render-surface.tsx` | RenderSurface=模板组件直接渲染(scale 外层等比)+错误边界契约移植 CanvasPlayer(出错快照/内容变化自动重挂/手动重载) | 替代已删除的 canvas-player.tsx |
+| `src/editor/edit-canvas.tsx` | CanvasPanel 整体迁出 App.tsx(App 993→351 行,千行付账)并接自持画布 | 顺手修:旧 App 级 Ctrl+滚轮监听与 useCanvasZoom 双重挂载(每次滚轮 1.21 倍);拖动结束恢复选择框显示(旧版外部直写 display:none 后 React 不重置) |
+| `src/editor/bundle-entry.tsx` / `editor.html` | pointer-events 补丁退役(Player 壳专属语义) | |
+
+**WP-A3 旋转感知选择框(对照 transform_controls.rs)**:
+
+- `src/editor/sel-geom.ts` 纯几何:布局盒 ⊕ transform 2D 矩阵分解 → 旋转矩形 {cx,cy,w,h,deg};角点按视觉方位标注(nw=min(x+y) 等,翻转无关);旋转柄=视觉上边外侧法线抬升;45° 桶近似方位光标(CSS 光标不可连续旋转)。单测 10 例。
+- 选择框/手柄随层旋转,手柄=屏幕等尺寸 7×7 白底 accent 描边方块(PhotoCraft 规格);参考线 PhotoCraft magenta。
+- 缩放分档:未旋转自由层=对角锚(原 cornerResize);**旋转自由层=视觉中心锚**(image-ops.centerResize,新单测);产品槽位=中心锚 sx/sy(原语义);**边柄=单维缩放**(edgeResize,仅未旋转自由层,n/s 需显式高,新单测)。
+
+**WP-A4 文字几何缩放**:
+
+- `templates/text-style.ts` 增 `gscale`(0.3..3)折入 layerStyle 变换链 translate→rotate→scale;`text-scale.ts` useTextScaleHandles 重写=对角锚距离比驱动 gscale,读数「N %」,live 值=基准×scale×gscale(编辑卡字号/就地编辑 px 同口径)。
+
+**WP-B 图层区 PhotoCraft 化(`src/editor/layers-panel.tsx`,自 panels.tsx 迁出;对照 layers.rs/layer_row.rs)**:
+
+- 行=眼睛+**缩略图**(照片行小图/文字行文案样本/图形行◇)+名字(**双击就地重命名**,显示名存 `store.layerNames`,会话内存态,不进 props 契约不进导出,项目切换/回读清空)+锁+拖柄;拖动调层级/素材拖入成层/组投放=原行为。
+- 头行=**混合模式(17 种)+不透明度**,作用于选中图片图层(文字层无 opacity 通道,禁用并提示);不透明度拖动=预览写 el.style.opacity 松手提交。
+- **右键菜单**=重命名/隐藏/锁定/排列四向/复制/删除(菜单皮肤上收 ui.ensureMenuStyle 与素材面板共用);**页脚垃圾桶**=拖自由图层到此删除。
+
+### 6.2 验证记录(2026-11-11)
+
+- 单测:封面插件 124 用例全绿(新增 sel-geom 10 + centerResize/edgeResize 4 + gscale 3);src typecheck 0 红(工作树总红 42→37,既有漂移只减不增)。
+- 导出侧冒烟:`stage.mjs --smoke` 真渲染 ✓(remotion-bundle 预构建随批重出,gscale 进导出)。**顺手修既有夹具缺陷**:smoke props 漏 `subtitle` 而空文案校验必拒(非本批引入,首跑即红)。
+- 渲染面实机(独立页+浏览器自动化,渲染面验证纪律):自持画布渲染 ✓/点选出现选择框+4 角柄+旋转柄 ✓/拖动 80px 精确提交+选择框恢复 ✓/文字角柄拖动=框 143×33→198×46 等比 1.38 且**字号保持 34px** ✓/右键菜单项与行语义 ✓/双击重命名提交生效 ✓/图层区缩略图与混合-不透明度头行 ✓。
+- 门禁:`check:tintin` 5 pass/0 fail;verify-cover-payload 新鲜度首跑拦下 staging 未刷新(守卫按设计工作),stage 后复绿。
+
+### 6.3 剩余方向(待裁决排期)
+
+- 图层缩略图升级为合成像素级(现为代表性预览);面板头行混合/不透明度扩展到文字层(需模板文字节点吃 styles.opacity,6 模板×多文字层改造)。
+- 旋转自由层的边柄(现仅角柄);角柄在旋转+翻转组合下的「抓哪个角锚哪个对角」精确语义(现以视觉方位标注近似)。
+- layerNames 持久化(现为会话内存,随项目切换清空;进 cover.props.json 需契约评审)。
+- 多选与成组变换、标尺(§四 远期,未动)。

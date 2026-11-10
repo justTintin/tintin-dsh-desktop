@@ -22,12 +22,9 @@ declare global {
 }
 window.remotion_staticBase = '/tintin/cover/editor'
 
-// 组合根带 pointer-events:none(Remotion Studio 嵌入语义);编辑器需要画布内图层
-// 可点选拖拽。全局注入安全:该属性只在封面 DOM 存在。
-const style = document.createElement('style')
-style.dataset.plugin = 'dsh-tintin-cover-plugin'
-style.textContent = '[data-cover-layer] { pointer-events: auto !important; }'
-document.head.append(style)
+// 组合根 pointer-events:none 是 Remotion Player 壳的嵌入语义;2026-11-11 WP-A2 编辑态
+// 弃 Player 改自持画布后不再存在该根,旧全局补丁('[data-cover-layer]{pointer-events:
+// auto!important}')随之删除(安全面:不再无条件提升任意图层可点)。
 
 // 设计 token(2026-11-10 用户裁决:与视频剪辑一致)——值=OpenFilm Studio globals.css
 // 暗色档逐字拷贝(字体族/色板/圆角/阴影),封面编辑器组件一律引用这些变量,不再自造色。

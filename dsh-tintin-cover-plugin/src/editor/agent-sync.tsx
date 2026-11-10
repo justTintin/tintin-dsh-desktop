@@ -36,6 +36,7 @@ async function reloadProjectState(): Promise<void> {
         props: { ...defaults, ...record.props },
         hiddenLayers: Array.isArray(record.hiddenLayers) ? [...record.hiddenLayers] : [],
         selectedLayer: null,
+        layerNames: {}, // 图层显示名随项目(2026-11-11 WP-B)
       })
     } else {
       // 新建/空白项目(2026-10-30 用户裁决:画布什么也没有)——模板结构保留但内容
@@ -49,7 +50,7 @@ async function reloadProjectState(): Promise<void> {
       }
       cleared.customLayers = []
       cleared.layerOrder = t.layerDefs.map((l) => l.id)
-      useEditor.setState({ props: cleared, hiddenLayers: t.layerDefs.map((l) => l.id), selectedLayer: null })
+      useEditor.setState({ props: cleared, hiddenLayers: t.layerDefs.map((l) => l.id), selectedLayer: null, layerNames: {} })
     }
   } catch { /* 会话路由未起(旧包) */ }
 }

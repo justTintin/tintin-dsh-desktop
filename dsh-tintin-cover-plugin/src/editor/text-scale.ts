@@ -1,24 +1,29 @@
-// text-scale — 文字层画布缩放手柄(2026-11-10 用户报障「放大拖动文字值不变」+对齐
-// PhotoCraft 文字画布操作:拖角改字号,预览-提交分离)。自 CanvasPanel 提取付账(千行门禁)。
-// live 值经 liveLayer 通道广播(编辑卡字号/X·Y 实时跟随),props 零写入直到提交。
+// text-scale — 画布变换手柄钩子族(2026-11-11 WP-A3/A4 重写,自 CanvasPanel 提取付账):
+// · useRotateHandles: 旋转手柄(图片/文字层,2026-10-29 用户裁决;2026-11-10 扩展文字)。
+//   中心改由 sel-geom 旋转感知选择框提供(WP-A3)——旋转中手柄冻结由 onEnd 清框重测。
+// · useTextScaleHandles: 文字层四角手柄=几何缩放(2026-11-11 对齐 PhotoCraft Free
+//   Transform——拖角缩放整层几何,gstyle 折入层变换,不改字号不重排;字号仍由
+//   编辑卡 scale 管)。预览写 el.style.transform 追加 scale,提交写 styles.gscale;
+//   live 值经 liveLayer 通道广播(编辑卡字号显示=基准×scale×gscale)。
 import React from 'react'
-import { canvasBoxIn, compositionRectIn, type CanvasBox } from './canvas-geom'
+import { canvasBoxIn, compositionRectIn } from './canvas-geom'
 import type { TemplateDef } from '../registry'
 import { liveLayer, notifyLiveLayer } from './ui'
 
 export interface RotateDeps {
   readout: (clientX: number, clientY: number, text: string) => void
   hideReadout: () => void
-  setHandleBox: (v: null) => void
   props: Record<string, unknown>
   customLayers: Array<{ id: string; rotate?: number }> | undefined
-  handleBox: { x: number; y: number; w: number; h: number } | null
+  /** 选中层视觉中心(屏幕 px,playerWrap 系;WP-A3 起由旋转感知选择框提供) */
+  center: { x: number; y: number } | null
   selectedLayer: string | null
   hostRef: React.RefObject<HTMLDivElement | null>
-  playerWrapRef: React.RefObject<HTMLDivElement | null>
   setLayerStyle: (id: string, patch: Record<string, unknown>) => void
   setCustomLayer: (id: string, patch: Record<string, unknown>) => void
   locked: boolean
+  /** 松手回调(清冻结框,触发重测) */
+  onEnd: () => void
 }
 
 export interface RotateHandles {
@@ -31,8 +36,8 @@ export interface RotateHandles {
   onUp: (e: React.PointerEvent) => void
 }
 
-/** 旋转手柄(2026-10-29 用户裁决;2026-11-10 扩展文字层并提取付账): 拖动=绕中心转,
- *  4° 吸附 ±90/±180, 预览写 el.transform(纯视觉), 提交写 styles.rotate/customLayers.rotate。 */
+/** 旋转手柄: 拖动=绕视觉中心转,4° 吸附 ±90/±180,预览写 el.transform(纯视觉),
+ *  提交写 styles.rotate/customLayers.rotate。 */
 export function useRotateHandles(deps: RotateDeps): RotateHandles {
   const depsRef = React.useRef(deps)
   depsRef.current = deps
@@ -46,11 +51,10 @@ export function useRotateHandles(deps: RotateDeps): RotateHandles {
   }
   const onDown = (e: React.PointerEvent): void => {
     const d = depsRef.current
-    if (!d.handleBox || !d.selectedLayer || d.locked) return
+    if (!d.center || !d.selectedLayer || d.locked) return
     e.stopPropagation()
-    const wrap = d.playerWrapRef.current?.getBoundingClientRect()
-    const cx = (wrap?.left ?? 0) + d.handleBox.x + d.handleBox.w / 2
-    const cy = (wrap?.top ?? 0) + d.handleBox.y + d.handleBox.h / 2
+    const cx = d.center.x
+    const cy = d.center.y
     const custom = d.selectedLayer.startsWith('img-')
     const styles = (d.props.styles as Record<string, { rotate?: number }> | undefined)?.[d.selectedLayer]
     const base = custom
@@ -78,7 +82,7 @@ export function useRotateHandles(deps: RotateDeps): RotateHandles {
     const rot = ref.current
     ref.current = null
     d.hideReadout()
-    d.setHandleBox(null)
+    d.onEnd()
     ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
     if (!rot) return
     if (rot.curDeg === rot.base) { if (rot.el) rot.el.style.transform = rot.baseTransform; return }
@@ -93,28 +97,30 @@ export interface TextScaleDeps {
   readout: (clientX: number, clientY: number, text: string) => void
   hideReadout: () => void
   props: Record<string, unknown>
-  handleBox: { x: number; y: number; w: number; h: number } | null
   selectedLayer: string | null
   /** 选中文字层的定义(id + 基准字号);null=非文字层,手柄不渲染也不响应 */
   selectedTextDef: { id: string; fontSize?: number } | null
   tpl: TemplateDef
   hostRef: React.RefObject<HTMLDivElement | null>
   playerWrapRef: React.RefObject<HTMLDivElement | null>
-  canvasBoxOf: (el: Element) => CanvasBox
   setLayerStyle: (id: string, patch: Record<string, unknown>) => void
   locked: boolean
 }
 
 export interface TextScaleHandles {
   ref: React.MutableRefObject<{
-    id: string; base: number; startPx: number; lastPx: number; startDist: number
-    ax: number; ay: number; el: HTMLElement | null
+    id: string; base: number; startDist: number; lastTotal: number
+    ax: number; ay: number; el: HTMLElement | null; baseTransform: string
+    defPx: number
   } | null>
   onDown: (corner: 'nw' | 'ne' | 'sw' | 'se') => (e: React.PointerEvent) => void
   onMove: (e: React.PointerEvent) => void
   onUp: (e: React.PointerEvent) => void
 }
 
+/** 文字几何缩放手柄(WP-A4): 对角为锚,AABB 距离比驱动 gscale(0.3..3)。
+ *  预览=baseTransform 追加 scale(k)(baseTransform 已含 translate/rotate,均匀缩放
+ *  追加在后语义等价);提交写 styles.gscale。旋转层同样成立(锚=对角视觉点)。 */
 export function useTextScaleHandles(deps: TextScaleDeps): TextScaleHandles {
   const depsRef = React.useRef(deps)
   depsRef.current = deps
@@ -122,11 +128,10 @@ export function useTextScaleHandles(deps: TextScaleDeps): TextScaleHandles {
 
   const onDown = (corner: 'nw' | 'ne' | 'sw' | 'se') => (e: React.PointerEvent): void => {
     const d = depsRef.current
-    if (!d.handleBox || !d.selectedLayer || !d.selectedTextDef || d.locked) return
+    if (!d.selectedLayer || !d.selectedTextDef || d.locked) return
     e.stopPropagation()
-    const styles = (d.props.styles as Record<string, { scale?: number }> | undefined)?.[d.selectedLayer]
-    const base = d.selectedTextDef.fontSize ?? 24
-    const startPx = Math.round(base * (typeof styles?.scale === 'number' ? styles.scale : 1))
+    const styles = (d.props.styles as Record<string, { gscale?: number; scale?: number }> | undefined)?.[d.selectedLayer]
+    const base = typeof styles?.gscale === 'number' ? styles.gscale : 1
     const el = (d.hostRef.current?.querySelector(`[data-cover-layer="${d.selectedLayer}"]`) as HTMLElement | null) ?? null
     const rect = compositionRectIn(d.hostRef.current, d.playerWrapRef.current)
     if (!el || !rect) return
@@ -134,10 +139,12 @@ export function useTextScaleHandles(deps: TextScaleDeps): TextScaleHandles {
     const ax = corner === 'nw' || corner === 'sw' ? box.left + box.w : box.left
     const ay = corner === 'nw' || corner === 'ne' ? box.top + box.h : box.top
     const scale = Math.max(rect.width / d.tpl.width, 0.05)
+    const fontScale = typeof styles?.scale === 'number' ? styles.scale : 1
     ref.current = {
-      id: d.selectedLayer, base, startPx, lastPx: startPx,
+      id: d.selectedLayer, base,
       startDist: Math.max(8, Math.hypot((e.clientX - rect.left) / scale - ax, (e.clientY - rect.top) / scale - ay)),
-      ax, ay, el,
+      ax, ay, el, baseTransform: el.style.transform, lastTotal: base,
+      defPx: Math.round((d.selectedTextDef.fontSize ?? 24) * fontScale),
     }
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
   }
@@ -148,13 +155,13 @@ export function useTextScaleHandles(deps: TextScaleDeps): TextScaleHandles {
     if (!r || !rect) return
     const scale = Math.max(rect.width / d.tpl.width, 0.05)
     const distNow = Math.hypot((e.clientX - rect.left) / scale - r.ax, (e.clientY - rect.top) / scale - r.ay)
-    const px = Math.max(Math.max(14, Math.round(r.base * 0.3)), Math.min(Math.round(r.base * 3), Math.round(r.startPx * (distNow / r.startDist))))
-    r.lastPx = px
-    if (r.el) r.el.style.fontSize = `${px}px` // 预览:props 零写入
+    const total = Math.min(3, Math.max(0.3, r.base * (distNow / r.startDist)))
+    r.lastTotal = total
+    if (r.el) r.el.style.transform = `${r.baseTransform} scale(${total})` // 预览:props 零写入
     liveLayer.scaleId = r.id
-    liveLayer.scalePx = px
+    liveLayer.scalePx = Math.max(4, Math.round(r.defPx * total))
     notifyLiveLayer()
-    d.readout(e.clientX + 14, e.clientY + 14, `${px} px`) // T1.2: 缩放字号读数(对齐 Δ读数)
+    d.readout(e.clientX + 14, e.clientY + 14, `${Math.round(total * 100)} %`) // 几何缩放读数=百分比
   }
   const onUp = (e: React.PointerEvent): void => {
     const d = depsRef.current
@@ -165,8 +172,9 @@ export function useTextScaleHandles(deps: TextScaleDeps): TextScaleHandles {
     d.hideReadout()
     ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
     if (!r || !r.el) return
-    if (r.lastPx === r.startPx) { r.el.style.fontSize = ''; return } // 未变:还原预览
-    d.setLayerStyle(r.id, { scale: Math.min(3, Math.max(0.3, r.lastPx / r.base)) })
+    if (Math.abs(r.lastTotal - r.base) < 0.001) { r.el.style.transform = r.baseTransform; return } // 未变:还原预览
+    r.el.style.transform = '' // 提交后由 React 重渲写入新变换(手动清防外改残留)
+    d.setLayerStyle(r.id, { gscale: Math.round(r.lastTotal * 1000) / 1000 })
   }
   return { ref, onDown, onMove, onUp }
 }

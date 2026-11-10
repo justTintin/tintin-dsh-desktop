@@ -24,6 +24,10 @@ const result = await build({
   minify: true,
   jsx: 'transform',
   external: ['react', 'react-dom'],
+  // 编辑态自持画布(2026-11-10 用户裁决):'remotion' 在编辑器 bundle 内解析到本地
+  // shim(模板触达的 AbsoluteFill/Img/staticFile/useRemotionEnvironment 四导出),
+  // 导出路径(dist/remotion-bundle)仍用真 remotion——同一份模板组件两条渲染路径。
+  alias: { remotion: join(pluginRoot, 'src', 'editor', 'remotion-shim.tsx') },
   define: { 'process.env.NODE_ENV': '"production"' },
   logLevel: 'warning',
 })

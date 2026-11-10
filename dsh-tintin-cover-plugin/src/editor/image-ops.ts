@@ -65,6 +65,48 @@ export function lockedOf(props: Record<string, unknown>, id: string | null | und
   return (props.styles as Record<string, { locked?: unknown } | undefined> | undefined)?.[id]?.locked === true
 }
 
+/** 旋转层中心锚缩放(2026-11-11 WP-A3 对齐 PhotoCraft 旋转态: |deg|>0.5 的自由层以视觉
+ *  中心为锚等比缩放——本地几何改 w/h,布局中心平移补偿,视觉中心不动;未旋转层走
+ *  cornerResize 对角锚。f=缩放比;hVis=当前视觉高(box.h,未显式高时视觉高=hVis·f)。 */
+export function centerResize(
+  cur: { x: number; y: number; w: number; h: number | null },
+  f: number,
+  hVis: number,
+  min = 20,
+): { x: number; y: number; width: number; height: number | null } {
+  const cx = cur.x + cur.w / 2
+  const cy = cur.y + hVis / 2
+  const width = Math.max(min, Math.round(cur.w * f))
+  const height = cur.h === null ? null : Math.max(min, Math.round(cur.h * f))
+  const hNew = Math.max(min, Math.round(hVis * f))
+  return {
+    x: Math.round(cx - width / 2),
+    y: Math.round(cy - (height ?? hNew) / 2),
+    width,
+    height,
+  }
+}
+
+/** 边柄单维缩放(PhotoCraft 8 柄的边柄,2026-11-11 WP-A3;仅未旋转自由层):
+ *  side=w/e 改宽(对面边为锚),side=n/s 改高(需显式高度)。 */
+export function edgeResize(
+  box: { left: number; top: number; w: number; h: number },
+  side: 'w' | 'e' | 'n' | 's',
+  pointer: { x: number; y: number },
+  min = 20,
+): { x?: number; y?: number; width?: number; height?: number } {
+  if (side === 'w') {
+    const width = Math.max(min, Math.round(box.left + box.w - pointer.x))
+    return { x: Math.round(box.left + box.w - width), width }
+  }
+  if (side === 'e') return { width: Math.max(min, Math.round(pointer.x - box.left)) }
+  if (side === 'n') {
+    const height = Math.max(min, Math.round(box.top + box.h - pointer.y))
+    return { y: Math.round(box.top + box.h - height), height }
+  }
+  return { height: Math.max(min, Math.round(pointer.y - box.top)) }
+}
+
 export type Corner = 'nw' | 'ne' | 'sw' | 'se'
 
 /** 四角缩放(PhotoCraft Free Transform 角柄语义,2026-11-02 用户裁决「对齐 PhotoCraft」):
