@@ -139,6 +139,18 @@ const tintinClient = (() => {
         sidebarMo.disconnect(); bodyMo.disconnect(); releaseDragIsolation()
         for (const el of [...document.querySelectorAll('[data-tintin-entry]'), ...document.querySelectorAll('#tintin-view-overlay')]) el.remove()
       }
+      /* 四路触发的 RO 与 watchRail(2026-11-09 收起双修;2026-11-10 作用域修复:原定义在
+         try 块内,sidebarMo 回调在外层引用=块级作用域不可见,每次侧栏变动必抛
+         ReferenceError 且回调后续自愈全停——提升到回调可见的函数作用域) */
+      let railObserved = null
+      const railRO = new ResizeObserver(() => { syncOverlayBounds(); paintEntries() })
+      const watchRail = () => {
+        const root = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')
+        if (root && railObserved !== root) {
+          railRO.observe(root)
+          railObserved = root
+        }
+      }
       const sidebarMo = new MutationObserver(() => {
         syncOverlayBounds() // 兜底：React 重建侧栏节点会孤儿化 ResizeObserver，随变动重测
         watchRail() // 根被 React 替换后重挂 RO（2026-11-09 收起双修）
@@ -225,15 +237,7 @@ const tintinClient = (() => {
         // 改四路触发（全部幂等）：RO（根替换即重挂）+ class/style 属性观察 + width 过渡
         // 结束 + 800ms 值守卫兜底。实测收起后 2.5s 内 paintEntries/syncOverlayBounds 均
         // 不再有任何触发（hidden:0/6、stage 钉 119）。
-        let railObserved = null
-        const railRO = new ResizeObserver(() => { syncOverlayBounds(); paintEntries() })
-        const watchRail = () => {
-          const root = document.querySelector('[data-pane="sidebar"], [class*="sidebarCol"]')
-          if (root && railObserved !== root) {
-            railRO.observe(root)
-            railObserved = root
-          }
-        }
+
         let lastRailW = -1
         setInterval(() => {
           watchRail()
