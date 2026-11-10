@@ -7,11 +7,12 @@ import { CanvasPlayer } from './canvas-player'
 import { useCanvasShortcuts } from './canvas-keys'
 import { canvasBoxIn, compositionRectIn, type CanvasBox } from './canvas-geom'
 import { clampScale, cornerResize, lockedOf, type Corner } from './image-ops'
+import { useTextScaleHandles } from './text-scale'
 import type { CustomLayer } from '../../templates/CustomLayers'
 import { lookScale, type ImageLook } from '../../templates/image-style'
 import { redo, sanitizeCustomLayers, undo, useEditor } from './store'
 import { canvasDragFreeze, useCanvasZoom } from './use-canvas-zoom'
-import { chatFrameRef, iconBtn, referableValue } from './ui'
+import { chatFrameRef, iconBtn, liveLayer, notifyLiveLayer, referableValue } from './ui'
 import { CoverChatPanel, pushChatContextNow, reloadProjectState, useAgentPropsSync, useChatContextPush } from './agent-sync'
 import { AssetsPanel, ExportModal, LayersPanel } from './panels'
 import { ServerSettingsModal } from './server-settings'
@@ -59,8 +60,6 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   /** 旋转手柄(2026-10-29 用户裁决:选中的图片层可旋转;自定义层存 layer.rotate,产品图存 styles.rotate)。
    *  拖动=绕图层中心转,接近 0/±90/180 吸附;旋转中冻结手柄位置(旋转改包围盒,免得手柄跟着漂)。 */
   const isImageLayer = selectedLayer !== null && (selectedLayer.startsWith('img-') || selectedLayer === 'product')
-  /* 选中轮廓+旋转手柄盒(2026-10-31:常驻边缘框=任何选中图层都有;旋转手柄仅图片层;
-     PhotoCraft 对齐:选中即见边缘,旋转时边缘框保持显示) */
   const [handleBox, setHandleBox] = React.useState<{ x: number; y: number; w: number; h: number } | null>(null)
   /* 旋转预览-提交分离(2026-10-31 方案 B,同拖动):拖动中改写被拖层内联 transform 里的 rotate 值
      (纯视觉),pointerup 一次性提交 props;取消/未变化=还原基 transform。 */
@@ -239,7 +238,18 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   }
   /** 图层元素的画布盒(含 translate/scale 的视觉框 → 画布 px) */
   const canvasBoxOf = (el: Element): CanvasBox => canvasBoxIn(el, compositionRect(), tpl.width)
-  /** 对齐(相对画布;PhotoCraft 式六向)。文字层改 dx/dy 偏移,自定义层改 x/y */
+  /* 文字层画布缩放(2026-11-10 用户报障+对齐 PhotoCraft 文字画布操作): 逻辑在 text-scale.ts
+     (提取付账,千行门禁);live 值经 liveLayer 通道,编辑卡字号实时跟随。 */
+  const selectedTextDef = selectedLayer && !isImageLayer
+    ? tpl.layerDefs.find((d) => d.id === selectedLayer && d.type === 'text') ?? null
+    : null
+  const textScale = useTextScaleHandles({
+    props, handleBox, selectedLayer,
+    selectedTextDef: selectedTextDef ? { id: selectedTextDef.id, fontSize: selectedTextDef.fontSize } : null,
+    tpl, hostRef, playerWrapRef, canvasBoxOf, setLayerStyle,
+    locked: selectedLayer ? lockedOf(props, selectedLayer) : false,
+  })
+    /** 对齐(相对画布;PhotoCraft 式六向)。文字层改 dx/dy 偏移,自定义层改 x/y */
   const alignLayer = (id: string, mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom'): void => {
     if (lockedOf(props, id)) return
     const el = hostRef.current?.querySelector(`[data-cover-layer="${id}"]`)
@@ -481,6 +491,11 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       updateGuides(gv, gh)
       if (!drag.el?.isConnected) drag.el = (hostRef.current?.querySelector(`[data-cover-layer="${drag.layerId}"]`) as HTMLElement | null) ?? null
       if (drag.el) drag.el.style.translate = `${x - drag.baseX}px ${y - drag.baseY}px` // 与模板 translate/rotate 基变换可叠加;props 零写入
+      /* live 值广播(2026-11-10 对齐 PhotoCraft #128): 编辑卡 X/Y 拖动中实时跟随 */
+      liveLayer.posId = drag.layerId
+      liveLayer.posDx = Math.round(drag.curX)
+      liveLayer.posDy = Math.round(drag.curY)
+      notifyLiveLayer()
       showReadout(drag.curCX, drag.curCY, x - drag.baseX, y - drag.baseY)
     })
   }
@@ -494,6 +509,8 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (host) host.style.userSelect = ''
   }
   const commitDrag = (drag: NonNullable<NonNullable<typeof dragRef.current>>): void => {
+    liveLayer.posId = null
+    notifyLiveLayer()
     if (!drag.active) return // 死区内松手=点击,不动
     const dx = Math.round(drag.curX - drag.baseX)
     const dy = Math.round(drag.curY - drag.baseY)
@@ -609,6 +626,20 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                   style={{ position: 'absolute', left: handleBox.x + handleBox.w / 2 - 9, top: handleBox.y - 38, width: 18, height: 18, borderRadius: 999, background: 'var(--accent)', border: '2px solid #fff', cursor: 'grab', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
                 />
               </>
+            ) : null}
+            {/* 文字层四角缩放手柄(2026-11-10 用户报障+对齐 PhotoCraft 文字画布缩放):拖角改字号,
+                预览写 DOM fontSize,提交写 styles.scale;编辑卡字号显示 live 值实时跟随。 */}
+            {selectedTextDef && handleBox && !pcRunning && !lockedOf(props, selectedLayer) ? (
+              ([['nw', 'nwse-resize'], ['ne', 'nesw-resize'], ['sw', 'nesw-resize'], ['se', 'nwse-resize']] as const).map(([c, cursor]) => (
+                <div
+                  key={`t-${c}`}
+                  onPointerDown={textScale.onDown(c)}
+                  onPointerMove={textScale.onMove}
+                  onPointerUp={textScale.onUp}
+                  title="拖动角改字号(对角为锚)"
+                  style={{ position: 'absolute', left: handleBox.x + (c === 'ne' || c === 'se' ? handleBox.w - 7 : -7), top: handleBox.y + (c === 'sw' || c === 'se' ? handleBox.h - 7 : -7), width: 14, height: 14, borderRadius: 3, background: 'var(--accent)', border: '2px solid #fff', cursor, zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
+                />
+              ))
             ) : null}
             {/* 缩放手柄(PhotoCraft 四角柄,对角为锚等比缩放;自由图层=x/y 随锚补正,产品图槽位=中心缩放;预览-提交分离) */}
             {isImageLayer && handleBox && !pcRunning && !lockedOf(props, selectedLayer) ? (

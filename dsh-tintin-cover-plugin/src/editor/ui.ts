@@ -18,6 +18,32 @@ export const inputStyle = (extra: React.CSSProperties = {}): React.CSSProperties
 
 export const chatFrameRef: { current: HTMLIFrameElement | null } = { current: null }
 
+/* 画布操作 live 值通道(2026-11-10 对齐 PhotoCraft #128):拖动/缩放中 DOM 预览-提交分离,
+   编辑卡数值经此读实时值(不经 store——每帧写 store 会撑爆撤销栈与重渲染)。
+   id=null=无 live 操作(编辑卡回落 store 值)。v=版本号,变更自增,useSyncExternalStore 订阅。 */
+export interface LiveLayerState {
+  posId: string | null
+  posDx: number
+  posDy: number
+  scaleId: string | null
+  scalePx: number
+  v: number
+}
+export const liveLayer: LiveLayerState = { posId: null, posDx: 0, posDy: 0, scaleId: null, scalePx: 0, v: 0 }
+const liveListeners = new Set<() => void>()
+export function notifyLiveLayer(): void {
+  liveLayer.v += 1
+  for (const l of liveListeners) { try { l() } catch { /* 单订阅者故障不杀通道 */ } }
+}
+export function subscribeLiveLayer(listener: () => void): () => void {
+  liveListeners.add(listener)
+  return () => liveListeners.delete(listener)
+}
+/** 编辑卡用:选中层的 live 值快照(useSyncExternalStore 的 getSnapshot,须稳定引用)。 */
+export function liveLayerSnapshot(): LiveLayerState {
+  return liveLayer
+}
+
 export interface ReferableLayer { id: string; label: string; type: string; propsKey?: string; value?: unknown }
 
 export function referLayerToChat(layer: ReferableLayer): void {

@@ -2,6 +2,7 @@
 // 千行门禁)。滑条预览-提交分离(PreviewSlider)/文本防抖(DelayedTextEditor)/文字样式细调/
 // 自定义图片层与产品图编辑卡(从素材替换/抠图直达——抠图结果=素材,2026-10-31 裁决)。
 import React from 'react'
+import { liveLayer, liveLayerSnapshot, subscribeLiveLayer } from './ui'
 import { getTemplate, type LayerDef } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
 import { FontFamilyPicker, FontStylePicker } from './font-picker'
@@ -104,8 +105,13 @@ function DelayedTextEditor({ value, isArray, rows, onCommit }: {
 function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontSize: number }): React.ReactElement {
   const styles = useEditor((s) => (s.props.styles as Record<string, { scale?: number; color?: string; dx?: number; dy?: number; font?: string; weight?: number; italic?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }> | undefined)?.[layerId])
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
+  /* live 值(2026-11-10 对齐 PhotoCraft #128): 画布拖动/缩放中编辑卡实时跟随——
+     useSyncExternalStore 订阅 liveLayer(v 变化即重渲),选中层匹配时显示 live 值。 */
+  React.useSyncExternalStore(subscribeLiveLayer, liveLayerSnapshot)
   const scale = typeof styles?.scale === 'number' ? styles.scale : 1
-  const px = Math.round(baseFontSize * scale)
+  const px = liveLayer.scaleId === layerId ? liveLayer.scalePx : Math.round(baseFontSize * scale)
+  const [liveSlide, setLiveSlide] = React.useState<number | null>(null)
+  const shownPx = liveSlide ?? px
   const setPx = (v: number): void => {
     if (!Number.isFinite(v)) return
     setLayerStyle(layerId, { scale: Math.min(3, Math.max(0.3, v / baseFontSize)) })
@@ -134,23 +140,25 @@ function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontS
       ) : null}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
         <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>大小</span>
+        {/* 滑条 live 显示(2026-11-10 用户报障「放大拖动时右边的值没变」): 拖动中显示 live 值
+            (受控 value 锚 store 值=React 拉回,滑块回弹+显示不变),松手/失焦提交 store。 */}
         <input
-          type="range" min={Math.max(14, Math.round(baseFontSize * 0.3))} max={Math.round(baseFontSize * 3)} step={1} value={px}
-          onChange={(e) => { const el = layerEl(layerId); if (el) el.style.fontSize = `${Number(e.target.value)}px` }}
-          onPointerUp={(e) => setPx(Number(e.currentTarget.value))}
-          onKeyUp={(e) => setPx(Number(e.currentTarget.value))}
-          onBlur={(e) => setPx(Number(e.currentTarget.value))}
+          type="range" min={Math.max(14, Math.round(baseFontSize * 0.3))} max={Math.round(baseFontSize * 3)} step={1} value={shownPx}
+          onChange={(e) => { const v = Number(e.target.value); setLiveSlide(v); const el = layerEl(layerId); if (el) el.style.fontSize = `${v}px` }}
+          onPointerUp={(e) => { setPx(Number(e.currentTarget.value)); setLiveSlide(null) }}
+          onKeyUp={(e) => { setPx(Number(e.currentTarget.value)); setLiveSlide(null) }}
+          onBlur={(e) => { setPx(Number(e.currentTarget.value)); setLiveSlide(null) }}
           style={{ flex: 1, accentColor: 'var(--accent)' }}
         />
-        <input type="number" min={10} max={400} value={px} onChange={(e) => setPx(Number(e.target.value))} style={numBox} />
+        <input type="number" min={10} max={400} value={shownPx} onChange={(e) => { setPx(Number(e.target.value)); setLiveSlide(null) }} style={numBox} />
         <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>px</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
         <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>位置</span>
         <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>X</span>
-        <input type="number" min={-1200} max={1200} value={dx} onChange={(e) => setLayerStyle(layerId, { dx: Number(e.target.value) })} style={numBox} />
+        <input type="number" min={-1200} max={1200} value={liveLayer.posId === layerId ? liveLayer.posDx : dx} onChange={(e) => setLayerStyle(layerId, { dx: Number(e.target.value) })} style={numBox} />
         <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Y</span>
-        <input type="number" min={-1200} max={1200} value={dy} onChange={(e) => setLayerStyle(layerId, { dy: Number(e.target.value) })} style={numBox} />
+        <input type="number" min={-1200} max={1200} value={liveLayer.posId === layerId ? liveLayer.posDy : dy} onChange={(e) => setLayerStyle(layerId, { dy: Number(e.target.value) })} style={numBox} />
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>颜色</span>
