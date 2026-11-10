@@ -7,7 +7,9 @@ import { CanvasPlayer } from './canvas-player'
 import { useCanvasShortcuts } from './canvas-keys'
 import { canvasBoxIn, compositionRectIn, type CanvasBox } from './canvas-geom'
 import { clampScale, cornerResize, lockedOf, type Corner } from './image-ops'
-import { useTextScaleHandles } from './text-scale'
+import { useRotateHandles, useTextScaleHandles } from './text-scale'
+import { updateHover as auxUpdateHover, usePurePreview, cycleLayerSelection } from './canvas-aux'
+import { useInlineEditor } from './inline-edit'
 import type { CustomLayer } from '../../templates/CustomLayers'
 import { lookScale, type ImageLook } from '../../templates/image-style'
 import { redo, sanitizeCustomLayers, undo, useEditor } from './store'
@@ -22,6 +24,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   const { templateId, props, hiddenLayers } = useEditor()
   const tpl = getTemplate(templateId)
   const selectLayer = useEditor((s) => s.selectLayer)
+  const setProp = useEditor((s) => s.setProp)
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const addCustomLayer = useEditor((s) => s.addCustomLayer)
   const setCustomLayer = useEditor((s) => s.setCustomLayer)
@@ -65,6 +68,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
      (纯视觉),pointerup 一次性提交 props;取消/未变化=还原基 transform。 */
   const rotRef = React.useRef<{ cx: number; cy: number; a0: number; base: number; id: string; custom: boolean; el: HTMLElement | null; baseTransform: string; curDeg: number } | null>(null)
   const outlineRef = React.useRef<HTMLDivElement>(null)
+  const hoverRef = React.useRef<HTMLDivElement>(null)
   /** 选中边缘框/旋转手柄盒测量(边缘框=任何选中图层常驻;旋转中冻结;滚动后由 onScroll 重算) */
   const measureSelBox = (): void => {
     if (rotRef.current) return // 旋转中冻结:旋转改包围盒,免得边缘框跟着漂
@@ -98,54 +102,6 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     wrap.addEventListener('wheel', onWheel, { passive: false })
     return () => wrap.removeEventListener('wheel', onWheel)
   }, [])
-  const onRotateDown = (e: React.PointerEvent): void => {
-    if (!handleBox || !selectedLayer || lockedOf(props, selectedLayer)) return
-    e.stopPropagation()
-    const wrap = playerWrapRef.current?.getBoundingClientRect()
-    const cx = (wrap?.left ?? 0) + handleBox.x + handleBox.w / 2
-    const cy = (wrap?.top ?? 0) + handleBox.y + handleBox.h / 2
-    const custom = selectedLayer.startsWith('img-')
-    const styles = (props.styles as Record<string, { rotate?: number }> | undefined)?.[selectedLayer]
-    const base = custom
-      ? ((props.customLayers as Array<{ id: string; rotate?: number }> | undefined) ?? []).find((l) => l.id === selectedLayer)?.rotate ?? 0
-      : styles?.rotate ?? 0
-    const el = (hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`) as HTMLElement | null) ?? null
-    rotRef.current = { cx, cy, a0: Math.atan2(e.clientY - cy, e.clientX - cx), base, id: selectedLayer, custom, el, baseTransform: el?.style.transform ?? '', curDeg: base }
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-  }
-  /** 基 transform 串内的 rotate 值替换;无 rotate 时追加 */
-  const withRotate = (base: string, deg: number): string => {
-    const r = `rotate(${deg}deg)`
-    const i = base.lastIndexOf('rotate(')
-    if (i < 0) return base ? `${base} ${r}` : r
-    const end = base.indexOf(')', i)
-    return base.slice(0, i) + r + base.slice(end + 1)
-  }
-  const onRotateMove = (e: React.PointerEvent): void => {
-    const rot = rotRef.current
-    if (!rot) return
-    let deg = rot.base + ((Math.atan2(e.clientY - rot.cy, e.clientX - rot.cx) - rot.a0) * 180) / Math.PI
-    deg = Math.round(deg)
-    for (const s of [-180, -90, 0, 90, 180]) if (Math.abs(deg - s) <= 4) { deg = s; break }
-    if (deg > 180) deg -= 360
-    if (deg < -180) deg += 360
-    rot.curDeg = deg
-    if (rot.el) rot.el.style.transform = withRotate(rot.baseTransform, deg) // 纯视觉预览,props 零写入
-    showReadoutText(e.clientX + 14, e.clientY + 14, deg + "°") // 旋转角度读数(§2.6 P1,对照 Free Transform)
-  }
-  const onRotateUp = (e: React.PointerEvent): void => {
-    const rot = rotRef.current
-    rotRef.current = null
-    hideReadout()
-    setHandleBox(null) // 触发重算:旋转后的包围盒已变
-    ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
-    if (!rot) return
-    // 未变化=不写 props、也不会重渲染,必须还原预览前的 transform(否则槽位丢掉模板定位/翻转)
-    if (rot.curDeg === rot.base) { if (rot.el) rot.el.style.transform = rot.baseTransform; return }
-    if (rot.el) rot.el.style.transform = '' // React 离散事件内同步重设新值,无回跳
-    if (rot.custom) setCustomLayer(rot.id, { rotate: rot.curDeg })
-    else setLayerStyle(rot.id, { rotate: rot.curDeg })
-  }
   /** 缩放手柄(PhotoCraft 四角柄,2026-11-02 用户裁决:对角为锚等比缩放;预览-提交分离)。
    *  自由图层=对角锚改宽(显式高同比)+x/y 随锚补正;产品图槽位=以中心为锚改缩放倍率
    *  (槽位变换原点在中心,四角等价)。 */
@@ -238,18 +194,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   }
   /** 图层元素的画布盒(含 translate/scale 的视觉框 → 画布 px) */
   const canvasBoxOf = (el: Element): CanvasBox => canvasBoxIn(el, compositionRect(), tpl.width)
-  /* 文字层画布缩放(2026-11-10 用户报障+对齐 PhotoCraft 文字画布操作): 逻辑在 text-scale.ts
-     (提取付账,千行门禁);live 值经 liveLayer 通道,编辑卡字号实时跟随。 */
-  const selectedTextDef = selectedLayer && !isImageLayer
-    ? tpl.layerDefs.find((d) => d.id === selectedLayer && d.type === 'text') ?? null
-    : null
-  const textScale = useTextScaleHandles({
-    props, handleBox, selectedLayer,
-    selectedTextDef: selectedTextDef ? { id: selectedTextDef.id, fontSize: selectedTextDef.fontSize } : null,
-    tpl, hostRef, playerWrapRef, canvasBoxOf, setLayerStyle,
-    locked: selectedLayer ? lockedOf(props, selectedLayer) : false,
-  })
-    /** 对齐(相对画布;PhotoCraft 式六向)。文字层改 dx/dy 偏移,自定义层改 x/y */
+  /** 对齐(相对画布;PhotoCraft 式六向)。文字层改 dx/dy 偏移,自定义层改 x/y */
   const alignLayer = (id: string, mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom'): void => {
     if (lockedOf(props, id)) return
     const el = hostRef.current?.querySelector(`[data-cover-layer="${id}"]`)
@@ -369,6 +314,30 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     if (el) el.style.display = 'none'
   }
 
+  /* T1.3 双击就地编辑(逻辑在 inline-edit.tsx): 双击文字层 → 覆盖 textarea → 防抖写 props */
+  const inline = useInlineEditor({
+    tpl, props, setProp, hostRef, playerWrapRef, layerAt, pcRunning, fitScale, zoom,
+  })
+  const openInlineEdit = (clientX: number, clientY: number): void => inline.open(clientX, clientY)
+  /* 文字层画布缩放(逻辑在 text-scale.ts,live 值经 liveLayer 通道) */
+  const selectedTextDef = selectedLayer && !isImageLayer
+    ? tpl.layerDefs.find((d) => d.id === selectedLayer && d.type === 'text') ?? null
+    : null
+  const textScale = useTextScaleHandles({
+    readout: showReadoutText, hideReadout,
+    props, handleBox, selectedLayer,
+    selectedTextDef: selectedTextDef ? { id: selectedTextDef.id, fontSize: selectedTextDef.fontSize } : null,
+    tpl, hostRef, playerWrapRef, canvasBoxOf, setLayerStyle,
+    locked: selectedLayer ? lockedOf(props, selectedLayer) : false,
+  })
+  const rotate = useRotateHandles({
+    readout: showReadoutText, hideReadout, setHandleBox,
+    props, handleBox, selectedLayer, customLayers: props.customLayers as Array<{ id: string; rotate?: number }> | undefined,
+    hostRef, playerWrapRef,
+    setLayerStyle, setCustomLayer,
+    locked: selectedLayer ? lockedOf(props, selectedLayer) : false,
+  })
+  
   const onPointerDown = (e: React.PointerEvent): void => {
     if (pcRunning) return // PhotoCraft 为主:画布交互在原生窗口,网页仅镜像
     if (dragRef.current) return // 已在拖动:忽略第二指
@@ -418,6 +387,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       // 悬停光标(2026-11-02 用户裁决:对齐 PhotoCraft=箭头,不用手型)
       const host = hostRef.current
       if (host) host.style.cursor = 'default'
+      auxUpdateHover({ hoverRef, hostRef, playerWrapRef, pcRunning, purePreview }, false, e.clientX, e.clientY)
       return
     }
     if (e.pointerId !== drag.pointerId) return
@@ -439,6 +409,12 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
           for (const L of [b.left, b.left + b.w / 2, b.left + b.w]) { push(xs, L, L); push(xs, L - drag.boxW / 2, L); push(xs, L - drag.boxW, L) }
           for (const L of [b.top, b.top + b.h / 2, b.top + b.h]) { push(ys, L, L); push(ys, L - drag.boxH / 2, L); push(ys, L - drag.boxH, L) }
         })
+        /* T2.4 等距分布候选(2026-11-10 对齐 PhotoCraft/PS 分布提示): 相邻两目标的中间点
+           = 拖到这里与两目标等距;guide 值取中点(参考线标出分布位)。 */
+        const sx = [...new Set(xs.map((c) => c.at))].sort((a, b) => a - b)
+        for (let i = 0; i < sx.length - 1; i++) push(xs, (sx[i]! + sx[i + 1]!) / 2, (sx[i]! + sx[i + 1]!) / 2)
+        const sy = [...new Set(ys.map((c) => c.at))].sort((a, b) => a - b)
+        for (let i = 0; i < sy.length - 1; i++) push(ys, (sy[i]! + sy[i + 1]!) / 2, (sy[i]! + sy[i + 1]!) / 2)
         drag.candsX = xs
         drag.candsY = ys }
       if (outlineRef.current) outlineRef.current.style.display = 'none' // 常驻边缘框让位给拖动轮廓
@@ -523,6 +499,18 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
     dragRef.current = null
     if (!drag) return
     endDragVisual(drag)
+    /* T3.7 Alt+点击循环选层(2026-11-10 P2.7): Alt 按住且本次为死区点击(未产生拖动/复制)
+       → 在命中点的重叠图层栈里切到下一个;Alt+拖动仍是复制语义,互不干扰。 */
+    if (e.altKey && !drag.active) {
+      const stack = document.elementsFromPoint(drag.startX, drag.startY)
+        .map((el) => (el as Element).closest('[data-cover-layer]'))
+        .filter((el): el is Element => Boolean(el))
+        .map((el) => el.getAttribute('data-cover-layer') || '')
+      if (cycleLayerSelection(stack, hiddenLayers, selectedLayer, selectLayer)) {
+        try { hostRef.current?.releasePointerCapture?.(e.pointerId) } catch { /* 已隐式释放 */ }
+        return
+      }
+    }
     commitDrag(drag) // 离散事件内同步提交:清预览与写 props 同帧,无回跳
     try { hostRef.current?.releasePointerCapture?.(e.pointerId) } catch { /* 已隐式释放 */ }
   }
@@ -534,6 +522,9 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
   }
   /* 快捷键(2026-11-01 对齐 PhotoCraft,自 onKeyDown 解耦为窗口级):见 canvas-keys.ts */
   useCanvasShortcuts(() => ({ all: Boolean(pcRunning), layer: Boolean(dragRef.current || rotRef.current || resRef.current) }))
+  /* T3.9 空格纯净预览(2026-11-10):按住 Space 隐藏全部辅助线/轮廓/手柄/网格(只看画面) */
+  const [purePreview, setPurePreview] = React.useState(false)
+  usePurePreview(setPurePreview)
 
   return (
     <div
@@ -545,6 +536,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
       onPointerCancel={onPointerCancel}
       /* 捕获失败的兜底:指针已松开(无按键)却仍挂着拖动态 = 丢弃 */
       onPointerLeave={(e) => { if (!e.buttons && dragRef.current) onPointerCancel() }}
+      onDoubleClick={(e) => openInlineEdit(e.clientX, e.clientY)}
       onDragOver={(e) => { if (!pcRunning) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}
       onDrop={(e) => {
         if (pcRunning) return
@@ -568,7 +560,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
             {/* 滚动层(2026-10-31 画布缩放 §2.6):内容按 zoom 放大,超出即滚动;对齐工具条/边缘框/旋转柄
                 在 playerWrap 层不随滚动(按实时 rect 定位)。Ctrl+滚轮缩放(App 级 wheel 监听) */}
             <div ref={scrollRef} style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', alignItems: zoom > 1 ? 'flex-start' : 'center', justifyContent: zoom > 1 ? 'flex-start' : 'center' }} onScroll={measureSelBox}>
-              <div style={{ position: 'relative', width: Math.round(tpl.width * fitScale * zoom), height: Math.round(tpl.height * fitScale * zoom), flexShrink: 0, margin: 'auto' }}>
+              <div style={{ position: 'relative', width: Math.round(tpl.width * fitScale * zoom), height: Math.round(tpl.height * fitScale * zoom), flexShrink: 0, margin: 'auto', imageRendering: zoom > 2 ? 'pixelated' : 'auto' }}>
                 <CanvasPlayer
                   component={tpl.component}
                   inputProps={{ ...props, hiddenLayers }}
@@ -577,7 +569,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                   style={{ width: '100%', height: '100%', borderRadius: 10, overflow: 'hidden', boxShadow: '0 18px 60px rgba(0,0,0,0.5)' }}
                 />
                 {/* 画布网格(显示开关;编辑器视觉辅助,不进导出) */}
-                {showGrid && !pcRunning ? (
+                {showGrid && !pcRunning && !purePreview ? (
                   <div data-preview-grid style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 40, backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px)' }} />
                 ) : null}
                 {/* 拖动吸附参考线(青色十字;ref 直写,拖动全程零重渲染)——在缩放内容层内,随缩放对齐画布 */}
@@ -586,12 +578,15 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
               </div>
             </div>
             {/* 选中边缘框(2026-10-31 §2.6:常驻=任何选中图层都有,旋转时保持;拖动中由拖动轮廓接管) */}
-            {handleBox && !pcRunning ? (
+            {handleBox && !pcRunning && !purePreview ? (
               <div ref={outlineRef} style={{ position: 'absolute', left: handleBox.x - 2, top: handleBox.y - 2, width: handleBox.w + 4, height: handleBox.h + 4, border: '1.5px solid var(--accent)', borderRadius: 4, pointerEvents: 'none', zIndex: 86 }} />
             ) : null}
+            {/* T3.6 悬停预亮(ref 直写零重渲染) */}
+            <div ref={hoverRef} style={{ position: 'absolute', border: '1px dashed rgba(255,255,255,0.35)', borderRadius: 4, pointerEvents: 'none', zIndex: 85, display: 'none' }} />
+            {inline.element}
             {/* 对齐工具条(选中图层时出现;相对画布六向)。阻断冒泡:否则宿主 onPointerDown 按
                 坐标命中落空 → selectLayer(null) → 工具条随选中态卸载,点击永远无效(实测) */}
-            {selectedLayer && !pcRunning ? (
+            {selectedLayer && !pcRunning && !purePreview ? (
               <div
                 onPointerDown={(e) => e.stopPropagation()}
                 onDoubleClick={(e) => e.stopPropagation()}
@@ -614,14 +609,14 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
                 ))}
               </div>
             ) : null}
-            {/* 旋转手柄(选中的图片层=自定义层/产品图;拖动绕中心旋转,虚线柄+连接杆) */}
-            {isImageLayer && handleBox && !pcRunning && !lockedOf(props, selectedLayer) ? (
+            {/* 旋转手柄(选中的图片层/文字层=2026-11-10 对齐 PhotoCraft 文字变换;拖动绕中心旋转) */}
+            {(isImageLayer || selectedTextDef) && handleBox && !pcRunning && !lockedOf(props, selectedLayer) && !purePreview ? (
               <>
                 <div style={{ position: 'absolute', left: handleBox.x + handleBox.w / 2 - 1, top: handleBox.y - 20, width: 2, height: 20, background: 'var(--accent)', pointerEvents: 'none', zIndex: 88 }} />
                 <div
-                  onPointerDown={onRotateDown}
-                  onPointerMove={onRotateMove}
-                  onPointerUp={onRotateUp}
+                  onPointerDown={rotate.onDown}
+                  onPointerMove={rotate.onMove}
+                  onPointerUp={rotate.onUp}
                   title="拖动旋转(接近水平/垂直自动吸附)"
                   style={{ position: 'absolute', left: handleBox.x + handleBox.w / 2 - 9, top: handleBox.y - 38, width: 18, height: 18, borderRadius: 999, background: 'var(--accent)', border: '2px solid #fff', cursor: 'grab', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
                 />
@@ -629,7 +624,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
             ) : null}
             {/* 文字层四角缩放手柄(2026-11-10 用户报障+对齐 PhotoCraft 文字画布缩放):拖角改字号,
                 预览写 DOM fontSize,提交写 styles.scale;编辑卡字号显示 live 值实时跟随。 */}
-            {selectedTextDef && handleBox && !pcRunning && !lockedOf(props, selectedLayer) ? (
+            {selectedTextDef && handleBox && !pcRunning && !lockedOf(props, selectedLayer) && !purePreview ? (
               ([['nw', 'nwse-resize'], ['ne', 'nesw-resize'], ['sw', 'nesw-resize'], ['se', 'nwse-resize']] as const).map(([c, cursor]) => (
                 <div
                   key={`t-${c}`}
@@ -642,7 +637,7 @@ function CanvasPanel({ project }: { project: string }): React.ReactElement {
               ))
             ) : null}
             {/* 缩放手柄(PhotoCraft 四角柄,对角为锚等比缩放;自由图层=x/y 随锚补正,产品图槽位=中心缩放;预览-提交分离) */}
-            {isImageLayer && handleBox && !pcRunning && !lockedOf(props, selectedLayer) ? (
+            {isImageLayer && handleBox && !pcRunning && !lockedOf(props, selectedLayer) && !purePreview ? (
               ([['nw', 'nwse-resize'], ['ne', 'nesw-resize'], ['sw', 'nesw-resize'], ['se', 'nwse-resize']] as const).map(([c, cursor]) => (
                 <div
                   key={c}
