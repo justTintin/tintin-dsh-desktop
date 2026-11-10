@@ -123,10 +123,12 @@ function registerContextBarSlot(host: SlotHost, require?: (id: string) => unknow
   // 展示函数名便于 React DevTools / slot 调试定位
   Object.defineProperty(TintinContextAccessory, 'name', { value: 'TintinContextAccessory' })
 
-  const injectFn = slots.inject
-  const registerFn = slots.register
+  // register 必须以方法调用形态走 slots 对象：SlotRegistry.register 内部读
+  // this.ctx（cordis Service ctx），剥成自由变量裸调用时 this 丢失（落到
+  // window），每次启动必抛 Uncaught TypeError ... reading 'effect' 并打断
+  // React 渲染管线（2026-11-10 冻结事故根因，536ef805e98 引入）。
   slots.inject('conversation.input.left', () =>
-    registerFn(
+    slots.register!(
       { name: 'conversation.input.left', id: 'tintin-context-bar', order: 30 },
       TintinContextAccessory,
     ))
