@@ -211,6 +211,11 @@ function writePatch(state, models, agent = 'deepseek') {
       '        headers:',
       `          x-tintin-cover-tools-token: ${state.coverTools.token}`,
       '        failOnStartupError: false',
+      /* 工具调用超时(2026-11-10 用户报障「渲染预览连超 3 次 Request timed out」):
+         dsh-mcp-client 默认 60s(6e4), 而 render_preview 走 90s 渲染超时守卫、
+         text_remove 180s、imitate_cover 轮询最长 420s——渲染实际成功而客户端先断,
+         智能体永远收到超时(13:49 侧车产物为证)。调 600s 覆盖全部封面工具上限。 */
+      '        toolCallTimeoutMs: 600000',
     ] : []),
     '- id: llm-pi-ai',
     '  config:',
