@@ -193,6 +193,40 @@ describe('cover tools mcp endpoint', () => {
     expect(resultOf(bad).content[0].text).toContain('partial_failed')
   })
 
+  it('imitate_cover: 人物档 subject=person 透传+结果回显 subject/styleMode;人物多图本地拒绝', async () => {
+    const jsonRes = (obj: unknown, status = 200) => ({ ok: true, status, headers: { get: () => 'application/json' }, json: async () => obj, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })
+    const fetchMock = vi.fn()
+      // product-upload
+      .mockImplementationOnce(async () => jsonRes({ paths: ['/srv/uploads/person.png'], count: 1 }))
+      // /generate/cover 202
+      .mockImplementationOnce(async () => jsonRes({ task_id: 'c_person-1', poll: '/tasks/unified/c_person-1' }, 202))
+      // poll → completed(person 档回显)
+      .mockImplementationOnce(async () => jsonRes({ id: 'c_person-1', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_person-1.png', width: 704, height: 1248, engine: 'comfygen', subject: 'person', style_mode: 'not_supported', refs_used: ['style_ref.png'] } }))
+      // 产物下载
+      .mockImplementationOnce(async () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { coverDir, call } = await setup()
+    writeFileSync(join(coverDir, 'person.png'), TINY_PNG)
+    const ok = await call(rpc(1, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png'], subject: 'person', title: '人物档', prompt: '动作与场景描述' } }))
+    const payload = JSON.parse(resultOf(ok).content[0].text)
+    expect(payload.ok).toBe(true)
+    expect(payload.subject).toBe('person')
+    expect(payload.styleMode).toBe('not_supported')
+    expect(payload.note).toContain('人脸相似度门')
+    // 人物档生成载荷契约:subject 透传+恰 1 张
+    const genCall = fetchMock.mock.calls[1] as [string, { body: string }]
+    expect(genCall[0]).toContain('/generate/cover')
+    const genBody = JSON.parse(genCall[1].body)
+    expect(genBody.subject).toBe('person')
+    expect(genBody.images).toEqual(['/srv/uploads/person.png'])
+
+    // 人物档多图 → 本地拒绝, 不打服务端(上传 4 次调用后不再新增)
+    const multi = await call(rpc(2, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png', 'person.png'], subject: 'person', title: 'x' } }))
+    expect(resultOf(multi).isError).toBe(true)
+    expect(resultOf(multi).content[0].text).toContain('恰 1 张人物正脸图')
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
   it('ocr_image: 返回逐行文本+位置框;服务端错误原文上返', async () => {
     const { coverDir, call } = await setup()
     writeFileSync(join(coverDir, 'poster.png'), TINY_PNG)

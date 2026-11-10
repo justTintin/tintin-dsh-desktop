@@ -16,6 +16,8 @@
 //                   换服务端路径)→/generate/cover 编排(images 路径数组+文案至少其一)
 //                   →统一任务轮询→产物下载落盘双写。1106 缺口(本机参考图无通路)
 //                   由服务端新增 /generate/cover + product-upload 打通, 契约实测。
+//                   1110 人物主体批: subject="person"=人物正脸恰 1 张(引擎人脸身份
+//                   锚定+ArcFace 相似度门, completed=门已过; 风格参考 v1 不收, 走 prompt)
 //   ocr_image       拆解提字(/material/ocr): 逐行文本+位置框(box/box_rel/置信度,
 //                   实测含坐标), 供参考封面版式分析→文字层按位置重打。
 //   text_remove     去字(/image/text-remove, 2026-11-10 生产接线): LaMa 质量档抹掉
@@ -267,7 +269,11 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
 
   /** 仿封面生成(2026-11-09 服务端核实批):参考图上传→/generate/cover 编排→轮询→产物落盘。
    *  契约(实测): 参考图三选一 script_id/images/material_ids(封面域只用 images=服务端路径),
-   *  文案至少其一 title/prompt/selling_points;上传端点=POST /api/storyboard/scripts/product-upload。 */
+   *  文案至少其一 title/prompt/selling_points;上传端点=POST /api/storyboard/scripts/product-upload。
+   *  1110 人物档(实测): subject="person"=引擎人脸身份锚定+相似度门, images 须恰 1 张人物正脸图
+   *  (多张服务端 400 拒);风格参考 v1 不收(style_refs 参数被服务端丢弃,风格走 prompt 文字);
+   *  prompt 禁写人物外貌——身份由引擎锚定模板负责,外貌描述=画陌生人(1110 晚墨镜男事故);
+   *  任务 completed=人脸相似度门已过,失败 partial_failed 带分值(错误原文上返)。 */
   const imitateCover = async (args) => {
     const engine = await loadEngine()
     const coverDir = await engine.resolveCoverDir()
@@ -276,6 +282,10 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     const inputs = Array.isArray(args?.images) ? args.images : args?.images ? [args.images] : []
     if (!inputs.length) throw new Error('缺少参考图:images 至少 1 张(参考封面或参考产品图)')
     if (inputs.length > COVER_MAX_REF_IMAGES) throw new Error(`参考图最多 ${COVER_MAX_REF_IMAGES} 张`)
+    const subject = args?.subject === 'person' ? 'person' : args?.subject === 'product' ? 'product' : ''
+    if (subject === 'person' && inputs.length !== 1) {
+      throw new Error('subject=person 要求 images 恰 1 张人物正脸图(引擎人脸身份锚定 v1 不收多图/风格参考组合);风格用 prompt 文字描述')
+    }
     const title = typeof args?.title === 'string' ? args.title.trim() : ''
     const prompt = typeof args?.prompt === 'string' ? args.prompt.trim() : ''
     const sellingPoints = Array.isArray(args?.selling_points) ? args.selling_points.map((s) => String(s).trim()).filter(Boolean) : []
@@ -283,6 +293,7 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     const refPaths = inputs.map((input) => resolveImagePath(input, coverDir, resolvePluginDir()))
     const serverPaths = await uploadRefImages(serverUrl, refPaths)
     const payload = { images: serverPaths }
+    if (subject) payload.subject = subject
     if (title) payload.title = title
     if (prompt) payload.prompt = prompt
     if (sellingPoints.length) payload.selling_points = sellingPoints
@@ -304,8 +315,13 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     if (!outputUrl) throw new Error(`生成完成但无产物地址:${JSON.stringify(done?.result ?? {}).slice(0, 200)}`)
     const outName = `imitate-${Date.now()}.png`
     const filePath = await saveGeneratedImage(serverUrl, outputUrl, outName, coverDir, resolvePluginDir())
+    const resultSubject = String(done?.result?.subject ?? '')
+    const resultStyleMode = String(done?.result?.style_mode ?? '')
+    const personNote = subject === 'person' || resultSubject === 'person'
+      ? '人物档:任务 completed=引擎人脸相似度门已过(失败会 partial_failed 带分值);人物身份由参考图锚定,prompt 里的外貌描述不参与身份。'
+      : ''
     return {
-      content: [{ type: 'text', text: JSON.stringify({ ok: true, name: outName, file: filePath, asset: '素材区(三写位)', taskId, note: '这是服务端仿封面产物(无分层)。要按项目版式组装:用 read_image 看它→取其中元素(可再 matting 抠主体)作为图层素材,再写 cover.props.json→render_preview 回看。' }, null, 1) }],
+      content: [{ type: 'text', text: JSON.stringify({ ok: true, name: outName, file: filePath, asset: '素材区(三写位)', taskId, ...(resultSubject ? { subject: resultSubject } : {}), ...(resultStyleMode ? { styleMode: resultStyleMode } : {}), note: `这是服务端仿封面产物(无分层)。要按项目版式组装:用 read_image 看它→取其中元素(可再 matting 抠主体)作为图层素材,再写 cover.props.json→render_preview 回看。${personNote}` }, null, 1) }],
     }
   }
 
@@ -370,11 +386,12 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     },
     {
       name: 'imitate_cover',
-      description: '仿封面生成(服务端 /generate/cover 编排):上传参考图(参考封面/参考产品图,1..4 张)→按文案生成同风格封面→产物落素材区+项目目录。参数:images(必填,本机参考图)+文案至少其一(title/prompt/selling_points)。产物是整图(无分层)——组装进项目版式请看返回 note。分钟级耗时。',
+      description: '仿封面生成(服务端 /generate/cover 编排):上传参考图→按文案生成同风格封面→产物落素材区+项目目录。普通档(缺省):images 1..4 张(第一张建议参考封面,其余产品/人物图)。人物档(subject="person"):images 恰 1 张人物正脸图,引擎人脸身份锚定+相似度门(换人=任务失败),风格/场景/动作写进 prompt——prompt 禁写人物外貌(外貌描述=画陌生人)。参数:images(必填)+文案至少其一(title/prompt/selling_points)。产物是整图(无分层)——组装进项目版式请看返回 note。分钟级耗时。',
       inputSchema: { type: 'object', properties: {
-        images: { type: 'array', items: { type: 'string' }, description: '参考图路径(项目目录/素材位文件名或绝对路径),1..4 张;第一张建议为参考封面,其余为产品/人物图' },
+        images: { type: 'array', items: { type: 'string' }, description: '参考图路径(项目目录/素材位文件名或绝对路径);普通档 1..4 张,人物档(subject=person)恰 1 张人物正脸图' },
+        subject: { type: 'string', enum: ['person', 'product'], description: '可选,人物档传 "person"(人物身份锚定,恰 1 张人物正脸图);缺省=普通档' },
         title: { type: 'string', description: '主标题文案(与 prompt/selling_points 至少其一)' },
-        prompt: { type: 'string', description: '画面/风格描述' },
+        prompt: { type: 'string', description: '画面/风格/动作/构图描述;人物档下禁写人物外貌(脸/发型/服装/配饰)' },
         selling_points: { type: 'array', items: { type: 'string' }, description: '卖点短语数组(角标文案)' },
       }, required: ['images'] },
     },
