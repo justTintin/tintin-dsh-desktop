@@ -20,6 +20,8 @@ export interface TextStyleOverride {
   shadow?: { dx: number; dy: number; blur: number; color: string }
   /** 描边(仅文字;WebkitTextStroke 宽度 px + 颜色;设置后覆盖模板描边) */
   stroke?: { width: number; color: string }
+  /** 旋转(度,±180;画布旋转手柄写入;2026-11-10 对齐 PhotoCraft 文字变换) */
+  rotate?: number
 }
 
 /** 图片槽位(产品图)的条目另带外观/变换字段(image-style.ts,2026-11-01 对齐 PhotoCraft) */
@@ -61,7 +63,10 @@ export function layerStyle(
   const scale = typeof s?.scale === 'number' && Number.isFinite(s.scale) ? Math.min(3, Math.max(0.3, s.scale)) : 1
   const dx = clampOffset(s?.dx)
   const dy = clampOffset(s?.dy)
-  const translate = dx === undefined && dy === undefined ? '' : `translate(${dx ?? 0}px, ${dy ?? 0}px)`
+  const rotate = typeof s?.rotate === 'number' && Number.isFinite(s.rotate) ? Math.min(180, Math.max(-180, Math.round(s.rotate))) : undefined
+  const translate = dx === undefined && dy === undefined && rotate === undefined
+    ? ''
+    : `translate(${dx ?? 0}px, ${dy ?? 0}px)${rotate ? ` rotate(${rotate}deg)` : ''}`
   const font = sanitizeFontFamily(s?.font)
   const weight = clampWeight(s?.weight)
   const shadow = s?.shadow && typeof s.shadow.blur === 'number' && typeof s.shadow.color === 'string'
