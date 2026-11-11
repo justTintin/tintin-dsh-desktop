@@ -74,7 +74,10 @@ const mount = (): void => {
 
     const fab = document.createElement('button');
     fab.className = 'openfilm-composer-tool';
-    fab.textContent = '📦'; fab.title = '选择产品(资料注入会话)';
+    /* 图标(2026-11-11 用户裁决:与在线素材按钮同款样式)= lucide Package,16px/stroke 1.75,
+       与官方工具行(LibraryBig/Plus)同一画法;原 📦 emoji 与官方 SVG 并排不成套 */
+    fab.setAttribute('aria-pressed', 'false');
+    fab.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/></svg>';
     fab.title = '选择产品:资料注入会话(@ 引用)';
     /* 挂进官方 composer 工具条(与素材/技能按钮同行同款) —— 等工具条出现后注入 */
     const attachFab = (): void => {
@@ -154,7 +157,7 @@ const mount = (): void => {
         fire('insertText', line);
       }
       status.textContent = '已注入产品资料到会话输入框';
-      panel.style.display = 'none';
+      hide();
     };
 
     const rowOf = (item: Record<string, unknown>): HTMLElement => {
@@ -200,26 +203,42 @@ const mount = (): void => {
         status.textContent = '产品加载失败：' + (error instanceof Error ? error.message : String(error));
       }
     };
+    /* 显隐(2026-11-11 用户裁决:与在线素材按钮同款开关语义): fab 再点一次=关闭;
+       aria-pressed 走官方 .openfilm-composer-tool[aria-pressed=true] 按下态样式 */
+    const setOpen = (on: boolean): void => {
+      panel.style.display = on ? 'flex' : 'none';
+      fab.setAttribute('aria-pressed', on ? 'true' : 'false');
+    };
     const open = (): void => {
-      panel.style.display = 'flex';
-      /* 素材式嵌入: 面板占聊天列的会话区域(列左缘→列宽, 列顶→输入框上缘留 128px 给
-         composer), 不盖 Studio 画布(2026-11-09 用户裁决); 列不在=屏幕左侧兜底 */
+      setOpen(true);
+      /* 素材式嵌入: 面板占聊天列的会话区域(列左缘→列宽, 列顶→**输入框上缘**)。
+         2026-11-11 用户裁决:不留空隙——面板底=输入框顶(data-prompt-shell=composer
+         卡片根, MentionMenuPlugin 同款锚);原 128px 固定预留=面板悬在输入框上方一段。
+         锚缺失才退回 128px 兜底;列不在=屏幕左侧兜底。 */
       const columnRect = document.getElementById('of-chat')?.getBoundingClientRect();
+      const shellRect = document.querySelector('[data-prompt-shell]')?.getBoundingClientRect();
       if (columnRect && columnRect.width > 40) {
         panel.style.left = `${Math.round(columnRect.left)}px`;
         panel.style.top = `${Math.round(columnRect.top)}px`;
         panel.style.width = `${Math.round(columnRect.width)}px`;
-        panel.style.maxHeight = `${Math.max(240, Math.round(columnRect.height - 128))}px`;
+        if (shellRect && shellRect.top > columnRect.top + 40) {
+          panel.style.height = `${Math.round(shellRect.top - columnRect.top)}px`;
+          panel.style.maxHeight = 'none';
+        } else {
+          panel.style.height = '';
+          panel.style.maxHeight = `${Math.max(240, Math.round(columnRect.height - 128))}px`;
+        }
       } else {
         panel.style.left = '0px';
         panel.style.top = '32px';
         panel.style.width = '420px';
+        panel.style.height = '';
         panel.style.maxHeight = '70vh';
       }
       if (!list.childElementCount && !status.textContent) void load('');
     };
-    fab.onclick = open;
-    close.onclick = () => { panel.style.display = 'none' };
+    fab.onclick = () => { if (panel.style.display !== 'none') setOpen(false); else open() };
+    close.onclick = () => setOpen(false);
     let timer = 0;
     search.oninput = () => { window.clearTimeout(timer); timer = window.setTimeout(() => { void load(search.value.trim()) }, 350) };
   } catch (error) {
