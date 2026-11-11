@@ -403,6 +403,14 @@
 4. **卡片标题单行省略**: `headStyle` 加 nowrap+ellipsis(长文件名不再换行),悬停 title 显示全名。
 - 验证: 144 用例(新增 4)+37 基线+两构建+check:tintin+staging 新鲜;探针:头行标签在且值宽 80、图片卡无 混合/不透明度/锁定/投影 而 变换/对齐/翻转在、长名单行高 15px(nowrap/ellipsis)、GUI 删中间层选中自动落到下一行(素材B→素材A),零 pageerror。
 
+### 6.5¹⁵ 文字编辑叠字根因+修复(2026-11-11 续批 R23,用户截图指认「还是没在原字上编辑」)
+
+用户截图:进入编辑后画布出现**两层字**(模板原字 + 覆盖层字),字距/斜切/末行颜色不同→错位重影。根因两层:
+
+1. **覆盖层是透明 textarea 叠在原字上,原字从未被隐藏**——两行字同时可见,永远对不齐(模板每行还有 skewX(-4deg)/奇偶行缩进/末行 0.88 字号+青色,textarea 只有一套样式)。
+2. **参照 PhotoCraft**:它的文字编辑是在图层自身排版里画光标(`crates/ui-egui/src/tools/type_tool/editing.rs` caret/selection,无独立覆盖层)——根本不存在「两层字」。React 等价实现:**编辑期间把原图层整体隐藏**(`data-inline-editing` attribute + 一次性样式表 `[data-cover-layer][data-inline-editing]{visibility:hidden !important}`;attribute 用 DOM setAttribute,React 重渲不丢——style 直写会被重渲冲掉,这是选 attribute 的原因),只留覆盖层一层字;提交/Esc/失焦关闭时移除 attribute 恢复。顺带:进入编辑光标落末尾(不 select-all,避免整段蓝底盖住画面);覆盖层高度按行数×实测行高留足(原层隐藏后输入多行要能看见)。
+- 验证: 144 用例+37 基线+两构建+check:tintin+staging 新鲜;探针:进入编辑 attr=true/visibility=hidden、输入触发重渲后 attr 仍 true、Esc 关闭 attr 移除恢复 visible、编辑态截图=单层字无蓝底、零 pageerror。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。

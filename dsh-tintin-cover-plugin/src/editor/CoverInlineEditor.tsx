@@ -20,7 +20,14 @@ export interface InlineEditorProps {
 export function CoverInlineEditor({ box, style, initial, multiline, onCommit, onClose }: InlineEditorProps): React.ReactElement {
   const [value, setValue] = React.useState(initial)
   const ref = React.useRef<HTMLTextAreaElement>(null)
-  React.useEffect(() => { ref.current?.focus(); ref.current?.select() }, [])
+  /* 进入编辑=光标落到末尾(2026-11-11:select-all 会把整段选中成大块蓝底,盖住画面视觉) */
+  React.useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    const end = el.value.length
+    el.setSelectionRange(end, end)
+  }, [])
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const schedule = (text: string): void => {
     if (timer.current) clearTimeout(timer.current)
