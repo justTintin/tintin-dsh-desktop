@@ -403,13 +403,15 @@
 4. **卡片标题单行省略**: `headStyle` 加 nowrap+ellipsis(长文件名不再换行),悬停 title 显示全名。
 - 验证: 144 用例(新增 4)+37 基线+两构建+check:tintin+staging 新鲜;探针:头行标签在且值宽 80、图片卡无 混合/不透明度/锁定/投影 而 变换/对齐/翻转在、长名单行高 15px(nowrap/ellipsis)、GUI 删中间层选中自动落到下一行(素材B→素材A),零 pageerror。
 
-### 6.5¹⁵ 文字编辑叠字根因+修复(2026-11-11 续批 R23,用户截图指认「还是没在原字上编辑」)
+### 6.5¹⁵ 文字编辑=图层自身排版内编辑(2026-11-11 续批 R23/R24,用户两次裁决)
 
-用户截图:进入编辑后画布出现**两层字**(模板原字 + 覆盖层字),字距/斜切/末行颜色不同→错位重影。根因两层:
+用户截图:进入编辑后画布出现**两层字**(模板原字 + 覆盖层字)。第一次修法(R23)=覆盖层 textarea 透明化 + 编辑期间隐藏原图层;用户随后明确裁决:**照 PhotoCraft 在图层自身的排版里编辑(无独立覆盖层)**。R24 按此重做:
 
-1. **覆盖层是透明 textarea 叠在原字上,原字从未被隐藏**——两行字同时可见,永远对不齐(模板每行还有 skewX(-4deg)/奇偶行缩进/末行 0.88 字号+青色,textarea 只有一套样式)。
-2. **参照 PhotoCraft**:它的文字编辑是在图层自身排版里画光标(`crates/ui-egui/src/tools/type_tool/editing.rs` caret/selection,无独立覆盖层)——根本不存在「两层字」。React 等价实现:**编辑期间把原图层整体隐藏**(`data-inline-editing` attribute + 一次性样式表 `[data-cover-layer][data-inline-editing]{visibility:hidden !important}`;attribute 用 DOM setAttribute,React 重渲不丢——style 直写会被重渲冲掉,这是选 attribute 的原因),只留覆盖层一层字;提交/Esc/失焦关闭时移除 attribute 恢复。顺带:进入编辑光标落末尾(不 select-all,避免整段蓝底盖住画面);覆盖层高度按行数×实测行高留足(原层隐藏后输入多行要能看见)。
-- 验证: 144 用例+37 基线+两构建+check:tintin+staging 新鲜;探针:进入编辑 attr=true/visibility=hidden、输入触发重渲后 attr 仍 true、Esc 关闭 attr 移除恢复 visible、编辑态截图=单层字无蓝底、零 pageerror。
+1. **contenteditable 落在模板文字图层自身**(`type_tool/editing.rs` 的 React 等价):双击文字层 → 该图层元素 `contenteditable="true"`、浏览器原生光标在真字形之间移动——字距/斜切/行高/末行跳色全部是模板真样式,物理上不存在第二层字,也没有覆盖框。非文字子节点(装饰条)编辑期间临时隐藏。
+2. **输入期间不写 props**(避免 React 重渲打断光标);**失焦=提交**(数组层按 innerText 分块分行、trimStart+丢空行;单行层整体提交,Enter 直接提交);**Esc=还原进编辑前的 DOM**(innerHTML 快照)。
+3. 编辑期间原生事件 stopPropagation 阻断画布宿主(否则 pointerdown 触发选择/拖动、dblclick 二次进入);光标落末尾(不整段选中)。
+4. R23 的覆盖层实现与其隐藏样式表随之整体退役(CoverInlineEditor.tsx 删除),避免两套机制并存。
+- 验证: 144 用例+37 基线+两构建+check:tintin+staging 新鲜;探针:双击后图层 contenteditable=true 且聚焦、覆盖 textarea=0、输入后 DOM 文本原位变化、点空白失焦提交(contenteditable 移除且新文本保留)、Esc 还原本次输入;编辑态截图=真字形(第一行白/末行青,模板原样式),零 pageerror。
 
 ### 6.6 剩余方向(待裁决排期)
 
