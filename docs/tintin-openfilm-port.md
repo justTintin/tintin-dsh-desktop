@@ -644,6 +644,15 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - **贴输入框**: 面板底=输入框顶(`[data-prompt-shell]` composer 卡片根为锚, MentionMenuPlugin 同款), 替代原 128px 固定预留(面板不再悬空一段);锚缺失退回 128px 兜底;面板补 `box-sizing:border-box`(边框计入定位尺寸,否则 1px 边框把面板底压过输入框顶 2px);
 - 验证: dsh-tintin-bundle 22 文件 204 用例全绿;check:tintin/热调载荷新鲜绿;独立渲染面探针(harness=假 composer 列+假 products 桥,静态服务+浏览器实测)=打开时面板底=输入框顶(634==634)、面板宽=列宽(420==420)、点开→再点关→再点开序列与 `aria-pressed` 同步、图标与素材按钮同类(`.openfilm-composer-tool`)且为 SVG 无 emoji(2026-11-11 实测,与实现同车提交)。
 
+## 16.34 设置页「按功能测试连接」面板整体退役(2026-11-12, 用户指令「这个原来dsh里不需要的删除」)
+
+设置页模型卡片下方的「按功能测试连接」注入面板(LLM/OCR/向量/TTS/ASR 五行探针+「全部测试」)是移植期自加的诊断面,上游 DSH 没有——按用户指令整体删除:
+
+- `dsh-tintin-client-ui/client.js`: 删 `installCapabilityTests()` 全函数(面板构建+MutationObserver 自愈注入+五探针),`apply` 不再调用、插件对象不再导出;包头注释同步收窄为仅 OpenFilm 壳。上游「添加模型提供商」按钮(0.1.5「添加提供方」→0.1.7 改名)是注入锚点兼上游原生件,**保留不动**;
+- `dsh-tintin-bundle/client.js`: 三处指路面注释(「按功能测试连接在 client-ui」等)随实现移除;
+- 面板消费的桥面成员(`window.tintin.server.llmModels` 等)是 tintin 桥公共面,另有/可能有其它消费方,不随面板退役;
+- 验证: 两 client.js `node --check` 通过、全仓 grep 零残留;check:tintin 绿(与实现同车提交)。
+
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 
 > 依据:«字节跳动 Agent 实践手册»§4.3.1 创作辅助四段形态(创意方案→素材推荐→拍摄建议→**剪辑建议**)对照——前三段我们已有且更深,第四段(有人看节奏/转场/字幕落点并给建议)完全空白;用户裁决立项补齐,并追加「根据素材自动粗剪」。源参考:[agent-practice-manual.md](agent-practice-manual.md) §4.3.1/§5.2/§8.2.3;开发标准条款:[tintin-agent-dev-standards.md](tintin-agent-dev-standards.md) T1/T2/T4/T7。**本文只立项不定实现;动代码前先过 §17.4 的验收判据与 §17.2 的 spike 门。**

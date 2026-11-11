@@ -310,8 +310,6 @@ const tintinClient = (() => {
       render()
     }
 
-    // 按功能测试连接 → dsh-tintin-client-ui（独立 client 包自己安装）。
-
     // ── WP-2 window.tintin polyfill：旧 preload 桥同签名重建，搬运视图零改动；
     // server.* → /tintin/ipc/*，进度事件改 jobId 轮询（主方案 §3.1）。命名空间
     // =Proxy：已知成员带浏览器可实现版本，未知成员转发 /tintin/ipc/<ns>:<method>
@@ -893,7 +891,6 @@ const tintinClient = (() => {
 
     // Install now (see header comment): the media bundle's factory registers
     // its view provider against __tintinViews, which must already exist.
-    // 按功能测试连接 lives in the dsh-tintin-client-ui client plugin.
     installTintinChrome()
     installTintinBridge()
     installTinTinProvisioning()
@@ -903,7 +900,7 @@ const tintinClient = (() => {
 
 // ── 插件定义（factory 期执行；React 只在此处可用）────────────────────────
 // 设置卡走 settings.plugin.item slot（ConfigurablePluginsTab 契约：key 列表分发、
-// 卡片组件由插件 client 贡献——image-generation 同款；按功能测试连接在 client-ui）。
+// 卡片组件由插件 client 贡献——image-generation 同款）。
 window.__ModuleLoader__.load({
   id: 'dsh-tintin-bundle',
   factory: (require) => {
