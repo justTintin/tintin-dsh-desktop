@@ -3,9 +3,9 @@
 // · RenderSurface 直接渲染模板(无 Player 壳,remotion 走 shim);几何/命中全归编辑器;
 // · 2026-11-11 用户裁决:画布选择框/角柄/边柄/旋转柄/悬停框整套 chrome 移除(三轮修复
 //   不稳:偏移双重计入→修复后实测仍见旧位残影与连杆横穿画布;裁决「无法正常处理就
-//   不要此功能」)。保留:点选/Shift 多选/拖动+智能吸附/Alt 循环选层/Alt 复制/对齐
-//   工具条/快捷键/就地编辑/拖放建层/智能参考线/用户参考线/标尺/网格/纯净预览;
-//   尺寸/位置/缩放/旋转编辑走属性面板数值字段(text-properties / layer-editors)。
+//   不要此功能」)。保留:点选/Shift 多选/拖动+智能吸附/Alt 循环选层/Alt 复制/快捷键/
+//   就地编辑/拖放建层/智能参考线/用户参考线/标尺/网格/纯净预览;尺寸/位置/缩放/旋转/对齐
+//   编辑走属性面板数值字段与对齐按钮(align-row;画布浮动对齐条 R15 随裁决删除)。
 //   几何数学(sel-geom/image-ops resize 族/text-scale)留档不删,待整套重设计后复用;
 // · 拖动/吸附/读数/Alt 循环/空格纯净预览/快捷键/就地编辑/拖放=原行为零改动;
 // · 顺手修: 旧 App 级 Ctrl+滚轮监听与 useCanvasZoom 重复挂载(每次滚轮 1.21 倍),
@@ -96,63 +96,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   }
   /** 图层元素的画布盒(含 translate/scale 的视觉框 → 画布 px) */
   const canvasBoxOf = (el: Element): CanvasBox => canvasBoxIn(el, compositionRect(), tpl.width)
-  /** 对齐(相对画布;PhotoCraft 式六向)。文字层改 dx/dy 偏移,自定义层改 x/y。
-   *  R8 多选: ≥2 层选中时=组内对齐(参照=选区包围盒: 左=最左/中=包围盒中线/右=最右,
-   *  对照 PS Align Left Edges of Selection),逐层按各自盒差 delta 平移。 */
-  const alignLayer = (id: string, mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom'): void => {
-    const ids = [...new Set([id, ...multiSelected])]
-    if (ids.length > 1) { alignGroup(ids, mode); return }
-    if (lockedOf(props, id)) return
-    const el = hostRef.current?.querySelector(`[data-cover-layer="${id}"]`)
-    if (!el) return
-    const box = canvasBoxOf(el)
-    const target = {
-      left: 0, centerX: (tpl.width - box.w) / 2, right: tpl.width - box.w,
-      top: 0, centerY: (tpl.height - box.h) / 2, bottom: tpl.height - box.h,
-    }[mode]
-    if (id.startsWith('img-')) {
-      const layer = (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; x: number; y: number }>) : []).find((l) => l.id === id)
-      if (!layer) return
-      if (mode === 'left' || mode === 'centerX' || mode === 'right') setCustomLayer(id, { x: Math.round(target) })
-      else setCustomLayer(id, { y: Math.round(target) })
-      return
-    }
-    const styles = (props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[id]
-    if (mode === 'left' || mode === 'centerX' || mode === 'right') {
-      setLayerStyle(id, { dx: Math.round((styles?.dx ?? 0) + (target - box.left)) })
-    } else {
-      setLayerStyle(id, { dy: Math.round((styles?.dy ?? 0) + (target - box.top)) })
-    }
-  }
-  /** R8 组内对齐: 参照=选区包围盒(画布盒),逐层 delta=参照边−自身边;横向模式只动 x/dx,
-   *  纵向只动 y/dy。锁定层跳过。 */
-  const alignGroup = (ids: string[], mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom'): void => {
-    const boxes = ids
-      .map((lid) => ({ id: lid, el: hostRef.current?.querySelector(`[data-cover-layer="${lid}"]`) }))
-      .filter((v): v is { id: string; el: Element } => Boolean(v.el) && !lockedOf(props, v.id))
-      .map((v) => ({ id: v.id, el: v.el, box: canvasBoxOf(v.el) }))
-    if (boxes.length < 2) return
-    const horizontal = mode === 'left' || mode === 'centerX' || mode === 'right'
-    const keyOf = (b: CanvasBox): number => horizontal
-      ? (mode === 'left' ? b.left : mode === 'centerX' ? b.left + b.w / 2 : b.left + b.w)
-      : (mode === 'top' ? b.top : mode === 'centerY' ? b.top + b.h / 2 : b.top + b.h)
-    const refs = boxes.map((v) => keyOf(v.box))
-    const ref = horizontal
-      ? (mode === 'left' ? Math.min(...refs) : mode === 'centerX' ? (Math.min(...refs) + Math.max(...refs)) / 2 : Math.max(...refs))
-      : (mode === 'top' ? Math.min(...refs) : mode === 'centerY' ? (Math.min(...refs) + Math.max(...refs)) / 2 : Math.max(...refs))
-    for (const v of boxes) {
-      const delta = Math.round(ref - keyOf(v.box))
-      if (delta === 0) continue
-      if (v.id.startsWith('img-')) {
-        const layer = (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; x: number; y: number }>) : []).find((l) => l.id === v.id)
-        if (!layer) continue
-        setCustomLayer(v.id, horizontal ? { x: layer.x + delta } : { y: layer.y + delta })
-      } else {
-        const styles = (props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[v.id]
-        setLayerStyle(v.id, horizontal ? { dx: (styles?.dx ?? 0) + delta } : { dy: (styles?.dy ?? 0) + delta })
-      }
-    }
-  }
   /** 拖入图片 → 同步三写 → 新图层(锚点居中于投放点)。
    *  例外(2026-10-31 用户裁决:产品图可移动,移动不产生新副本): 拖入的与当前产品图是同一张时,
    *  平移产品槽位到投放点(select 便于继续拖),不再新增图层。 */
@@ -498,7 +441,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const { guideDragRef, previewHRef, previewVRef, startGuideDrag, moveGuidePreview, finishGuideDrag } = useUserGuides({
     pcRunning, purePreview: purePreviewRef.current, fitScale, zoom, tpl, contentRef, userGuides, addUserGuide, removeUserGuide,
   })
-  const locked = selectedLayer ? lockedOf(props, selectedLayer) : false
   /* 快捷键(2026-11-01 对齐 PhotoCraft,自 onKeyDown 解耦为窗口级):见 canvas-keys.ts */
   useCanvasShortcuts(() => ({ all: Boolean(pcRunning), layer: Boolean(dragRef.current) }))
 
@@ -567,31 +509,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                 <div ref={previewHRef} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 96, display: 'none' }} />
                 <div ref={previewVRef} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 96, display: 'none' }} />
                 {inline.element}
-                {/* 对齐工具条(选中图层时出现;相对画布六向)。阻断冒泡:否则宿主 onPointerDown 按
-                    坐标命中落空 → selectLayer(null) → 工具条随选中态卸载,点击永远无效(实测) */}
-                {selectedLayer && !pcRunning && !purePreview ? (
-                  <div
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onDoubleClick={(e) => e.stopPropagation()}
-                    style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, background: 'rgba(30,30,32,0.92)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '3px 5px', zIndex: 80 }}>
-                    {([
-                      ['left', '⇤', '左对齐画布'],
-                      ['centerX', '⇔', '水平居中'],
-                      ['right', '⇥', '右对齐画布'],
-                      ['top', '⇧', '顶对齐画布'],
-                      ['centerY', '⇕', '垂直居中'],
-                      ['bottom', '⇩', '底对齐画布'],
-                    ] as const).map(([mode, glyph, titleText]) => (
-                      <button
-                        key={mode}
-                        title={locked ? '图层已锁定位置' : titleText}
-                        disabled={locked}
-                        onClick={() => selectedLayer && alignLayer(selectedLayer, mode)}
-                        style={{ width: 26, height: 24, borderRadius: 6, border: 0, cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, opacity: locked ? 0.35 : 1 }}
-                      >{glyph}</button>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             </div>
             {/* R8 标尺(组件在 canvas-rulers.tsx;刻度平移/十字标 ref 对齐,拖出参考线 R9b) */}

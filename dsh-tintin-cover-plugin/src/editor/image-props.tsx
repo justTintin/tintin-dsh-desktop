@@ -12,6 +12,7 @@ import { BLEND_MODES, lookOpacity, lookScale, type ImageLook } from '../../templ
 import { canvasBoxIn, compositionRectIn, layerEl, type CanvasBox } from './canvas-geom'
 import { clampScale, flipPatch, resizeWH, rotatePatch } from './image-ops'
 import { useEditor } from './store'
+import { AlignButtons, type AlignMode } from './align-row'
 import { ghostBtn, headStyle, inputStyle } from './ui'
 
 export type ImageTarget =
@@ -138,6 +139,24 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
     })
   }
   const opacity = Math.round(lookOpacity(look) * 100)
+  const tpl = getTemplate(templateId)
+  /* 六向对齐画布(2026-11-11 R15: 画布浮动对齐条删除后入口收进属性卡;与文字面板/旧工具条同数学=视觉盒对画布) */
+  const alignToCanvas = (mode: AlignMode): void => {
+    if (!metrics || locked) return
+    const box = metrics.box
+    const goal = {
+      left: 0, centerX: (tpl.width - box.w) / 2, right: tpl.width - box.w,
+      top: 0, centerY: (tpl.height - box.h) / 2, bottom: tpl.height - box.h,
+    }[mode]
+    const horizontal = mode === 'left' || mode === 'centerX' || mode === 'right'
+    if (target.kind === 'custom') {
+      apply(horizontal ? { x: Math.round(goal) } : { y: Math.round(goal) })
+      return
+    }
+    apply(horizontal
+      ? { dx: Math.round((look.dx ?? 0) + (goal - box.left)) }
+      : { dy: Math.round((look.dy ?? 0) + (goal - box.top)) })
+  }
   const transformBtn = (text: string, patch: ImageLook, title: string): React.ReactElement => (
     <button key={text} disabled={locked} onClick={() => apply(patch)} title={locked ? '图层已锁定位置' : title} style={chip(!locked)}>{text}</button>
   )
@@ -201,6 +220,12 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
             <span style={label}>°</span>
           </div>
         </>
+      ) : null}
+      {geometry ? (
+        <div style={{ ...row }}>
+          <span style={label}>对齐</span>
+          <AlignButtons onAlign={alignToCanvas} disabled={locked || !metrics} />
+        </div>
       ) : null}
       <div style={{ ...row, flexWrap: 'wrap' }}>
         {transformBtn('⇋ 水平翻转', flipPatch(look, 'x'), '编辑›变换›水平翻转')}

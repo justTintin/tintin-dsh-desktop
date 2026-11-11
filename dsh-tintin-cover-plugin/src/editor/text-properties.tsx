@@ -20,9 +20,9 @@ import { useEditor } from './store'
 import {
   IconAlignCenter, IconAlignJustify, IconAlignLeft, IconAlignRight,
   IconChevronDown, IconDistributeHorizontal, IconDistributeVertical,
-  IconEdgeBottom, IconEdgeHCenter, IconEdgeLeft, IconEdgeRight, IconEdgeTop, IconEdgeVCenter,
   IconLink2,
 } from './layer-icons'
+import { AlignButtons, IconBtn } from './align-row'
 
 const PC = {
   field: '#242424',
@@ -92,31 +92,6 @@ function SectionHead({ label, open, onToggle }: { label: string; open: boolean; 
       <span style={{ display: 'flex', color: PC.textDim }}><IconChevronDown size={13} /></span>
       <span style={{ fontSize: 12, fontWeight: 600, color: PC.text }}>{label}</span>
     </div>
-  )
-}
-
-/** 图标小钮(26px 视觉缩至 24×22;hover=field 底) */
-function IconBtn({ children, onClick, disabled, active, title }: {
-  children: React.ReactNode
-  onClick: () => void
-  disabled?: boolean
-  active?: boolean
-  title: string
-}): React.ReactElement {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      style={{
-        width: 24, height: 22, border: 0, borderRadius: 3, cursor: disabled ? 'default' : 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: active ? PC.field : 'transparent',
-        color: disabled ? PC.textFaint : active ? PC.accent : PC.icon,
-      }}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -242,14 +217,7 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
       <SectionHead label="对齐与分布" open={open.align} onToggle={() => toggle('align')} />
       {open.align ? (
         <div style={{ paddingBottom: 4 }}>
-          <div style={{ display: 'flex', gap: 2 }}>
-            <IconBtn title="左对齐画布" onClick={() => align('left')} disabled={locked}><IconEdgeLeft size={14} /></IconBtn>
-            <IconBtn title="水平居中画布" onClick={() => align('centerX')} disabled={locked}><IconEdgeHCenter size={14} /></IconBtn>
-            <IconBtn title="右对齐画布" onClick={() => align('right')} disabled={locked}><IconEdgeRight size={14} /></IconBtn>
-            <IconBtn title="顶对齐画布" onClick={() => align('top')} disabled={locked}><IconEdgeTop size={14} /></IconBtn>
-            <IconBtn title="垂直居中画布" onClick={() => align('centerY')} disabled={locked}><IconEdgeVCenter size={14} /></IconBtn>
-            <IconBtn title="底对齐画布" onClick={() => align('bottom')} disabled={locked}><IconEdgeBottom size={14} /></IconBtn>
-          </div>
+          <AlignButtons onAlign={align} disabled={locked} />
           <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
             <button disabled title="水平分布(需 ≥3 个选中对象)" style={{ height: 22, flex: 1, border: `1px solid ${PC.fieldBorder}`, borderRadius: 3, background: PC.field, color: PC.textFaint, fontSize: 11, cursor: 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
               <IconDistributeHorizontal size={13} /> 水平
