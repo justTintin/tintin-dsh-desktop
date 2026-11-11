@@ -369,6 +369,15 @@
 3. **活动画布取层**: 全部取层查询收敛到 `data-tintin-cover-canvas` 标记根内(`layerEl`),页面里出现第二棵画布树(旧模板残留/双挂载)时不再命中错误的画布——修「对齐只对齐了横屏」类问题(实测:文档序在前注入伪 title 节点,对齐仍命中活动画布真节点,伪节点不动)。
 - 验证: 140 用例+37 基线+两构建+check:tintin+staging 新鲜;无头探针:内联 fontFamily/fontSize/weight/color 与画布节点逐项 same、背景透明、位置偏移 0/0、输入即时回写画布;Ctrl+拖动 transform 1→3 提交;伪画布场景对齐命中真节点。
 
+### 6.5¹¹ 文字层宽高链接(分辨率绑定)恢复(2026-11-11 续批 R19,用户截图指认)
+
+用户:「你的文字图层下面的分辨率绑定怎么没有了」——图1 PhotoCraft 变换段 W/H 之间有链接钮(默认链接,`layer_props_ui.rs:209 unwrap_or(true)`;链接时改 W 按 bh/bw 比例改 H,`:16-38 transform_params`)。我们的文字面板曾把链接渲染成灰色禁用图标(理由:文字层 H 随内容)。
+
+1. **链接钮实装**: 20px 宽按钮(PhotoCraft LINK_W)、默认链接;链接态=field 底 + accent 图标,解除态=透明 + link-2-off 图标(layer-icons 补 Lucide 路径)。
+2. **链接语义(文字层)**: 链接态改宽/改高=整体等比缩放(styles.gscale 0.3..3,几何缩放不改字号——与 Ctrl+拖动/旧角柄同一语义);解除链接后改宽=换行约束(styles.width),高保持随内容自动;高字段由只读改为可编辑(链接态等比缩放文本)。
+3. **顺手修真 bug**: NumField 缺 `box-sizing:border-box`,`width:100%` + 右内边距 24px 溢出 32px,正好盖住右侧链接钮——Playwright 命中=输入框,真机点击同样落空(content-box 缺省坑)。
+- 验证: 140 用例+37 基线+两构建+门禁;探针:链接态改宽 242→121(高 62→31,字号 96 不变,transform scale 0.5)、解除后改宽 121→36(高随内容 62→127)、链接钮命中=自身、零 pageerror。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。

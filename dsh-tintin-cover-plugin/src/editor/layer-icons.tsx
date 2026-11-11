@@ -133,3 +133,13 @@ export const IconLink2: React.FC<{ size: number }> = ({ size }) => (
     <path d="M9 17H7A5 5 0 0 1 7 7h2" /><path d="M15 7h2a5 5 0 1 1 0 10h-2" />
   </svg>
 )
+
+/** Lucide link-2-off(宽高未链接态;路径逐字) */
+export const IconLink2Off: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M9 17H7A5 5 0 0 1 7 7" />
+    <path d="M15 7h2a5 5 0 0 1 4 8" />
+    <line x1="8" x2="12" y1="12" y2="12" />
+    <line x1="2" x2="22" y1="2" y2="22" />
+  </svg>
+)

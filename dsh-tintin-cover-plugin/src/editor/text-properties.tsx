@@ -20,7 +20,7 @@ import { useEditor } from './store'
 import {
   IconAlignCenter, IconAlignJustify, IconAlignLeft, IconAlignRight,
   IconChevronDown,
-  IconLink2,
+  IconLink2, IconLink2Off,
 } from './layer-icons'
 import { AlignButtons, IconBtn, alignSelection, type AlignMode } from './align-row'
 
@@ -38,6 +38,9 @@ const PC = {
 const FIELD: React.CSSProperties = {
   height: 24, background: PC.field, color: PC.text, border: `1px solid ${PC.fieldBorder}`,
   borderRadius: 3, fontSize: 12, fontFamily: 'ui-monospace, Consolas, monospace', outline: 'none',
+  /* border-box(2026-11-11):缺省 content-box 时 width:100%+右内边距 24px 溢出 32px,
+     正好盖住右侧链接钮(Playwright 命中=输入框,真机点击也会落空) */
+  boxSizing: 'border-box',
 }
 
 /** 数值字段: 焦点内本地草稿,Enter/失焦提交,Esc 还原;placeholder=模板默认 */
@@ -145,6 +148,25 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
     return typeof v === 'number' && Number.isFinite(v) ? v : undefined
   }
   const setNum = (k: string) => (v: number | undefined): void => patch({ [k]: v })
+  /* 宽高链接(2026-11-11 R19 用户截图指认「文字图层的分辨率绑定怎么没有了」):
+     PhotoCraft 默认链接(layer_props_ui.rs:209 unwrap_or(true),链接时改 W 按 bh/bw 比例改 H)。
+     文字层 H 随内容——链接态改宽/改高=整体等比缩放(gscale,几何缩放不改字号,与 Ctrl+拖动同语义);
+     解除链接后改宽=换行约束(styles.width),高保持自动。 */
+  const [linked, setLinked] = React.useState(true)
+  const scaleText = (f: number): void => {
+    if (!Number.isFinite(f) || f <= 0) return
+    const cur = typeof styles?.gscale === 'number' ? styles.gscale : 1
+    patch({ gscale: Math.round(Math.min(3, Math.max(0.3, cur * f)) * 1000) / 1000 })
+  }
+  const setWidth = (v: number | undefined): void => {
+    if (v === undefined || !measure) return
+    if (linked) { scaleText(v / Math.max(1, measure.w)); return }
+    patch({ width: v })
+  }
+  const setHeight = (v: number | undefined): void => {
+    if (v === undefined || !measure) return
+    scaleText(v / Math.max(1, measure.h))
+  }
   /* 变换 X/Y: 画布绝对位 → dx/dy 平移(锁层拒绝;与画布微调同一拒绝面) */
   const locked = styles?.locked === true
   const setPosX = (v: number | undefined): void => {
@@ -186,17 +208,19 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingBottom: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ fontSize: 11, color: PC.textDim, width: 24, flexShrink: 0 }}>宽</span>
-            <NumField value={typeof styles?.width === 'number' ? styles.width : measure?.w ? Math.round(measure.w) : undefined} suffix="px" min={20} max={4000} disabled={locked} title="文本框宽(改=换行约束)" onCommit={(v) => patch({ width: v })} />
-            <span title="宽高链接(文字层高度随内容,禁用)" style={{ display: 'flex', color: PC.textFaint, flexShrink: 0 }}><IconLink2 size={13} /></span>
+            <NumField value={linked ? (measure ? Math.round(measure.w) : undefined) : (typeof styles?.width === 'number' ? styles.width : measure?.w ? Math.round(measure.w) : undefined)} suffix="px" min={20} max={4000} disabled={locked} title={linked ? '宽度(链接态=等比缩放文本)' : '文本框宽(改=换行约束)'} onCommit={setWidth} />
+            <button
+              onClick={() => setLinked((v) => !v)}
+              title={linked ? '宽高已链接(改宽/高=等比缩放文本;点击解除)' : '宽高未链接(改宽=换行约束;点击链接)'}
+              style={{
+                width: 20, height: 24, flexShrink: 0, padding: 0, cursor: 'pointer',
+                border: `1px solid ${linked ? PC.accent : PC.fieldBorder}`, borderRadius: 3,
+                background: linked ? PC.field : 'transparent', color: linked ? PC.accent : PC.textFaint,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >{linked ? <IconLink2 size={13} /> : <IconLink2Off size={13} />}</button>
             <span style={{ fontSize: 11, color: PC.textDim, width: 16, flexShrink: 0 }}>高</span>
-            <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
-              <input
-                value={measure ? Math.round(measure.h) : ''} readOnly disabled
-                title="文字层高度随内容自动"
-                style={{ ...FIELD, width: '100%', padding: '0 24px 0 8px', color: PC.textDim }}
-              />
-              <span style={{ position: 'absolute', right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center', fontSize: 11, fontFamily: 'ui-monospace, Consolas, monospace', color: PC.textFaint, pointerEvents: 'none' }}>px</span>
-            </div>
+            <NumField value={measure ? Math.round(measure.h) : undefined} suffix="px" min={8} max={4000} disabled={locked} title="文字层高(改=等比缩放文本)" onCommit={setHeight} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ fontSize: 11, color: PC.textDim, width: 24, flexShrink: 0 }}>X</span>
