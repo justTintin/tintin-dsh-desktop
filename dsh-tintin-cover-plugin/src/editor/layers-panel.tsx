@@ -136,6 +136,42 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
   const [menu, setMenu] = React.useState<{ id: string; x: number; y: number } | null>(null)
   /** 头行不透明度弹出滑条(fields.rs:323 popup 160px) */
   const [opPopup, setOpPopup] = React.useState(false)
+  /* 分割可调(2026-11-11 用户裁决):图层区默认占一半,拖分割线调;两块按 ratio 分高,
+     切层不改几何(高度固定=无抖动)。ratio=图层区(行区+页脚)占头行以下高度的比例;
+     默认按「整个面板高度的一半」校准(挂载测一次,用户拖过后不再覆盖)。 */
+  const [splitRatio, setSplitRatio] = React.useState(0.5)
+  const splitRef = React.useRef<{ y: number; h: number; r0: number } | null>(null)
+  const splitBodyRef = React.useRef<HTMLDivElement>(null)
+  const splitRootRef = React.useRef<HTMLDivElement>(null)
+  const splitTouchedRef = React.useRef(false)
+  React.useLayoutEffect(() => {
+    if (splitTouchedRef.current) return
+    const rootH = splitRootRef.current?.getBoundingClientRect().height ?? 0
+    const bodyH = splitBodyRef.current?.getBoundingClientRect().height ?? 0
+    if (rootH <= 0 || bodyH <= 0) return
+    const chrome = rootH - bodyH // 标题/头行
+    const r = (rootH / 2 - chrome) / bodyH
+    setSplitRatio(Math.min(0.85, Math.max(0.2, r)))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  const onSplitDown = (e: React.PointerEvent): void => {
+    e.preventDefault()
+    const h = splitBodyRef.current?.getBoundingClientRect().height ?? 0
+    if (h <= 0) return
+    splitTouchedRef.current = true
+    splitRef.current = { y: e.clientY, h, r0: splitRatio }
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId) } catch { /* 合成指针守卫 */ }
+  }
+  const onSplitMove = (e: React.PointerEvent): void => {
+    const s = splitRef.current
+    if (!s) return
+    const r = Math.min(0.85, Math.max(0.2, s.r0 + (e.clientY - s.y) / Math.max(1, s.h)))
+    setSplitRatio(r)
+  }
+  const onSplitUp = (e: React.PointerEvent): void => {
+    splitRef.current = null
+    try { (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId) } catch { /* 已释放 */ }
+  }
   const endDrag = (): void => { setDragId(null); setDropEdge(null); setTrashHot(false); setDupHot(false) }
   const displayName = (row: { rowType: 'group' | 'free'; id: string; label: string }): string => layerNames[row.id] ?? row.label
   const rows = allRows.filter((r) => {
@@ -200,7 +236,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
     return { id, kind: at <= 0.5 ? 'above' : 'below' }
   }
   return (
-    <div style={{ flex: '1 1 auto', minHeight: 0, background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div ref={splitRootRef} style={{ flex: '1 1 auto', minHeight: 0, background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ flexShrink: 0, padding: '8px 12px 6px', fontSize: 12, color: PC.text, fontWeight: 700 }}>图层 · {tpl.label}</div>
       {/* 头行:blend 下拉 + 不透明度数值字段(照 layers.rs:149-184/fields.rs) */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '0 12px 4px' }}>
@@ -252,6 +288,10 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
           ) : null}
         </div>
       </div>
+      {/* 分割可调(2026-11-11 用户裁决): 图层区默认占 50%,拖下方分割线调整;两块按 ratio
+          分高=切层几何恒定(编辑卡内容变化只滚动不挤压行区) */}
+      <div ref={splitBodyRef} style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: `${splitRatio} 1 0`, minHeight: 48, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* 行区(layers.rs:248-257) */}
       <div
         style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column' }}
@@ -438,6 +478,18 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
           <IconSquarePlus size={14} />
         </button>
       </div>
+      </div>
+      {/* 分割线(拖动调整图层区高度;7px 命中区,视觉 1px) */}
+      <div
+        title="拖动调整图层区高度"
+        onPointerDown={onSplitDown}
+        onPointerMove={onSplitMove}
+        onPointerUp={onSplitUp}
+        onPointerCancel={onSplitUp}
+        style={{ flexShrink: 0, height: 7, cursor: 'ns-resize', display: 'flex', alignItems: 'center', touchAction: 'none' }}
+      >
+        <div style={{ width: '100%', height: 1, background: PC.separator }} />
+      </div>
       {/* 右键菜单 */}
       {menu && menuRow ? (
         <>
@@ -459,9 +511,8 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
           </div>
         </>
       ) : null}
-      {/* 选中图层编辑(2026-11-11 抖动裁决: 固定高 300px 内滚动——编辑卡高度随图层类型/
-          内容变化会挤压上方行区=切层整列跳动;定高后行区几何恒定) */}
-      <div style={{ flexShrink: 0, height: 300, overflowY: 'auto', overflowX: 'hidden' }}>
+      {/* 选中图层编辑(高度=剩余比例,内部滚动;内容变化不再挤压行区) */}
+      <div style={{ flex: `${1 - splitRatio} 1 0`, minHeight: 96, overflowY: 'auto', overflowX: 'hidden' }}>
       {(() => {
         if (!selectedLayer) return null
         if (customById.has(selectedLayer)) return <CustomLayerEditor layer={customById.get(selectedLayer)!} project={project} />
@@ -519,6 +570,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
         }
         return null
       })()}
+      </div>
       </div>
     </div>
   )
