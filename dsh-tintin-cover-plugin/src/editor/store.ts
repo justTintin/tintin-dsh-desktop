@@ -47,6 +47,9 @@ export interface EditorState {
   addUserGuide: (axis: 'h' | 'v', pos: number) => void
   moveUserGuide: (axis: 'h' | 'v', from: number, to: number) => void
   removeUserGuide: (axis: 'h' | 'v', pos: number) => void
+  /** 选中参考线(2026-11-11 用户裁决:点选参考线+Delete 删除;会话内存态,不进 props) */
+  selectedGuide: { axis: 'h' | 'v'; pos: number } | null
+  setSelectedGuide: (g: { axis: 'h' | 'v'; pos: number } | null) => void
   /** 素材区当前选中项(2026-10-31 §2.5 P1:编辑卡「从素材替换/设为产品图」的数据源) */
   selectedAsset: string | null
   /** 图层显示名(2026-11-11 WP-B 对齐 PhotoCraft 双击重命名;会话内存态,不进 props 契约、
@@ -168,16 +171,30 @@ export const useEditor = create<EditorState>()(
         }),
       moveUserGuide: (axis, from, to) =>
         set((s) => {
+          const f = Math.round(from)
           const v = Math.round(to)
+          if (v === f) return {} // 原位落点=点选语义,不产生撤销记录
           const cur = s.userGuides[axis]
-          const i = cur.indexOf(Math.round(from))
+          const i = cur.indexOf(f)
           if (i < 0 || v < -50 || v > (axis === 'h' ? getTemplate(s.templateId).height : getTemplate(s.templateId).width) + 50) return {}
           const next = [...cur]
           next[i] = v
-          return { userGuides: { ...s.userGuides, [axis]: next } }
+          const merged = next.filter((g, gi) => gi === i || Math.abs(g - v) >= 0.5) // 拖到既有线位=合并,对照 PS
+          return {
+            userGuides: { ...s.userGuides, [axis]: merged },
+            selectedGuide: s.selectedGuide?.axis === axis && s.selectedGuide.pos === f ? { axis, pos: v } : s.selectedGuide,
+          }
         }),
       removeUserGuide: (axis, pos) =>
-        set((s) => ({ userGuides: { ...s.userGuides, [axis]: s.userGuides[axis].filter((g) => g !== Math.round(pos)) } })),
+        set((s) => {
+          const v = Math.round(pos)
+          return {
+            userGuides: { ...s.userGuides, [axis]: s.userGuides[axis].filter((g) => g !== v) },
+            selectedGuide: s.selectedGuide?.axis === axis && s.selectedGuide.pos === v ? null : s.selectedGuide, // 删线即清选中
+          }
+        }),
+      selectedGuide: null,
+      setSelectedGuide: (g) => set({ selectedGuide: g }),
       applyGroupScale: (entries) =>
         set((s) => {
           const customEntries = entries.filter((e) => e.custom)

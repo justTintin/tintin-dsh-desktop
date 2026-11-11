@@ -42,7 +42,10 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const duplicateCustomLayer = useEditor((s) => s.duplicateCustomLayer)
   const userGuides = useEditor((s) => s.userGuides)
   const addUserGuide = useEditor((s) => s.addUserGuide)
+  const moveUserGuide = useEditor((s) => s.moveUserGuide)
   const removeUserGuide = useEditor((s) => s.removeUserGuide)
+  const selectedGuide = useEditor((s) => s.selectedGuide)
+  const setSelectedGuide = useEditor((s) => s.setSelectedGuide)
   const showGuides = useEditor((s) => s.guides)
   const showGrid = useEditor((s) => s.canvasGrid)
   const zoom = useEditor((s) => s.zoom)
@@ -210,6 +213,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const onPointerDown = (e: React.PointerEvent): void => {
     if (pcRunning) return // PhotoCraft 为主:画布交互在原生窗口,网页仅镜像
     if (dragRef.current || scaleRef.current) return // 已在拖动/缩放:忽略第二指
+    setSelectedGuide(null) // 点画布任意处=清除参考线选中态(命中线的事件在命中带上被拦,不会到这里)
     let id = layerAt(e.clientX, e.clientY)
     /* R8 多选(对照 PhotoCraft Shift+点击加选):Shift+命中层=切换其多选态(主选跟随),
        不启动拖动;普通点击走单选(内部清多选)。 */
@@ -517,12 +521,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     try { hostRef.current?.releasePointerCapture?.(e.pointerId) } catch { /* 已隐式释放 */ }
   }
   const onPointerCancel = (): void => {
-    if (guideDragRef.current) { // 参考线取消:预览消失(move 旧线已拔起=删除语义)
-      guideDragRef.current = null
-      if (previewHRef.current) previewHRef.current.style.display = 'none'
-      if (previewVRef.current) previewVRef.current.style.display = 'none'
-      return
-    }
+    if (guideDragRef.current) { cancelGuideDrag(); return } // 参考线取消:预览消失、被抓线还原
     if (scaleRef.current) { // Ctrl 缩放取消:清预览不提交
       if (scaleRef.current.el) scaleRef.current.el.style.scale = ''
       scaleRef.current = null
@@ -540,8 +539,9 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const purePreviewRef = React.useRef(purePreview)
   purePreviewRef.current = purePreview
   usePurePreview(setPurePreview)
-  const { guideDragRef, previewHRef, previewVRef, startGuideDrag, moveGuidePreview, finishGuideDrag } = useUserGuides({
-    pcRunning, purePreview: purePreviewRef.current, fitScale, zoom, tpl, contentRef, userGuides, addUserGuide, removeUserGuide,
+  const { guideDragRef, previewHRef, previewVRef, startGuideDrag, moveGuidePreview, finishGuideDrag, cancelGuideDrag } = useUserGuides({
+    pcRunning, purePreview: purePreviewRef.current, fitScale, zoom, tpl, contentRef, userGuides,
+    addUserGuide, moveUserGuide, removeUserGuide, setSelectedGuide,
   })
   /* 快捷键(2026-11-01 对齐 PhotoCraft,自 onKeyDown 解耦为窗口级):见 canvas-keys.ts */
   useCanvasShortcuts(() => ({ all: Boolean(pcRunning), layer: Boolean(dragRef.current) }))
@@ -601,15 +601,27 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                 {/* 拖动吸附参考线(PhotoCraft magenta;ref 直写,拖动全程零重渲染)——在缩放内容层内,随缩放对齐画布 */}
                 <div ref={guideVRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, background: GUIDE_COLOR, pointerEvents: 'none', zIndex: 95, display: 'none' }} />
                 <div ref={guideHRef} style={{ position: 'absolute', left: 0, right: 0, height: 1, background: GUIDE_COLOR, pointerEvents: 'none', zIndex: 95, display: 'none' }} />
-                {/* R9b 用户参考线(青线;拖出建/拖动移/拖删;逻辑在 use-user-guides.ts) */}
+                {/* R9b 用户参考线(青线):标尺拖出建线;线命中带(7px 透明)拖动移线,拖回标尺/
+                    拖出画布=删线,双击=删线,原位点选=选中(选中线加粗,Delete 键删线);
+                    交互逻辑在 use-user-guides.ts,命中带拦指针不透传画布 */}
                 {!purePreview ? userGuides.h.map((y) => (
-                  <div key={'ug-h' + y} style={{ position: 'absolute', left: 0, right: 0, top: `${(y / tpl.height) * 100}%`, height: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 94 }} />
+                  <div key={'ug-h' + y} data-user-guide={'h:' + y}
+                    onPointerDown={(e) => startGuideDrag('h', e)}
+                    onDoubleClick={(e) => { e.stopPropagation(); removeUserGuide('h', y) }}
+                    style={{ position: 'absolute', left: 0, right: 0, top: `calc(${(y / tpl.height) * 100}% - 3px)`, height: 7, pointerEvents: 'auto', zIndex: 96, cursor: 'row-resize', background: 'transparent' }}>
+                    <div data-guide-line style={{ position: 'absolute', left: 0, right: 0, top: 3, height: selectedGuide?.axis === 'h' && selectedGuide.pos === y ? 2 : 1, background: GUIDE_USER_COLOR, pointerEvents: 'none' }} />
+                  </div>
                 )) : null}
                 {!purePreview ? userGuides.v.map((x) => (
-                  <div key={'ug-v' + x} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(x / tpl.width) * 100}%`, width: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 94 }} />
+                  <div key={'ug-v' + x} data-user-guide={'v:' + x}
+                    onPointerDown={(e) => startGuideDrag('v', e)}
+                    onDoubleClick={(e) => { e.stopPropagation(); removeUserGuide('v', x) }}
+                    style={{ position: 'absolute', top: 0, bottom: 0, left: `calc(${(x / tpl.width) * 100}% - 3px)`, width: 7, pointerEvents: 'auto', zIndex: 96, cursor: 'col-resize', background: 'transparent' }}>
+                    <div data-guide-line style={{ position: 'absolute', top: 0, bottom: 0, left: 3, width: selectedGuide?.axis === 'v' && selectedGuide.pos === x ? 2 : 1, background: GUIDE_USER_COLOR, pointerEvents: 'none' }} />
+                  </div>
                 )) : null}
-                <div ref={previewHRef} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 96, display: 'none' }} />
-                <div ref={previewVRef} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 96, display: 'none' }} />
+                <div ref={previewHRef} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 97, display: 'none' }} />
+                <div ref={previewVRef} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 97, display: 'none' }} />
                 {inline.element}
               </div>
             </div>

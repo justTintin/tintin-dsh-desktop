@@ -107,6 +107,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 110 },
+      { id: 'titleRule', label: '标题装饰条(装饰)', type: 'graphic' },
       { id: 'subtitle', label: '副标题', type: 'text', fontSize: 34 },
       { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
       { id: 'subTag', label: '栏目角标(装饰)', type: 'graphic' },
@@ -121,6 +122,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 104 },
+      { id: 'titleRule', label: '标题装饰条(装饰)', type: 'graphic' },
       { id: 'subtitle', label: '副标题', type: 'text', fontSize: 38 },
       { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
       { id: 'subTag', label: '栏目角标(装饰)', type: 'graphic' },

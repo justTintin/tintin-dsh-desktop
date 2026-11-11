@@ -413,6 +413,12 @@
 4. R23 的覆盖层实现与其隐藏样式表随之整体退役(CoverInlineEditor.tsx 删除),避免两套机制并存。
 - 验证: 144 用例+37 基线+两构建+check:tintin+staging 新鲜;探针:双击后图层 contenteditable=true 且聚焦、覆盖 textarea=0、输入后 DOM 文本原位变化、点空白失焦提交(contenteditable 移除且新文本保留)、Esc 还原本次输入;编辑态截图=真字形(第一行白/末行青,模板原样式),零 pageerror。
 
+### 6.5¹⁶ 标题黄条拆层 + 参考线可删(2026-11-11 续批 R25,用户两项裁决)
+
+1. **标题黄条=独立装饰图层 `titleRule`**: 视频缩略图横/竖两模板把标题块内写死的黄色装饰条(`#facc15→#f97316`,300×14,rotate -2deg)拆为顶层独立图层,进 layerDefs(`标题装饰条(装饰)`),图层面板可开关、默认保留,走 layerOrder z 序。默认纵位=原块内流式排版换算(标题块 top+前各行行盒+末行缩小行盒+原 marginTop),`styles.title.scale` 覆盖字号时同步跟随;旧项目快照不含该 id=按 effectiveOrder 兜底置顶渲染,不改存档。
+2. **参考线可删四通道**(兑现标尺「拖回标尺/画布外删除」工具提示): 线由 1px `pointer-events:none` 纯视觉条改 7px 透明命中带——①拖回标尺/拖出画布=删除;②双击=删除;③原位松手=点选(选中线加粗 2px),Delete/Backspace 删线;④标尺拖出建线不变。移线实现改「抓线=直写 DOM 隐藏真实线 → 落位 moveUserGuide 单条撤销」,原「抓起即删旧+落位加新」双撤销消除;moveUserGuide 增原位守卫(不产生空撤销)与同位合并(对照 PS),removeUserGuide 同步清选中态;pointercancel=还原被抓线(props 零写入)。
+- 验证: 145 用例+typecheck(仅既有 test 漂移红,本批文件零红)+editor/engine/bundle 三构建+stage+check:tintin(140 锚/行数基线/载荷逐字节新鲜)全绿。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。

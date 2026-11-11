@@ -17,6 +17,12 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
   // 2026-11-01 对齐 PhotoCraft:翻转/宽高缩放/不透明度/混合模式,见 image-style.ts)
   const productOverride = styles?.product
   const productTransform = `translateX(-50%) translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) ${lookTransform(productOverride)}`
+  /* 标题装饰条默认纵位(2026-11-11 拆层换算):标题块 top130 + 前各行行盒 + 末行缩小行盒(×0.88)
+     + 原块内 marginTop20;字号被 styles.title.scale 覆盖时同步跟随 */
+  const ruleLh = hookStyle.lineHeight ?? 1.2
+  const ruleTop = hookLines.length > 0
+    ? Math.round(130 + (hookLines.length - 1) * hookStyle.fontSize * ruleLh + Math.round(hookStyle.fontSize * 0.88) * ruleLh + 20)
+    : 150
   return (
     <AbsoluteFill style={{ background: '#070b18' }}>
       {!hidden('environment') && (
@@ -59,8 +65,13 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
               {line}
             </div>
           ))}
-          <div style={{ marginTop: 20, marginLeft: 4, width: 300, height: 14, background: 'linear-gradient(90deg,#facc15,#f97316)', borderRadius: 7, transform: 'rotate(-2deg)' }} />
         </div>
+      )}
+
+      {/* 标题装饰条(2026-11-11 用户裁决:黄色下划条从标题块内拆为独立装饰图层 titleRule,
+          图层面板可开关、默认保留;top=原块内流式排版换算:标题 top+各行行盒+块内 margin) */}
+      {!hidden('titleRule') && (
+        <div style={{ position: 'absolute', left: 60, top: ruleTop, width: 300, height: 14, background: 'linear-gradient(90deg,#facc15,#f97316)', borderRadius: 7, transform: 'rotate(-2deg)', zIndex: layerZ(layerOrder, 'titleRule') }} />
       )}
 
       {!hidden('product') && (

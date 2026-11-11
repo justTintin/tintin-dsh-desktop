@@ -1,6 +1,6 @@
 // 画布快捷键(2026-11-01 自 App.tsx 解耦并对齐 PhotoCraft):窗口级监听——在图层面板点选后也生效,
 // 焦点在输入框/文本域/下拉框时让行。Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y 撤销重做 · Ctrl+0/±缩放 ·
-// 方向键微调(Shift=10px) · Ctrl+J 复制图层 · Delete/Backspace 删除自由图层 · Ctrl+[ ] 上下移一层 ·
+// 方向键微调(Shift=10px) · Ctrl+J 复制图层 · Delete/Backspace 删除选中参考线或自由图层 · Ctrl+[ ] 上下移一层 ·
 // Ctrl+Shift+[ ] 置底/置顶。锁定位置的图层拒绝微调。
 import React from 'react'
 import { lockedOf } from './image-ops'
@@ -28,6 +28,12 @@ export function useCanvasShortcuts(blocked: () => { all: boolean; layer: boolean
         if (k === '0') { take(); s.setZoom(1); return }
         if (k === '=' || k === '+') { take(); s.setZoom(s.zoom * 1.25); return }
         if (k === '-') { take(); s.setZoom(s.zoom / 1.25); return }
+      }
+      /* 选中参考线: Delete/Backspace 删线(2026-11-11 用户裁决;先于图层删除分支) */
+      if (s.selectedGuide && (e.key === 'Delete' || e.key === 'Backspace')) {
+        take()
+        s.removeUserGuide(s.selectedGuide.axis, s.selectedGuide.pos)
+        return
       }
       const id = s.selectedLayer
       if (!id || b.layer) return
