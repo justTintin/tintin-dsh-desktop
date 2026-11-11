@@ -582,6 +582,68 @@ SkillsLibrary(Studio 示例弹窗)的服务端 tab 此前形态: 卡片**整卡�
 - **重放清单机锚化(2026-11-10 用户指令「锚定已实现的修改,防升级丢失」)**:vendor 树补丁重放清单从散文铁律升为 `scripts/tintin-anchors.json` 的 39 条 grep 锚(83→122 锚/45→75 文档)——openfilm-shell-src 15 个补丁文件(BrandLogo×2/SkillsDialog 技能库/SkillsLibrary/CustomServices ServiceNote/prompt-text+Pill 产品族/host.ts+ProjectView show-skills/LibraryDrawer tintinOnlineLibrary/SkillsPane useServerSkills+**图标导入行 `RefreshCw, Server, Star, Trash2`**(0.3.1 Server is not defined 事故定锚)/chat App 产品发送+状态/app-bridge products/chat i18n ×5 groupProducts/studio i18n ×5 serverRemoveHint+tintinOnline)+agent-definitions(tintin-agent/openfilm/antigravity 三行)+bundle 侧(TinTin provider TINTIN_SERVER_URL/mergeTinTinProvider/studio-runtime 注入/fetch-runtime 2b 步/fetch-shell openfilm-models.mjs)。此后每次 `fetch-openfilm-shell` 清树后漏放或放错的补丁,**verify-tintin-gate 直接红**;锚的是 tracked 源文件(vendored runtime gitignore 树不锚,避免干净克隆即红)。
 - **注册面机锚化(同指令续批,122→140 锚/75→84 文档)**:升级会冲掉的**非 OpenFilm 定制面**也入锚——①`.yarn/patches/dshmarket-desktop.patch` 三语义(dsh-market 自更名缝/holdYoungReleases 桌面宿主更新闸/provideNpmVersions 版本喂入;market:prepare 每次重接线,丢 hunk 即静默丢功能)②根 package.json 三个 patch 注册(dshmarket/app-builder-lib/esbuild)③六包 `"dsh": {` face(Loader 只为挂载+声明 dsh.client 的包进 web 启动图,1017 教训:缺一即视图空白)④cordis.patch.yml 六挂载(tintin-client-ui/host/media/cover/creation/ops,丢挂载=整子应用卸载)。
 
+## 16.28 浏览器域：样式全面美化对齐视频剪辑设计系统(2026-11-08, 用户裁决「浏览器的样式也要参考视频剪辑 全面美化」)
+
+参照面=视频剪辑(媒体包)的 **Luosiding 设计系统**(tintin-tokens.css: indigo 品牌蓝/slate 中性阶/radius-xl 12px/easing-out/卡片低饱和罩层+accent 光晕), 暗色中性面/字/边**逐值对齐原生 dsw-alias**(design-platform.css 实值: layer-1=bluish-875 #232324 / layer-2=850 #2c2c2e / layer-3=800 #353538 / base=950 #151517 / label-primary=bluish-50 #f0f1f5 / label-secondary=bluish-300 / border=白 6%·10%)。浏览器页是独立 webview 载体(宿主 alias 变量不注入本页), 故按宿主值**静态落地**、以 [data-theme]/媒体查询双轨切档(既有主题三态机制不变)。改动:
+
+- **token 基座**: --bg/surface/surface-2/surface-3/line/line-strong/ink/ink-2/muted/primary(indigo-500 亮·indigo-400 暗)/primary-soft/accent(violet)/ok/bad/star/radius(8·10·12)/easing(含 out)/shadow(1·3)/wash 全套语义变量, 暗色一档齐备; 新增全局细滚动条(原生同款);
+- **工具条/标签栏/地址栏**: 表面阴影分层, 图标钮 primary-soft hover+按压缩放, 地址栏 focus 光环(0 0 0 3px primary-soft), 标签 active=primary-soft+底边指示条, 星标金色态统一;
+- **按钮族**: 新 `.btn-primary`(解析/下载视频: indigo 底+hover 抬升+按压缩放), da-btn/li-btn/sn-btn/al-btn 全部过渡化; 下载条进度 fill 改 indigo→violet 渐变;
+- **卡片族**: li/sn/al 卡统一 radius+hover 边光; 右栏 h4 小节标题(字距+虚线分隔); hostTip 胶囊化(color-mix 反色+blur); 查找条 shadow-3; 视图入场动画(view-in 0.28s, .view.active 触发);
+- 验证: 页面语法+jsdom 冒烟(结构完整/btn-primary 挂载/面板无 sn-btn 渲染/扩展行含设置)+14 文件 111 用例+包 build+check:tintin(140 锚点)绿。
+
+## 16.29 浏览器域：后台标签捕获两缺陷修复(2026-11-08, 用户报障「下载失败(未捕获到播放地址)+解析成功点下载视频导致当前界面关闭」)
+
+> 已被 §16.30 取代：捕获改独立隐藏窗口；`openTab` 的 background/url/autoplay 扩展与 tab-model 兜底语义已整体回退。
+
+11-08 后台标签批的实机暴露: ①**「界面关闭」= tabOpen 把捕获标签扶正 activeId**（openTab 默认激活+引擎 focusPlatform/attachActive）→ 用户当前视图被摘下幕, 25s 后关捕获标签又挂回来=「关了又回来」; ②**捕获 25s 超时失败**=两个因素叠加——后台标签无人看就不播放 → 抖音播放器不发媒体流(捕获对象根本不存在) + 基线快照在 tabOpen 之后抓(被焦点切换污染)。修复:
+
+- **`openTab` 增加 `{background:true}`**: 入池但不改 activeId（无活跃标签时兜底激活）, 引擎 tabOpen 同旗标跳过 focusPlatform/attachActive —— 捕获标签真的在后台, 当前视图不被摘;
+- **捕获标签直载+自动起播**: tabOpen 新增 `url`（直载解析出的视频页, 不落种子页）与 `autoplay` 旗标（did-finish-load 后注入脚本: muted play video + 模拟点击播放器 10 次/800ms 步进）→ 媒体流真正发出来;
+- **基线前置**: 页面流程改为 tabOpen **之前**快照当前缓冲（baseReady 门）, 不被焦点变化污染;
+- 验证: tab-model 新增 background 用例(入池不抢焦点/无活跃兜底激活), 14 文件 **112 用例**全绿+包 build+check:tintin(140 锚点)绿; 端到端待重打包实机。
+
+## 16.30 浏览器域：捕获页移出标签池(2026-11-11, 用户裁决方案 1「按方案1修改,根治」)
+
+报障:解析成功后点「下载视频」, 左边正在播放的页面被换掉/重载。根因=捕获走同窗后台标签(§16.29): `openTab` 的 background 仅在已有活跃标签时生效, 平台行直开、标签池为空时捕获标签被扶正 activeId; 标签栏出现改变 `#view-host` 尺寸 → bounds 上报 → `layoutBrowserWindow` 按 activeView 把捕获标签贴到主区, 原视图被摘下并静音; 捕获结束关标签再贴回(期间地址栏也显示捕获页 URL)。实现缺陷, 与抖音站内行为无关。
+
+修复: 捕获不再用标签, 改**独立隐藏 BrowserWindow**(`dsh-tintin-browser/src/browser/sniff-capture.ts`):
+
+- 不进 tabPool/tabViews、不挂任何 contentView、不推 tabs/state → 浏览器 UI/地址栏/当前视图零感知; 结束/超时/失败只销毁隐藏窗;
+- 分区与平台视图一致(`persist:tintin-<id>`)→ session.webRequest 嗅探照常命中; `backgroundThrottling:false` + 静音起播注入保证隐藏窗也发流;
+- `openTab` 的 background/url/autoplay 扩展与 tab-model 的 background 兜底语义**整体回退**(无消费方, 且正是本次缺陷来源);
+- 嗅探三 IPC(list/clear/download)迁入 sniff-capture.ts(千行付账: browser-service 1000→983 行); 嗅探详情页门控优先读捕获页 URL(用户在别的平台页面也能抓); `sniffDownload` 支持显式 platformId/referer(捕获与当前平台解耦);
+- preload 增 `captureOpen/captureClose`; 页面流程改为 captureOpen(captureId) → 轮询 → captureClose → sniffDownload(platformId=douyin, referer=视频页); 打开失败/桥缺失立即收敛按钮, 不再空转 25s;
+- 验证: 浏览器包 15 文件 **114 用例**全绿(新增 sniff-capture 请求校验 3 用例); tintin 插件 typecheck 绿; check:tintin(140 锚点/13 基线)绿。
+
+## 16.31 浏览器域：下载栏完成行「打开目录」按钮(2026-11-11, 用户指令「红框处为进度条，下载完成后要有显示打开目录的按钮」)
+
+红框=浏览器底部下载栏(#shelf)。改动:
+
+- **完成行「打开目录」**: `downloads:done` 载荷本就带 `finalPath`(media-downloader/download-manager 两条链都发), 完成行渲染 `da-btn` 小按钮 → `bridge.revealPath(finalPath)` → 既有 `browser:revealDailyAsset` 通道(壳侧 `shell.showItemInFolder` 高亮该文件); preload 增 `revealPath` 别名(同通道, 语义分开免误读);
+- **完成行不再 4 秒自动撤行**(撤了按钮就没意义), 留在下载栏(区域限高滚动)直到本会话; 错误行维持 4s 自动清;
+- **顺带修进度行 NaN**: media-downloader 的 progress `speed` 字段承载的是进度消息字符串("下载中 1.2 MB/s"/"视频 50% · 音频 30%"), 页面 `fmtSpeed` 按数字计算对字符串得 NaN → "45% · NaN KB/s"; 改为字符串即展示文案、数字才走速率格式化;
+- 验证: jsdom 冒烟(进度行消息速率无 NaN/完成行有按钮/点击 revealPath 带 finalPath/完成行 4s 不撤/错误行 4s 撤)+插件 typecheck/build 绿+check:tintin 绿。
+
+## 16.32 浏览器域：B站嗅探面板隐藏+助手下载按钮恢复(2026-11-11, 用户报障「右边列表不需要这么多+右边没有下载按钮，是没解析出来的吗」)
+
+两个问题一个根源: §16.27「下载入口收敛」只考虑了抖音(解析卡兜底), B站的**唯一下载入口**(助手推送区按钮)被删成纯展示=零入口——解析其实成功(推送区「1 条 · 1080P 高码率」就是), 只是没按钮; 而嗅探面板在 B站刷的是 DASH 分片流(mcdn.bilivideo/mountaintys/mqpbk 等 PCDN 域名每几秒一片), 单抓一片不可播, 对用户纯噪音。改动:
+
+- **B站隐藏嗅探面板**: sniffWatch 对 bilibili 隐藏「媒体嗅探」标题+列表(清空按钮随标题隐藏), sniffTick 对 B站跳过轮询; 其他平台不变;
+- **助手推送区恢复「下载」按钮**: 回退 §16.27 的纯展示化, 恢复 SRC downloadBiliExtLink 口径(0dd1bc8b3a 原实现 1:1)——每条卡 badge+「下载」按钮, 点击 `downloadMediaStart({url, audioUrl?, title, filename: dl.download||标题, referer:地址栏||bilibili, platformId/subDir:'bilibili', useYtdlp:false})`, 双流 FFmpeg 合并; biliBusy 按 url 防重复, 成功「已提交 ✓」2.5s 回落, 失败「失败」;
+- 下载入口全景(「一个视频一个按钮」语义不变): 抖音=解析卡「下载视频」(嗅探面板仅诊断), B站=助手推送区(嗅探面板隐藏), 其余平台=嗅探面板诊断(无下载按钮, 与 11-08 收敛一致);
+- **B站下载=共享下载栏**(用户追问「底部像抖音一样的进度条+打开下载目录」): B站按钮与抖音解析卡走同一 `downloadMediaStart`→media-downloader 引擎→同一 `downloads:progress/done` 总线→同一底部下载栏(§16.31 的进度行+完成行「打开目录」平台无关, B站自动生效);
+- 验证: jsdom 冒烟 17 断言(B站嗅探面板隐藏/抖音可见/推送区卡片带按钮/点击带 platformId=bilibili+audioUrl 双流参数/**B站下载在共享下载栏出进度行(30% · 下载中 2.5 MB/s)与完成行打开目录(点击 revealPath 带材料库 bilibili 子目录路径)**)+插件 build 绿+check:tintin 绿。
+
+## 16.33 OpenFilm 产品面板:图标/开关/贴输入框(2026-11-11, 用户裁决,openfilm-shell tintin-products.ts)
+
+composer 工具条「选择产品」面板三处对齐官方质感:
+
+- **图标**: 📦 emoji → lucide Package SVG(16px/stroke 1.75, 与官方工具行 LibraryBig/Plus 同一画法);`aria-pressed` 走官方 `.openfilm-composer-tool[aria-pressed=true]` 按下态;
+- **显隐开关**: fab 再点一次=关闭(setOpen 收口显隐+aria-pressed), close 键同走 setOpen——与在线素材按钮同款开关语义;
+- **贴输入框**: 面板底=输入框顶(`[data-prompt-shell]` composer 卡片根为锚, MentionMenuPlugin 同款), 替代原 128px 固定预留(面板不再悬空一段);锚缺失退回 128px 兜底;
+- 验证: dsh-tintin-bundle 22 文件 204 用例全绿(同车提交)。
+
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 
 > 依据:«字节跳动 Agent 实践手册»§4.3.1 创作辅助四段形态(创意方案→素材推荐→拍摄建议→**剪辑建议**)对照——前三段我们已有且更深,第四段(有人看节奏/转场/字幕落点并给建议)完全空白;用户裁决立项补齐,并追加「根据素材自动粗剪」。源参考:[agent-practice-manual.md](agent-practice-manual.md) §4.3.1/§5.2/§8.2.3;开发标准条款:[tintin-agent-dev-standards.md](tintin-agent-dev-standards.md) T1/T2/T4/T7。**本文只立项不定实现;动代码前先过 §17.4 的验收判据与 §17.2 的 spike 门。**

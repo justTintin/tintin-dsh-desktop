@@ -17,7 +17,7 @@
 // ═══════════════════════════════════════════════════════════════
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell, WebContentsView } from 'electron'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
   PLATFORM_COOKIE_DOMAINS,
   hasLoginCookie,  PLATFORM_DEFS,
@@ -41,7 +41,8 @@ import { createDownloadManager, type DownloadManager } from './download-manager.
 import { createMediaStorage, type MediaStorage } from './media-storage.ts'
 import { captureHotspots } from './hotspot-capture.ts'
 import { startLoopbackService, type LoopbackService } from './loopback-service.ts'
-import { createMediaSniffer, type MediaSniffer } from './media-sniffer.ts'
+import { createMediaSniffer } from './media-sniffer.ts'
+import { activeCapturePageUrl, registerSniffCapture } from './sniff-capture.ts'
 import { registerDeepLinkSwallow } from './deep-link-guard.ts'
 import { createCreatorsStoreIpc } from './creators-store.ts'
 // 下载扩展链复活（2026-10-26；SRC thick-shell-viewpool.js / media-downloader.js / douyin-parse-logic.js）
@@ -51,7 +52,6 @@ import { createMediaDownloaderIpc } from './media-downloader.ts'
 // @ts-expect-error 纯 JS ESM 移植件（附 ipc.d.ts 通配声明）
 import { createAutoListingIpc } from './auto-listing/ipc.js'
 import { homedir } from 'node:os'
-import { dirname } from 'node:path'
 
 /** 模块级日志（registerBrowserService 前也可能打点） */
 let pageDownloadMirror: ReturnType<typeof import('./page-downloads.ts').createPageDownloadMirror> | null = null
@@ -125,8 +125,8 @@ void loopback
 // 浏览器窗口页面（build/tintin-browser.html，2026-09-28 用户裁决：整体按原客户端
 // 实现——页面承载工具条/左栏/右栏/下载栏，原生视图按页面宿主矩形覆盖）
 let pageHostRect: { x: number; y: number; width: number; height: number } | null = null
-// 媒体嗅探（SRC webview 注入方案的壳侧等价；按平台分区缓冲，页面拉取）
-let mediaSniffer: MediaSniffer | null = null
+// 媒体嗅探（SRC webview 注入方案的壳侧等价；按平台分区缓冲，页面拉取；
+// 数据面 IPC 与后台捕获窗口在 sniff-capture.ts）
 
 // ── 内嵌模式（2026-10-19 用户方案 4：浏览器=主窗内嵌界面，OpenFilm B 方案同款）──
 // UI 页（tintin-browser.html）作为 WebContentsView 挂主窗 contentView，外层矩形由
@@ -606,7 +606,6 @@ export function registerBrowserService(
   // 媒体嗅探先于挂接创建（2026-11-04 修复：原创建语句在挂接循环之后约 200 行，
   // 可选链在 null 上静默吞掉 → 嗅探器从未挂上 session，功能自移植起不可用）
   const sniffer = createMediaSniffer()
-  mediaSniffer = sniffer
   // 登录即同步：cookie 变化防抖自动导出（网页/独立窗口两形态通用）；嗅探挂接覆盖全部
   // 平台分区（含 web/jimeng——原循环骑在 cookie 域名单上漏了 web，网页浏览器分区的
   // 媒体永远嗅不到）；pageUrl 供应方=该平台当前页 URL（详情页白名单门，见 sniffer attach）
@@ -622,6 +621,9 @@ export function registerBrowserService(
     for (const platform of PLATFORM_IDS) {
       try {
         sniffer.attach(session.fromPartition(PLATFORM_DEFS[platform]!.partition), platform, () => {
+          // 捕获会话优先（2026-11-11 方案 1：详情页门控看捕获页，用户切到别的平台也不漏抓）
+          const captureUrl = activeCapturePageUrl(platform)
+          if (captureUrl) return captureUrl
           const view = browserViews.get(platform)
           return view && !view.webContents.isDestroyed() ? view.webContents.getURL() ?? '' : ''
         })
@@ -748,6 +750,17 @@ export function registerBrowserService(
     storeFile: join(app.getPath('userData'), 'tintin', 'browser', 'media-storage.json'),
     downloadsDir: () => app.getPath('downloads'),
   })
+  // ── 媒体嗅探数据面 + 后台捕获窗口（2026-11-11 方案 1；嗅探三 IPC 迁至
+  // sniff-capture.ts——捕获用独立隐藏窗，不进标签池、不碰页面宿主）──
+  registerSniffCapture({
+    ipcMain,
+    sniffer,
+    downloader: mediaDownloader,
+    currentPlatform: () => currentPlatform,
+    activeViewUrl: () => activeView()?.webContents.getURL?.() ?? '',
+    hostWindow: () => hostWin(),
+    log: ctxLog,
+  })
 
   // ── 回环门面（架构文档 §浏览器域三层形态第2层）：agent 工具经 HTTP+token
   // 调壳层引擎；握手文件落 DSH_HOME/tintin/browser/loopback.json（host 读它）。
@@ -813,11 +826,6 @@ export function registerBrowserService(
       return { success: true }
     } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) } }
   })
-  // browser:sniffList/sniffClear/sniffDownload — 媒体嗅探（SRC SniffTab 数据面；
-  // 壳侧 webRequest 采集。嗅探器创建已上移到挂接循环之前——2026-11-04 顺序修复）
-  ipcMain.handle('browser:sniffList', (_e, platform: unknown) => {
-    return { success: true, data: mediaSniffer!.items(String(platform || '')) }
-  })
   // 页内查找（2026-11-08 第一批 P0 #5）：作用于当前活跃平台视图
   ipcMain.handle('browser:findInPage', (_e, p: unknown) => {
     const q = (p || {}) as { text?: unknown; forward?: unknown }
@@ -832,32 +840,6 @@ export function registerBrowserService(
     const wc = activeView()?.webContents
     try { wc?.stopFindInPage('clearSelection') } catch { /* 视图销毁竞态 */ }
     return { ok: true }
-  })
-  ipcMain.handle('browser:sniffClear', (_e, platform: unknown) => {
-    mediaSniffer!.clear(String(platform || '') || undefined)
-    return { success: true }
-  })
-  ipcMain.handle('browser:sniffDownload', async (_e, payload: unknown) => {
-    const p = (payload || {}) as { url?: unknown; audioUrl?: unknown; filename?: unknown }
-    const url = String(p.url || '')
-    if (!/^https?:\/\/.*/.test(url)) return { success: false, error: '非法媒体地址' }
-    const audioUrl = String(p.audioUrl || '').trim() // 伴生音频流（2026-11-08 配对下载：双流+FFmpeg 合并）
-    const tail = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'media.mp4').slice(0, 120) || 'media.mp4'
-    // 显式文件名（2026-11-07：解析链捕获下载按标题命名，URL 尾段是 CDN 哈希名）
-    const filename = String(p.filename || '').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 120)
-    // media-downloader 引擎（SRC downloadSniffedMedia：Cookie/Referer 注入；m3u8/flv/videoplayback 交 yt-dlp）
-    const cur = currentPlatform && PLATFORM_DEFS[currentPlatform] ? currentPlatform : undefined
-    const viewUrl = activeView()?.webContents.getURL?.() || ''
-    const needsYtdlp = /\.(m3u8|flv)/i.test(url) || url.includes('videoplayback')
-    const r = await mediaDownloader.startMedia({
-      url,
-      ...(audioUrl ? { audioUrl } : {}),
-      filename: filename || tail,
-      ...(viewUrl ? { referer: viewUrl } : {}),
-      ...(cur ? { platformId: cur, subDir: cur } : {}),
-      useYtdlp: needsYtdlp,
-    })
-    return r.success ? { success: true, taskId: r.taskId } : { success: false, error: r.error }
   })
 
   createCreatorsStoreIpc(ipcMain, { app, getBrowserWindow: () => browserWindow })

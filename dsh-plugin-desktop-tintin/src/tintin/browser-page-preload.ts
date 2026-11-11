@@ -38,6 +38,8 @@ const desktopBrowser = {
   // 嗅探/下载（每日素材视图已按 2026-11-04 用户裁决移除，getDailyAssets/openDailyAsset/
   // captureHotspots/onHotspotProgress 通道暴露点随之删除；revealDailyAsset 保留=历史视图「定位」在用）
   revealDailyAsset: (payload: unknown) => invoke('browser:revealDailyAsset', payload),
+  /** 资源管理器高亮任意文件（下载栏「打开目录」用；与历史视图定位同 shell 通道） */
+  revealPath: (payload: unknown) => invoke('browser:revealDailyAsset', payload),
   sniffList: (payload?: unknown) => invoke('browser:sniffList', payload),
   sniffClear: (payload?: unknown) => invoke('browser:sniffClear', payload),
   sniffDownload: (payload: unknown) => invoke('browser:sniffDownload', payload),
@@ -106,6 +108,9 @@ const tintinBrowserPage = {
   tabClose: (payload: unknown) => invoke('browser:tabClose', payload),
   tabActivate: (payload: unknown) => invoke('browser:tabActivate', payload),
   onTabs: (listener: (payload: unknown) => void) => on('tintin-browser-page:tabs', listener),
+  /** 后台捕获会话（2026-11-11 方案 1：独立隐藏窗口，不进标签池） */
+  captureOpen: (payload: unknown) => invoke('browser:captureOpen', payload),
+  captureClose: (payload?: unknown) => invoke('browser:captureClose', payload),
   // 历史/书签（2026-11-08 第二批 #3/#4）
   historyList: () => invoke('history:list'),
   historyClear: () => invoke('history:clear'),
