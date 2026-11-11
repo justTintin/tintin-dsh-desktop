@@ -307,6 +307,12 @@
 - 基线不落 position/top(与模板 absolute 冲突),折 translate——实测选定。
 - 既有 toEqual 断言兼容: toEqual 忽略 undefined 键,零改动。
 
+### 6.5⁗ 现场报障修复(2026-11-11 续批 R12,用户截图指认两案)
+
+1. **主体图默认白球**: VideoCoverPortrait 主体图槽位自带白色聚光渐变盘(#f8fafc→透明 72%)+青色虚线圆环(产品照聚光装饰),**无图时也渲染**=默认白球。修=盘/环门控在 image 有值时才渲染(空槽=透明,PhotoCraft 语义:空层无像素)。
+2. **选择框偏外+样式**: ①框如实绘制槽位边界——槽位本身 left:50% 而 620 宽溢出画布右缘 80px(用户所见「偏到外面」);框位置实测与槽位边界逐像素一致(frameMatchesSlot=true,误差<3px,无测量 bug)。②样式=青色 accent 非 PhotoCraft 蓝——选择框 chrome 全量换 **SEL_COLOR #378EF0**(transform_controls.rs accent;常驻框/多选框/拖动轮廓/旋转柄连杆+柄/角边柄/组柄 8 处),白色方块柄保留。
+- 现场验证(竖屏+空主体图选中): 白球 0/框色 rgb(55,142,240)/框==槽位边界 ✓。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。

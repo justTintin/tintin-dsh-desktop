@@ -62,7 +62,9 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
 
       {!hidden('product') && (
         <div data-cover-layer="product" style={{ position: 'absolute', left: '50%', bottom: 250, transform: productTransform, width: 620, height: 620, zIndex: layerZ(layerOrder, 'product'), opacity: lookOpacity(productOverride), mixBlendMode: lookBlend(productOverride) }}>
+          {image ? (
           <div style={{ position: 'absolute', inset: 40, borderRadius: '50%', background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 42%, rgba(203,213,225,0) 72%)' }} />
+          ) : null}
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)' }}>
             <CoverImg
               name={image}
@@ -74,7 +76,9 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
               }}
             />
           </div>
+          {image ? (
           <div style={{ position: 'absolute', inset: 26, borderRadius: '50%', border: '3px dashed rgba(34,211,238,0.5)' }} />
+          ) : null}
         </div>
       )}
 

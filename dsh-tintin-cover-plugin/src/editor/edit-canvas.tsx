@@ -46,6 +46,8 @@ const snapEq = (a: SelSnapshot | null, f: RotFrame, comp: DOMRect, scale: number
 /* PhotoCraft 智能参考线 magenta(crates/engine/src/snap.rs smart guides 同色系);
    手柄 7×7 白底 accent 描边(transform_controls.rs 同规格)。 */
 const GUIDE_COLOR = '#ff2bbf'
+/* 选择框/手柄 chrome = PhotoCraft 蓝(transform_controls.rs accent;用户裁决一比一) */
+const SEL_COLOR = '#378EF0'
 /* R9b 用户参考线青色(PS guides 视觉系) */
 const GUIDE_USER_COLOR = 'rgba(0,191,255,0.85)'
 const HANDLE_PX = 7
@@ -605,7 +607,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (!drag.active) {
       if (Math.hypot(dxs, dys) < 3) return // 死区:手抖不算拖
       drag.active = true
-      for (const m of drag.moves) if (m.el) { m.el.style.outline = '2px solid var(--accent)'; m.el.style.willChange = 'translate' } // 全部选中层提升合成层(R8)
+      for (const m of drag.moves) if (m.el) { m.el.style.outline = `2px solid ${SEL_COLOR}`; m.el.style.willChange = 'translate' } // 全部选中层提升合成层(R8)
       canvasDragFreeze.active = true
       // 层间智能吸附候选(激活时一次实测;拖动中其它层静止):其它图层的 左/中/右、上/中/下 线
       { const xs: { at: number; guide: number }[] = []; const ys: { at: number; guide: number }[] = []
@@ -851,7 +853,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                 position: 'absolute',
                 left: compMap.left + multiUnion.x * sel!.scale, top: compMap.top + multiUnion.y * sel!.scale,
                 width: multiUnion.w * sel!.scale, height: multiUnion.h * sel!.scale,
-                border: '1px solid var(--accent)', pointerEvents: 'none', zIndex: 86,
+                border: `1px solid ${SEL_COLOR}`, pointerEvents: 'none', zIndex: 86,
               }} />
             ) : null}
             {/* R9c 组缩放角柄(多选时;联合框四角,白底描边方块同规格) */}
@@ -868,7 +870,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                     left: compMap.left + cx * sel!.scale - (HANDLE_PX + 2) / 2,
                     top: compMap.top + cy * sel!.scale - (HANDLE_PX + 2) / 2,
                     width: HANDLE_PX + 2, height: HANDLE_PX + 2, borderRadius: 1,
-                    background: '#fff', border: '1px solid var(--accent)',
+                    background: '#fff', border: `1px solid ${SEL_COLOR}`,
                     cursor: c === 'nw' || c === 'se' ? 'nwse-resize' : 'nesw-resize',
                     zIndex: 91, boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
                   }}
@@ -881,7 +883,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                 left: centerScreen.x, top: centerScreen.y,
                 width: sel.frame.w * sel.scale, height: sel.frame.h * sel.scale,
                 transform: `translate(-50%, -50%) rotate(${sel.frame.deg}deg)`,
-                border: '1px solid var(--accent)', pointerEvents: 'none', zIndex: 86,
+                border: `1px solid ${SEL_COLOR}`, pointerEvents: 'none', zIndex: 86,
               }} />
             ) : null}
             {/* T3.6 悬停预亮(ref 直写零重渲染) */}
@@ -923,7 +925,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                   const len = Math.hypot(b.x - a.x, b.y - a.y)
                   const ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI
                   return (
-                    <div style={{ position: 'absolute', left: a.x, top: a.y, width: Math.max(len, 1), height: 1.5, background: 'var(--accent)', transformOrigin: '0 50%', transform: `rotate(${ang}deg)`, pointerEvents: 'none', zIndex: 88 }} />
+                    <div style={{ position: 'absolute', left: a.x, top: a.y, width: Math.max(len, 1), height: 1.5, background: SEL_COLOR, transformOrigin: '0 50%', transform: `rotate(${ang}deg)`, pointerEvents: 'none', zIndex: 88 }} />
                   )
                 })()}
                 <div
@@ -931,7 +933,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                   onPointerMove={rotate.onMove}
                   onPointerUp={rotate.onUp}
                   title="拖动旋转(接近水平/垂直自动吸附)"
-                  style={{ position: 'absolute', left: screen(rotPos)!.x - 9, top: screen(rotPos)!.y - 9, width: 18, height: 18, borderRadius: 999, background: 'var(--accent)', border: '2px solid #fff', cursor: 'grab', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
+                  style={{ position: 'absolute', left: screen(rotPos)!.x - 9, top: screen(rotPos)!.y - 9, width: 18, height: 18, borderRadius: 999, background: SEL_COLOR, border: '2px solid #fff', cursor: 'grab', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
                 />
                 {/* 角柄(文字层=几何缩放,其余=尺寸) */}
                 {corners.map((c) => {
@@ -948,7 +950,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                       style={{
                         position: 'absolute', left: p.x - (HANDLE_PX + 2) / 2, top: p.y - (HANDLE_PX + 2) / 2,
                         width: HANDLE_PX + 2, height: HANDLE_PX + 2, borderRadius: 1,
-                        background: '#fff', border: '1px solid var(--accent)',
+                        background: '#fff', border: `1px solid ${SEL_COLOR}`,
                         cursor: cursorFor(angleOf(c, { x: sel.frame.cx, y: sel.frame.cy })),
                         zIndex: 91, boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
                       }}
@@ -971,7 +973,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                       style={{
                         position: 'absolute', left: p.x - (HANDLE_PX + 2) / 2, top: p.y - (HANDLE_PX + 2) / 2,
                         width: HANDLE_PX + 2, height: HANDLE_PX + 2, borderRadius: 1,
-                        background: '#fff', border: '1px solid var(--accent)',
+                        background: '#fff', border: `1px solid ${SEL_COLOR}`,
                         cursor: side === 'w' || side === 'e' ? 'ew-resize' : 'ns-resize',
                         zIndex: 91, boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
                       }}
