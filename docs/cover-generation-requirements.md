@@ -461,12 +461,12 @@ POST /tintin/cover/api/acp/chat-sessions|chat-turn|chat-attachment|chat-ref-imag
 | 环节 | 结论 | 证据 |
 |---|---|---|
 | 会话链(聊天 iframe → 页面桥 → `/tintin/cover/api/acp/*` → `cover-acp-bridge.js` → `dsh --profile acp`) | ✅ 与 film 参照实现同构(MCP 声明/模型路由补丁/占位键/session 参数逐项一致;`sessionInfo.mcp:false` 两侧同为占位旗标) | 代码对照 `cover-acp-bridge.js` ⇋ `film-acp.ts`(mcpServers 同形状同地址) |
-| 服务端 MCP(`${server}/mcp`,session/new 声明 `tintin-server`) | ✅ 端点活:initialize 握手 200(`tintin-agent-server` v1.1),tools/list **42 工具在册**,封面强相关 `generate_image`/`generate_cover`/`product_image_generate`/`product_three_view`/`comfyui_workflow`/`task_status_unified` 全在;免鉴权 | curl initialize/tools/list 实测(2026-10-29) |
+| 服务端 MCP(`${server}/mcp`,session/new 声明 `tintin-server`) | ✅ 端点活:initialize 握手 200(`tintin-agent-server` v1.1),免鉴权。10-29 时点 tools/list 42 工具;**1111 复核:注册面已收敛为 8 统一工具**(create_image/create_video/create_music/create_audio/create_digital_human/upload_file/task_status_unified/server_health,封面生成收进 create_image mode=cover;注意该 mode 的 schema 尚未透出 subject/style_image/style_weight——人物档仍走客户端 imitate_cover 本地工具) | curl initialize/tools/list 实测(2026-10-29;1111 复核) |
 | session/new 接受 MCP 声明 | ✅ 真实 dsh 会话建立成功(sessionId 签发) | 探针 startSession ok |
-| 模型路由(`${server}/llm`,deepseek-v4-flash/-pro) | ❌ **当前断**:服务端 /llm 转发上游 DeepSeek 时 401——**服务端自己的上游 API key(尾号 548b)无效**;流式表现为 200+`text/event-stream` 空 SSE(0 字节)→agent 报 `Stream ended without finish_reason`。**视频剪辑会话同命中**(同一调用形状),属服务端侧故障(换上游键),非移植缺陷 | 非 stream 401 原文 `Authentication Fails … ****548b is invalid`;stream body 0 字节;桥内探针 prompt 19s 失败同错误 |
+| 模型路由(`${server}/llm`,deepseek-v4-flash/-pro) | ✅ **已恢复**(1111 对账核正):401 上游键失效已于 1029 服务端换键修复;1110 晚扩写步「LLM 未返回 JSON」四连挂经 11-11 服务端重启不复现——1111 封面真链终验两单(c_ea1279fb-9/c_345ba9ed-a)LLM 场景扩写均正常出 JSON 且任务 completed | 1111 终验双单 completed 实证;历史 401 证据见 git 历史 |
 | 客户端密钥 | 两无嫌:客户端恒用占位键 `sk-tintin-local`(film/cover 一致);`/llm/chat/completions` 实测不校验客户端 Bearer(无鉴权头同结果) | curl 对照 |
 
-**结论**:移植对账成立,服务端 **MCP 连接前提全部成立**(端点活/工具在册/会话接受声明);当前消息整轮失败卡在**服务端 /llm 上游 DeepSeek 键失效**——服务端侧换键后自然恢复,客户端零改动。
+**结论**:移植对账成立,服务端 MCP 连接前提全部成立(端点活/会话接受声明)。历史阻塞两项均已清偿:401 上游键失效(1029 服务端换键)、扩写步「LLM 未返回 JSON」(11-11 服务端重启后不复现,1111 终验双单 completed 实证);客户端零改动。
 
 ### 12.4 修复实录(本轮回归根因,防复发)
 

@@ -19,7 +19,10 @@
 //                   1110 人物主体批: subject="person"=人物正脸恰 1 张(引擎人脸身份
 //                   锚定+ArcFace 相似度门, completed=门已过);1110 风格参考批:
 //                   style_image+style_weight 分参数透传(服务端面名,引擎 style_refs
-//                   名对服务端无效);prompt 禁写人物外貌(墨镜男事故守规)
+//                   名对服务端无效);prompt 禁写人物外貌(墨镜男事故守规);
+//                   1111 验收回显批: person 结果回显 face_similarity{score,threshold,pass}
+//                   +face_similarity_mode(result 顶层优先,shots_done[0] 兜底,
+//                   pass=false 加警示;字段缺省=引擎未回传不虚构)
 //   ocr_image       拆解提字(/material/ocr): 逐行文本+位置框(box/box_rel/置信度,
 //                   实测含坐标), 供参考封面版式分析→文字层按位置重打。
 //   text_remove     去字(/image/text-remove, 2026-11-10 生产接线): LaMa 质量档抹掉
@@ -277,7 +280,10 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
    *  prompt 禁写人物外貌——身份由引擎锚定模板负责,外貌描述=画陌生人(1110 晚墨镜男事故)。
    *  1110 风格参考(探针实测): 服务端面参数名=style_image(单张,服务端路径)+style_weight(数值,
    *  0.4/0.6/0.8 映引擎五档;引擎侧字段名 style_refs 对服务端无效会被丢弃)——与 images/subject
-   *  分参数同传,任务日志"风格参考: … weight=",结果 style_mode 回显。 */
+   *  分参数同传,任务日志"风格参考: … weight=",结果 style_mode 回显。
+   *  1111 验收回显(2026-11-11 API 文档+双单实跑实证): person 模式完成态 result 另附 subject+
+   *  face_similarity{score,threshold,pass}+face_similarity_mode(实测 score 0.761/0.78 @0.65 门,
+   *  person+style 组合门也过);引擎侧历史形态=shots_done[0].face_similarity,两处都接。 */
   const imitateCover = async (args) => {
     const engine = await loadEngine()
     const coverDir = await engine.resolveCoverDir()
@@ -325,17 +331,34 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     const taskId = String(gen?.task_id ?? '')
     if (!taskId) throw new Error(`封面生成未返回任务 id:${JSON.stringify(gen).slice(0, 200)}`)
     const done = await pollUnifiedTask(serverUrl, taskId)
-    const outputUrl = String(done?.result?.output_url ?? '')
-    if (!outputUrl) throw new Error(`生成完成但无产物地址:${JSON.stringify(done?.result ?? {}).slice(0, 200)}`)
+    const result = done?.result ?? {}
+    const outputUrl = String(result.output_url ?? '')
+    if (!outputUrl) throw new Error(`生成完成但无产物地址:${JSON.stringify(result).slice(0, 200)}`)
     const outName = `imitate-${Date.now()}.png`
     const filePath = await saveGeneratedImage(serverUrl, outputUrl, outName, coverDir, resolvePluginDir())
-    const resultSubject = String(done?.result?.subject ?? '')
-    const resultStyleMode = String(done?.result?.style_mode ?? '')
+    const resultSubject = String(result.subject ?? result.subject_type ?? '')
+    const resultStyleMode = String(result.style_mode ?? '')
+    // 验收回显(2026-11-11 API 文档契约+实跑双单实证):person 模式完成态 result 另附
+    // subject+face_similarity{score,threshold,pass}+face_similarity_mode;引擎侧历史形态=
+    // shots_done[0].face_similarity,两处都接;字段缺省=引擎未回传,不虚构。
+    const shotsDone = Array.isArray(result.shots_done) ? result.shots_done : []
+    const rawFace = result.face_similarity && typeof result.face_similarity === 'object'
+      ? result.face_similarity
+      : (shotsDone[0]?.face_similarity && typeof shotsDone[0].face_similarity === 'object' ? shotsDone[0].face_similarity : null)
+    const faceSimilarity = rawFace
+      ? { score: rawFace.score, threshold: rawFace.threshold, pass: rawFace.pass }
+      : null
+    const faceSimMode = String(result.face_similarity_mode ?? '')
+    const faceNote = faceSimilarity
+      ? (faceSimilarity.pass === false
+        ? `注意:人脸相似度门分值未过(score=${faceSimilarity.score} < threshold=${faceSimilarity.threshold})——先 read_image 验人,疑似非本人即弃用。`
+        : `人脸相似度门:score=${faceSimilarity.score} ≥ threshold=${faceSimilarity.threshold} 已过。`)
+      : ''
     const personNote = subject === 'person' || resultSubject === 'person'
       ? '人物档:任务 completed=引擎人脸相似度门已过(失败会 partial_failed 带分值);人物身份由参考图锚定,prompt 里的外貌描述不参与身份。'
       : ''
     return {
-      content: [{ type: 'text', text: JSON.stringify({ ok: true, name: outName, file: filePath, asset: '素材区(三写位)', taskId, ...(resultSubject ? { subject: resultSubject } : {}), ...(resultStyleMode ? { styleMode: resultStyleMode } : {}), note: `这是服务端仿封面产物(无分层)。要按项目版式组装:用 read_image 看它→取其中元素(可再 matting 抠主体)作为图层素材,再写 cover.props.json→render_preview 回看。${personNote}` }, null, 1) }],
+      content: [{ type: 'text', text: JSON.stringify({ ok: true, name: outName, file: filePath, asset: '素材区(三写位)', taskId, ...(resultSubject ? { subject: resultSubject } : {}), ...(resultStyleMode ? { styleMode: resultStyleMode } : {}), ...(faceSimilarity ? { face_similarity: faceSimilarity } : {}), ...(faceSimMode ? { face_similarity_mode: faceSimMode } : {}), note: `这是服务端仿封面产物(无分层)。要按项目版式组装:用 read_image 看它→取其中元素(可再 matting 抠主体)作为图层素材,再写 cover.props.json→render_preview 回看。${personNote}${faceNote}` }, null, 1) }],
     }
   }
 
@@ -400,7 +423,7 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     },
     {
       name: 'imitate_cover',
-      description: '仿封面生成(服务端 /generate/cover 编排):上传参考图→按文案生成同风格封面→产物落素材区+项目目录。普通档(缺省):images 1..4 张(第一张建议参考封面,其余产品/人物图)。人物档(subject="person"):images 恰 1 张人物正脸图,引擎人脸身份锚定+相似度门(换人=任务失败)。风格迁移:style_image=风格参考封面(+style_weight 0.4/0.6/0.8),与 images/subject 分参数同传——不要把风格封面塞进 images。prompt 禁写人物外貌(外貌描述=画陌生人)。参数:images(必填)+文案至少其一(title/prompt/selling_points)。产物是整图(无分层)——组装进项目版式请看返回 note。分钟级耗时。',
+      description: '仿封面生成(服务端 /generate/cover 编排):上传参考图→按文案生成同风格封面→产物落素材区+项目目录。普通档(缺省):images 1..4 张(第一张建议参考封面,其余产品/人物图)。人物档(subject="person"):images 恰 1 张人物正脸图,引擎人脸身份锚定+相似度门(换人=任务失败,完成态结果回显 face_similarity 分值)。风格迁移:style_image=风格参考封面(+style_weight 0.4/0.6/0.8),与 images/subject 分参数同传——不要把风格封面塞进 images。prompt 禁写人物外貌(外貌描述=画陌生人)。参数:images(必填)+文案至少其一(title/prompt/selling_points)。产物是整图(无分层)——组装进项目版式请看返回 note。分钟级耗时。',
       inputSchema: { type: 'object', properties: {
         images: { type: 'array', items: { type: 'string' }, description: '参考图路径(项目目录/素材位文件名或绝对路径);普通档 1..4 张,人物档(subject=person)恰 1 张人物正脸图' },
         subject: { type: 'string', enum: ['person', 'product'], description: '可选,人物档传 "person"(人物身份锚定,恰 1 张人物正脸图);缺省=普通档' },

@@ -70,7 +70,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 - **人物封面(2026-11-10 人物主体批,用户给了人物图并要求"用这个人"时必走)**:`imitate_cover` 传 `subject:"person"`,images **恰 1 张人物正脸图**。引擎做人物身份锚定(脸 100% 同参考、禁换脸)+人脸相似度门(ArcFace,换人=任务失败)——**这是"人不变、换风格自然动作"的唯一正路,禁止用普通档或抠图叠放冒充**。三条硬规(1110 晚墨镜男事故):
   1. **prompt 禁写人物外貌**(脸型/发型/眼镜/服装/配饰,也不许复述参考封面里人物的长相)——身份由引擎锚定模板负责,外貌描述=画陌生人;只写**动作/构图/场景**。
   2. **参考封面走 `style_image`(+`style_weight` 建议 0.4/0.6/0.8),不要塞进 images**(person 模式 images 恰 1 张,多张 400 拒;引擎侧字段名 style_refs 对服务端无效)——风格由风格图注入,prompt 不必再堆风格词;版式(标题/角标位置)另用 ocr_image 拆参考封面重排。
-  3. **验收=任务 completed**(人脸相似度门已过;失败 partial_failed 带分值,错误原文上返,同请求最多重试 2 次)+read_image 看产物确认人与参考图一致后才写 props。
+  3. **验收=任务 completed**(人脸相似度门已过,结果回显 `face_similarity{score,threshold,pass}` 与 `face_similarity_mode`;失败 partial_failed 带分值在错误原文,同请求最多重试 2 次)+read_image 看产物确认人与参考图一致后才写 props。
 - **参考封面拆解**:`mcp__cover-tools__ocr_image`(image=参考封面)→逐行文字+位置框(box 像素/box_rel 相对比例/置信度)。按 box_rel×模板宽高换算成文字层位置重打标题/角标文案——**文字一律回排版层,永不进生图 prompt**;系统字体复刻不了的花字效果如实说明。
 - **去字还原干净底图(2026-11-10 服务端 /image/text-remove 生产上线)**:`mcp__cover-tools__text_remove`(image=参考封面;boxes 省略=自动 OCR 全部字框,或显式传 `[[x1,y1,x2,y2],...]` 绝对像素=ocr_image 的 lines[].box)。LaMa 质量档约 6s,产物 PNG 落素材区+项目目录——**原字已抹的干净底图**,可直接当 bgImage/底图层;fast=true 仅适合纯色/渐变底小字。
 - 典型流(用户提供参考封面+产品图):ocr_image 拆参考版式(文字+位置) → text_remove 抹掉原字得干净底图 → 组装:干净底图当 bgImage+文字层按 OCR 位置重打(可改文案) + matting 抠产品主体/imitate_cover 补图 → render_preview 回看 → 导出。

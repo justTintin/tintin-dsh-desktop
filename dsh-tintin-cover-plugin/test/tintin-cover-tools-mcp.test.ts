@@ -201,7 +201,7 @@ describe('cover tools mcp endpoint', () => {
       // /generate/cover 202
       .mockImplementationOnce(async () => jsonRes({ task_id: 'c_person-1', poll: '/tasks/unified/c_person-1' }, 202))
       // poll → completed(person 档回显)
-      .mockImplementationOnce(async () => jsonRes({ id: 'c_person-1', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_person-1.png', width: 704, height: 1248, engine: 'comfygen', subject: 'person', style_mode: 'style_ref', refs_used: ['style_ref.png'] } }))
+      .mockImplementationOnce(async () => jsonRes({ id: 'c_person-1', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_person-1.png', width: 704, height: 1248, engine: 'comfygen', subject: 'person', style_mode: 'style_ref', refs_used: ['style_ref.png'], face_similarity: { score: 0.723, threshold: 0.65, pass: true }, face_similarity_mode: 'arcface' } }))
       // 产物下载
       .mockImplementationOnce(async () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' }))
     vi.stubGlobal('fetch', fetchMock)
@@ -214,6 +214,10 @@ describe('cover tools mcp endpoint', () => {
     expect(payload.subject).toBe('person')
     expect(payload.styleMode).toBe('style_ref')
     expect(payload.note).toContain('人脸相似度门')
+    // 验收回显(2026-11-11 API 文档契约):person 模式 result 另附 face_similarity+face_similarity_mode
+    expect(payload.face_similarity).toEqual({ score: 0.723, threshold: 0.65, pass: true })
+    expect(payload.face_similarity_mode).toBe('arcface')
+    expect(payload.note).toContain('0.723')
     // 人物档生成载荷契约:subject/style_image/style_weight 透传,images 恰 1 张
     const genCall = fetchMock.mock.calls[1] as [string, { body: string }]
     expect(genCall[0]).toContain('/generate/cover')
@@ -232,6 +236,23 @@ describe('cover tools mcp endpoint', () => {
     expect(resultOf(weightOnly).isError).toBe(true)
     expect(resultOf(weightOnly).content[0].text).toContain('style_weight 需与 style_image 同传')
     expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
+  it('imitate_cover: face_similarity 兜底链(result 顶层缺→shots_done[0])+pass=false 警示+subject_type 回退', async () => {
+    const jsonRes = (obj: unknown, status = 200) => ({ ok: true, status, headers: { get: () => 'application/json' }, json: async () => obj, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })
+    vi.stubGlobal('fetch', vi.fn()
+      .mockImplementationOnce(async () => jsonRes({ paths: ['/srv/uploads/person.png'], count: 1 }))
+      .mockImplementationOnce(async () => jsonRes({ task_id: 'c_person-2', poll: '/tasks/unified/c_person-2' }, 202))
+      .mockImplementationOnce(async () => jsonRes({ id: 'c_person-2', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_person-2.png', width: 704, height: 1248, engine: 'comfygen', subject_type: 'person', shots_done: [{ name: 'cover', face_similarity: { score: 0.52, threshold: 0.65, pass: false } }] } }))
+      .mockImplementationOnce(async () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' })))
+    const { coverDir, call } = await setup()
+    writeFileSync(join(coverDir, 'person.png'), TINY_PNG)
+    const ok = await call(rpc(1, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png'], subject: 'person', title: '兜底', prompt: '动作与场景描述' } }))
+    const payload = JSON.parse(resultOf(ok).content[0].text)
+    expect(payload.ok).toBe(true)
+    expect(payload.subject).toBe('person')
+    expect(payload.face_similarity).toEqual({ score: 0.52, threshold: 0.65, pass: false })
+    expect(payload.note).toContain('人脸相似度门分值未过')
   })
 
   it('ocr_image: 返回逐行文本+位置框;服务端错误原文上返', async () => {
