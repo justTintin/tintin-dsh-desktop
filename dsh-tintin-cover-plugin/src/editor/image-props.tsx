@@ -9,7 +9,7 @@ import React from 'react'
 import { getTemplate } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
 import { BLEND_MODES, lookOpacity, lookScale, type ImageLook } from '../../templates/image-style'
-import { canvasBoxIn, compositionRectIn, layerEl, type CanvasBox } from './canvas-geom'
+import { canvasBoxIn, layerEl, type CanvasBox } from './canvas-geom'
 import { clampScale, flipPatch, resizeWH, rotatePatch } from './image-ops'
 import { useEditor } from './store'
 import { AlignButtons, alignSelection, type AlignMode } from './align-row'
@@ -83,7 +83,7 @@ function useLayerMetrics(id: string, sig: string): { box: CanvasBox; layoutW: nu
     const read = (): void => {
       if (stopped) return
       const el = layerEl(id)
-      setM(el ? { box: canvasBoxIn(el, compositionRectIn(document), tplWidth), layoutW: el.offsetWidth, layoutH: el.offsetHeight } : null)
+      setM(el ? { box: canvasBoxIn(el, el.offsetParent?.getBoundingClientRect() ?? null, tplWidth), layoutW: el.offsetWidth, layoutH: el.offsetHeight } : null)
     }
     const raf = requestAnimationFrame(read)
     const el = layerEl(id)

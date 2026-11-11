@@ -10,7 +10,7 @@
 // 文字层写 styles.dx/dy、自由图片层写 x/y、槽位写 styles.dx/dy;锁定层跳过。
 import React from 'react'
 import { getTemplate } from '../registry'
-import { compRectRef } from './canvas-geom'
+import { compRectRef, layerEl } from './canvas-geom'
 import { lockedOf } from './image-ops'
 import { useEditor } from './store'
 
@@ -86,7 +86,7 @@ function measureBox(id: string): { left: number; top: number; w: number; h: numb
   if (!comp || comp.width <= 0) return null
   const st = useEditor.getState()
   const tpl = getTemplate(st.templateId)
-  const el = document.querySelector(`[data-cover-layer="${id}"]`)
+  const el = layerEl(id)
   if (!(el instanceof HTMLElement)) return null
   const scale = Math.max(comp.width / tpl.width, 0.05)
   const r = el.getBoundingClientRect()

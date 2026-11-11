@@ -14,7 +14,7 @@ import React from 'react'
 import { FontFamilyPicker, FontStylePicker } from './font-picker'
 import { getTemplate } from '../registry'
 import { BLEND_MODES } from '../../templates/image-style'
-import { canvasBoxIn, compRectRef } from './canvas-geom'
+import { canvasBoxIn, compRectRef, layerEl } from './canvas-geom'
 import { liveLayer, liveLayerSnapshot, subscribeLiveLayer } from './ui'
 import { useEditor } from './store'
 import {
@@ -130,7 +130,7 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
   const [measureTick, force] = React.useReducer((n: number) => n + 1, 0)
   React.useLayoutEffect(() => { force() }, [styles, selectedLayer, live.v])
   const measureNow = (): { left: number; top: number; w: number; h: number } | null => {
-    const el = document.querySelector(`[data-cover-layer="${layerId}"]`)
+    const el = layerEl(layerId)
     const comp = compRectRef.current
     if (!(el instanceof HTMLElement) || !comp || comp.width <= 0) return null
     const scale = Math.max(comp.width / tplWidth, 0.05)

@@ -360,6 +360,15 @@
 3. **全属性审计**(无头探针逐项操作+读真实落点,20 项): 通过=字号/行距/字距/颜色/大小写/段落/投影/描边/混合/基线/横缩放/竖缩放/角度/文本框宽、主体图 W/X/居中/翻转、眼睛隐藏、水平等距分布(3 选中)、文本层不透明度(1→0.85)。**审计抓出另一真缺口并修复**: 两个视频模板(VideoCover/VideoCoverPortrait)的标题内层是显式字段清单,`letterSpacing/textTransform/textAlign` 从未消费(字距/大小写/段落对齐设了不生效)——已补接线(其余四模板走 `...style` spread 全通)。
 - 验证: 140 用例+37 基线+三件构建+check:tintin+staging 新鲜;探针:对齐后 X/Y 同帧更新(左对齐 56→0、底对齐 Y→688),审计 19/20 通过(余 1=默认项目无主体图,img 不存在系夹具限制;模板侧 `imgDropShadow` 接线已核对)。
 
+### 6.5¹⁰ 内联编辑 1:1 原字体 + Ctrl 缩放 + 活动画布取层(2026-11-11 续批 R18,用户三条裁决)
+
+用户:「整个字体的编辑有问题,没有在原来的字体上编辑,要 1:1 还原 PhotoCraft」「按住 Ctrl 时要像 PhotoCraft 变换框一样扩大缩小」「对齐只对齐了横屏——有两个画布」。
+
+1. **内联编辑=原字体原样式原位**: 旧覆盖层自带深色底/边框/居中/`fontFamily:inherit`/硬编码行高与字号,所见非所得。重写=进入编辑时现场测量画布文字节点的 computed style(fontFamily/fontSize/fontWeight/fontStyle/lineHeight/letterSpacing/color/textAlign/textTransform)注入 textarea,透明背景/零内边距/零边框,盒子取文字节点屏幕盒。**坐标系坑(实测 dy 147px)**: 编辑器元素渲染在 content 层而盒坐标取了 playerWrap 相对——改 contentRef 相对(同 R12 选择框双重计入同类病)。
+2. **Ctrl+拖动=等比缩放**(PhotoCraft `edit.freeTransform` 语义,Ctrl+滚轮仍是画布缩放): 拖动中以 CSS `scale` 独立属性预览(与模板 transform 相乘,中心锚),松手提交——文字=gscale(0.3..3,几何缩放不改字号)、自由图片=width/height(围中心扩缩并补偿 x/y)、主体槽位=sx/sy(模板中心锚);带百分比读数;Ctrl 悬停图层=缩放光标。选择框/手柄维持 R13 裁决不回归。
+3. **活动画布取层**: 全部取层查询收敛到 `data-tintin-cover-canvas` 标记根内(`layerEl`),页面里出现第二棵画布树(旧模板残留/双挂载)时不再命中错误的画布——修「对齐只对齐了横屏」类问题(实测:文档序在前注入伪 title 节点,对齐仍命中活动画布真节点,伪节点不动)。
+- 验证: 140 用例+37 基线+两构建+check:tintin+staging 新鲜;无头探针:内联 fontFamily/fontSize/weight/color 与画布节点逐项 same、背景透明、位置偏移 0/0、输入即时回写画布;Ctrl+拖动 transform 1→3 提交;伪画布场景对齐命中真节点。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。

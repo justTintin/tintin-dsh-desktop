@@ -14,8 +14,8 @@ import React from 'react'
 import { getTemplate } from '../registry'
 import { RenderSurface } from './render-surface'
 import { useCanvasShortcuts } from './canvas-keys'
-import { canvasBoxIn, compositionRectIn, compRectRef, type CanvasBox } from './canvas-geom'
-import { lockedOf } from './image-ops'
+import { canvasBoxIn, compositionRectIn, compRectRef, layerEl, type CanvasBox } from './canvas-geom'
+import { clampScale, lockedOf } from './image-ops'
 import { usePurePreview, cycleLayerSelection } from './canvas-aux'
 import { useInlineEditor } from './inline-edit'
 import { useEditor } from './store'
@@ -80,6 +80,17 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     | null
   >(null)
   useCanvasZoom(tpl, playerWrapRef, scrollRef)
+  /* Ctrl+拖动=等比缩放(2026-11-11 R18 用户裁决:按住 Ctrl 要像 PhotoCraft 变换框一样放大缩小;
+     选择框/手柄已按裁决拆除,Ctrl 手势是替代入口;Ctrl+滚轮仍是画布缩放)。
+     预览=el.style.scale(CSS 独立属性,与模板 transform 相乘,transform-origin 默认居中);
+     提交:文字=gscale(0.3..3,几何缩放不改字号)、自由图片=width/height(围中心扩缩,补偿 x/y)、
+     槽位=sx/sy(模板变换原点在中心,天然居中)。 */
+  const scaleRef = React.useRef<{
+    id: string; kind: 'text' | 'custom' | 'slot'; pointerId: number
+    cx: number; cy: number; startDist: number; f: number; el: HTMLElement | null
+    baseGscale: number; baseW: number; baseH: number; baseX: number; baseY: number
+    baseSx: number; baseSy: number
+  } | null>(null)
   /** 合成盒(按模板比例缩放的画布容器)= 拖动/对齐/落点的统一坐标系;
    *  每渲染刷新 compRectRef(text-properties 变换段 W/H/X/Y 的测量基准)。 */
   const compositionRect = (): DOMRect | null => {
@@ -192,13 +203,13 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
 
   /* T1.3 双击就地编辑(逻辑在 inline-edit.tsx): 双击文字层 → 覆盖 textarea → 防抖写 props */
   const inline = useInlineEditor({
-    tpl, props, setProp, hostRef, playerWrapRef, layerAt, pcRunning, fitScale, zoom,
+    tpl, props, setProp, hostRef, contentRef, layerAt, pcRunning, fitScale, zoom,
   })
   const openInlineEdit = (clientX: number, clientY: number): void => inline.open(clientX, clientY)
 
   const onPointerDown = (e: React.PointerEvent): void => {
     if (pcRunning) return // PhotoCraft 为主:画布交互在原生窗口,网页仅镜像
-    if (dragRef.current) return // 已在拖动:忽略第二指
+    if (dragRef.current || scaleRef.current) return // 已在拖动/缩放:忽略第二指
     let id = layerAt(e.clientX, e.clientY)
     /* R8 多选(对照 PhotoCraft Shift+点击加选):Shift+命中层=切换其多选态(主选跟随),
        不启动拖动;普通点击走单选(内部清多选)。 */
@@ -209,10 +220,37 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (!id) return
     // 锁定位置:只选中不拖动;Alt+拖动仍可拖出副本(副本不带锁,同 PhotoCraft)
     if (lockedOf(props, id) && !(e.altKey && id.startsWith('img-'))) return
+    /* Ctrl+拖动=等比缩放(PhotoCraft free transform 语义;不落拖动) */
+    if (e.ctrlKey && !e.altKey) {
+      const el = layerEl(id)
+      if (!el) return
+      const kind: 'text' | 'custom' | 'slot' = id.startsWith('img-') ? 'custom' : id === 'product' ? 'slot' : 'text'
+      if (kind === 'text' && !tpl.layerDefs.some((d) => d.id === id && d.type === 'text')) return
+      const layer = kind === 'custom' ? (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; x: number; y: number; width: number; height?: number }>) : []).find((l) => l.id === id) : undefined
+      if (kind === 'custom' && !layer) return
+      const look = (props.styles as Record<string, { gscale?: number; sx?: number; sy?: number }> | undefined)?.[id]
+      const r = el.getBoundingClientRect()
+      const cx = r.left + r.width / 2
+      const cy = r.top + r.height / 2
+      scaleRef.current = {
+        id, kind, pointerId: e.pointerId, cx, cy,
+        startDist: Math.max(8, Math.hypot(e.clientX - cx, e.clientY - cy)),
+        f: 1, el,
+        baseGscale: typeof look?.gscale === 'number' ? look.gscale : 1,
+        baseW: layer?.width ?? Math.round(el.offsetWidth),
+        baseH: layer?.height ?? Math.round(el.offsetHeight),
+        baseX: layer?.x ?? 0, baseY: layer?.y ?? 0,
+        baseSx: typeof look?.sx === 'number' ? look.sx : 1,
+        baseSy: typeof look?.sy === 'number' ? look.sy : 1,
+      }
+      canvasDragFreeze.active = true
+      try { hostRef.current?.setPointerCapture?.(e.pointerId) } catch { /* 合成指针守卫 */ }
+      return
+    }
     const compRect = compositionRect()
     if (!compRect) return
     const scale = compRect.width / tpl.width
-    const dragEl = document.querySelector(`[data-cover-layer="${id}"]`)
+    const dragEl = layerEl(id)
     const baseBox = dragEl ? canvasBoxOf(dragEl) : null
     let baseX = 0
     let baseY = 0
@@ -279,11 +317,21 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   }
   const onPointerMove = (e: React.PointerEvent): void => {
     if (guideDragRef.current) { moveGuidePreview(e); return } // R9b 参考线拖拽优先
+    const sc = scaleRef.current
+    if (sc) { // Ctrl 缩放预览:radial 距离比;CSS scale 与模板 transform 相乘
+      if (e.pointerId !== sc.pointerId) return
+      e.preventDefault()
+      const dist = Math.hypot(e.clientX - sc.cx, e.clientY - sc.cy)
+      sc.f = Math.min(20, Math.max(0.05, dist / sc.startDist))
+      if (sc.el) sc.el.style.scale = `${sc.f}`
+      showReadoutText(e.clientX, e.clientY, `缩放 ${Math.round(sc.f * 100)}%`)
+      return
+    }
     const drag = dragRef.current
     if (!drag) {
-      // 悬停光标(2026-11-02 用户裁决:对齐 PhotoCraft=箭头,不用手型)
+      // 悬停光标(2026-11-02 用户裁决:对齐 PhotoCraft=箭头,不用手型;Ctrl 按住=缩放光标)
       const host = hostRef.current
-      if (host) host.style.cursor = 'default'
+      if (host) host.style.cursor = e.ctrlKey && layerAt(e.clientX, e.clientY) ? 'nwse-resize' : 'default'
       return
     }
     syncRulerMarker(e.clientX, e.clientY)
@@ -402,6 +450,30 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   }
   const onPointerUp = (e: React.PointerEvent): void => {
     if (guideDragRef.current) { finishGuideDrag(e); return } // R9b 参考线落位/删除
+    const sc = scaleRef.current
+    if (sc) { // Ctrl 缩放提交(Ctrl+拖动;死区内 f≈1 不提交)
+      scaleRef.current = null
+      canvasDragFreeze.active = false
+      if (sc.el) sc.el.style.scale = ''
+      hideReadout()
+      try { hostRef.current?.releasePointerCapture?.(e.pointerId) } catch { /* 已隐式释放 */ }
+      const f = sc.f
+      if (Math.abs(f - 1) < 0.01) return
+      if (sc.kind === 'text') {
+        setLayerStyle(sc.id, { gscale: Math.round(Math.min(3, Math.max(0.3, sc.baseGscale * f)) * 1000) / 1000 })
+      } else if (sc.kind === 'slot') {
+        setLayerStyle(sc.id, { sx: clampScale(sc.baseSx * f), sy: clampScale(sc.baseSy * f) })
+      } else {
+        const w = Math.max(20, Math.min(8000, Math.round(sc.baseW * f)))
+        const h = Math.max(20, Math.min(8000, Math.round(sc.baseH * f)))
+        setCustomLayer(sc.id, {
+          width: w, height: h,
+          x: Math.round(sc.baseX - (w - sc.baseW) / 2),
+          y: Math.round(sc.baseY - (h - sc.baseH) / 2),
+        })
+      }
+      return
+    }
     const drag = dragRef.current
     dragRef.current = null
     if (!drag) return
@@ -426,6 +498,13 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       guideDragRef.current = null
       if (previewHRef.current) previewHRef.current.style.display = 'none'
       if (previewVRef.current) previewVRef.current.style.display = 'none'
+      return
+    }
+    if (scaleRef.current) { // Ctrl 缩放取消:清预览不提交
+      if (scaleRef.current.el) scaleRef.current.el.style.scale = ''
+      scaleRef.current = null
+      canvasDragFreeze.active = false
+      hideReadout()
       return
     }
     const drag = dragRef.current
@@ -482,7 +561,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
             {/* 滚动层(2026-10-31 画布缩放 §2.6):内容按 zoom 放大,超出即滚动;对齐工具条
                 在 playerWrap 层不随滚动(按实时 rect 定位)。Ctrl+滚轮缩放=useCanvasZoom 锚点缩放 */}
             <div ref={scrollRef} style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', alignItems: zoom > 1 ? 'flex-start' : 'center', justifyContent: zoom > 1 ? 'flex-start' : 'center' }} onScroll={() => { compositionRect(); syncRulers() }}>
-              <div ref={contentRef} style={{ position: 'relative', width: Math.round(tpl.width * fitScale * zoom), height: Math.round(tpl.height * fitScale * zoom), flexShrink: 0, margin: 'auto', imageRendering: zoom > 2 ? 'pixelated' : 'auto' }}>
+              <div ref={contentRef} data-tintin-cover-canvas="" style={{ position: 'relative', width: Math.round(tpl.width * fitScale * zoom), height: Math.round(tpl.height * fitScale * zoom), flexShrink: 0, margin: 'auto', imageRendering: zoom > 2 ? 'pixelated' : 'auto' }}>
                 {/* WP-A2: 自持画布=模板组件直接渲染(无 Player 壳);remotion 经 shim */}
                 <RenderSurface
                   component={tpl.component}
