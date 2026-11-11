@@ -60,7 +60,7 @@ function CustomLayerEditor({ layer, project }: { layer: CustomLayer; project: st
         >{matting.busy ? '抠图中…' : '抠图去背景'}</button>
       </div>
       {matting.msg ? <div style={{ marginTop: 6, fontSize: 11, color: matting.ok ? 'var(--ok)' : 'var(--err)', wordBreak: 'break-all' }}>{matting.msg}</div> : null}
-      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6 }}>画布拖动改位置 · 拖右下角柄改大小 · 拖上方圆点旋转 · Alt+拖动复制</div>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 6 }}>画布拖动改位置 · 尺寸/旋转用上方 W/H/角度字段 · Alt+拖动复制</div>
     </div>
   )
 }

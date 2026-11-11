@@ -1,13 +1,16 @@
 // 选中图片图层的属性卡(2026-11-01 用户裁决:对齐 PhotoCraft)。分区照 PhotoCraft 的落点:
 // 图层面板头(混合模式/不透明度/锁定位置)→ 属性面板「变换」(W🔗H/X/Y/角度)→
-// 编辑›变换(翻转/旋转 90°·180°)→ 图层›排列 → 复制/删除。自由图层与产品图槽位共用;
-// 环境底图(全幅铺底,模板不按图层序叠放)只开放外观与翻转。X/Y=图层框左上角(画布 px)。
+// 编辑›变换(翻转/旋转 90°·180°)。自由图层与产品图槽位共用;环境底图(全幅铺底,
+// 模板不按图层序叠放)只开放外观与翻转。X/Y=图层框左上角(画布 px)。
+// 2026-11-11 用户裁决:移除卡内「排列(置顶/上移/下移/置底)/复制图层/删除图层/仅显示此图层
+// 导出」——这些操作图层面板已有(行拖拽排序/右键菜单/页脚 trash·square-plus/Alt+点击眼睛),
+// 卡内重复=多此一举。
 import React from 'react'
 import { getTemplate } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
 import { BLEND_MODES, lookOpacity, lookScale, type ImageLook } from '../../templates/image-style'
 import { canvasBoxIn, compositionRectIn, layerEl, type CanvasBox } from './canvas-geom'
-import { clampScale, flipPatch, resizeWH, rotatePatch, type Arrange } from './image-ops'
+import { clampScale, flipPatch, resizeWH, rotatePatch } from './image-ops'
 import { useEditor } from './store'
 import { ghostBtn, headStyle, inputStyle } from './ui'
 
@@ -92,39 +95,14 @@ function useLayerMetrics(id: string, sig: string): { box: CanvasBox; layoutW: nu
 export function ImageLayerProps({ target }: { target: ImageTarget }): React.ReactElement {
   const setCustomLayer = useEditor((s) => s.setCustomLayer)
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
-  const arrangeLayer = useEditor((s) => s.arrangeLayer)
-  const duplicateCustomLayer = useEditor((s) => s.duplicateCustomLayer)
-  const removeCustomLayer = useEditor((s) => s.removeCustomLayer)
   const templateId = useEditor((s) => s.templateId)
-  const allProps = useEditor((s) => s.props)
-  const customLayers = useEditor((s) => s.props.customLayers) as CustomLayer[] | undefined
   const [linked, setLinked] = React.useState(true)
-  const [exportMsg, setExportMsg] = React.useState('')
   const id = target.kind === 'custom' ? target.layer.id : target.id
   const look: ImageLook & { dx?: number; dy?: number } = target.kind === 'custom' ? target.layer : target.look
   const geometry = target.kind === 'custom' || target.geometry
   const locked = look.locked === true
   const metrics = useLayerMetrics(id, `${templateId}|${JSON.stringify(look)}`)
 
-  /** 单层导出(2026-11-02 对齐 PhotoCraft quick-export):隐藏其余全部图层后 render,
-   *  PNG 落项目目录。文字层隐藏=不参与校验(B2 语义),模板底图保留。 */
-  const exportThisLayer = async (): Promise<void> => {
-    const tpl = getTemplate(templateId)
-    const others = tpl.layerDefs.map((l) => l.id).filter((x) => x !== id)
-    const customOthers = ((allProps.customLayers as CustomLayer[] | undefined) ?? []).map((l) => l.id).filter((x) => x !== id)
-    const hidden = [...others, ...customOthers]
-    setExportMsg('渲染中…')
-    try {
-      const r = await fetch('/tintin/ipc/cover/render', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ templateId, props: { ...allProps, hiddenLayers: hidden }, fileName: `仅-${id}.png` }),
-      }).then((x) => x.json()) as { ok?: boolean; file?: string; error?: string }
-      if (!r.ok) throw new Error(r.error || '渲染失败')
-      setExportMsg(`✓ 已导出 ${r.file}`)
-    } catch (err) {
-      setExportMsg(`✗ ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
   const apply = (patch: ImageLook & { x?: number; y?: number; width?: number; height?: number; dx?: number; dy?: number }): void => {
     if (target.kind === 'custom') setCustomLayer(id, patch)
     else setLayerStyle(id, patch)
@@ -160,9 +138,6 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
     })
   }
   const opacity = Math.round(lookOpacity(look) * 100)
-  const arrangeBtn = (how: Arrange, text: string, keys: string): React.ReactElement => (
-    <button key={how} onClick={() => arrangeLayer(id, how)} title={`${text}(${keys})`} style={chip()}>{text}</button>
-  )
   const transformBtn = (text: string, patch: ImageLook, title: string): React.ReactElement => (
     <button key={text} disabled={locked} onClick={() => apply(patch)} title={locked ? '图层已锁定位置' : title} style={chip(!locked)}>{text}</button>
   )
@@ -237,26 +212,6 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
             {transformBtn('180°', rotatePatch(look, 180), '旋转 180°')}
           </>
         ) : null}
-      </div>
-      {geometry ? (
-        <div style={{ ...row, flexWrap: 'wrap' }}>
-          <span style={label}>排列</span>
-          {arrangeBtn('front', '置顶', 'Ctrl+Shift+]')}
-          {arrangeBtn('forward', '上移一层', 'Ctrl+]')}
-          {arrangeBtn('backward', '下移一层', 'Ctrl+[')}
-          {arrangeBtn('back', '置底', 'Ctrl+Shift+[')}
-        </div>
-      ) : null}
-      {target.kind === 'custom' ? (
-        <div style={{ ...row, flexWrap: 'wrap' }}>
-          <button onClick={() => duplicateCustomLayer(id)} title="复制图层(Ctrl+J):全部属性照搬,副本在原图层之上" style={chip()}>⧉ 复制图层</button>
-          <button onClick={() => removeCustomLayer(id)} title="删除图层(Delete)" style={{ ...chip(), color: 'var(--err)' }}>🗑 删除图层</button>
-        </div>
-      ) : null}
-      {/* 单层导出(2026-11-02 对齐 PhotoCraft quick-export):隐藏其余全部图层后 render */}
-      <div style={row}>
-        <button onClick={() => void exportThisLayer()} title="隐藏其余图层,只渲染本图层为 PNG(落项目目录)" style={{ ...chip(), color: '#93c5fd' }}>⬇ 仅显示此图层导出</button>
-        {exportMsg ? <span style={{ fontSize: 11, color: exportMsg.startsWith('✓') ? 'var(--ok)' : 'var(--err)', wordBreak: 'break-all' }}>{exportMsg}</span> : null}
       </div>
     </div>
   )

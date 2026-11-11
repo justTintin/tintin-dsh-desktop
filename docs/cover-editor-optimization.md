@@ -326,6 +326,14 @@
 5. **留档不删**: sel-geom/image-ops resize 族/text-scale/use-group-scale/canvas-aux.updateHover 几何数学保留(当前无引用),待整套选择系统重设计后复用。
 - 验证: 140 用例/typecheck 37 基线/三件构建/check:tintin 全绿;无头实机探针(切层 3 次): SEL 蓝 border/fill 元素=0、首尾行 Y 恒定(111/333)、编辑卡+对齐工具条正常、页面错误=0。
 
+### 6.5⁶ 编辑卡去重(2026-11-11 续批 R14,用户裁决)
+
+用户截图点破:「图层里的一些操作(红框:上移/下移/置底/复制图层/删除图层/仅显示此图层导出)已经可以通过操作图层来做,还多此一举」——这些操作图层面板全有(行拖拽排序=排列;右键菜单=排列四向+复制+删除;页脚 trash/square-plus=删除/复制;Alt+点击眼睛=仅显示此层),编辑卡重复即多此一举:
+
+1. **ImageLayerProps 删除三块**: 排列段(置顶/上移一层/下移一层/置底)、复制/删除行、仅显示此图层导出行;连带删除 exportThisLayer/exportMsg/arrangeBtn 与 arrangeLayer/duplicateCustomLayer/removeCustomLayer 订阅(图片属性卡只留 混合/不透明度/锁定/投影/变换 W🔗H·X·Y·角度/翻转/旋转 90°·180°)。
+2. **过时提示行同步**: 「拖右下角柄改大小·拖上方圆点旋转」随 chrome 拆除已不存在 → 改「尺寸/旋转用上方 W/H/角度字段」。
+- 验证: 140 用例+37 基线+两构建+check:tintin+无头探针(选中主体图:排列/复制/删除/单层导出按钮=0,变换与翻转/旋转在,零 pageerror)。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。
