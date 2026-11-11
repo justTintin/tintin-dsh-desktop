@@ -461,3 +461,13 @@
 - 缩放发生时文本块附坐标换算元信息(`[Image: 原始 WxH, 已缩放至 wxh, 像素坐标 ×f 换算]`,claude-code createImageMetadataText 同思路)——仿封面 OCR 拆版式按所见图报 box 不失真。
 - 聊天侧(用户拖入/粘贴图)经查**上游 shell 已自带**同款阶梯(ref-pictures.ts `attachedPicture`:2000px/4MB JPEG q0.85),无需另做。
 - 测试:cover-image-resize.test.ts 7 用例(fail-open/直通/超分缩放/质量阶梯/硬上限/空图/元信息),全绿。
+
+### 7.3 聊天图片链路三修 + 错误面(方案 2/4;素材创作批)
+
+- **附件名放宽对齐 ASSET_NAME_RE**(cover-acp-routes.js chat-attachment):旧英数正则拒中文附件名——只拒穿越/Windows 非法字符/控制符,中文/空格/emoji 收下;
+- **大小上限补齐**:chat-attachment 15MB、chat-ref-image 8MB,超限回 **413 人话**(旧:attachment 无上限,upload-image 超限静默 `req.destroy()`=客户端只见裸网络错误);readBodyBytes 超限排空(硬顶 64MB)保证 fetch 能读到响应;素材条 importFiles 增客户端预检(超限不上传);
+- **chat-ref-image 扩展名跟真实格式**(魔数判 png/webp/jpg),不再恒写 `.jpg`;
+- **拖入文件真实路径**(chat-shell cover-chat-bridge.ts `pathForFile`):原恒空串=全部走字节通道;现逐层走链(本窗→父窗→祖父窗)找 `__DSH_HOST_PATHS__.pathFor`/`dshDesktopFilePath.forFile`(影片侧 client-ui 同契约),任何异常回空串=回退字节通道零回归;
+- **URL 导入项目落盘失败不再静默**:upload-url 回 `warning` 字段,素材条 flashNotice 如实呈现「已导入 x——项目目录落盘失败(素材位已有):原因」;
+- **画布多文件拖入**(edit-canvas.tsx,方案 5):原只收第一张——现逐张上传建层(第 2+ 张 +24px/张 错位堆放防叠死,上限 12 张);
+- 测试:tintin-cover-acp.test.ts 增 3 用例(中文名收下+413+穿越拒;引用图魔数扩展名+413),18 用例全绿;chat-shell vite 构建通过。

@@ -38,11 +38,29 @@ async function readBodyJson(req) {
   try { return JSON.parse(text) } catch { throw new Error(`请求体不是合法 JSON(${text.slice(0, 80)}…)`) }
 }
 
-/** POST 体收集(原始字节) */
-async function readBodyBytes(req) {
+/** POST 体收集(原始字节)。maxBytes 超限时丢弃载荷继续排空(硬顶 64MB)并返回
+ *  overflow:true——调用方回 413 人话;排空保证 fetch 客户端能读到响应(裸 destroy=连接错误噪音)。 */
+async function readBodyBytes(req, { maxBytes = Infinity } = {}) {
   const chunks = []
-  for await (const c of req) chunks.push(c)
-  return Buffer.concat(chunks)
+  let size = 0
+  let overflow = false
+  for await (const c of req) {
+    size += c.length
+    if (!overflow && maxBytes !== Infinity && size > maxBytes) overflow = true
+    if (overflow) {
+      if (size > 64 * 1024 * 1024) break
+      continue
+    }
+    chunks.push(c)
+  }
+  return { bytes: Buffer.concat(chunks), overflow }
+}
+
+/** 字节魔数 → 扩展名(png/webp,其余归 jpg)。 */
+function magicExt(bytes) {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'png'
+  if (bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') return 'webp'
+  return 'jpg'
 }
 
 /** props 记录读写(编辑器↔agent 对流点;revision 单调,origin 标记写入方) */
@@ -253,11 +271,18 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
     sendJson(res, 200, { ok: true })
   })
 
+  /* 附件上限(2026-11-12 素材创作批;原无上限)。引用图(发送前上游已压到 ≤4MB)留裕量 8MB */
+  const MAX_CHAT_ATTACHMENT_BYTES = 15 * 1024 * 1024
+  const MAX_CHAT_REF_IMAGE_BYTES = 8 * 1024 * 1024
+
   register('chat-attachment', async (req, res) => {
     if (req.method !== 'POST' || !guard(req, res, true)) return
     const name = String(new URL(req.url, 'http://localhost').searchParams.get('name') || '')
-    if (!/^[A-Za-z0-9._-]{1,120}$/.test(name)) { sendJson(res, 400, { ok: false, error: '附件名不合法' }); return }
-    const bytes = await readBodyBytes(req)
+    /* 名面放宽对齐 ASSET_NAME_RE(2026-11-12 素材创作批):只拒穿越/非法字符/控制符,
+       中文名附件不再被旧英数正则挡死;超限 413 人话(原无上限)。 */
+    if (!ASSET_NAME_RE.test(name)) { sendJson(res, 400, { ok: false, error: '附件名不合法' }); return }
+    const { bytes, overflow } = await readBodyBytes(req, { maxBytes: MAX_CHAT_ATTACHMENT_BYTES })
+    if (overflow) { sendJson(res, 413, { ok: false, error: '附件超过 15MB 上限——请压缩后再发,或走素材条导入' }); return }
     if (!bytes.length) { sendJson(res, 400, { ok: false, error: '空附件' }); return }
     const dir = join(chatAttachDir(await coverDir()), name)
     mkdirSync(dirname(dir), { recursive: true })
@@ -271,8 +296,10 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
     const turnId = String(query.searchParams.get('turnId') || '')
     const n = String(query.searchParams.get('n') || '0')
     if (!/^[A-Za-z0-9._-]{1,120}$/.test(turnId) || !/^\d+$/.test(n)) { sendJson(res, 400, { ok: false, error: '参数不合法' }); return }
-    const bytes = await readBodyBytes(req)
-    const file = join(chatAttachDir(await coverDir()), `${turnId}-${n}.jpg`)
+    const { bytes, overflow } = await readBodyBytes(req, { maxBytes: MAX_CHAT_REF_IMAGE_BYTES })
+    if (overflow) { sendJson(res, 413, { ok: false, error: '引用图超过 8MB 上限' }); return }
+    /* 扩展名跟真实格式(魔数),不再恒写 .jpg */
+    const file = join(chatAttachDir(await coverDir()), `${turnId}-${n}.${magicExt(bytes)}`)
     mkdirSync(dirname(file), { recursive: true })
     writeFileSync(file, bytes)
     sendJson(res, 200, { ok: true, path: file })

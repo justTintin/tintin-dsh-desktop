@@ -170,6 +170,55 @@ describe('cover project asset root (2026-10-31 doubled-projects regression)', ()
     dispose()
   })
 
+  /* 字节请求桩:body 走 async 迭代(路由 readBodyBytes 契约) */
+  const fireAcpPost = async (
+    mount: ReturnType<typeof mountAcp>,
+    sub: string,
+    { query = '', body = Buffer.from('x'), headers = {} as Record<string, string> }: { query?: string; body?: Buffer; headers?: Record<string, string> } = {},
+  ): Promise<{ status: number; body: Record<string, unknown> }> => {
+    const handler = mount.handlers.get(`/tintin/cover/api/acp/${sub}`)
+    expect(handler).toBeDefined()
+    const req = {
+      method: 'POST',
+      url: `/tintin/cover/api/acp/${sub}${query ? `?${query}` : ''}`,
+      headers,
+      [Symbol.asyncIterator]: async function* () { yield body },
+    }
+    await handler?.(req as never, {} as never)
+    return (mount.responses.at(-1) ?? { status: 0, body: {} }) as { status: number; body: Record<string, unknown> }
+  }
+
+  it('chat-attachment: 中文名收下(对齐 ASSET_NAME_RE);超限 413 人话;穿越名拒绝', async () => {
+    const coverDir = tempRoot()
+    const mount = mountAcp(async () => coverDir)
+    const cn = await fireAcpPost(mount, 'chat-attachment', { query: 'name=微信截图 2026-11-12.png', body: Buffer.from('bytes') })
+    expect(cn.status).toBe(200)
+    expect(existsSync(join(coverDir, '.cover-chat', 'attachments', '微信截图 2026-11-12.png'))).toBe(true)
+    const big = Buffer.alloc(16 * 1024 * 1024, 1)
+    const over = await fireAcpPost(mount, 'chat-attachment', { query: 'name=big.png', body: big })
+    expect(over.status).toBe(413)
+    expect(String(over.body.error)).toContain('15MB')
+    const evil = await fireAcpPost(mount, 'chat-attachment', { query: 'name=..%2Fevil.png', body: Buffer.from('x') })
+    expect(evil.status).toBe(400)
+    mount.dispose()
+  })
+
+  it('chat-ref-image: 扩展名跟真实格式(魔数);超限 413', async () => {
+    const coverDir = tempRoot()
+    const mount = mountAcp(async () => coverDir)
+    const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+    const ok = await fireAcpPost(mount, 'chat-ref-image', { query: 'turnId=t1&n=1', body: TINY_PNG })
+    expect(ok.status).toBe(200)
+    expect(existsSync(join(coverDir, '.cover-chat', 'attachments', 't1-1.png'))).toBe(true)
+    const jpegBody = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0])
+    const ok2 = await fireAcpPost(mount, 'chat-ref-image', { query: 'turnId=t1&n=2', body: jpegBody })
+    expect(ok2.status).toBe(200)
+    expect(existsSync(join(coverDir, '.cover-chat', 'attachments', 't1-2.jpg'))).toBe(true)
+    const over = await fireAcpPost(mount, 'chat-ref-image', { query: 'turnId=t1&n=3', body: Buffer.alloc(9 * 1024 * 1024, 1) })
+    expect(over.status).toBe(413)
+    mount.dispose()
+  })
+
   /* upload:真实 handler;引擎以包内 stub 顶替(Vite 解析不了 temp 外部路径的运行期动态
      import),stub 读 env 取 coverDir——loadEngine 单例缓存同一 stub 模块无碍。 */
   let stubPluginDir = ''

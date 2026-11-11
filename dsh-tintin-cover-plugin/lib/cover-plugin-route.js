@@ -474,12 +474,21 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
       }
       const chunks = []
       let size = 0
+      /* 超限 413 人话(2026-11-12 素材创作批):旧行为静默 req.destroy()——客户端只看到
+         裸网络错误;素材条 importFiles 一直映射着 413=「文件过大」却永远等不到。content-length
+         预检 + 超限排空(硬顶 64MB,保证客户端读到响应),再超硬顶才断连接。 */
+      let overflow = Number(req.headers['content-length'] ?? 0) > 15 * 1024 * 1024
       req.on('data', (c) => {
         size += c.length
-        if (size > 15 * 1024 * 1024) { req.destroy(); return }
-        chunks.push(c)
+        if (size > 15 * 1024 * 1024) overflow = true
+        if (!overflow) { chunks.push(c); return }
+        if (size > 64 * 1024 * 1024) req.destroy()
       })
       req.on('end', async () => {
+        if (overflow) {
+          sendJson(res, 413, { ok: false, error: '图片超过 15MB 上限——请压缩后再导入' })
+          return
+        }
         try {
           const bytes = Buffer.concat(chunks)
           if (bytes.length === 0) { sendJson(res, 400, { ok: false, error: '空文件' }); return }
@@ -541,7 +550,9 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
           const name = `url-${Date.now()}.${ext}`
           const { writeCoverAsset } = await import('./cover-asset.js')
           writeCoverAsset(dir, name, bytes)
-          // 项目对齐(2026-10-30 用户裁决:素材跟项目;URL 导入同样落项目目录)
+          // 项目对齐(2026-10-30 用户裁决:素材跟项目;URL 导入同样落项目目录)。
+          // 落项目失败不再静默(2026-11-12 素材创作批):warning 回传,界面如实呈现。
+          let projectWarning = ''
           try {
             const engine = await loadEngine()
             const coverDir = await engine.resolveCoverDir()
@@ -552,12 +563,12 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
             if (projectsRoot && !finalDir.startsWith(projectsRoot)) throw new Error('非法项目名')
             mkdirSync(finalDir, { recursive: true })
             writeFileSync(join(finalDir, name), bytes)
-          } catch { /* 落项目失败不阻断(三写位已有) */ }
+          } catch (e) { projectWarning = `项目目录落盘失败(素材位已有):${e instanceof Error ? e.message : String(e)}` }
           try {
             const { appendAssetProvenance } = await import('./cover-provenance.js')
             appendAssetProvenance(dir, { name, source: 'url', ts: Date.now() })
           } catch { /* 留痕失败不阻断 */ }
-          sendJson(res, 200, { ok: true, name })
+          sendJson(res, 200, { ok: true, name, ...(projectWarning ? { warning: projectWarning } : {}) })
         } catch (err) {
           sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) })
         }

@@ -567,8 +567,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
         e.preventDefault()
         const layerName = e.dataTransfer.getData('application/x-tintin-cover-layer')
         if (layerName) { dropAsLayer(layerName, e.clientX, e.clientY); return }
-        const file = e.dataTransfer.files?.[0]
-        if (file && /image\//i.test(file.type)) uploadAsLayer(file, e.clientX, e.clientY)
+        /* 多文件拖入(2026-11-12 素材创作批,原只收第一张):逐张上传建层,
+           第 2+ 张错位堆放(+24px/张)避免全部叠在同一点看不出有几张;上限 12 张防误拖整个相册。 */
+        const files = [...(e.dataTransfer.files ?? [])].filter((f) => /image\//i.test(f.type)).slice(0, 12)
+        files.forEach((file, i) => {
+          uploadAsLayer(file, e.clientX + (i > 0 ? i * 24 : 0), e.clientY + (i > 0 ? i * 24 : 0))
+        })
       }}
       style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-field)', gap: 12, outline: 'none' }}>
       {/* Δ读数浮层(对照 PhotoCraft offset_readout):直接 DOM 写,拖动中跟指针 */}

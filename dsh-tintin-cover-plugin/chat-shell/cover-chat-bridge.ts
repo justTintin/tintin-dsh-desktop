@@ -386,11 +386,33 @@ function setLibraryDrawer(open: boolean): void {
    加必选成员,此处类型即刻报缺,不再依赖人工升级清单。 */
 type AppBridgeContract = typeof import('../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/app-bridge')['app'];
 
+/* 拖入文件尽量拿真实本地路径(2026-11-12 素材创作批):桌面壳 preload 暴露
+   __DSH_HOST_PATHS__/dshDesktopFilePath(与影片侧 client-ui 同契约)。本页是插件
+   webServer 伺服的 iframe,桥可能挂在本窗或祖先窗——逐层走链找首个可用者调用;
+   File 对象跨窗代理失败等一切异常都返回空串=回退字节通道,零回归。 */
+function resolveDroppedFilePath(file: File): string {
+  const scopes: Array<Record<string, unknown>> = []
+  try {
+    let win: Window | null = window;
+    for (let depth = 0; win && depth < 3; depth += 1) {
+      scopes.push(win as unknown as Record<string, unknown>);
+      win = win.parent !== win ? win.parent : null;
+    }
+  } catch { /* 跨域隔离等异常:只用已收集到的窗 */ }
+  for (const scope of scopes) {
+    const hostPaths = scope['__DSH_HOST_PATHS__'] as { pathFor?: (f: File) => string } | undefined;
+    try { const p = hostPaths?.pathFor?.(file); if (p) return String(p); } catch { /* 换下一路径 */ }
+    const filePath = scope['dshDesktopFilePath'] as { forFile?: (f: File) => string } | undefined;
+    try { const p = filePath?.forFile?.(file); if (p) return String(p); } catch { /* 同上 */ }
+  }
+  return '';
+}
+
 const coverBridge: AppBridgeContract & Record<string, unknown> = {
   version: 'tintin-cover-1',
   bridgeVersion: '1',
   platform: navigator.platform.startsWith('Win') ? 'win32' : navigator.platform.startsWith('Mac') ? 'darwin' : 'linux',
-  pathForFile: (_file: File): string => '',
+  pathForFile: (file: File): string => resolveDroppedFilePath(file),
   revealPath: async (_path: string) => {
     await fetch('/tintin/cover/api/reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => undefined);
   },

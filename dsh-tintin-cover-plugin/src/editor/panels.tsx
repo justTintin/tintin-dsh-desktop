@@ -116,6 +116,8 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
     let ok = 0
     const failures: string[] = []
     for (const f of files) {
+      /* 客户端预检(2026-11-12 素材创作批):超限先拦,免整包上传才被 413 */
+      if (f.size > 15 * 1024 * 1024) { failures.push(`${f.name}：超过 15MB 上限，请压缩后再导入`); continue }
       let name = f.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').replace(/\.\./g, '-')
       if (existing.has(name)) name = `${Date.now()}-${name}`
       existing.add(name)
@@ -156,10 +158,11 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
       try {
         const r = await (await fetch('/tintin/ipc/cover/upload-url', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url, project }),
-        })).json() as { ok?: boolean; name?: string; error?: string }
+        })).json() as { ok?: boolean; name?: string; error?: string; warning?: string }
         if (!r.ok || !r.name) throw new Error(r.error || 'URL 导入失败')
         reloadNow()
-        flashNotice(`已导入 ${r.name}`)
+        /* 项目目录落盘失败如实呈现(2026-11-12 素材创作批:路由回 warning 字段) */
+        flashNotice(r.warning ? `已导入 ${r.name}——${r.warning}` : `已导入 ${r.name}`)
       } catch (e) {
         flashNotice('导入失败——' + (e instanceof Error ? e.message : String(e)))
       } finally { setImportBusy(false) }
