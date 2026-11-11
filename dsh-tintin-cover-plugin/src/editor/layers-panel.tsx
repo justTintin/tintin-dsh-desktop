@@ -19,6 +19,75 @@ import { ensureMenuStyle, headStyle, iconBtn } from './ui'
 import { layerEl } from './canvas-geom'
 
 const THUMB_PX = 30
+/** 图层显示名持久化键(R4,2026-11-11):项目名 → { 图层id → 显示名 };面板接管读写 */
+const LAYER_NAMES_KEY = 'tintin.cover.layerNames.v1'
+
+/** 文字行缩略图(R3,2026-11-11):canvas 2D 真字体渲染——字号/颜色/字重/斜体/投影/
+ *  描边/不透明度与画布同源,2 倍分辨率;jsdom/无 2D 环境回退字样 span(单测环境无画布)。 */
+function TextThumb({ text, styles }: {
+  text: string
+  styles?: { scale?: number; gscale?: number; color?: string; font?: string; weight?: number; italic?: boolean; opacity?: number; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }
+}): React.ReactElement {
+  const ref = React.useRef<HTMLCanvasElement | null>(null)
+  const [drawn, setDrawn] = React.useState(false)
+  const key = JSON.stringify({ text, styles })
+  React.useEffect(() => {
+    const cv = ref.current
+    if (!cv) return
+    let ctx: CanvasRenderingContext2D | null = null
+    try { ctx = cv.getContext('2d') } catch { ctx = null }
+    if (!ctx) { setDrawn(false); return }
+    const W = THUMB_PX * 2
+    const H = THUMB_PX * 2
+    ctx.clearRect(0, 0, W, H)
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (!lines.length) { setDrawn(false); return }
+    const fontOf = (px: number): string =>
+      `${styles?.italic ? 'italic ' : ''}${styles?.weight ?? 700} ${px}px ${styles?.font ? `"${styles.font}", ` : ''}"Microsoft YaHei", sans-serif`
+    const drawPx = 16
+    ctx.font = fontOf(drawPx)
+    const widths = lines.map((l) => ctx!.measureText(l).width)
+    const maxW = Math.max(...widths, 1)
+    const totalH = lines.length * drawPx * 1.15
+    const fit = Math.min((W - 6) / maxW, (H - 6) / totalH, 1.4)
+    const fs = Math.max(6, drawPx * fit)
+    ctx.font = fontOf(fs)
+    ctx.textBaseline = 'top'
+    ctx.globalAlpha = typeof styles?.opacity === 'number' ? Math.min(1, Math.max(0, styles.opacity)) : 1
+    if (styles?.shadow) {
+      ctx.shadowColor = styles.shadow.color
+      ctx.shadowBlur = Math.max(0, styles.shadow.blur) * fit
+      ctx.shadowOffsetX = styles.shadow.dx * fit
+      ctx.shadowOffsetY = styles.shadow.dy * fit
+    }
+    if (styles?.stroke && styles.stroke.width > 0) {
+      ctx.lineWidth = Math.min(6, styles.stroke.width) * fit
+      ctx.strokeStyle = styles.stroke.color
+      ctx.lineJoin = 'round'
+    }
+    ctx.fillStyle = styles?.color ?? '#e6e6e6'
+    const startY = (H - lines.length * fs * 1.15) / 2
+    lines.forEach((line, i) => {
+      const x = (W - ctx!.measureText(line).width) / 2
+      const y = startY + i * fs * 1.15
+      if (styles?.stroke && styles.stroke.width > 0) ctx!.strokeText(line, x, y)
+      ctx!.fillText(line, x, y)
+    })
+    setDrawn(true)
+  }, [key])
+  return (
+    <div style={{ width: THUMB_PX, height: THUMB_PX, borderRadius: 4, flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--border)', background: 'var(--bg-app)', position: 'relative' }}>
+      <canvas ref={ref} width={THUMB_PX * 2} height={THUMB_PX * 2} style={{ width: THUMB_PX, height: THUMB_PX, display: 'block' }} />
+      <span style={{
+        position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2,
+        fontSize: 10, lineHeight: 1, color: styles?.color ?? '#e6e6e6', fontWeight: 700,
+        fontFamily: styles?.font ? `"${styles.font}", sans-serif` : undefined,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
+        visibility: drawn ? 'hidden' : 'visible',
+      }}>{text.split('\n')[0] || '字'}</span>
+    </div>
+  )
+}
 
 /** 行缩略图(PhotoCraft 64px 缩略图的小型化;照片行=内嵌小图,文字行=字样,图形行=◇) */
 function LayerThumb({ row, layerDefs, props }: {
@@ -40,17 +109,9 @@ function LayerThumb({ row, layerDefs, props }: {
   const key = def?.propsKey ?? row.id
   const value = props[key]
   if (def?.type === 'text') {
-    const styles = (props.styles as Record<string, { scale?: number; gscale?: number; color?: string; font?: string }> | undefined)?.[row.id]
-    const raw = Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
-    return (
-      <div style={{ ...box, border: '1px solid var(--border)', background: 'var(--bg-app)', padding: 2 }}>
-        <span style={{
-          fontSize: 10, lineHeight: 1, color: styles?.color ?? '#e6e6e6', fontWeight: 700,
-          fontFamily: styles?.font ? `"${styles.font}", sans-serif` : undefined,
-          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
-        }}>{raw || '字'}</span>
-      </div>
-    )
+    const styles = (props.styles as Record<string, { scale?: number; gscale?: number; color?: string; font?: string; weight?: number; italic?: boolean; opacity?: number; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }> | undefined)?.[row.id]
+    const raw = Array.isArray(value) ? (value as string[]).join('\n') : String(value ?? '')
+    return <TextThumb text={raw} styles={styles} />
   }
   if (def?.type === 'product' || key === 'bgImage') {
     const src = typeof value === 'string' && value ? value : ''
@@ -103,6 +164,22 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
   const [renaming, setRenaming] = React.useState<{ id: string; value: string } | null>(null)
   const [menu, setMenu] = React.useState<{ id: string; x: number; y: number } | null>(null)
   const endDrag = (): void => { setDragId(null); setOverId(null); setAssetOverId(null); setTrashHot(false) }
+  /* R4 显示名按项目持久化(2026-11-11):面板接管读写——项目切换即换档(load),
+     名称变更落盘(save);agent-sync 的 props 回读不再触碰 layerNames。 */
+  React.useEffect(() => {
+    let names: Record<string, string> = {}
+    try {
+      names = (JSON.parse(localStorage.getItem(LAYER_NAMES_KEY) ?? '{}') as Record<string, Record<string, string>>)[project] ?? {}
+    } catch { /* 坏 JSON 忽略 */ }
+    useEditor.setState({ layerNames: names })
+  }, [project])
+  React.useEffect(() => {
+    try {
+      const all = JSON.parse(localStorage.getItem(LAYER_NAMES_KEY) ?? '{}') as Record<string, Record<string, string>>
+      all[project] = layerNames
+      localStorage.setItem(LAYER_NAMES_KEY, JSON.stringify(all))
+    } catch { /* 存储失败不阻断 */ }
+  }, [layerNames, project])
   /** 显示名:layerNames 优先(双击重命名),缺省=行默认名 */
   const displayName = (row: { rowType: 'group' | 'free'; id: string; label: string }): string => layerNames[row.id] ?? row.label
   /** 素材拖入图层面板(2026-10-30 用户裁决):拖到某层行=作为自定义层插到该层层级位置;
@@ -124,10 +201,11 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
     if (id.startsWith('img-')) setCustomLayer(id, { locked: !lockedOf(props, id) })
     else setLayerStyle(id, { locked: !lockedOf(props, id) })
   }
-  /* 头行混合/不透明度(2026-11-11 WP-B,对照 layers.rs):作用于选中图片图层。
-     文字层无 opacity 通道(模板文字节点不吃 styles.opacity),禁用;不透明度拖动=
-     预览写 el.style.opacity,松手提交(同画布手柄的预览-提交分离)。 */
-  const selIsImage = Boolean(selectedLayer && (selectedLayer.startsWith('img-') || selectedLayer === 'product' || (defOf(selectedLayer)?.propsKey ?? selectedLayer) === 'bgImage'))
+  /* 头行混合/不透明度(2026-11-11 WP-B,对照 layers.rs;R1 起扩展到文字层——
+     text-style.ts opacity/blend 已入 layerStyle,6 模板文字节点消费):
+     作用于选中图片/文字图层;装饰层无外观通道,禁用。不透明度拖动=预览写
+     el.style.opacity,松手提交(同画布手柄的预览-提交分离)。 */
+  const selHasLook = Boolean(selectedLayer && (selectedLayer.startsWith('img-') || selectedLayer === 'product' || (defOf(selectedLayer)?.propsKey ?? selectedLayer) === 'bgImage' || defOf(selectedLayer)?.type === 'text'))
   const selLook = ((): { blend?: string; opacity?: number } => {
     if (!selectedLayer) return {}
     if (selectedLayer.startsWith('img-')) return customById.get(selectedLayer) ?? {}
@@ -135,7 +213,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
   })()
   const [opDraft, setOpDraft] = React.useState<number | null>(null)
   const applyBlend = (mode: string): void => {
-    if (!selectedLayer || !selIsImage) return
+    if (!selectedLayer || !selHasLook) return
     const patch = mode === 'normal' ? { blend: undefined } : { blend: mode }
     if (selectedLayer.startsWith('img-')) setCustomLayer(selectedLayer, patch)
     else setLayerStyle(selectedLayer, patch)
@@ -147,7 +225,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
   }
   const commitOpacity = (v: number): void => {
     previewOpacity(null)
-    if (!selectedLayer || !selIsImage) return
+    if (!selectedLayer || !selHasLook) return
     const op = Math.min(1, Math.max(0, v / 100))
     if (selectedLayer.startsWith('img-')) setCustomLayer(selectedLayer, { opacity: op })
     else setLayerStyle(selectedLayer, { opacity: op })
@@ -165,23 +243,23 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexShrink: 0 }}>
         <select
           value={selLook.blend ?? 'normal'}
-          disabled={!selIsImage}
+          disabled={!selHasLook}
           onChange={(e) => applyBlend(e.target.value)}
-          title={selIsImage ? '图层混合模式' : '混合模式仅作用于图片图层(自由层/产品图/环境图)'}
-          style={{ flex: 1, minWidth: 0, background: 'var(--bg-field)', color: selIsImage ? 'var(--text)' : 'var(--text-faint)', border: '1px solid var(--border-strong)', borderRadius: 6, fontSize: 11, padding: '3px 4px', cursor: selIsImage ? 'pointer' : 'default' }}
+          title={selHasLook ? '图层混合模式' : '混合模式作用于图片/文字图层(装饰层无外观通道)'}
+          style={{ flex: 1, minWidth: 0, background: 'var(--bg-field)', color: selHasLook ? 'var(--text)' : 'var(--text-faint)', border: '1px solid var(--border-strong)', borderRadius: 6, fontSize: 11, padding: '3px 4px', cursor: selHasLook ? 'pointer' : 'default' }}
         >
           {BLEND_MODES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select>
         <input
           type="range" min={0} max={100} step={1}
           value={opDraft ?? Math.round((selLook.opacity ?? 1) * 100)}
-          disabled={!selIsImage}
+          disabled={!selHasLook}
           onChange={(e) => previewOpacity(Number(e.target.value))}
           onPointerUp={(e) => commitOpacity(Number(e.currentTarget.value))}
           onKeyUp={(e) => commitOpacity(Number(e.currentTarget.value))}
           onBlur={(e) => commitOpacity(Number(e.currentTarget.value))}
-          title={selIsImage ? '图层不透明度' : '不透明度仅作用于图片图层'}
-          style={{ width: 64, accentColor: 'var(--accent)', cursor: selIsImage ? 'pointer' : 'default' }}
+          title={selHasLook ? '图层不透明度' : '不透明度作用于图片/文字图层'}
+          style={{ width: 64, accentColor: 'var(--accent)', cursor: selHasLook ? 'pointer' : 'default' }}
         />
         <span style={{ fontSize: 10, color: 'var(--text-faint)', width: 30, textAlign: 'right' }}>{opDraft ?? Math.round((selLook.opacity ?? 1) * 100)}%</span>
       </div>

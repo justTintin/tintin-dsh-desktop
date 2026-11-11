@@ -252,9 +252,16 @@
 - 渲染面实机(独立页+浏览器自动化,渲染面验证纪律):自持画布渲染 ✓/点选出现选择框+4 角柄+旋转柄 ✓/拖动 80px 精确提交+选择框恢复 ✓/文字角柄拖动=框 143×33→198×46 等比 1.38 且**字号保持 34px** ✓/右键菜单项与行语义 ✓/双击重命名提交生效 ✓/图层区缩略图与混合-不透明度头行 ✓。
 - 门禁:`check:tintin` 5 pass/0 fail;verify-cover-payload 新鲜度首跑拦下 staging 未刷新(守卫按设计工作),stage 后复绿。
 
-### 6.3 剩余方向(待裁决排期)
+### 6.3 剩余方向勾账(2026-11-11 续批 R1-R4,用户裁决「开始」;全部随批提交)
 
-- 图层缩略图升级为合成像素级(现为代表性预览);面板头行混合/不透明度扩展到文字层(需模板文字节点吃 styles.opacity,6 模板×多文字层改造)。
-- 旋转自由层的边柄(现仅角柄);角柄在旋转+翻转组合下的「抓哪个角锚哪个对角」精确语义(现以视觉方位标注近似)。
-- layerNames 持久化(现为会话内存,随项目切换清空;进 cover.props.json 需契约评审)。
+1. ✅ **头行混合/不透明度扩展到文字层**: `templates/text-style.ts` TextStyleOverride 增 `opacity`(0..1 夹取)/`blend`(BLEND_MODES 白名单,normal=undefined),layerStyle 恒输出 opacity/mixBlendMode(spread 消费的 4 模板自动生效;VideoCover×2 title 与 ProductCover×2 features 显式节点补 opacity/mixBlendMode 透传——6 模板全部消费);面板 selIsImage→selHasLook(图片/文字层启用,装饰层仍禁用)。单测+4。
+2. ✅ **旋转层边柄**: edgeResize 替换为 `rotatedEdgeResize`(指针位移在视觉边轴向的分量驱动,对侧视觉边为锚,x/y 补偿含 sin/cos 交叉分量;deg=0 严格退化为轴对齐行为;翻转不改盒几何故公式与 flip 无关),边柄不再限制未旋转;n/s 仍需显式高。单测重写 4 例(含 90° 顶缘锚定不变量)。
+3. ✅ **文字缩略图 canvas 真字体渲染**: TextThumb 2 倍分辨率 canvas 2D(字号/字重/斜体/字体族/颜色/投影/描边/不透明度与画布同源,fit 自适应缩放,逐行居中);getContext 失败(jsdom/无 2D)回退字样 span——渲染面/单测双形态可用。
+4. ✅ **layerNames 按项目持久化**: 面板接管读写(localStorage `tintin.cover.layerNames.v1` = { 项目名 → { 图层id → 显示名 } },项目切换即换档,名称变更即落盘);agent-sync 的 props 回读不再重置 layerNames(上一批的重置逻辑回退——持久化后面板是唯一属主)。
+
+### 6.4 剩余方向(待裁决排期)
+
+- 图层缩略图升级为合成像素级(自由层/产品行现为代表性小图;文字行已真字体渲染)。
+- 角柄在旋转+翻转组合下的「抓哪个角锚哪个对角」精确语义(现以视觉方位标注近似)。
+- layerNames 进 cover.props.json 契约(现为编辑器侧 localStorage,跨机不同步)。
 - 多选与成组变换、标尺(§四 远期,未动)。

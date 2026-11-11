@@ -1,7 +1,8 @@
 // 文字图层样式覆盖(§9.7-2 后续:面板可调字号/颜色/位移;props.__styles 投影到模板节点)。
 // 约定:props.styles = { [layerId]: { scale?, color?, dx?, dy? } };
 // 缺省 = 模板原设计。所有模板文字节点经 layerStyle() 取值,编辑器与模板只认这一份。
-import type { ImageLook } from './image-style'
+import type React from 'react'
+import { BLEND_MODES, type ImageLook } from './image-style'
 
 export interface TextStyleOverride {
   scale?: number
@@ -25,6 +26,12 @@ export interface TextStyleOverride {
   /** 几何缩放(0.3..3,等比,原点=层中心;画布角柄写入;2026-11-11 对齐 PhotoCraft
    *  Free Transform——文字画布缩放=几何变换不改字号,字号仍由 scale/编辑卡管) */
   gscale?: number
+  /** 不透明度(0..1;图层面板头行写入;2026-11-11 对齐 PhotoCraft layers.rs 头行,
+   *  文字层与图片层同通道;缺省=1) */
+  opacity?: number
+  /** 混合模式(BLEND_MODES 白名单;缺省=正常。CSS mixBlendMode 浏览器与 Remotion
+   *  渲染同源) */
+  blend?: string
 }
 
 /** 图片槽位(产品图)的条目另带外观/变换字段(image-style.ts,2026-11-01 对齐 PhotoCraft) */
@@ -47,7 +54,8 @@ const clampWeight = (v: unknown): number | undefined =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(900, Math.max(100, Math.round(v))) : undefined
 
 /** 单图层样式合成:基准字号/颜色 × 覆盖(scale 夹取 0.4..2.2;font=本机已装字体族名,
- *  渲染机即本机,画布与导出同源解析;缺字字形回落微软雅黑) */
+ *  渲染机即本机,画布与导出同源解析;缺字字形回落微软雅黑)。返回直接可散布进
+ *  style 的形状(opacity/mixBlendMode 恒输出,模板文字节点展开即生效)。 */
 export function layerStyle(
   props: StyleProps | undefined,
   layerId: string,
@@ -61,6 +69,8 @@ export function layerStyle(
   fontStyle?: 'italic'
   textShadow?: string
   strokeCss?: string
+  opacity: number
+  mixBlendMode?: React.CSSProperties['mixBlendMode']
 } {
   const s = props?.styles?.[layerId]
   const scale = typeof s?.scale === 'number' && Number.isFinite(s.scale) ? Math.min(3, Math.max(0.3, s.scale)) : 1
@@ -88,6 +98,11 @@ export function layerStyle(
   const stroke = s?.stroke && typeof s.stroke.width === 'number' && typeof s.stroke.color === 'string'
     ? { width: Math.max(0, Math.round(s.stroke.width)), color: sanitizeShadowColor(s.stroke.color) }
     : undefined
+  // 头行外观通道(2026-11-11 对齐 PhotoCraft layers.rs):不透明度夹取 0..1,混合模式白名单
+  const opacity = typeof s?.opacity === 'number' && Number.isFinite(s.opacity) ? Math.min(1, Math.max(0, s.opacity)) : 1
+  const blend = typeof s?.blend === 'string' && s.blend !== 'normal' && BLEND_MODES.some(([id]) => id === s.blend)
+    ? s.blend as React.CSSProperties['mixBlendMode']
+    : undefined
   return {
     fontSize: Math.round(base.fontSize * scale),
     color: s?.color ?? base.color,
@@ -97,6 +112,8 @@ export function layerStyle(
     fontStyle: s?.italic === true ? 'italic' : undefined,
     textShadow: shadow ? `${shadow.dx}px ${shadow.dy}px ${shadow.blur}px ${shadow.color}` : undefined,
     strokeCss: stroke ? `${stroke.width}px ${stroke.color}` : undefined,
+    opacity,
+    mixBlendMode: blend,
   }
 }
 

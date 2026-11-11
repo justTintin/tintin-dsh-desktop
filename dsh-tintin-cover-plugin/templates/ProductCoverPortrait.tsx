@@ -53,7 +53,7 @@ export const ProductCoverPortrait: React.FC<ProductCoverProps> = ({ brand, title
             <div data-cover-layer="subtitle" style={{ ...subStyle, marginTop: 18, fontWeight: subStyle.fontWeight ?? 600, transform: subStyle.translate || undefined }}>{subtitle}</div>
           )}
           {!hidden('features') && (
-            <div data-cover-layer="features" style={{ marginTop: 30, display: 'flex', flexDirection: 'column', gap: 14, transform: featStyle.translate || undefined }}>
+            <div data-cover-layer="features" style={{ marginTop: 30, display: 'flex', flexDirection: 'column', gap: 14, opacity: featStyle.opacity, mixBlendMode: featStyle.mixBlendMode, transform: featStyle.translate || undefined }}>
               {features.map((f) => (
                 <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ width: 28, height: 28, borderRadius: 999, background: '#4f7cff', color: '#fff', fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✓</div>

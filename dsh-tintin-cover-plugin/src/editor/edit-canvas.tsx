@@ -15,7 +15,7 @@ import { getTemplate } from '../registry'
 import { RenderSurface } from './render-surface'
 import { useCanvasShortcuts } from './canvas-keys'
 import { canvasBoxIn, compositionRectIn, type CanvasBox } from './canvas-geom'
-import { clampScale, cornerResize, centerResize, edgeResize, lockedOf, type Corner } from './image-ops'
+import { clampScale, cornerResize, centerResize, rotatedEdgeResize, lockedOf, type Corner } from './image-ops'
 import { useRotateHandles, useTextScaleHandles } from './text-scale'
 import { updateHover as auxUpdateHover, usePurePreview, cycleLayerSelection } from './canvas-aux'
 import { useInlineEditor } from './inline-edit'
@@ -210,9 +210,11 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     const c = cornerResize(r.box0, r.corner, r.f * r.startDist, r.startDist, { x: r.layer?.x ?? 0, y: r.layer?.y ?? 0, w: r.layer?.width ?? 0, h: r.layer?.height ?? null })
     setCustomLayer(r.id, c.height === null ? { x: c.x, y: c.y, width: c.width } : { x: c.x, y: c.y, width: c.width, height: c.height })
   }
-  /** 边柄单维缩放(WP-A3,PhotoCraft 8 柄的边柄;仅未旋转自由层;n/s 需显式高度) */
+  /** 边柄单维缩放(WP-A3;R2 起旋转层同样支持:rotatedEdgeResize 以指针轴向分量驱动,
+   *  对侧边为锚,deg=0 退化为轴对齐。n/s 仅显式高度的自由层) */
   const edgeRef = React.useRef<{
-    id: string; side: SelEdge; box0: CanvasBox; layer: CustomLayer; el: HTMLElement | null
+    id: string; side: SelEdge; deg: number; start: { x: number; y: number }
+    layer: CustomLayer; el: HTMLElement | null
   } | null>(null)
   const onEdgeDown = (side: SelEdge) => (e: React.PointerEvent): void => {
     if (!selectedLayer?.startsWith('img-') || lockedOf(props, selectedLayer)) return
@@ -220,15 +222,23 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (!layer || ((side === 'n' || side === 's') && layer.height === undefined)) return
     e.stopPropagation()
     const el = hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`) as HTMLElement | null
-    if (!el) return
-    edgeRef.current = { id: selectedLayer, side, box0: canvasBoxOf(el), layer, el }
+    const rect = compositionRect()
+    if (!el || !rect) return
+    const deg = frameOf(el, rect, tpl.width)?.frame.deg ?? 0
+    edgeRef.current = { id: selectedLayer, side, deg, start: canvasPoint(e.clientX, e.clientY), layer, el }
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
   }
   const onEdgeMove = (e: React.PointerEvent): void => {
     const r = edgeRef.current
     const rect = compositionRect()
     if (!r || !rect || !r.el) return
-    const patch = edgeResize(r.box0, r.side, canvasPoint(e.clientX, e.clientY))
+    const p = canvasPoint(e.clientX, e.clientY)
+    const patch = rotatedEdgeResize(
+      { x: r.layer.x, y: r.layer.y, w: r.layer.width, h: r.layer.height ?? 0 },
+      r.side,
+      { x: p.x - r.start.x, y: p.y - r.start.y },
+      r.deg,
+    )
     if (patch.x !== undefined) r.el.style.left = `${patch.x}px`
     if (patch.width !== undefined) r.el.style.width = `${patch.width}px`
     if (patch.y !== undefined) r.el.style.top = `${patch.y}px`
@@ -239,7 +249,13 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     edgeRef.current = null
     ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
     if (!r || !r.el) return
-    const patch = edgeResize(r.box0, r.side, canvasPoint(e.clientX, e.clientY))
+    const p = canvasPoint(e.clientX, e.clientY)
+    const patch = rotatedEdgeResize(
+      { x: r.layer.x, y: r.layer.y, w: r.layer.width, h: r.layer.height ?? 0 },
+      r.side,
+      { x: p.x - r.start.x, y: p.y - r.start.y },
+      r.deg,
+    )
     const changed = (patch.width !== undefined && patch.width !== r.layer.width)
       || (patch.height !== undefined && patch.height !== r.layer.height)
       || (patch.x !== undefined && patch.x !== r.layer.x)
@@ -610,7 +626,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const customSel = selectedLayer?.startsWith('img-')
     ? ((props.customLayers as CustomLayer[] | undefined) ?? []).find((l) => l.id === selectedLayer) ?? null
     : null
-  const showEdges = Boolean(showHandles && customSel && sel && Math.abs(sel.frame.deg) < 0.5)
+  const showEdges = Boolean(showHandles && customSel && sel)
   const centerScreen = sel && compMap ? toScreen({ x: sel.frame.cx, y: sel.frame.cy }, compMap, tpl.width) : null
 
   return (

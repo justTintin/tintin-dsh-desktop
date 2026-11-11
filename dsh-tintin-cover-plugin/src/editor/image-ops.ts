@@ -87,24 +87,34 @@ export function centerResize(
   }
 }
 
-/** 边柄单维缩放(PhotoCraft 8 柄的边柄,2026-11-11 WP-A3;仅未旋转自由层):
- *  side=w/e 改宽(对面边为锚),side=n/s 改高(需显式高度)。 */
-export function edgeResize(
-  box: { left: number; top: number; w: number; h: number },
+/** 边柄单维缩放(2026-11-11 WP-A3;R2 起支持任意旋转,替换原未旋转版 edgeResize):
+ *  视觉边(±u/±v 方向)跟随指针轴向分量,对侧边为锚。关键事实:翻转只镜像内容不改
+ *  盒几何(镜像矩形点集=原点集),故公式与 flip 无关;deg=0 时退化为轴对齐行为。
+ *  cur=起始布局盒;x/y 补偿使锚边世界位不动(旋转后补偿含 sin/cos 交叉分量)。 */
+export function rotatedEdgeResize(
+  cur: { x: number; y: number; w: number; h: number },
   side: 'w' | 'e' | 'n' | 's',
-  pointer: { x: number; y: number },
+  pointerDelta: { x: number; y: number },
+  deg: number,
   min = 20,
 ): { x?: number; y?: number; width?: number; height?: number } {
-  if (side === 'w') {
-    const width = Math.max(min, Math.round(box.left + box.w - pointer.x))
-    return { x: Math.round(box.left + box.w - width), width }
+  const rad = (deg * Math.PI) / 180
+  const ux = Math.cos(rad)
+  const uy = Math.sin(rad)
+  const vx = -uy
+  const vy = ux
+  if (side === 'w' || side === 'e') {
+    const s = side === 'e' ? 1 : -1
+    const du = pointerDelta.x * ux + pointerDelta.y * uy
+    const w = Math.max(min, Math.round(cur.w + s * du))
+    const k = (s * (w - cur.w)) / 2
+    return { width: w, x: Math.round(cur.x + k * ux - (w - cur.w) / 2), y: Math.round(cur.y + k * uy) }
   }
-  if (side === 'e') return { width: Math.max(min, Math.round(pointer.x - box.left)) }
-  if (side === 'n') {
-    const height = Math.max(min, Math.round(box.top + box.h - pointer.y))
-    return { y: Math.round(box.top + box.h - height), height }
-  }
-  return { height: Math.max(min, Math.round(pointer.y - box.top)) }
+  const s = side === 's' ? 1 : -1
+  const dv = pointerDelta.x * vx + pointerDelta.y * vy
+  const h = Math.max(min, Math.round(cur.h + s * dv))
+  const k = (s * (h - cur.h)) / 2
+  return { height: h, x: Math.round(cur.x + k * vx), y: Math.round(cur.y + k * vy - (h - cur.h) / 2) }
 }
 
 export type Corner = 'nw' | 'ne' | 'sw' | 'se'

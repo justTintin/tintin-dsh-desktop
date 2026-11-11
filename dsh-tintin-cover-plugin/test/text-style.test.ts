@@ -4,7 +4,7 @@ import { layerStyle } from '../templates/text-style'
 
 describe('layerStyle(§9.7-2 样式细调)', () => {
   it('缺省 = 模板基准', () => {
-    expect(layerStyle(undefined, 'title', { fontSize: 88, color: '#ffffff' })).toEqual({ fontSize: 88, color: '#ffffff', translate: '', fontFamily: undefined, textShadow: undefined, strokeCss: undefined })
+    expect(layerStyle(undefined, 'title', { fontSize: 88, color: '#ffffff' })).toEqual({ fontSize: 88, color: '#ffffff', translate: '', fontFamily: undefined, textShadow: undefined, strokeCss: undefined, opacity: 1, mixBlendMode: undefined })
     expect(layerStyle({ styles: {} }, 'title', { fontSize: 88, color: '#ffffff' }).fontSize).toBe(88)
   })
   it('scale 生效并四舍五入;越界夹取 0.3..3(2026-10-28 PhotoCraft 式放宽)', () => {
@@ -61,5 +61,23 @@ describe('gscale 几何缩放(2026-11-11 WP-A4: 画布角柄=几何变换不改�
     expect(layerStyle({ styles: { title: { gscale: 9 } } }, 'title', base).translate).toBe('scale(3)')
     expect(layerStyle({ styles: { title: { gscale: 0.1 } } }, 'title', base).translate).toBe('scale(0.3)')
     expect(layerStyle({ styles: { title: { gscale: 'x' as unknown as number } } }, 'title', base).translate).toBe('')
+  })
+})
+
+
+describe('opacity/blend 外观通道(2026-11-11 R1: 头行扩文字层)', () => {
+  const base = { fontSize: 88, color: '#fff' }
+  it('opacity 缺省 1,夹取 0..1', () => {
+    expect(layerStyle(undefined, 'title', base).opacity).toBe(1)
+    expect(layerStyle({ styles: { title: { opacity: 0.35 } } }, 'title', base).opacity).toBe(0.35)
+    expect(layerStyle({ styles: { title: { opacity: 5 } } }, 'title', base).opacity).toBe(1)
+    expect(layerStyle({ styles: { title: { opacity: -1 } } }, 'title', base).opacity).toBe(0)
+    expect(layerStyle({ styles: { title: { opacity: 'x' as unknown as number } } }, 'title', base).opacity).toBe(1)
+  })
+  it('blend 白名单;normal/非法=undefined', () => {
+    expect(layerStyle({ styles: { title: { blend: 'multiply' } } }, 'title', base).mixBlendMode).toBe('multiply')
+    expect(layerStyle({ styles: { title: { blend: 'normal' } } }, 'title', base).mixBlendMode).toBeUndefined()
+    expect(layerStyle({ styles: { title: { blend: 'drop-the-world' } } }, 'title', base).mixBlendMode).toBeUndefined()
+    expect(layerStyle({ styles: { title: { blend: 3 as unknown as string } } }, 'title', base).mixBlendMode).toBeUndefined()
   })
 })

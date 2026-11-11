@@ -36,7 +36,7 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
       )}
 
       {!hidden('title') && (
-        <div data-cover-layer="title" style={{ position: 'absolute', left: 56, top: 130, width: 968, zIndex: layerZ(layerOrder, 'title'), transform: hookStyle.translate || undefined }}>
+        <div data-cover-layer="title" style={{ position: 'absolute', left: 56, top: 130, width: 968, zIndex: layerZ(layerOrder, 'title'), opacity: hookStyle.opacity, mixBlendMode: hookStyle.mixBlendMode, transform: hookStyle.translate || undefined }}>
           {hookLines.map((line, i) => (
             <div
               key={line}
