@@ -134,7 +134,15 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       return
     }
     const scale = Math.max(comp!.width / tpl.width, 0.05)
-    setSel((prev) => (snapEq(prev, got.frame, comp!, scale) ? prev : { frame: got.frame, compLeft: comp!.left, compTop: comp!.top, scale }))
+    /* 框/手柄渲染在 playerWrap 内(top/left 相对 playerWrap),而 comp 是视口坐标——
+       必须先剥掉 playerWrap 自身的视口偏移(应用顶栏+设置条+画布居中边距),
+       否则偏移被双重计入,选择框整体下/右漂(2026-11-11 用户截图实证,+129 画布px)。 */
+    const wrap = playerWrapRef.current?.getBoundingClientRect()
+    const relLeft = comp!.left - (wrap?.left ?? 0)
+    const relTop = comp!.top - (wrap?.top ?? 0)
+    setSel((prev) => (snapEq(prev, got.frame, comp!, scale) && prev !== null && prev.compLeft === relLeft && prev.compTop === relTop
+      ? prev
+      : { frame: got.frame, compLeft: relLeft, compTop: relTop, scale }))
     /* R8: 多选联合盒(全部选中层的画布 AABB 并集) */
     if (multiSelected.length > 0) {
       const ids = [...new Set([selectedLayer, ...multiSelected])]

@@ -313,7 +313,7 @@
 2. **选择框偏外+样式**: ①框如实绘制槽位边界——槽位本身 left:50% 而 620 宽溢出画布右缘 80px(用户所见「偏到外面」);框位置实测与槽位边界逐像素一致(frameMatchesSlot=true,误差<3px,无测量 bug)。②样式=青色 accent 非 PhotoCraft 蓝——选择框 chrome 全量换 **SEL_COLOR #378EF0**(transform_controls.rs accent;常驻框/多选框/拖动轮廓/旋转柄连杆+柄/角边柄/组柄 8 处),白色方块柄保留。
 - 现场验证(竖屏+空主体图选中): 白球 0/框色 rgb(55,142,240)/框==槽位边界 ✓。
 
-### 6.6 剩余方向(待裁决排期)
+**6.5⁗ 补充(同批二次修复)**:用户再报「选中文字后框仍偏」——真凶坐实=**选择框坐标双重计入**:measureSel 存的 compLeft/compTop 是视口坐标,而框/手柄渲染在 playerWrap 内(top/left 相对 playerWrap),应用顶栏+设置条+画布居中边距被双重计入(+129 画布px=88 屏幕px÷缩放,与用户 44% 缩放场景吻合;横纵同源)。修=measureSel 存 **playerWrap 相对坐标**(comp − playerWrap rect)。此前「框==槽位逐像素」验证两侧同误差故盲区——对照验证必须有一侧独立基准。同批:选择框 chrome 换 PhotoCraft 蓝(SEL_COLOR #378EF0,8 处)+白球门控。### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。
 - 多选组缩放的旋转成员精确语义(现按视觉 AABB 近似,与对齐/微调同一口径)。
