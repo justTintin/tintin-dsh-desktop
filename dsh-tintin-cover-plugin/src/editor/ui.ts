@@ -5,7 +5,8 @@ export const panelStyle: React.CSSProperties = {
   width: 252, flexShrink: 0, background: 'var(--bg-panel)', borderRight: '1px solid #333',
   padding: 12, display: 'flex', flexDirection: 'column', overflowY: 'auto', overflowX: 'hidden',
 }
-export const headStyle: React.CSSProperties = { fontSize: 11, color: 'var(--text-faint)', margin: '4px 0 8px', fontWeight: 700, letterSpacing: 1 }
+/* 卡片标题单行省略(2026-11-11 用户裁决:长文件名不换行) */
+export const headStyle: React.CSSProperties = { fontSize: 11, color: 'var(--text-faint)', margin: '4px 0 8px', fontWeight: 700, letterSpacing: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
 export const iconBtn: React.CSSProperties = { border: 0, background: 'transparent', cursor: 'pointer', fontSize: 13, padding: 0, width: 22 }
 export const ghostBtn: React.CSSProperties = {
   width: '100%', padding: '7px 0', borderRadius: 8, border: '1px solid #444',

@@ -8,12 +8,12 @@
 import React from 'react'
 import { getTemplate } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
-import { BLEND_MODES, lookOpacity, lookScale, type ImageLook } from '../../templates/image-style'
+import { lookScale, type ImageLook } from '../../templates/image-style'
 import { canvasBoxIn, layerEl, type CanvasBox } from './canvas-geom'
 import { clampScale, flipPatch, resizeWH, rotatePatch } from './image-ops'
 import { useEditor } from './store'
 import { AlignButtons, alignSelection, type AlignMode } from './align-row'
-import { ghostBtn, headStyle, inputStyle } from './ui'
+import { ghostBtn, headStyle } from './ui'
 
 export type ImageTarget =
   | { kind: 'custom'; layer: CustomLayer }
@@ -140,7 +140,6 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
       dy: Math.round((look.dy ?? 0) + (edit.y !== undefined ? edit.y - pos.y : 0)),
     })
   }
-  const opacity = Math.round(lookOpacity(look) * 100)
   /* 六向对齐画布(2026-11-11 R17: PhotoCraft 语义=选区内每层各自对齐;实现在 align-row=现场量 DOM) */
   const alignToCanvas = (mode: AlignMode): void => {
     if (locked) return
@@ -152,41 +151,8 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
 
   return (
     <div data-image-props="" style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(127,127,127,0.07)', border: '1px solid var(--border)' }}>
-      <div style={{ ...row, marginTop: 0 }}>
-        <select
-          value={look.blend ?? 'normal'} title="混合模式"
-          onChange={(e) => apply({ blend: e.target.value === 'normal' ? undefined : e.target.value })}
-          style={inputStyle({ width: 104, height: 24, fontSize: 11, padding: '0 4px', flexShrink: 0 })}
-        >
-          {BLEND_MODES.map(([mode, text]) => <option key={mode} value={mode}>{text}</option>)}
-        </select>
-        <span style={label}>不透明度</span>
-        <PreviewSlider min={0} max={100} step={1} value={opacity}
-          preview={(v) => { const el = layerEl(id); if (el) el.style.opacity = String(v / 100) }}
-          commit={(v) => { if (v !== opacity) apply({ opacity: v / 100 }) }} />
-        <NumField value={opacity} min={0} max={100} title="不透明度 %" onCommit={(v) => apply({ opacity: Math.round(v) / 100 })} />
-      </div>
-      <label style={{ ...row, cursor: 'pointer', fontSize: 11, color: locked ? '#facc15' : 'var(--text-muted)' }}>
-        <input type="checkbox" checked={locked} onChange={(e) => apply({ locked: e.target.checked ? true : undefined })} />
-        🔒 锁定位置{locked ? '(移动/变换已禁用)' : ''}
-      </label>
-
-      {/* 投影(2026-11-02 对齐 PhotoCraft 图层样式):图片=drop-shadow 滤镜;开=默认黑投影,大小可调 */}
-      <div style={row}>
-        <span style={label}>投影</span>
-        <button
-          onClick={() => apply(look.shadow ? { shadow: undefined } : { shadow: { dx: 0, dy: 10, blur: 18, color: 'rgba(0,0,0,0.55)' } })}
-          title={look.shadow ? '关闭投影' : '开启投影'}
-          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 11, color: look.shadow ? 'var(--accent)' : 'var(--text-faint)', borderColor: look.shadow ? 'var(--accent)' : undefined }}
-        >{look.shadow ? '开' : '关'}</button>
-        {look.shadow ? (
-          <>
-            <span style={label}>大小</span>
-            <NumField value={Math.round(look.shadow.blur ?? 0)} min={0} max={80} title="投影大小(px)" onCommit={(v) => apply({ shadow: { ...(look.shadow ?? { dx: 0, dy: 10, color: 'rgba(0,0,0,0.55)' }), blur: v } })} />
-          </>
-        ) : null}
-      </div>
-
+      {/* 2026-11-11 用户裁决:卡内 混合/不透明度/锁定位置/投影 整块删除——混合+不透明度在图层面板
+          头行、锁定位置在图层右键菜单,重复摆放=多此一举(投影一并随裁决移除) */}
       {geometry ? (
         <>
           <div style={{ ...headStyle, margin: '10px 0 0' }}>变换</div>

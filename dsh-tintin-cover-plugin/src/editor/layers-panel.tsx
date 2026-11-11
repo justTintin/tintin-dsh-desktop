@@ -258,6 +258,8 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
             <IconChevronDown size={14} />
           </div>
         </div>
+        {/* 头行「不透明度：」标签(2026-11-11 用户裁决:标签占前面下拉框的伸缩位,值字段宽度不变) */}
+        <span style={{ fontSize: 12, color: PC.textDim, flexShrink: 0 }}>不透明度：</span>
         <div style={{ position: 'relative', width: 80, flexShrink: 0 }}>
           <button
             onClick={() => selHasLook && setOpPopup((v) => !v)}
@@ -526,7 +528,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
           const lines = Array.isArray(value) ? (value as string[]) : null
           return (
             <div style={{ marginTop: 14, padding: '0 12px 12px', overflowY: 'auto' }}>
-              <div style={headStyle}>编辑「{layerNames[layer.id] ?? layer.label}」</div>
+              <div style={headStyle} title={'编辑「' + (layerNames[layer.id] ?? layer.label) + '」'}>编辑「{layerNames[layer.id] ?? layer.label}」</div>
               <DelayedTextEditor key={layer.id} value={text} isArray={Array.isArray(value)}
                 rows={Array.isArray(value) ? Math.max(3, value.length + 1) : 3}
                 onCommit={(v) => setProp(key, Array.isArray(value) ? v.split('\n') : v)} />
@@ -562,7 +564,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
         if (typeof value === 'string') {
           return (
             <div style={{ marginTop: 14, padding: '0 12px 12px', overflowY: 'auto' }}>
-              <div style={headStyle}>编辑「{layerNames[layer.id] ?? layer.label}」</div>
+              <div style={headStyle} title={'编辑「' + (layerNames[layer.id] ?? layer.label) + '」'}>编辑「{layerNames[layer.id] ?? layer.label}」</div>
               <DelayedTextEditor key={layer.id} value={value} isArray={false}
                 onCommit={(v) => setProp(key, v)} />
               <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>装饰层文案,改动即时预览;字号/配色由模板排版</div>

@@ -104,6 +104,18 @@ export function effectiveOrder(state: Pick<EditorState, 'templateId' | 'props'>)
   for (const id of [...fixed, ...customIds]) if (!ordered.includes(id)) ordered.push(id)
   return ordered
 }
+/** 删除后的选中接续(2026-11-11 用户裁决):面板序(上→下)里被删块的下一个;删到底部=剩下列表最后一个 */
+function selectionAfterDelete(state: Pick<EditorState, 'templateId' | 'props'>, drop: Set<string>): string | null {
+  const topToBottom = [...effectiveOrder(state)].reverse()
+  const idxs = [...drop].map((id) => topToBottom.indexOf(id)).filter((i) => i >= 0)
+  const maxIdx = idxs.length ? Math.max(...idxs) : -1
+  for (let i = maxIdx + 1; i < topToBottom.length; i += 1) {
+    const id = topToBottom[i]
+    if (id && !drop.has(id)) return id
+  }
+  const remaining = topToBottom.filter((id) => !drop.has(id))
+  return remaining.length ? remaining[remaining.length - 1] ?? null : null
+}
 
 function withOrder(state: EditorState, order: string[]): Pick<EditorState, 'props'> {
   return { props: { ...state.props, layerOrder: order } }
@@ -197,7 +209,7 @@ export const useEditor = create<EditorState>()(
           const order = effectiveOrder(s).filter((v) => !drop.has(v))
           return {
             props: { ...s.props, customLayers, layerOrder: order },
-            selectedLayer: s.selectedLayer && drop.has(s.selectedLayer) ? null : s.selectedLayer,
+            selectedLayer: s.selectedLayer && drop.has(s.selectedLayer) ? selectionAfterDelete(s, drop) : s.selectedLayer,
             multiSelected: s.multiSelected.filter((v) => !drop.has(v)),
           }
         }),
@@ -256,7 +268,7 @@ export const useEditor = create<EditorState>()(
         set((s) => {
           const layers = (Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []).filter((l) => l.id !== id)
           const order = effectiveOrder(s).filter((v) => v !== id)
-          return { props: { ...s.props, customLayers: layers, layerOrder: order }, selectedLayer: s.selectedLayer === id ? null : s.selectedLayer }
+          return { props: { ...s.props, customLayers: layers, layerOrder: order }, selectedLayer: s.selectedLayer === id ? selectionAfterDelete(s, new Set([id])) : s.selectedLayer, multiSelected: s.multiSelected.filter((v) => v !== id) }
         }),
       setCustomLayer: (id, patch) =>
         set((s) => {

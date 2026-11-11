@@ -43,7 +43,7 @@ function CustomLayerEditor({ layer, project }: { layer: CustomLayer; project: st
   }
   return (
     <div style={{ marginTop: 14 }}>
-      <div style={headStyle}>编辑「{layer.image.split('/').pop()}」</div>
+      <div style={headStyle} title={'编辑「' + (layer.image.split('/').pop() ?? layer.image) + '」'}>编辑「{layer.image.split('/').pop()}」</div>
       <ImageLayerProps target={{ kind: 'custom', layer }} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
         <button
@@ -154,7 +154,7 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
   }
   return (
     <div style={{ marginTop: 14 }}>
-      <div style={headStyle}>图片「{layerLabel}」</div>
+      <div style={headStyle} title={'图片「' + layerLabel + '」'}>图片「{layerLabel}」</div>
       <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 8, wordBreak: 'break-all' }}>
         当前:{typeof current === 'string' && current ? current : '(未设置)'}
       </div>
