@@ -15,9 +15,13 @@ import { useVsrRemoval } from '@/composables/useVsrRemoval'
 import { useVsrPreviewPane } from '@/composables/useVsrPreviewPane'
 import { useVsrRedub } from '@/composables/useVsrRedub'
 import { acceptFileDragOver } from '@/utils/fileUrl'
+// 多 Tab 工作区 busy 上报（2026-11-12）：任务运行中→关闭确认+tab 状态点
+import { useToolTabBusy } from '@/composables/useToolTabs'
 
 const vm = useVsrRemoval()
 const pane = useVsrPreviewPane(vm)
+// busy=去字幕/去水印任务处理中（useServerTask isProcessing）
+useToolTabBusy(() => vm.isProcessing.value)
 const {
   mode,
   purpose,

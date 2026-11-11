@@ -33,6 +33,8 @@ import { fmtDur } from '@/composables/copywritingMontageStep3VoiceLogic'
 import TSelect from '@/components/common/TSelect.vue'
 import { createMontageSharedRuntime } from '@/composables/copywritingMontage/context'
 import { useImitationVideo } from '@/composables/useImitationVideo'
+// 多 Tab 工作区 busy 上报（2026-11-12）：任务运行中→关闭确认+tab 状态点
+import { useToolTabBusy } from '@/composables/useToolTabs'
 import { useImitationMontage } from '@/composables/useImitationMontage'
 import type { PickerItem } from '@/composables/useWorkbenchPickers'
 import { buildMediaServeUrl, buildMediaThumbUrl } from '@/composables/workbenchChatContext'
@@ -78,6 +80,8 @@ const SCENE_ELEMENT_LABELS: Record<string, string> = {
 }
 
 const iv = useImitationVideo()
+// busy 聚合=拆解（part1）与分镜生成（gen）两阶段任一 running
+useToolTabBusy(() => iv.part1Phase.value === 'running' || iv.genPhase.value === 'running')
 const { ivPlatformOptions, ivPlatform } = iv
 const { ensureServerUrl, toAbsolute } = createMontageSharedRuntime()
 

@@ -1,11 +1,16 @@
 <script setup lang="ts">
-// 媒体工具视图根组件（WP-3）：分组卡片网格 + 内嵌工具展开（全页视图，非弹窗）。
+// 媒体工具视图根组件（WP-3）：分组卡片网格 + 多 Tab 工作区。
 // 2026-09-24 用户裁决：分组对齐原客户端 views/MediaTools.vue（文案脚本模板/图形/
 // 音频/视频 四组；智能混剪按 A1 裁决永久不移植故不列卡）；未移植卡以「建设中」
 // 角标占位（不可点，恢复一张加一张卡）。已可用：文案混剪、剪映模板、声音克隆、
 // 图像抠图、参考视频下载（2026-09-25 用户裁决随产品资料批次移植）；素材库
 // （2026-09-29 由「音频生成」卡升级：视频/图片素材库 + 音频页原音频生成）。
-import { computed, onMounted, ref, watch } from 'vue'
+// 2026-11-12 多 Tab 工作区落地（docs/tintin-multitab-workspace.md，2026-11-09
+// 用户裁决；KeepAlive 单实例缓存语义被 tab 多实例取代——2026-10-20 裁决同步废止）：
+// tab 栏替换「返回媒体工具」条；打开卡片=新开 tab；「+」回导航页（无 tab
+// 底层视图）；同卡可多开各实例互不干涉；关闭运行中任务 tab 有确认。
+import { onMounted, ref, watch } from 'vue'
+import type { Component } from 'vue'
 import CopywritingMontage from './components/media-tools/copywriting-montage/CopywritingMontage.vue'
 // 剪映模板卡启用（2026-09-24 用户裁决：去掉「建设中」，可用）：组/子类目两级浏览 +
 // 从剪映同步（预设/文字模板/花字/贴纸/转场/音频）+ 字体（剪映）上传
@@ -33,13 +38,17 @@ import SubtitleRemoval from './components/media-tools/SubtitleRemoval.vue'
 import ImitationVideo from './components/media-tools/ImitationVideo.vue'
 // 直播切片（2026-09-25 P2 恢复）：热点发现→切片→封面/字幕（whisper+llmChat+liveclip 文件 I/O）
 import LiveClip from './components/media-tools/LiveClip.vue'
-// 「前往分镜」跨视图跳转（2026-09-27）：产品资料文案面板写入 pendingStoryboard
-// 信号后，本视图侦听并自动打开分镜脚本创作卡
+// 多 Tab 工作区三件（本包实现；运营包持同构副本）：
+import ToolTabBar from './components/ToolTabBar.vue'
+import ToolTabPane from './components/ToolTabPane.vue'
+import { useToolTabs, TOOL_TAB_MAX, type ToolTab } from './composables/useToolTabs'
+// 「前往分镜」跨视图跳转（2026-09-27）：产品资料·文案面板写入 pendingStoryboard
+// 信号后自动打开分镜脚本创作卡
 import { pendingStoryboard } from './composables/pendingStoryboard'
 // 主题跟随宿主（2026-10-18 报障修正：原生信号 body[data-ds-dark-theme]）
 import { useHostDark } from './composables/hostTheme'
 // 工具内跨卡跳转（2026-10-09）：仿视频第 1 步「视频去字幕」等按钮写入
-// 目标卡 id（pendingMediaTool），本视图侦听后切换 active（一次性消费）
+// 目标卡 id（pendingMediaTool），本视图侦听后切卡（一次性消费）
 import { pendingMediaTool } from './composables/pendingMediaTool'
 
 interface ToolCard {
@@ -99,36 +108,94 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
 ]
 
 const ALL_TOOLS = GROUPS.flatMap((g) => g.tools)
-const active = ref<string | null>(null)
+
+// ═══ 多 Tab 工作区（模型层 useToolTabs；实例键控/显隐在 ToolTabPane）═══
+const { tabs, activeTabId, discarded, hasTabs, openTab, closeTab, activate, goHome, closeOthers, closeRight } = useToolTabs()
+
+// 卡 id → 工具组件（tab 内容按 toolId 解析渲染）
+const TOOL_COMPONENTS: Record<string, Component> = {
+  'copywriting-montage': CopywritingMontage,
+  'imitation-video': ImitationVideo,
+  'jianying-templates': JianYingTemplates,
+  'voice-clone': VoiceClone,
+  storyboard: OtStoryboard,
+  'video-transcribe': VideoTranscribe,
+  'subtitle-removal': SubtitleRemoval,
+  'live-slice': LiveClip,
+  'image-matting': ImageMatting,
+  'material-library': MaterialLibrary,
+  'reverse-prompt-video': ReversePromptVideo,
+  'reverse-prompt-image': ReversePromptImage,
+}
+
+/** tab 栏标题解析（toolId → 卡片 emoji/标题） */
+function toolMeta(toolId: string): { emoji: string; title: string } | null {
+  const t = ALL_TOOLS.find((x) => x.id === toolId)
+  return t ? { emoji: t.emoji, title: t.title } : null
+}
+
+// 满员提示（软上限 12，模型层拒绝新开时触发）
+const capacityNotice = ref(false)
+// 关闭确认（一期从宽：仅任务运行中的 tab 拦截，2026-11-12 用户裁决）
+const closeAsk = ref<ToolTab | null>(null)
+
+/** 打开卡片 = 新开 tab 并切换（点击卡片/新开类信号走这里） */
+function requestOpen(toolId: string): void {
+  if (!TOOL_COMPONENTS[toolId]) return // 未知卡 id 拒收（退役卡防御）
+  if (openTab(toolId) === null) capacityNotice.value = true
+}
+
+/** 直达信号语义（2026-11-09 文档建议）：聚焦已有同工具 tab，无则新开
+    （避免直达链路开出重复 tab） */
+function focusOrOpen(toolId: string): void {
+  const existing = tabs.value.find((t) => t.toolId === toolId)
+  if (existing) activate(existing.id)
+  else requestOpen(toolId)
+}
+
+function openTool(t: ToolCard): void {
+  if (t.disabled) return
+  requestOpen(t.id)
+}
+
+/** 关闭请求（tab 栏 × / 中键 / 右键菜单统一入口）：busy=任务运行中→确认 */
+function requestClose(id: string): void {
+  const tab = tabs.value.find((t) => t.id === id)
+  if (!tab) return
+  if (tab.busy > 0) closeAsk.value = tab
+  else closeTab(id)
+}
+function confirmClose(): void {
+  if (closeAsk.value) closeTab(closeAsk.value.id)
+  closeAsk.value = null
+}
+function cancelClose(): void {
+  closeAsk.value = null
+}
+
 // 「前往分镜」跨视图跳转（2026-09-27）：产品资料·文案面板写入 pendingStoryboard
 // 信号后自动打开分镜脚本创作卡（信号由 OtStoryboard 挂载/在位时消费）
-watch(pendingStoryboard, (v) => { if (v) active.value = 'storyboard' })
+watch(pendingStoryboard, (v) => { if (v) focusOrOpen('storyboard') })
 // 工具内跨卡跳转（2026-10-09）：仿视频第 1 步「视频去字幕」等按钮写入目标卡
 // id 后在此切卡；立即清空（一次性消费，防残留重复触发）。
-// 未知卡 id 拒收（2026-11-09 封面卡退役防御）：否则 active 落在无分支匹配的 id
-// 上 = 只剩返回键的空详情页死胡同；存量外部绑定（创作包 localStorage）可能还带着旧 id。
+// 未知卡 id 拒收（2026-11-09 封面卡退役防御）：否则落在无组件映射的 id 上
+// =空 tab 死胡同；存量外部绑定（创作包 localStorage）可能还带着旧 id。
 watch(pendingMediaTool, (id) => {
   pendingMediaTool.value = null
-  if (!id || !ALL_TOOLS.some((t) => t.id === id)) return
-  active.value = id
+  if (!id || !TOOL_COMPONENTS[id]) return
+  focusOrOpen(id)
 })
 // 跨包直达（2026-10-17 创作模式拆独立插件 dsh-tintin-creation-bundle）：
 // 创作包经窗口总线 __tintinBus 请求打开媒体工具卡（同 bundle 写入方仍走
 // 上方 pendingMediaTool ref，两条路径同一落点）；未知卡 id 同款拒收
 function onBusMediaTool(payload: unknown): void {
   const id = String(payload ?? '')
-  if (!id || !ALL_TOOLS.some((t) => t.id === id)) return
-  active.value = id
+  if (!id || !TOOL_COMPONENTS[id]) return
+  focusOrOpen(id)
 }
 onMounted(() => {
   window.__tintinBus?.on('tintin:media-tool', onBusMediaTool)
 })
-const activeTool = computed(() => ALL_TOOLS.find((t) => t.id === active.value) ?? null)
-
-function openTool(t: ToolCard): void {
-  if (t.disabled) return
-  active.value = t.id
-}
 
 // 主题跟随宿主（2026-10-18 报障修正）：原生有效暗色=body[data-ds-dark-theme]
 // （应用内偏好可≠系统偏好），旧 html.dark 链原生从不打——判定/监听收进
@@ -137,14 +204,30 @@ const isDark = useHostDark()
 </script>
 
 <template>
-  <!-- tintin-media-scope：搬运的 tokens/global css 的作用域根（见 src/styles/） -->
+  <!-- tintin-media-scope：搬运的 tokens/global css 的作用域根（见 src/styles/）；
+       2026-11-12 多 Tab 工作区：.root 钉 100vh 自建滚动骨架（宿主链全是
+       min-height 高度不定，fixed overlay 的 100vh 是合法定锚——同 OpsApp
+       2026-11-07 方案 1 口径），导航页与每个 tab pane 各自内滚 -->
   <div class="tintin-media-scope root" :class="{ dark: isDark }">
-    <!-- ═══ 卡片网格 ═══ -->
+    <!-- ═══ tab 栏（有 tab 才显示；「+」回导航页） ═══ -->
+    <ToolTabBar
+      v-if="hasTabs"
+      :tabs="tabs"
+      :active-tab-id="activeTabId"
+      :tool-meta="toolMeta"
+      @activate="activate"
+      @close="requestClose"
+      @home="goHome"
+      @menu-close-others="closeOthers"
+      @menu-close-right="closeRight"
+    />
+
+    <!-- ═══ 卡片导航页（无 tab 底层视图；v-show 保 DOM，回导航不丢 tab 状态） ═══ -->
     <!-- 2026-09-25 用户报障「卡片返回后界面空白」：原 <Transition mode="out-in">
          依赖过渡结束检测（transitionend + 双 rAF 换类），高合成器负载（卡片光晕
          无限旋转）或帧饥饿时偶发停在 leave 阶段=整页空白。改为无 Transition 的
-         同步 v-if 交换 + 纯 CSS 入场动画（page-in）：结构上无离开阶段，不可能卡死。 -->
-    <div v-if="!active" class="page">
+         同步 v-show 交换 + 纯 CSS 入场动画（page-in）：结构上无离开阶段，不可能卡死。 -->
+    <div v-show="!activeTabId" class="page page-nav">
       <div class="head">
         <div class="title">媒体工具</div>
         <div class="sub">选择需要执行的 AI 生产能力</div>
@@ -181,54 +264,61 @@ const isDark = useHostDark()
       </div>
     </div>
 
-    <!-- ═══ 工具详情（同面板内嵌展开，非弹窗） ═══ -->
-    <div v-else class="page">
-      <div class="bar">
-        <button type="button" class="back" @click="active = null">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M19 12H5" />
-            <path d="M12 19l-7-7 7-7" />
-          </svg>
-          返回媒体工具
-        </button>
-        <div class="bar-title">
-          <span class="bar-emoji">{{ activeTool?.emoji }}</span>
-          {{ activeTool?.title }}
+    <!-- ═══ tab 内容区：每 tab 一个 pane，全部挂载 v-show 切换（状态/滚动/轮询
+         保持）；LRU 超限的 pane 卸载实例（切回重建）；关闭 tab 即销毁 ═══ -->
+    <div v-show="!!activeTabId" class="tab-panes">
+      <ToolTabPane
+        v-for="t in tabs"
+        :key="t.id"
+        :tab="t"
+        :component="TOOL_COMPONENTS[t.toolId]"
+        :active="t.id === activeTabId"
+        :discarded="discarded.has(t.id)"
+      />
+    </div>
+
+    <!-- ═══ 关闭确认（任务运行中） ═══ -->
+    <div v-if="closeAsk" class="modal-mask" @click.self="cancelClose">
+      <div class="modal confirm-modal">
+        <div class="confirm-title">关闭标签页</div>
+        <div class="confirm-text">
+          「{{ toolMeta(closeAsk.toolId)?.title ?? closeAsk.toolId }}」正在运行任务，关闭将中断该任务。确定关闭？
+        </div>
+        <div class="confirm-ops">
+          <button type="button" class="confirm-btn" @click="cancelClose">取消</button>
+          <button type="button" class="confirm-btn confirm-btn-danger" @click="confirmClose">中断并关闭</button>
         </div>
       </div>
-      <!-- 2026-10-20 用户裁决：工具页 KeepAlive 缓存——返回媒体工具/重进卡片时
-           保留全部界面状态（所选文件、框选、轮询中的任务、结果），执行中的任务
-           轮询在后台继续，重进即见最新进度。v-if 链单子节点，KeepAlive 按组件
-           类型各自缓存。 -->
-      <KeepAlive>
-        <CopywritingMontage v-if="active === 'copywriting-montage'" />
-        <ImitationVideo v-else-if="active === 'imitation-video'" />
-        <JianYingTemplates v-else-if="active === 'jianying-templates'" />
-        <VoiceClone v-else-if="active === 'voice-clone'" />
-        <OtStoryboard v-else-if="active === 'storyboard'" />
-        <VideoTranscribe v-else-if="active === 'video-transcribe'" />
-        <SubtitleRemoval v-else-if="active === 'subtitle-removal'" />
-        <LiveClip v-else-if="active === 'live-slice'" />
-        <ImageMatting v-else-if="active === 'image-matting'" />
-        <MaterialLibrary v-else-if="active === 'material-library'" />
-        <ReversePromptVideo v-else-if="active === 'reverse-prompt-video'" />
-        <ReversePromptImage v-else-if="active === 'reverse-prompt-image'" />
-      </KeepAlive>
+    </div>
+
+    <!-- ═══ 满员提示（软上限 12） ═══ -->
+    <div v-if="capacityNotice" class="modal-mask" @click.self="capacityNotice = false">
+      <div class="modal confirm-modal">
+        <div class="confirm-title">标签页已达上限</div>
+        <div class="confirm-text">最多同时打开 {{ TOOL_TAB_MAX }} 个标签页，请先关闭部分标签页后再打开新工具。</div>
+        <div class="confirm-ops">
+          <button type="button" class="confirm-btn" @click="capacityNotice = false">确定</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-/* 全页视图布局（2026-09-23 入口裁决）：容器 el 为 100% 宽 × 100% 高、
-   overflow auto 的视图区（tintin-bundle Tab 栏传入），本组件铺满宽度、
-   高度按内容增长，滚动交由容器。padding 对照源 MediaTools 页。 */
+/* 全页视图布局（2026-11-12 多 Tab 工作区）：容器 el 为 100% 宽 × 100% 高的
+   视图区（tintin-bundle Tab 栏传入），本组件钉 100vh 铺满、自建滚动骨架
+   （宿主链全是 min-height、高度不定，fixed overlay 的 100vh 是合法定锚；
+   同 OpsApp 2026-11-07 方案 1 口径）。tab 栏 flex-shrink:0 在顶部，
+   导航页与 tab pane 各自内滚。padding 下沉到导航页层（tab 栏通栏）。 */
 .root {
   width: 100%;
-  min-height: 100%;
-  padding: var(--space-6);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-/* 页面入场（2026-09-25 空白修复）：无 Transition 的同步 v-if 交换 + 纯 CSS
+/* 页面入场（2026-09-25 空白修复）：无 Transition 的同步交换 + 纯 CSS
    入场动画——离开零依赖，结构上不存在卡死点（原 out-in Transition 见上方注记） */
 .page {
   display: flex;
@@ -237,6 +327,23 @@ const isDark = useHostDark()
 }
 @keyframes page-in {
   from { opacity: 0; transform: translateY(12px); }
+}
+
+/* 导航页（卡片网格）：自滚层（滚动宿主从视图区换到本层，视觉一致） */
+.page-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+/* tab 内容区：纵向 flex，每 pane flex:1 自滚（ToolTabPane 内部样式） */
+.tab-panes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .head { margin-bottom: var(--space-5); }
@@ -364,21 +471,34 @@ const isDark = useHostDark()
 .arrow svg { width: 14px; height: 14px; } /* 卡片 2/3 */
 .tool-card:hover:not(.is-disabled) .arrow { transform: translateX(2px); background: var(--primary); color: var(--primary-foreground); }
 
-/* 工具详情顶栏（对照源 tool-bar 压缩版） */
-.bar {
+/* ═══ 确认弹层（关闭运行中 / 满员提示）：形态对齐包内 modal-mask 惯例
+   （VideoTranscribe 等：fixed 全屏 z 1002 在覆盖层堆叠上下文内） ═══ */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1002;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  padding-bottom: var(--space-4);
-  margin-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border);
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
 }
-.back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 var(--space-3);
+.confirm-modal {
+  width: min(420px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+}
+.confirm-title { font-size: var(--font-size-h5); font-weight: 700; color: var(--foreground); }
+.confirm-text { font-size: var(--font-size-body); line-height: var(--line-height-body); color: var(--muted-foreground); }
+.confirm-ops { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.confirm-btn {
+  height: 32px;
+  padding: 0 var(--space-4);
   font-size: 13px;
   font-weight: 500;
   color: var(--foreground);
@@ -388,11 +508,9 @@ const isDark = useHostDark()
   cursor: pointer;
   transition: all var(--duration-fast);
 }
-.back:hover { border-color: var(--primary); color: var(--primary); }
-.bar-title { display: flex; align-items: center; gap: var(--space-2); font-size: 20px; font-weight: 700; color: var(--foreground); }
-.bar-emoji { font-size: 22px; line-height: 1; }
-
-/* 网格 ↔ 详情 切换（对照源 slide-up，缩短位移适配面板） */
+.confirm-btn:hover { border-color: var(--primary); color: var(--primary); }
+.confirm-btn-danger { color: #fff; background: var(--danger, #ef4444); border-color: var(--danger, #ef4444); }
+.confirm-btn-danger:hover { color: #fff; background: #dc2626; border-color: #dc2626; }
 </style>
 
 <style>
@@ -403,5 +521,6 @@ const isDark = useHostDark()
    特异度低于 scoped 规则而失效，弹窗被覆盖层压住不可见）。改挂到 scope 根后
    令牌/暗色/全局样式自动继承；弹层 fixed 全屏、z 1002 在覆盖层堆叠上下文内
    高于向导内容。已知取舍：顶部 Tab 栏（9999）仍高于弹层蒙层，弹窗打开时
-   Tab 栏不被蒙住（原版为全窗变暗，此处为作用域化的必要让步）。 */
+   Tab 栏不被蒙住（原版为全窗变暗，此处为作用域化的必要让步）；
+   本视图内联确认弹层（关闭确认/满员提示）同样 fixed z 1002。 */
 </style>

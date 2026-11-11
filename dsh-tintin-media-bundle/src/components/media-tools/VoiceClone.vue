@@ -17,8 +17,12 @@ import { clientError, clientInfo } from '@/utils/clientLog'
 // IPC 结构化克隆到渲染层是 Uint8Array，旧兜底 JSON.stringify(res) 把音频字节数组
 // 序列化成 {"0":229,...} 塞进文稿框并随样本上传入库——识别统一走此解析器）
 import { parseTranscriptionResponse, segmentsToPlainText } from '@/composables/srtUtils'
+// 多 Tab 工作区 busy 上报（2026-11-12）：任务运行中→关闭确认+tab 状态点
+import { useToolTabBusy } from '@/composables/useToolTabs'
 
 const s = useVoiceCloneStudio()
+// busy=整体克隆合成处理中（克隆合成+批量克隆同源）
+useToolTabBusy(() => s.wholeIsProcessing.value)
 
 /** 本地通知（与 useVoiceCloneStudio 内同款；此前组件内未定义导致调用即 ReferenceError，2026-09-06 修复） */
 function notify(title: string, body: string): void {

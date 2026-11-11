@@ -41,6 +41,8 @@ import type { ClipPlanItem, LlmPlanItem } from '@/composables/liveClipLogic'
 import { parseTranscriptionResponse } from '@/composables/srtUtils'
 import type { SrtSegment } from '@/composables/srtUtils'
 import { filePathOf } from '@/utils/fileUrl'
+// 多 Tab 工作区 busy 上报（2026-11-12）：任务运行中→关闭确认+tab 状态点
+import { useToolTabBusy } from '@/composables/useToolTabs'
 
 const STEPS = ['1. 视频分析与热点发现', '2. 切片与封面生成']
 const step = ref(0)
@@ -239,6 +241,8 @@ interface Clip {
 const clips = ref<Clip[]>([])
 const clipBusy = ref(false)
 const clipMsg = ref('')
+// busy=热点分析或切片生成任一进行中（2026-11-12 多 Tab 工作区）
+useToolTabBusy(() => analyzing.value || clipBusy.value)
 const exporting = ref(false)
 const exportMsg = ref('')
 const coverStage = ref('')

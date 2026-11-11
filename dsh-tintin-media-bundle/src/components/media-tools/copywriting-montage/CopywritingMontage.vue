@@ -13,6 +13,7 @@ import TSelect from '@/components/common/TSelect.vue'
 import VideoPreview from '@/components/common/VideoPreview.vue'
 // import VideoPlayer 已移除：Step4 成片预览由统一右栏 StepPreviewPane 接管（2026-09-10 界面统一）
 import { useCopywritingMontage } from '@/composables/useCopywritingMontage'
+import { useCopywritingTabBusy } from '@/composables/copywritingMontageTabBusy' // 多 Tab busy 聚合接线（口径见其头注；提取付账）
 import { useHostDark } from '@/composables/hostTheme'
 
 // 弹窗 teleport 到 body（App 根外），暗色类必须显式绑定（2026-11-05 白弹窗同款裁决）
@@ -46,6 +47,7 @@ function go(i: number) {
 }
 
 const s = useCopywritingMontage()
+useCopywritingTabBusy(s)
 const {
   // 共享
   polling, activeTaskId, statusText, cancelPolling,

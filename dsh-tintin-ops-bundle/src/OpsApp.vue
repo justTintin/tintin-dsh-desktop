@@ -1,12 +1,19 @@
 <script setup lang="ts">
-// 运营工具视图根组件：分组卡片网格 + 内嵌工具展开（模式对齐 App.vue 的媒体
-// Launcher；SRC views/OpsTools.vue 三组结构 1:1，搬运基线 SRC 9ca9050）。
+// 运营工具视图根组件：分组卡片网格 + 多 Tab 工作区（模式对齐 App.vue 媒体
+// 多 Tab 骨架，2026-11-12 落地 docs/tintin-multitab-workspace.md，2026-11-09
+// 用户裁决；SRC views/OpsTools.vue 三组结构 1:1，搬运基线 SRC 9ca9050）。
 // 2026-09-25 用户裁决：产品资料卡随图像抠图一并移植（提前于 P3 ops-bundle），
 // 其余 5 卡保持「建设中」占位（恢复一张加一张卡）；卡片清单位置/描述/配色
-// 与 SRC GROUP_TOOLS 逐字对齐。占位网格（tintin-bundle chrome）在本视图
-// 注册后被 provider 接管，P3 ops-bundle 落地时迁移注册权即可。
-import { computed, ref } from 'vue'
+// 与 SRC GROUP_TOOLS 逐字对齐。
+// tab 栏替换「返回运营工具」条；打开卡片=新开 tab；「+」回导航页；同卡可
+// 多开（两包 tab 骨架为副本：useToolTabs/ToolTabBar/ToolTabPane）。
+import { ref } from 'vue'
+import type { Component } from 'vue'
 import { useHostDark } from './composables/hostTheme'
+// 多 Tab 工作区三件（本包副本；原件在媒体包，改动须两包同步）
+import ToolTabBar from './components/ToolTabBar.vue'
+import ToolTabPane from './components/ToolTabPane.vue'
+import { useToolTabs, TOOL_TAB_MAX, type ToolTab } from './composables/useToolTabs'
 // 产品资料（2026-09-25 用户裁决移植）：仓库同步/树/表单增删改/智能挖掘/全量挖掘
 // + 内嵌文案生成面板（OtCopywritingPanel）
 import OtProductLibrary from './components/ops-tools/OtProductLibrary.vue'
@@ -50,12 +57,54 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
 ]
 
 const ALL_TOOLS = GROUPS.flatMap((g) => g.tools)
-const active = ref<string | null>(null)
-const activeTool = computed(() => ALL_TOOLS.find((t) => t.id === active.value) ?? null)
+
+// ═══ 多 Tab 工作区（模型层 useToolTabs；实例键控/显隐在 ToolTabPane）═══
+const { tabs, activeTabId, discarded, hasTabs, openTab, closeTab, activate, goHome, closeOthers, closeRight } = useToolTabs()
+
+// 卡 id → 工具组件（tab 内容按 toolId 解析渲染；自动上架面板组件保留映射，
+// 卡恢复可用时零改动）
+const TOOL_COMPONENTS: Record<string, Component> = {
+  'product-library': OtProductLibrary,
+  'kb-qa': OtKbQaPanel,
+  'auto-listing': OtAutoListingPanel,
+}
+
+/** tab 栏标题解析（toolId → 卡片 emoji/标题） */
+function toolMeta(toolId: string): { emoji: string; title: string } | null {
+  const t = ALL_TOOLS.find((x) => x.id === toolId)
+  return t ? { emoji: t.emoji, title: t.title } : null
+}
+
+// 满员提示（软上限 12，模型层拒绝新开时触发）
+const capacityNotice = ref(false)
+// 关闭确认（一期从宽：仅任务运行中的 tab 拦截；ops 卡 busy 接线暂无——
+// 各卡运行态接入 useToolTabBusy 后自动生效）
+const closeAsk = ref<ToolTab | null>(null)
+
+/** 打开卡片 = 新开 tab 并切换 */
+function requestOpen(toolId: string): void {
+  if (!TOOL_COMPONENTS[toolId]) return
+  if (openTab(toolId) === null) capacityNotice.value = true
+}
+
+/** 关闭请求：busy=任务运行中→确认（无 busy 上报的卡直接关） */
+function requestClose(id: string): void {
+  const tab = tabs.value.find((t) => t.id === id)
+  if (!tab) return
+  if (tab.busy > 0) closeAsk.value = tab
+  else closeTab(id)
+}
+function confirmClose(): void {
+  if (closeAsk.value) closeTab(closeAsk.value.id)
+  closeAsk.value = null
+}
+function cancelClose(): void {
+  closeAsk.value = null
+}
 
 function openTool(t: ToolCard): void {
   if (t.disabled) return
-  active.value = t.id
+  requestOpen(t.id)
 }
 
 // 主题跟随宿主（2026-10-18 报障修正）：原生有效暗色=body[data-ds-dark-theme]
@@ -66,103 +115,142 @@ const isDark = useHostDark()
 
 <template>
   <!-- tintin-media-scope：搬运的 tokens/global css 的作用域根（见 src/styles/）；
-       运营视图与媒体视图共用同一套令牌作用域 -->
+       运营视图与媒体视图共用同一套令牌作用域。2026-11-07（产品资料左右联滚
+       修复·方案1）的「工具体独立滚动区」骨架在多 Tab 下由 ToolTabPane 滚动层
+       继承：每 pane 自滚，产品资料页组件根 height:100% 占满本层 → 左树/右栏
+       各自内滚互不牵动；首页工具卡列表自滚（滚动宿主从 .root 换到各层）。 -->
   <div class="tintin-media-scope root" :class="{ dark: isDark }">
-    <!-- ═══ 卡片网格 ═══（2026-09-25 空白修复：同 App.vue，去 out-in Transition 换同步交换） -->
-    <div v-if="!active" class="page">
-        <div class="head">
-          <div class="title">运营工具</div>
-          <div class="sub">智能问答系统 · 产品资料 · 我的知识库 · 视频评价预测 · 视频营销检测</div>
-        </div>
-        <div v-for="g in GROUPS" :key="g.group" class="group-block">
-          <div class="group-label">{{ g.group }}</div>
-          <div class="grid">
-            <button
-              v-for="t in g.tools"
-              :key="t.id"
-              type="button"
-              class="tool-card"
-              :class="{ 'is-disabled': t.disabled }"
-              :style="{ '--card-accent': t.accent }"
-              :disabled="t.disabled"
-              @click="openTool(t)"
-            >
-            <span v-if="t.disabled" class="badge">建设中</span>
-            <div class="card-top">
-              <div class="icon"><span>{{ t.emoji }}</span></div>
-              <div class="card-title">{{ t.title }}</div>
-            </div>
-            <div class="card-desc">{{ t.desc }}</div>
-            <div class="card-foot">
-              <span class="arrow" aria-hidden="true">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M5 12h14" />
-                  <path d="M12 5l7 7-7 7" />
-                </svg>
-              </span>
-            </div>
-          </button>
-          </div>
-        </div>
-      </div>
+    <!-- ═══ tab 栏（有 tab 才显示；「+」回导航页） ═══ -->
+    <ToolTabBar
+      v-if="hasTabs"
+      :tabs="tabs"
+      :active-tab-id="activeTabId"
+      :tool-meta="toolMeta"
+      @activate="activate"
+      @close="requestClose"
+      @home="goHome"
+      @menu-close-others="closeOthers"
+      @menu-close-right="closeRight"
+    />
 
-    <!-- ═══ 工具详情（同面板内嵌展开，非弹窗） ═══ -->
-    <div v-else class="page">
-        <div class="bar">
-          <button type="button" class="back" @click="active = null">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M19 12H5" />
-              <path d="M12 19l-7-7 7-7" />
-            </svg>
-            返回运营工具
-          </button>
-          <div class="bar-title">
-            <span class="bar-emoji">{{ activeTool?.emoji }}</span>
-            {{ activeTool?.title }}
+    <!-- ═══ 卡片导航页（无 tab 底层视图；v-show 保 DOM） ═══ -->
+    <div v-show="!activeTabId" class="page page-nav">
+      <div class="head">
+        <div class="title">运营工具</div>
+        <div class="sub">智能问答系统 · 产品资料 · 我的知识库 · 视频评价预测 · 视频营销检测</div>
+      </div>
+      <div v-for="g in GROUPS" :key="g.group" class="group-block">
+        <div class="group-label">{{ g.group }}</div>
+        <div class="grid">
+          <button
+            v-for="t in g.tools"
+            :key="t.id"
+            type="button"
+            class="tool-card"
+            :class="{ 'is-disabled': t.disabled }"
+            :style="{ '--card-accent': t.accent }"
+            :disabled="t.disabled"
+            @click="openTool(t)"
+          >
+          <span v-if="t.disabled" class="badge">建设中</span>
+          <div class="card-top">
+            <div class="icon"><span>{{ t.emoji }}</span></div>
+            <div class="card-title">{{ t.title }}</div>
           </div>
-        </div>
-        <!-- 2026-10-20 用户裁决：工具页 KeepAlive 缓存——返回运营工具/重进卡片时
-             保留全部界面状态（含执行中任务的轮询与结果展示），与媒体工具同口径。 -->
-        <!-- 2026-11-07 用户裁决（产品资料左右联滚修复·方案1）：工具体独立滚动区——
-             其余工具页行为不变（滚动宿主从外层视图区换到本层，视觉一致）；
-             产品资料页组件根 height:100% 正好占满本层 → 左树/右栏各自内滚互不牵动。 -->
-        <div class="tool-body">
-          <KeepAlive>
-            <OtProductLibrary v-if="active === 'product-library'" />
-            <OtKbQaPanel v-else-if="active === 'kb-qa'" />
-            <OtAutoListingPanel v-else-if="active === 'auto-listing'" />
-          </KeepAlive>
+          <div class="card-desc">{{ t.desc }}</div>
+          <div class="card-foot">
+            <span class="arrow" aria-hidden="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14" />
+                <path d="M12 5l7 7-7 7" />
+              </svg>
+            </span>
+          </div>
+        </button>
         </div>
       </div>
+    </div>
+
+    <!-- ═══ tab 内容区：每 tab 一个 pane（全部挂载 v-show 切换；LRU 超限卸载
+         实例切回重建；关闭 tab 即销毁） ═══ -->
+    <div v-show="!!activeTabId" class="tab-panes">
+      <ToolTabPane
+        v-for="t in tabs"
+        :key="t.id"
+        :tab="t"
+        :component="TOOL_COMPONENTS[t.toolId]"
+        :active="t.id === activeTabId"
+        :discarded="discarded.has(t.id)"
+      />
+    </div>
+
+    <!-- ═══ 关闭确认（任务运行中） ═══ -->
+    <div v-if="closeAsk" class="modal-mask" @click.self="cancelClose">
+      <div class="modal confirm-modal">
+        <div class="confirm-title">关闭标签页</div>
+        <div class="confirm-text">
+          「{{ toolMeta(closeAsk.toolId)?.title ?? closeAsk.toolId }}」正在运行任务，关闭将中断该任务。确定关闭？
+        </div>
+        <div class="confirm-ops">
+          <button type="button" class="confirm-btn" @click="cancelClose">取消</button>
+          <button type="button" class="confirm-btn confirm-btn-danger" @click="confirmClose">中断并关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ 满员提示（软上限 12） ═══ -->
+    <div v-if="capacityNotice" class="modal-mask" @click.self="capacityNotice = false">
+      <div class="modal confirm-modal">
+        <div class="confirm-title">标签页已达上限</div>
+        <div class="confirm-text">最多同时打开 {{ TOOL_TAB_MAX }} 个标签页，请先关闭部分标签页后再打开新工具。</div>
+        <div class="confirm-ops">
+          <button type="button" class="confirm-btn" @click="capacityNotice = false">确定</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* 全页视图布局：容器 el 为 100% 宽 × min-height 100%、overflow auto 的视图区
-   （tintin-bundle chrome #tintin-view-overlay 传入，position:fixed inset:0）。
-   2026-11-07（产品资料左右联滚修复·方案1）：宿主链全是 min-height（高度不定，
-   百分比高度解析不了），但 overlay 是 fixed inset:0 → 高度恒等于 100vh——
-   .root 直接钉 100vh 并自滚，往下传导确定高度，详情页才能建立
-   「页头固定 + 工具体内滚」骨架；首页工具卡列表照常整页滚（滚动宿主
-   从视图区换到本层，视觉一致）。 */
+/* 全页视图布局（2026-11-12 多 Tab 工作区）：.root 钉 100vh（宿主链全是
+   min-height 高度不定，fixed overlay 的 100vh 是合法定锚——2026-11-07
+   方案 1 同款锚定），tab 栏 flex-shrink:0 在顶部，导航页与 tab pane 各自
+   内滚（.root 不再承担滚动）。 */
 .root {
   width: 100%;
   height: 100vh;
-  overflow-y: auto;
-  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
-/* 页面入场（2026-09-25 空白修复）：无 Transition 的同步 v-if 交换 + 纯 CSS
-   入场动画——离开零依赖，结构上不存在卡死点（原 out-in Transition 见上方注记） */
+/* 页面入场（2026-09-25 空白修复）：无 Transition 的同步交换 + 纯 CSS
+   入场动画——离开零依赖，结构上不存在卡死点（原 out-in Transition 见 App.vue 注记） */
 .page {
   display: flex;
   flex-direction: column;
-  height: 100%; /* 2026-11-07 方案1：详情页固定为一屏高，滚动全部下沉到内部区域 */
-  overflow: hidden;
   animation: page-in 0.2s var(--easing-out, cubic-bezier(0, 0, 0.2, 1));
 }
 @keyframes page-in {
   from { opacity: 0; transform: translateY(12px); }
+}
+
+/* 导航页（卡片网格）：自滚层（滚动宿主从 .root 换到本层，视觉一致；
+   顺带修掉旧 .page height:100%+overflow:hidden 对首页超屏内容的理论裁切） */
+.page-nav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-6);
+}
+
+/* tab 内容区：纵向 flex，每 pane flex:1 自滚（ToolTabPane 内部样式） */
+.tab-panes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .head { margin-bottom: var(--space-5); }
@@ -216,18 +304,15 @@ const isDark = useHostDark()
 @keyframes card-in {
   from { opacity: 0; transform: translateY(12px); }
 }
-/* 卡片光晕：静态径向渐变（2026-10-14 用户报障「折叠侧栏全页白屏」——原 blur(40px)
-   + aurora-spin 无限旋转在卡片数增多/重排时 GPU 光栅化暴涨致渲染层假死；
-   静止观感一致，零滤镜零动画） */
-/* 光晕：偏心径向渐变 + 旋转动画（2026-10-14 恢复动画、去掉 blur 滤镜——
-   大尺寸模糊层重排时 GPU 光栅化暴涨曾致渲染层假死；无滤镜旋转=合成器零重光栅化） */
+/* 卡片光晕：偏心径向渐变 + 旋转动画（2026-10-14 报障：blur(40px) 大尺寸模糊
+   曾致渲染层假死；无滤镜旋转=合成器零重光栅化；光晕只在 hover/焦点显现 2026-10-15） */
 .tool-card::before {
   content: '';
   position: absolute;
   inset: -35%;
   z-index: 0;
   background: radial-gradient(circle at 32% 32%, var(--card-accent, #6366f1) 0%, transparent 52%);
-  opacity: 0; /* 光晕只在 hover/焦点时显现（2026-10-15 用户裁决） */
+  opacity: 0;
   pointer-events: none;
   transition: opacity 0.4s;
   animation: card-aurora 9s linear infinite;
@@ -286,30 +371,33 @@ const isDark = useHostDark()
 .arrow svg { width: 14px; height: 14px; } /* 卡片 2/3 */
 .tool-card:hover:not(.is-disabled) .arrow { transform: translateX(2px); background: var(--primary); color: var(--primary-foreground); }
 
-.bar {
+/* ═══ 确认弹层（关闭运行中 / 满员提示）：形态对齐媒体 App.vue 同款 ═══ */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 1002;
   display: flex;
   align-items: center;
-  gap: var(--space-4);
-  flex-shrink: 0; /* 2026-11-07 方案1：页头不被工具体挤压 */
-  padding-bottom: var(--space-4);
-  margin-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border);
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
 }
-
-/* 工具体（2026-11-07 方案1）：详情页的滚动层。普通工具页内容自然高 → 本层滚动
-   （等价于原先的视图区滚动）；产品资料页组件根 height:100% 占满本层不产生滚动，
-   内部左右栏各自 overflow 内滚。 */
-.tool-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+.confirm-modal {
+  width: min(420px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
 }
-.back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 var(--space-3);
+.confirm-title { font-size: var(--font-size-h5); font-weight: 700; color: var(--foreground); }
+.confirm-text { font-size: var(--font-size-body); line-height: var(--line-height-body); color: var(--muted-foreground); }
+.confirm-ops { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.confirm-btn {
+  height: 32px;
+  padding: 0 var(--space-4);
   font-size: 13px;
   font-weight: 500;
   color: var(--foreground);
@@ -319,8 +407,7 @@ const isDark = useHostDark()
   cursor: pointer;
   transition: all var(--duration-fast);
 }
-.back:hover { border-color: var(--primary); color: var(--primary); }
-.bar-title { display: flex; align-items: center; gap: var(--space-2); font-size: 20px; font-weight: 700; color: var(--foreground); }
-.bar-emoji { font-size: 22px; line-height: 1; }
-
+.confirm-btn:hover { border-color: var(--primary); color: var(--primary); }
+.confirm-btn-danger { color: #fff; background: var(--danger, #ef4444); border-color: var(--danger, #ef4444); }
+.confirm-btn-danger:hover { color: #fff; background: #dc2626; border-color: #dc2626; }
 </style>

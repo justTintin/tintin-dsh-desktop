@@ -17,6 +17,8 @@ import TButton from '@/components/common/TButton.vue'
 import TSelect, { type SelectOption } from '@/components/common/TSelect.vue'
 import VideoPlayer from '@/components/common/VideoPlayer.vue'
 import { useTranscribeQueue, STATUS_TEXT } from '@/composables/useTranscribeQueue'
+// 多 Tab 工作区 busy 上报（2026-11-12）：任务运行中→关闭确认+tab 状态点
+import { useToolTabBusy } from '@/composables/useToolTabs'
 import { acceptFileDragOver } from '@/utils/fileUrl'
 import type { QueueStatus } from '@/composables/useTranscribeQueue'
 import type { SrtSegment } from '@/composables/srtUtils'
@@ -25,6 +27,8 @@ import { caretToTime } from '@/composables/srtUtils'
 // srt/vtt/txt/plain 四格式导出保留
 
 const q = useTranscribeQueue()
+// busy=批量转写任务运行中（含上传/轮询阶段）
+useToolTabBusy(() => q.busy.value)
 const {
   files, lang, busy, stageText, uploadPercent,
   selectedIndex, selected, editMode, editedText,

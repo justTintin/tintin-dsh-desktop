@@ -13,8 +13,12 @@ import { onMounted, watch } from 'vue'
 import { RATIO_OPTIONS, ratioToOrient, totalDuration } from '@/composables/opsStoryboardLogic'
 import { useOpsStoryboard } from '@/composables/useOpsStoryboard'
 import { takePendingStoryboard, pendingStoryboard } from '@/composables/pendingStoryboard'
+// 多 Tab 工作区 busy 上报（2026-11-12）：任务运行中→关闭确认+tab 状态点
+import { useToolTabBusy } from '@/composables/useToolTabs'
 
 const S = useOpsStoryboard()
+// busy=生成分镜/保存脚本任一进行中
+useToolTabBusy(() => S.generating.value || S.saving.value)
 
 // 一次性消费「前往分镜脚本设计」信号（产品资料·文案面板跳转带入，2026-09-27
 // 打通：分镜卡挂载/卡片在位时重复跳转均消费）——文案与产品上下文回填。

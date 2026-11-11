@@ -15,6 +15,9 @@
 import { onMounted, onUnmounted, ref, type Ref } from 'vue'
 
 export function resolveHostDark(): boolean {
+  // SSR（渲染冒烟/服务端渲染）无 DOM：给 false 占位，客户端挂载后 onMounted 重判
+  // （2026-11-12 副本同步：媒体包原件 2026-11-05 SSR 冒烟时已加，ops 副本漏跟）
+  if (typeof document === 'undefined') return false
   if (document.body?.hasAttribute('data-ds-dark-theme')) return true
   const source = document.documentElement?.dataset?.dsThemeSource
   if (source === 'dark' || source === 'light') return source === 'dark'
