@@ -96,6 +96,15 @@ export function createCoverProject(rawName?: string): { name: string } {
   return { name: unique }
 }
 
+/** 新建封面项目的初始 props 记录(2026-11-12 用户裁决方案B:默认竖屏,新建即竖屏,
+ *  不再继承上一个项目的模板)。模板=video-portrait;固定层全隐藏=与「空白项目画布
+ *  什么也没有」裁决(2026-10-30)同观感;内容由路由层写盘(cover-acp-routes 的
+ *  writeCoverPropsRecord),本函数只产形状,保持引擎无副作用。 */
+export function defaultCoverPropsRecord(): { templateId: string; props: Record<string, unknown>; hiddenLayers: string[] } {
+  const tpl = getTemplate('video-portrait')
+  return { templateId: tpl.id, props: { ...tpl.defaultProps }, hiddenLayers: tpl.layerDefs.map((l) => l.id) }
+}
+
 /** 切换当前项目(目录必须存在) */
 export function switchCoverProject(rawName: string): { name: string } {
   const root = join(resolveWorkspaceDir(), 'cover')

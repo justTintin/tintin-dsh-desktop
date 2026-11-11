@@ -6,7 +6,7 @@ import { getTemplate, templateOfOrientation, validateProps, type LayerDef } from
 import type { CustomLayer } from '../../templates/CustomLayers'
 import type { ImageLook } from '../../templates/image-style'
 import type { TextStyleOverride } from '../../templates/text-style'
-import { arrangeOrder, cloneLayer, type Arrange } from './image-ops'
+import { arrangeOrder, clampScale, cloneLayer, type Arrange } from './image-ops'
 
 /** 图层组归属净化(2026-10-31 阶段2):只认模板存在的图片组槽位(product/bgImage),
     其余(未知槽位/文字组/装饰组)剥除——组里只能放对应类型的图层。 */
@@ -58,7 +58,8 @@ export interface EditorState {
   renameLayer: (id: string, name: string) => void
   lastExport: { ok: boolean; file?: string; error?: string } | null
   setTemplate: (id: string) => void
-  /** 横竖屏切换(2026-10-27 裁决):同族变体切换,内容 props 尽量保留 */
+  /** 横竖屏切换(2026-10-27 裁决;2026-11-12 方案1 比例迁移):同族变体切换,内容保留,
+   *  几何(图层位置/位移/缩放/参考线/选中线)按新旧画布比例映射 */
   setOrientation: (orientation: 'landscape' | 'portrait') => void
   setProp: (key: string, value: unknown) => void
   setLayerStyle: (layerId: string, patch: TextStyleOverride & ImageLook) => void
@@ -127,8 +128,10 @@ function withOrder(state: EditorState, order: string[]): Pick<EditorState, 'prop
 export const useEditor = create<EditorState>()(
   temporal(
     (set) => ({
-      templateId: 'video',
-      props: { ...getTemplate('video').defaultProps },
+      /* 默认竖屏(2026-11-12 用户裁决方案B):编辑器初始模板=video-portrait;
+         新建封面项目由路由写入同款竖屏记录(engine.defaultCoverPropsRecord),不再继承上一个项目 */
+      templateId: 'video-portrait',
+      props: { ...getTemplate('video-portrait').defaultProps },
       hiddenLayers: [] as string[],
       selectedLayer: null as string | null,
       multiSelected: [] as string[],
@@ -244,18 +247,75 @@ export const useEditor = create<EditorState>()(
       genEngine: 'server',
       setGenEngine: (engine) => set({ genEngine: engine }),
       setTemplate: (id) =>
-        set({ templateId: id, props: { ...getTemplate(id).defaultProps }, hiddenLayers: [], selectedLayer: null }),
+        set({
+          /* 模板切换=换文档:参考线是画布脚手架(文档域),随旧模板作废;多选/主选同清。
+             同项目横竖切换走 setOrientation(参考线按比例迁移,不在此清) */
+          templateId: id,
+          props: { ...getTemplate(id).defaultProps },
+          hiddenLayers: [],
+          selectedLayer: null,
+          multiSelected: [],
+          userGuides: { h: [], v: [] },
+          selectedGuide: null,
+        }),
+      /* 横竖屏切换=比例迁移(2026-11-12 用户裁决方案1):一切量按「自己的轴」映射——
+         x/dx/width/sx 按 wr,y/dy/height/sy 按 hr(x 轴量跟画布宽比,y 轴量跟画布高比),
+         往返精确互逆(漂移≤1px 取整界),切换后相对布局关系不变;一次 set=单条撤销。
+         保证机制:一切几何消费方只认 tpl.width/height(唯一来源),本迁移函数是位置类
+         状态跨模式的唯一入口(新增位置类状态必须挂进来)。 */
       setOrientation: (orientation) =>
         set((s) => {
           const nextId = templateOfOrientation(s.templateId, orientation)
           if (nextId === s.templateId) return {}
+          const prev = getTemplate(s.templateId)
           const next = getTemplate(nextId)
+          const wr = next.width / prev.width
+          const hr = next.height / prev.height
+          const clampMap = (arr: number[], factor: number, limit: number): number[] => {
+            const out: number[] = []
+            for (const g of arr) {
+              const v = Math.min(limit, Math.max(0, Math.round(g * factor)))
+              if (!out.some((o) => Math.abs(o - v) < 0.5)) out.push(v) // 映射撞线=合并,守唯一性
+            }
+            return out
+          }
           const merged: Record<string, unknown> = { ...next.defaultProps }
           for (const [k, v] of Object.entries(s.props)) if (k in merged && k !== 'styles') merged[k] = v
-          // 自定义图层与 z 序跨变体保留(图片不因横竖切换丢失)
-          merged.customLayers = s.props.customLayers
+          // 自定义图层与 z 序跨变体保留(图片不因横竖切换丢失)+ 几何按轴比例映射
+          const layers = Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []
+          merged.customLayers = layers.map((l) => ({
+            ...l,
+            x: Math.round(l.x * wr),
+            y: Math.round(l.y * hr),
+            width: Math.max(20, Math.round(l.width * wr)),
+            ...(typeof l.height === 'number' && l.height > 0 ? { height: Math.max(20, Math.round(l.height * hr)) } : {}),
+          }))
           merged.layerOrder = effectiveOrder(s)
-          return { templateId: nextId, props: merged }
+          // 文字/图片图层位移与槽位缩放按各自轴映射(sx 跟宽比、sy 跟高比)
+          const styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
+          for (const id of Object.keys(styles)) {
+            const st = styles[id]!
+            const next2: TextStyleOverride & ImageLook = { ...st }
+            if (typeof st.dx === 'number') next2.dx = Math.round(st.dx * wr)
+            if (typeof st.dy === 'number') next2.dy = Math.round(st.dy * hr)
+            if (typeof st.sx === 'number') next2.sx = clampScale(st.sx * wr)
+            if (typeof st.sy === 'number') next2.sy = clampScale(st.sy * hr)
+            styles[id] = next2
+          }
+          merged.styles = styles
+          // 用户参考线随画布比例迁移(映射后天然落在 [0,新界限],夹取只兜浮点取整)
+          const selectedGuide = s.selectedGuide
+            ? { axis: s.selectedGuide.axis, pos: Math.round(s.selectedGuide.pos * (s.selectedGuide.axis === 'h' ? hr : wr)) }
+            : null
+          return {
+            templateId: nextId,
+            props: merged,
+            userGuides: {
+              h: clampMap(s.userGuides.h, hr, next.height),
+              v: clampMap(s.userGuides.v, wr, next.width),
+            },
+            selectedGuide,
+          }
         }),
       setProp: (key, value) => set((s) => ({ props: { ...s.props, [key]: value } })),
       setLayerStyle: (layerId, patch) =>

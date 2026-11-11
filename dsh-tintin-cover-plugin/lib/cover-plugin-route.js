@@ -678,6 +678,13 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   projectAction('/tintin/cover/api/projects', async (engine) => ({ projects: engine.listCoverProjects(), current: basename(await engine.resolveCoverDir()) }))
   projectAction('/tintin/cover/api/projects/create', async (engine, p) => {
     const created = engine.createCoverProject(typeof p.name === 'string' ? p.name : undefined)
+    // 新建项目=默认竖屏(2026-11-12 用户裁决方案B):指针已指向新项目,直接落初始
+    // props 记录(video-portrait+固定层全隐藏,与空白项目同观感),不再继承上一个
+    // 项目的模板。记录写失败不阻断建项目(编辑器仍按空白项目兜底渲染)。
+    try {
+      const { writeCoverPropsRecord } = await import('./cover-acp-routes.js')
+      writeCoverPropsRecord(await engine.resolveCoverDir(), engine.defaultCoverPropsRecord(), 'editor')
+    } catch { /* ignore */ }
     // current 必须回传:前端靠它高亮 tab(缺失=无高亮+切换失灵,2026-10-30 实撞)
     return { ...created, current: created.name, projects: engine.listCoverProjects() }
   })
