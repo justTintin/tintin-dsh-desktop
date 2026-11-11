@@ -38,18 +38,28 @@ export function useCanvasShortcuts(blocked: () => { all: boolean; layer: boolean
         s.arrangeLayer(id, e.shiftKey ? (up ? 'front' : 'back') : up ? 'forward' : 'backward')
         return
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && id.startsWith('img-')) { take(); s.removeCustomLayer(id); return }
+      /* R8 多选: Delete/Backspace 删除全部选中的自由图层;方向键=全部选中层同一 delta 微调 */
+      if ((e.key === 'Delete' || e.key === 'Backspace')) {
+        const targets = [...new Set([id, ...s.multiSelected])].filter((v) => v.startsWith('img-'))
+        if (!targets.length) return
+        take()
+        for (const t of targets) s.removeCustomLayer(t)
+        return
+      }
       const step = e.shiftKey ? 10 : 1
       const d = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, [number, number]>)[e.key]
       if (!d || mod) return
       take()
-      if (lockedOf(s.props, id)) return
-      if (id.startsWith('img-')) {
-        const layer = (Array.isArray(s.props.customLayers) ? (s.props.customLayers as Array<{ id: string; x: number; y: number }>) : []).find((l) => l.id === id)
-        if (layer) s.setCustomLayer(id, { x: layer.x + d[0], y: layer.y + d[1] })
-      } else {
-        const st = (s.props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[id]
-        s.setLayerStyle(id, { dx: (st?.dx ?? 0) + d[0], dy: (st?.dy ?? 0) + d[1] })
+      const moveIds = [...new Set([id, ...s.multiSelected])]
+      for (const mid of moveIds) {
+        if (lockedOf(s.props, mid)) continue
+        if (mid.startsWith('img-')) {
+          const layer = (Array.isArray(s.props.customLayers) ? (s.props.customLayers as Array<{ id: string; x: number; y: number }>) : []).find((l) => l.id === mid)
+          if (layer) s.setCustomLayer(mid, { x: layer.x + d[0], y: layer.y + d[1] })
+        } else {
+          const st = (s.props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[mid]
+          s.setLayerStyle(mid, { dx: (st?.dx ?? 0) + d[0], dy: (st?.dy ?? 0) + d[1] })
+        }
       }
     }
     window.addEventListener('keydown', onKey)

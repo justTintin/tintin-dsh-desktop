@@ -28,6 +28,11 @@ export interface EditorState {
   props: Record<string, unknown>
   hiddenLayers: string[]
   selectedLayer: string | null
+  /** 多选(2026-11-11 §6.4 R8,PhotoCraft Shift+点击加选): 非主选的其余选中层;
+   *  主选=selectedLayer(最后点击)。普通单击清空多选;多选仅移动/对齐/微调/删除语义 */
+  multiSelected: string[]
+  toggleMultiSelect: (id: string) => void
+  clearMultiSelect: () => void
   /** 素材区当前选中项(2026-10-31 §2.5 P1:编辑卡「从素材替换/设为产品图」的数据源) */
   selectedAsset: string | null
   /** 图层显示名(2026-11-11 WP-B 对齐 PhotoCraft 双击重命名;会话内存态,不进 props 契约、
@@ -97,6 +102,22 @@ export const useEditor = create<EditorState>()(
       props: { ...getTemplate('video').defaultProps },
       hiddenLayers: [] as string[],
       selectedLayer: null as string | null,
+      multiSelected: [] as string[],
+      toggleMultiSelect: (id) =>
+        set((s) => {
+          /* R8 语义: 选择集 = {主选} ∪ 多选。toggle 对全集运算——加选保留旧主选在集内
+             (对照 PhotoCraft Shift+点击),移除后主选=集内最后一个,空集=全清 */
+          const sel = new Set([...s.multiSelected, ...(s.selectedLayer ? [s.selectedLayer] : [])])
+          if (sel.has(id)) {
+            sel.delete(id)
+            const rest = [...sel]
+            return { multiSelected: rest, selectedLayer: rest.length ? rest[rest.length - 1]! : null }
+          }
+          sel.add(id)
+          const rest = [...sel]
+          return { multiSelected: rest.filter((v) => v !== id), selectedLayer: id }
+        }),
+      clearMultiSelect: () => set({ multiSelected: [] }),
       selectedAsset: null as string | null,
       layerNames: {} as Record<string, string>,
       renameLayer: (id, name) =>
@@ -135,7 +156,7 @@ export const useEditor = create<EditorState>()(
         set((s) => ({
           hiddenLayers: s.hiddenLayers.includes(id) ? s.hiddenLayers.filter((l) => l !== id) : [...s.hiddenLayers, id],
         })),
-      selectLayer: (id) => set({ selectedLayer: id }),
+      selectLayer: (id) => set({ selectedLayer: id, multiSelected: [] }),
       setSelectedAsset: (name) => set({ selectedAsset: name }),
       setLastExport: (r) => set({ lastExport: r }),
       addCustomLayer: (image, x, y, width = 360, group?: string) => {

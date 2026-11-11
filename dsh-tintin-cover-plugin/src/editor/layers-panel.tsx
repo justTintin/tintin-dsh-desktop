@@ -10,7 +10,7 @@
 import React from 'react'
 import { getTemplate } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
-import { BLEND_MODES } from '../../templates/image-style'
+import { BLEND_MODES, imgDropShadow, lookBlend, lookOpacity, lookTransform, type ImageLook } from '../../templates/image-style'
 import { lockedOf } from './image-ops'
 import { effectiveOrder, useEditor } from './store'
 import { buildLayerRows } from './layer-rows'
@@ -19,8 +19,6 @@ import { ensureMenuStyle, headStyle, iconBtn } from './ui'
 import { layerEl } from './canvas-geom'
 
 const THUMB_PX = 30
-/** 图层显示名持久化键(R4,2026-11-11):项目名 → { 图层id → 显示名 };面板接管读写 */
-const LAYER_NAMES_KEY = 'tintin.cover.layerNames.v1'
 
 /** 文字行缩略图(R3,2026-11-11):canvas 2D 真字体渲染——字号/颜色/字重/斜体/投影/
  *  描边/不透明度与画布同源,2 倍分辨率;jsdom/无 2D 环境回退字样 span(单测环境无画布)。 */
@@ -89,7 +87,9 @@ function TextThumb({ text, styles }: {
   )
 }
 
-/** 行缩略图(PhotoCraft 64px 缩略图的小型化;照片行=内嵌小图,文字行=字样,图形行=◇) */
+/** 行缩略图(R5,2026-11-11 §6.4: 图片行=合成像素级——旋转/翻转/不透明度/混合/投影
+ *  与画布同一条 CSS 渲染管线(lookTransform/lookOpacity/lookBlend/imgDropShadow 同源),
+ *  不再是原始素材小图;文字行=真字体 canvas;图形行=◇) */
 function LayerThumb({ row, layerDefs, props }: {
   row: { id: string; rowType: 'group' | 'free' }
   layerDefs: ReturnType<typeof getTemplate>['layerDefs']
@@ -99,10 +99,18 @@ function LayerThumb({ row, layerDefs, props }: {
   const checker = { background: 'repeating-conic-gradient(#2e2e35 0% 25%, #1b1b21 0% 50%) 0 0 / 8px 8px' }
   const box: React.CSSProperties = { width: THUMB_PX, height: THUMB_PX, borderRadius: 4, flexShrink: 0, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }
   if (row.rowType === 'free') {
-    const img = (row as { image?: string }).image ?? ''
+    const layer = (row as { image?: string; rotate?: number; opacity?: number; blend?: string; flipX?: boolean; flipY?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string } })
+    const img = layer.image ?? ''
     return (
       <div style={{ ...box, ...checker, border: '1px solid var(--border)' }}>
-        <img src={`/tintin/ipc/cover/acp/asset?name=${encodeURIComponent(img)}`} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+        <img
+          src={`/tintin/ipc/cover/acp/asset?name=${encodeURIComponent(img)}`} alt="" loading="lazy"
+          style={{
+            width: '100%', height: '100%', objectFit: 'contain', display: 'block',
+            transform: lookTransform(layer), opacity: lookOpacity(layer), mixBlendMode: lookBlend(layer),
+            filter: imgDropShadow(layer),
+          }}
+        />
       </div>
     )
   }
@@ -115,10 +123,18 @@ function LayerThumb({ row, layerDefs, props }: {
   }
   if (def?.type === 'product' || key === 'bgImage') {
     const src = typeof value === 'string' && value ? value : ''
+    const look = (props.styles as Record<string, ImageLook> | undefined)?.[row.id]
     return (
       <div style={{ ...box, ...checker, border: '1px solid var(--border)' }}>
         {src
-          ? <img src={`/tintin/ipc/cover/acp/asset?name=${encodeURIComponent(src)}`} alt="" loading="lazy" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+          ? <img
+              src={`/tintin/ipc/cover/acp/asset?name=${encodeURIComponent(src)}`} alt="" loading="lazy"
+              style={{
+                width: '100%', height: '100%', objectFit: 'cover', display: 'block',
+                transform: lookTransform(look), opacity: lookOpacity(look), mixBlendMode: lookBlend(look),
+                filter: imgDropShadow(look),
+              }}
+            />
           : <span style={{ fontSize: 12, color: 'var(--text-faint)' }}>🖼</span>}
       </div>
     )
@@ -164,22 +180,9 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
   const [renaming, setRenaming] = React.useState<{ id: string; value: string } | null>(null)
   const [menu, setMenu] = React.useState<{ id: string; x: number; y: number } | null>(null)
   const endDrag = (): void => { setDragId(null); setOverId(null); setAssetOverId(null); setTrashHot(false) }
-  /* R4 显示名按项目持久化(2026-11-11):面板接管读写——项目切换即换档(load),
-     名称变更落盘(save);agent-sync 的 props 回读不再触碰 layerNames。 */
-  React.useEffect(() => {
-    let names: Record<string, string> = {}
-    try {
-      names = (JSON.parse(localStorage.getItem(LAYER_NAMES_KEY) ?? '{}') as Record<string, Record<string, string>>)[project] ?? {}
-    } catch { /* 坏 JSON 忽略 */ }
-    useEditor.setState({ layerNames: names })
-  }, [project])
-  React.useEffect(() => {
-    try {
-      const all = JSON.parse(localStorage.getItem(LAYER_NAMES_KEY) ?? '{}') as Record<string, Record<string, string>>
-      all[project] = layerNames
-      localStorage.setItem(LAYER_NAMES_KEY, JSON.stringify(all))
-    } catch { /* 存储失败不阻断 */ }
-  }, [layerNames, project])
+  /* R7(2026-11-11 §6.4): layerNames 属主=契约(cover.props.json 经 agent-sync 推/收,
+     项目域天然隔离);R4 的 localStorage 双 effect 退役——改名即 store 变更,推送
+     防抖自动携带 layerNames 落盘,项目切换由 reloadProjectState 套用记录。 */
   /** 显示名:layerNames 优先(双击重命名),缺省=行默认名 */
   const displayName = (row: { rowType: 'group' | 'free'; id: string; label: string }): string => layerNames[row.id] ?? row.label
   /** 素材拖入图层面板(2026-10-30 用户裁决):拖到某层行=作为自定义层插到该层层级位置;

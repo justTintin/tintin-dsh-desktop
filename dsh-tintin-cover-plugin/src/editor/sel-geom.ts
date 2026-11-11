@@ -16,7 +16,7 @@ export interface RotFrame { cx: number; cy: number; w: number; h: number; deg: n
 export type SelCorner = 'nw' | 'ne' | 'se' | 'sw'
 export type SelEdge = 'n' | 'e' | 's' | 'w'
 
-const r2 = (v: number): number => Math.round(v * 100) / 100
+const r2 = (v: number): number => Math.round(v * 100) / 100 || 0 // ||0: 归一化 -0(90° 整倍数浮点)
 
 /** 解析 computedStyle.transform 的 matrix(a,b,c,d,e,f);none/不支持(matrix3d)→ null */
 export function parseMatrix(transform: string | null | undefined): Matrix2D | null {
@@ -51,8 +51,10 @@ export function frameFromLayout(layout: { left: number; top: number; w: number; 
   }
 }
 
-/** 四个旋转角点(画布 px)。列向量 u=(cos deg,sin deg) 为宽度边方向,perp 为高度边方向;
- *  角点集合与翻转(det 符号)无关,标签按视觉方位分配(nw=左上最偏…)。 */
+/** 四个旋转角点(画布 px)。R6(2026-11-11 §6.4): 标签=内容角附着(PhotoCraft 语义)——
+ *  nw 恒= C−(w/2)u−(h/2)v,随层旋转走,不做视觉方位标注(视觉标注在 ±90° 整倍数
+ *  出现 x+y 平局,手柄会在相邻角之间跳;内容角附着无平局,且 deg=0 时两者重合)。
+ *  翻转不改盒几何,角点与翻转无关。 */
 export function rotCorners(f: RotFrame): Array<{ corner: SelCorner; x: number; y: number }> {
   const rad = f.deg * Math.PI / 180
   const ux = Math.cos(rad)
@@ -61,23 +63,16 @@ export function rotCorners(f: RotFrame): Array<{ corner: SelCorner; x: number; y
   const vy = ux
   const hw = f.w / 2
   const hh = f.h / 2
-  const pts = [
-    { x: f.cx + hw * ux + hh * vx, y: f.cy + hw * uy + hh * vy },
-    { x: f.cx + hw * ux - hh * vx, y: f.cy + hw * uy - hh * vy },
-    { x: f.cx - hw * ux + hh * vx, y: f.cy - hw * uy + hh * vy },
-    { x: f.cx - hw * ux - hh * vx, y: f.cy - hw * uy - hh * vy },
-  ]
-  // 视觉方位标注: nw=min(x+y) ne=min(y-x) sw=max(y-x) se=max(x+y)(轴对齐时与 CSS 命名一致)
-  const score = (p: { x: number; y: number }): { sum: number; diff: number } => ({ sum: p.x + p.y, diff: p.y - p.x })
-  const minSum = Math.min(...pts.map((p) => score(p).sum))
-  const maxSum = Math.max(...pts.map((p) => score(p).sum))
-  const minDiff = Math.min(...pts.map((p) => score(p).diff))
-  const maxDiff = Math.max(...pts.map(p => score(p).diff))
-  return pts.map((p) => {
-    const s = score(p)
-    const corner: SelCorner = s.sum === minSum ? 'nw' : s.sum === maxSum ? 'se' : s.diff === minDiff ? 'ne' : 'sw'
-    return { corner, x: r2(p.x), y: r2(p.y) }
-  })
+  return ([
+    ['nw', -1, -1],
+    ['ne', 1, -1],
+    ['sw', -1, 1],
+    ['se', 1, 1],
+  ] as const).map(([corner, su, sv]) => ({
+    corner,
+    x: r2(f.cx + su * hw * ux + sv * hh * vx),
+    y: r2(f.cy + su * hw * uy + sv * hh * vy),
+  }))
 }
 
 /** 上/下/左/右 边中点(画布 px);n=视觉上侧(y 更小,x 破平局),w=视觉左侧(x 更小,y 破平局) */

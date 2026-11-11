@@ -45,13 +45,14 @@ describe('rotCorners(视觉方位标注)', () => {
     expect(by.se).toEqual({ corner: 'se', x: 200, y: 150 })
     expect(by.sw).toEqual({ corner: 'sw', x: 0, y: 150 })
   })
-  it('rotate(90°): 200×100 的框视觉上变 100 宽 200 高,角点集正确', () => {
+  it('rotate(90°): 200×100 的框视觉上变 100 宽 200 高;内容角随层旋转(R6)', () => {
     const cs = rotCorners({ cx: 100, cy: 100, w: 200, h: 100, deg: 90 })
     const set = cs.map((c) => `${c.x},${c.y}`).sort()
     // deg=90: u=(0,1), v=(-1,0);角点 = c ± 100·u ± 50·v → x∈{50,150}, y∈{0,200}
     expect(set).toEqual(['50,0', '150,0', '50,200', '150,200'].sort())
-    // 视觉最上左 = nw: min(x+y)=50 → (50,0)
-    expect(cs.find((c) => c.corner === 'nw')).toEqual({ corner: 'nw', x: 50, y: 0 })
+    // 内容角附着: nw = C −100u −50v = (150, 0)(随层旋转,非视觉最上左)
+    expect(cs.find((c) => c.corner === 'nw')).toEqual({ corner: 'nw', x: 150, y: 0 })
+    expect(cs.find((c) => c.corner === 'se')).toEqual({ corner: 'se', x: 50, y: 200 })
   })
 })
 

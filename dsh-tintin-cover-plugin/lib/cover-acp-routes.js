@@ -529,7 +529,17 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
           return
         }
       }
-      writeCoverPropsRecord(dir, { templateId: p.templateId, props: p.props, hiddenLayers: Array.isArray(p.hiddenLayers) ? p.hiddenLayers : [] }, 'editor')
+      /* layerNames(2026-11-11 §6.4 R7: 图层显示名进契约——可选字段,编辑器面板
+         属主;agent 侧忽略未知字段,旧记录无此键=无自定义名。形状守卫:字符串映射)。 */
+      const layerNames = p.layerNames && typeof p.layerNames === 'object' && !Array.isArray(p.layerNames)
+        ? Object.fromEntries(Object.entries(p.layerNames).filter(([, v]) => typeof v === 'string').slice(0, 100))
+        : undefined
+      writeCoverPropsRecord(dir, {
+        templateId: p.templateId,
+        props: p.props,
+        hiddenLayers: Array.isArray(p.hiddenLayers) ? p.hiddenLayers : [],
+        ...(layerNames !== undefined ? { layerNames } : {}),
+      }, 'editor')
       sendJson(res, 200, { ok: true })
     } catch (err) {
       sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) })

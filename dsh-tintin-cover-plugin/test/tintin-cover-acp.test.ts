@@ -92,6 +92,14 @@ describe('cover props record (editor ↔ agent seam)', () => {
     expect(typeof record?.updatedAt).toBe('number')
     expect(record?.props).toEqual({ title: 'x' })
   })
+  it('persists layerNames when provided (R7 contract) and omits the key otherwise', () => {
+    const coverDir = tempRoot()
+    writeCoverPropsRecord(coverDir, { templateId: 'video', props: {}, hiddenLayers: [], layerNames: { title: '主标题·改名', bad: 3 } }, 'editor')
+    const withNames = readCoverPropsRecord(coverDir)
+    expect(withNames?.layerNames).toEqual({ title: '主标题·改名', bad: 3 }) // 服务端存原样,消毒在消费端
+    writeCoverPropsRecord(coverDir, { templateId: 'video', props: {}, hiddenLayers: [] }, 'editor')
+    expect(readCoverPropsRecord(coverDir)?.layerNames).toBeUndefined()
+  })
 })
 
 describe('cover acp bridge surface', () => {

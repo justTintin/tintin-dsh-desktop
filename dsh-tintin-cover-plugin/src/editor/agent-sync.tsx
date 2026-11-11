@@ -21,13 +21,19 @@ function pushChatContextNow(): void {
   )
 }
 
+/** layerNames 契约消毒(R7): 只收字符串映射(≤100 条),其余形状丢弃 */
+function sanitizeLayerNames(v: unknown): Record<string, string> {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
+  return Object.fromEntries(Object.entries(v as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === 'string').slice(0, 100))
+}
+
 /** 项目切换后的编辑器状态回读(2026-10-30 项目制):套用新项目目录的 props 快照。
  *  新项目尚无 props 文件时**必须重置为模板默认**(空白画布)——直接 return 会让
  *  画布/图层停留在旧项目内容(实撞:切到新建项目画布还是上一张的图)。 */
 async function reloadProjectState(): Promise<void> {
   try {
     const r = await fetch('/tintin/ipc/cover/acp/props').then((x) => x.json())
-    const record = r?.record as { templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
+    const record = r?.record as { templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[]; layerNames?: Record<string, string> } | null
     const tid = useEditor.getState().templateId
     if (record && typeof record.templateId === 'string' && record.templateId && record.props && typeof record.props === 'object') {
       if (record.templateId !== tid) useEditor.getState().setTemplate(record.templateId)
@@ -35,6 +41,7 @@ async function reloadProjectState(): Promise<void> {
       useEditor.setState({
         props: { ...defaults, ...record.props },
         hiddenLayers: Array.isArray(record.hiddenLayers) ? [...record.hiddenLayers] : [],
+        layerNames: sanitizeLayerNames(record.layerNames), // R7: 名字随契约记录(项目域)
         selectedLayer: null,
       })
     } else {
@@ -49,7 +56,7 @@ async function reloadProjectState(): Promise<void> {
       }
       cleared.customLayers = []
       cleared.layerOrder = t.layerDefs.map((l) => l.id)
-      useEditor.setState({ props: cleared, hiddenLayers: t.layerDefs.map((l) => l.id), selectedLayer: null })
+      useEditor.setState({ props: cleared, hiddenLayers: t.layerDefs.map((l) => l.id), selectedLayer: null, layerNames: {} })
     }
   } catch { /* 会话路由未起(旧包) */ }
 }
@@ -108,7 +115,7 @@ function useAgentPropsSync(isBusy: () => boolean): void {
       try {
         const r = await fetch('/tintin/ipc/cover/acp/props').then((x) => x.json())
         if (stop) return
-        const record = r?.record as { origin?: string; updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] } | null
+        const record = r?.record as { origin?: string; updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[]; layerNames?: Record<string, string> } | null
         if (record && typeof record.updatedAt === 'number') seenUpdatedAt = record.updatedAt
         if (record && record.origin === 'agent' && typeof record.updatedAt === 'number'
           && record.updatedAt > lastAgentTs && record.updatedAt > lastOwnWrite) {
@@ -128,6 +135,7 @@ function useAgentPropsSync(isBusy: () => boolean): void {
               useEditor.setState({ props: merged })
             }
             if (Array.isArray(record.hiddenLayers)) useEditor.setState({ hiddenLayers: [...record.hiddenLayers] })
+            if (record.layerNames !== undefined) useEditor.setState({ layerNames: sanitizeLayerNames(record.layerNames) })
           } finally {
             setTimeout(() => { pushing = false }, 650) // 盖过 600ms 推送防抖,防回流打转
           }
@@ -147,13 +155,13 @@ function useAgentPropsSync(isBusy: () => boolean): void {
         void fetch('/tintin/ipc/cover/acp/props', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ templateId: s.templateId, props: s.props, hiddenLayers: s.hiddenLayers, seenUpdatedAt }),
+          body: JSON.stringify({ templateId: s.templateId, props: s.props, hiddenLayers: s.hiddenLayers, layerNames: s.layerNames, seenUpdatedAt }),
         })
           .then((x) => x.json())
           .then((j) => {
             /* 被乐观锁拒(409=agent 期间写过): 丢弃陈旧快照, 立即套用 agent 最新记录 */
             if (j?.stale && j?.record?.origin === 'agent') {
-              const record = j.record as { updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[] }
+              const record = j.record as { updatedAt?: number; templateId?: string; props?: Record<string, unknown>; hiddenLayers?: string[]; layerNames?: Record<string, string> }
               if (typeof record.updatedAt === 'number') seenUpdatedAt = record.updatedAt
               if (typeof record.templateId === 'string' && record.templateId && record.templateId !== useEditor.getState().templateId) {
                 useEditor.getState().setTemplate(record.templateId)
@@ -161,7 +169,7 @@ function useAgentPropsSync(isBusy: () => boolean): void {
               const defaults = getTemplate(useEditor.getState().templateId).defaultProps
               const merged = { ...defaults, ...(record.props && typeof record.props === 'object' ? record.props : {}) }
               merged.customLayers = sanitizeCustomLayers(useEditor.getState().templateId, merged.customLayers)
-              useEditor.setState({ props: merged, hiddenLayers: Array.isArray(record.hiddenLayers) ? [...record.hiddenLayers] : [] })
+              useEditor.setState({ props: merged, hiddenLayers: Array.isArray(record.hiddenLayers) ? [...record.hiddenLayers] : [], layerNames: sanitizeLayerNames(record.layerNames) })
             }
           })
           .catch(() => {}).finally(() => { pushing = false })

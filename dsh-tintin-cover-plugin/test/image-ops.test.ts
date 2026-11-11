@@ -1,6 +1,6 @@
 // 选中图片图层基本操作(2026-11-01 对齐 PhotoCraft)的纯逻辑与 store 动作回归面。
 import { beforeEach, describe, expect, it } from 'vitest'
-import { arrangeOrder, centerResize, clampScale, cloneLayer, cornerResize, rotatedEdgeResize, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
+import { arrangeOrder, centerResize, clampScale, cloneLayer, cornerResize, rotatedCornerResize, rotatedEdgeResize, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
 import { effectiveOrder, useEditor } from '../src/editor/store'
 import { backdropStyle, lookBlend, lookOpacity, lookTransform } from '../templates/image-style'
 
@@ -183,5 +183,39 @@ describe('rotatedEdgeResize (边柄,2026-11-11 R2: 旋转层同样适用,锚=对
     const p = rotatedEdgeResize({ x: 100, y: 80, w: 200, h: 100 }, 'w', { x: 500, y: 0 }, 0)
     expect(p.width).toBe(20)
     expect(p.x! + p.width!).toBe(300)
+  })
+})
+
+describe('rotatedCornerResize (旋转层角柄精确锚定,2026-11-11 §6.4 R6)', () => {
+  it('deg=0 与 cornerResize 逐值一致:nw 拖拽=右下锚', () => {
+    const p = rotatedCornerResize({ x: 100, y: 80, w: 200, h: 100 }, 'nw', { x: 40, y: 40 }, 0, { hExplicit: 100 })
+    const ref = cornerResize({ left: 100, top: 80, w: 200, h: 100 }, 'nw', Math.hypot(40 - 300, 40 - 180), Math.hypot(100 - 300, 80 - 180), { x: 100, y: 80, w: 200, h: 100 })
+    expect(p).toEqual(ref)
+  })
+  it('deg=90:内容角 nw 拖拽,对侧内容角 se 世界位不动(R6 精确锚定)', () => {
+    const p = rotatedCornerResize({ x: 100, y: 80, w: 200, h: 100 }, 'nw', { x: 0, y: 0 }, 90, { hExplicit: 100 })
+    // 起始: C=(200,130), nw=(250,30), se=Q=(150,230);f=|P−Q|/|P0−Q| → w=246,h=123
+    expect(p.width).toBe(246)
+    expect(p.height).toBe(123)
+    // 由返回布局重构 se 内容角,应回到 Q(±0.6 舍入容差)
+    const u = { x: 0, y: 1 }
+    const v = { x: -1, y: 0 }
+    const ncx = p.x + p.width / 2
+    const ncy = p.y + (p.height ?? 0) / 2
+    const qNew = { x: ncx + (p.width / 2) * u.x + ((p.height ?? 0) / 2) * v.x, y: ncy + (p.width / 2) * u.y + ((p.height ?? 0) / 2) * v.y }
+    expect(Math.abs(qNew.x - 150)).toBeLessThanOrEqual(0.6)
+    expect(Math.abs(qNew.y - 230)).toBeLessThanOrEqual(0.6)
+  })
+  it('未显式高:height=null,y 补偿按布局高同比', () => {
+    const p = rotatedCornerResize({ x: 100, y: 80, w: 200, h: 100 }, 'nw', { x: 40, y: 40 }, 0, { hExplicit: null })
+    expect(p.height).toBeNull()
+    expect(p.x + p.width).toBe(300) // 右缘锚定
+    expect(p.y + 100 * (p.width / 200)).toBeCloseTo(180) // 下缘锚定(同比)
+  })
+  it('min 钳制(deg=0):拖到锚点,收窄到 20 且锚定边不动', () => {
+    const p = rotatedCornerResize({ x: 100, y: 80, w: 200, h: 100 }, 'nw', { x: 300, y: 180 }, 0, { hExplicit: 100 })
+    expect(p.width).toBe(20)
+    expect(p.x + p.width).toBe(300)
+    expect(p.y + (p.height ?? 0)).toBe(180)
   })
 })

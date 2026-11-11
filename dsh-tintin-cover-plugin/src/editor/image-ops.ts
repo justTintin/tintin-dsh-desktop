@@ -117,6 +117,40 @@ export function rotatedEdgeResize(
   return { height: h, x: Math.round(cur.x + k * vx), y: Math.round(cur.y + k * vy - (h - cur.h) / 2) }
 }
 
+/** 旋转层角柄缩放(2026-11-11 §6.4 R6: 对侧内容角精确锚定,替换旋转层的中心锚近似;
+ *  未旋转层仍走 cornerResize——deg=0 时本函数与 cornerResize 逐值一致)。
+ *  几何: 角点=内容角附着(nw 恒=C−(w/2)u−(h/2)v,sel-geom.rotCorners 同构),被拖角
+ *  P0 的轴侧符号 (sU,sV) 由角名精确给出(无视觉标注平局);拖拽比 f=|P−Q0|/|P0−Q0|
+ *  (Q0=对侧内容角起始位,与 cornerResize 同口径);新中心 C′=Q0+sU·(newW/2)·u+sV·(newH/2)·v,
+ *  布局左上=C′−(newW/2,newH/2)。翻转只镜像内容不改盒几何,故公式与 flip 无关。
+ *  hExplicit=null(随比例)时 height 返回 null,y 补偿按布局高同比。 */
+export function rotatedCornerResize(
+  cur: { x: number; y: number; w: number; h: number },
+  corner: Corner,
+  pointer: { x: number; y: number },
+  deg: number,
+  opts: { hExplicit: number | null; min?: number } = { hExplicit: null },
+): { x: number; y: number; width: number; height: number | null } {
+  const min = opts.min ?? 20
+  const rad = (deg * Math.PI) / 180
+  const ux = Math.cos(rad)
+  const uy = Math.sin(rad)
+  const vx = -uy
+  const vy = ux
+  const cx = cur.x + cur.w / 2
+  const cy = cur.y + cur.h / 2
+  const [su, sv] = corner === 'nw' ? [-1, -1] : corner === 'ne' ? [1, -1] : corner === 'sw' ? [-1, 1] : [1, 1]
+  const p0 = { x: cx + su * (cur.w / 2) * ux + sv * (cur.h / 2) * vx, y: cy + su * (cur.w / 2) * uy + sv * (cur.h / 2) * vy }
+  const q0 = { x: cx - su * (cur.w / 2) * ux - sv * (cur.h / 2) * vx, y: cy - su * (cur.w / 2) * uy - sv * (cur.h / 2) * vy }
+  const f = Math.max(8, Math.hypot(pointer.x - q0.x, pointer.y - q0.y)) / Math.max(8, Math.hypot(p0.x - q0.x, p0.y - q0.y))
+  const width = Math.max(min, Math.round(cur.w * f))
+  const height = opts.hExplicit === null ? null : Math.max(min, Math.round(cur.h * f))
+  const hNew = height ?? Math.max(min, Math.round(cur.h * f))
+  const ncx = q0.x + su * (width / 2) * ux + sv * (hNew / 2) * vx
+  const ncy = q0.y + su * (width / 2) * uy + sv * (hNew / 2) * vy
+  return { x: Math.round(ncx - width / 2), y: Math.round(ncy - hNew / 2), width, height }
+}
+
 export type Corner = 'nw' | 'ne' | 'sw' | 'se'
 
 /** 四角缩放(PhotoCraft Free Transform 角柄语义,2026-11-02 用户裁决「对齐 PhotoCraft」):

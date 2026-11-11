@@ -15,7 +15,7 @@ import { getTemplate } from '../registry'
 import { RenderSurface } from './render-surface'
 import { useCanvasShortcuts } from './canvas-keys'
 import { canvasBoxIn, compositionRectIn, type CanvasBox } from './canvas-geom'
-import { clampScale, cornerResize, centerResize, rotatedEdgeResize, lockedOf, type Corner } from './image-ops'
+import { clampScale, cornerResize, rotatedCornerResize, rotatedEdgeResize, lockedOf, type Corner } from './image-ops'
 import { useRotateHandles, useTextScaleHandles } from './text-scale'
 import { updateHover as auxUpdateHover, usePurePreview, cycleLayerSelection } from './canvas-aux'
 import { useInlineEditor } from './inline-edit'
@@ -49,6 +49,8 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const { templateId, props, hiddenLayers } = useEditor()
   const tpl = getTemplate(templateId)
   const selectLayer = useEditor((s) => s.selectLayer)
+  const toggleMultiSelect = useEditor((s) => s.toggleMultiSelect)
+  const multiSelected = useEditor((s) => s.multiSelected)
   const setProp = useEditor((s) => s.setProp)
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const addCustomLayer = useEditor((s) => s.addCustomLayer)
@@ -59,6 +61,13 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const zoom = useEditor((s) => s.zoom)
   const fitScale = useEditor((s) => s.fitScale)
   const scrollRef = React.useRef<HTMLDivElement>(null)
+  /* R8 标尺(对照 PhotoCraft/PS 画布标尺): 顶/左两条,画布 px 刻度;刻度层随滚动/缩放
+     平移对齐(ref 直写零重渲染),指针十字标跟随。v1 不含拖出参考线。 */
+  const contentRef = React.useRef<HTMLDivElement>(null)
+  const rulerXRef = React.useRef<HTMLDivElement>(null)
+  const rulerYRef = React.useRef<HTMLDivElement>(null)
+  const markerXRef = React.useRef<HTMLDivElement>(null)
+  const markerYRef = React.useRef<HTMLDivElement>(null)
   const setZoom = useEditor((s) => s.setZoom)
   const selectedLayer = useEditor((s) => s.selectedLayer)
   /* 拖动吸附参考线:直接 DOM 更新(ref),不走 React 状态——拖动全程零重渲染(2026-10-31 方案 B) */
@@ -80,6 +89,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
         snapX: { at: number; guide: number } | null; snapY: { at: number; guide: number } | null;
         candsX: { at: number; guide: number }[]; candsY: { at: number; guide: number }[];
         raf: number; curCX: number; curCY: number;
+        moves: Array<{ id: string; kind: 'custom' | 'fixed'; baseX: number; baseY: number; el: HTMLElement | null }>;
       }
     | null
   >(null)
@@ -89,6 +99,8 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const isImageLayer = selectedLayer !== null && (selectedLayer.startsWith('img-') || selectedLayer === 'product')
   /* WP-A3 旋转感知选择框(2026-11-11):编辑器自持 DOM,选择框=旋转矩形(边框/手柄随层旋转) */
   const [sel, setSel] = React.useState<SelSnapshot | null>(null)
+  /* R8 多选包围盒(画布 px AABB;≥2 层选中时取代旋转框,无手柄) */
+  const [multiUnion, setMultiUnion] = React.useState<{ x: number; y: number; w: number; h: number } | null>(null)
   /* 旋转预览-提交分离(2026-10-31 方案 B,同拖动):拖动中改写被拖层内联 transform 里的 rotate 值
      (纯视觉),pointerup 一次性提交 props;取消/未变化=还原基 transform。 */
   const rotRef = React.useRef<{ cx: number; cy: number; a0: number; base: number; id: string; custom: boolean; el: HTMLElement | null; baseTransform: string; curDeg: number } | null>(null)
@@ -99,6 +111,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (rotRef.current || dragRef.current?.active) return // 交互中冻结:几何在变,免得选择框跟着漂
     if (!selectedLayer || pcRunning) {
       setSel((prev) => (prev === null ? prev : null))
+      setMultiUnion((prev) => (prev === null ? prev : null))
       return
     }
     const el = hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`)
@@ -110,16 +123,32 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     }
     const scale = Math.max(comp!.width / tpl.width, 0.05)
     setSel((prev) => (snapEq(prev, got.frame, comp!, scale) ? prev : { frame: got.frame, compLeft: comp!.left, compTop: comp!.top, scale }))
+    /* R8: 多选联合盒(全部选中层的画布 AABB 并集) */
+    if (multiSelected.length > 0) {
+      const ids = [...new Set([selectedLayer, ...multiSelected])]
+      const boxes = ids
+        .map((lid) => hostRef.current?.querySelector('[data-cover-layer="' + lid + '"]'))
+        .filter((elm): elm is Element => Boolean(elm))
+        .map((elm) => canvasBoxIn(elm, comp!, tpl.width))
+      if (boxes.length >= 2) {
+        const x = Math.min(...boxes.map((b) => b.left))
+        const y = Math.min(...boxes.map((b) => b.top))
+        const u = { x, y, w: Math.max(...boxes.map((b) => b.left + b.w)) - x, h: Math.max(...boxes.map((b) => b.top + b.h)) - y }
+        setMultiUnion((prev) => (prev && Math.abs(prev.x - u.x) < 0.5 && Math.abs(prev.y - u.y) < 0.5 && Math.abs(prev.w - u.w) < 0.5 && Math.abs(prev.h - u.h) < 0.5 ? prev : u))
+      } else setMultiUnion((prev) => (prev === null ? prev : null))
+    } else setMultiUnion((prev) => (prev === null ? prev : null))
   }
   React.useLayoutEffect(() => { measureSel() })
   /** 合成盒(按模板比例缩放的画布容器)= 拖动/对齐/落点的统一坐标系 */
   const compositionRect = (): DOMRect | null => compositionRectIn(hostRef.current, playerWrapRef.current)
   /** 缩放手柄(PhotoCraft 角柄,2026-11-02 用户裁决:对角为锚等比缩放;预览-提交分离)。
-   *  自由图层未旋转=对角锚改宽(显式高同比)+x/y 随锚补正;旋转自由层=视觉中心锚(centerResize);
+   *  自由图层未旋转=对角锚改宽(cornerResize);旋转自由层=对侧内容角精确锚定
+   *  (rotatedCornerResize,R6——手柄=内容角附着随层旋转,拖拽比同口径,翻转不改盒几何);
    *  产品图槽位=以中心为锚改缩放倍率(槽位变换原点在中心,四角等价)。 */
   const resRef = React.useRef<{
     id: string; slot: boolean; rotated: boolean; corner: Corner
     ax: number; ay: number; startDist: number; hVis: number
+    deg: number; layout0: { x: number; y: number; w: number; h: number }; hExplicit: number | null
     el: HTMLElement | null; f: number
     w0: number; h0?: number
     sx0: number; sy0: number; signX: number; signY: number; baseTransform: string
@@ -147,13 +176,18 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     const scale = Math.max(rect.width / tpl.width, 0.05)
     const px = (e.clientX - rect.left) / scale
     const py = (e.clientY - rect.top) / scale
-    /* 锚:槽位/旋转层=视觉中心(旋转矩形的 AABB 中心=矩形中心);未旋转自由层=对角 */
-    const centerAnchor = slot || rotated
+    /* 锚:槽位=视觉中心(变换原点在中心);旋转自由层=对侧内容角(rotatedCornerResize
+       内部处理,这里只记起测量);未旋转自由层=对角 */
+    const centerAnchor = slot
     const ax = centerAnchor ? box.left + box.w / 2 : corner === 'nw' || corner === 'sw' ? box.left + box.w : box.left
     const ay = centerAnchor ? box.top + box.h / 2 : corner === 'nw' || corner === 'ne' ? box.top + box.h : box.top
     resRef.current = {
       id: selectedLayer, slot, rotated, corner, ax, ay, startDist: Math.max(8, Math.hypot(px - ax, py - ay)), el, f: 1,
-      hVis: box.h, w0: layer?.width ?? 0, h0: layer?.height, sx0: lookScale(look?.sx), sy0: lookScale(look?.sy),
+      hVis: box.h,
+      deg: got?.frame.deg ?? 0,
+      layout0: { x: layer?.x ?? 0, y: layer?.y ?? 0, w: layer?.width ?? 0, h: layer?.height ?? got?.frame.h ?? 100 },
+      hExplicit: layer?.height ?? null,
+      w0: layer?.width ?? 0, h0: layer?.height, sx0: lookScale(look?.sx), sy0: lookScale(look?.sy),
       signX: look?.flipX ? -1 : 1, signY: look?.flipY ? -1 : 1, baseTransform: el.style.transform,
       box0: { left: box.left, top: box.top, w: box.w, h: box.h }, layer,
     }
@@ -172,7 +206,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       const i = r.baseTransform.lastIndexOf(' scale(')
       r.el.style.transform = `${i < 0 ? r.baseTransform : r.baseTransform.slice(0, i)} scale(${n.sx * r.signX}, ${n.sy * r.signY})`
     } else if (r.rotated) {
-      const c = centerResize({ x: r.layer?.x ?? 0, y: r.layer?.y ?? 0, w: r.layer?.width ?? n.w, h: r.layer?.height ?? null }, r.f, r.hVis)
+      const c = rotatedCornerResize(r.layout0, r.corner, canvasPoint(e.clientX, e.clientY), r.deg, { hExplicit: r.hExplicit })
       r.el.style.width = `${c.width}px`
       if (c.height !== null) r.el.style.height = `${c.height}px`
       r.el.style.left = `${c.x}px`
@@ -203,7 +237,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     }
     if (r.slot) { setLayerStyle(r.id, { sx: n.sx, sy: n.sy }); return }
     if (r.rotated) {
-      const c = centerResize({ x: r.layer?.x ?? 0, y: r.layer?.y ?? 0, w: r.layer?.width ?? 0, h: r.layer?.height ?? null }, r.f, r.hVis)
+      const c = rotatedCornerResize(r.layout0, r.corner, canvasPoint(e.clientX, e.clientY), r.deg, { hExplicit: r.hExplicit })
       setCustomLayer(r.id, c.height === null ? { x: c.x, y: c.y, width: c.width } : { x: c.x, y: c.y, width: c.width, height: c.height })
       return
     }
@@ -281,8 +315,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   }
   /** 图层元素的画布盒(含 translate/scale 的视觉框 → 画布 px) */
   const canvasBoxOf = (el: Element): CanvasBox => canvasBoxIn(el, compositionRect(), tpl.width)
-  /** 对齐(相对画布;PhotoCraft 式六向)。文字层改 dx/dy 偏移,自定义层改 x/y */
+  /** 对齐(相对画布;PhotoCraft 式六向)。文字层改 dx/dy 偏移,自定义层改 x/y。
+   *  R8 多选: ≥2 层选中时=组内对齐(参照=选区包围盒: 左=最左/中=包围盒中线/右=最右,
+   *  对照 PS Align Left Edges of Selection),逐层按各自盒差 delta 平移。 */
   const alignLayer = (id: string, mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom'): void => {
+    const ids = [...new Set([id, ...multiSelected])]
+    if (ids.length > 1) { alignGroup(ids, mode); return }
     if (lockedOf(props, id)) return
     const el = hostRef.current?.querySelector(`[data-cover-layer="${id}"]`)
     if (!el) return
@@ -303,6 +341,35 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       setLayerStyle(id, { dx: Math.round((styles?.dx ?? 0) + (target - box.left)) })
     } else {
       setLayerStyle(id, { dy: Math.round((styles?.dy ?? 0) + (target - box.top)) })
+    }
+  }
+  /** R8 组内对齐: 参照=选区包围盒(画布盒),逐层 delta=参照边−自身边;横向模式只动 x/dx,
+   *  纵向只动 y/dy。锁定层跳过。 */
+  const alignGroup = (ids: string[], mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom'): void => {
+    const boxes = ids
+      .map((lid) => ({ id: lid, el: hostRef.current?.querySelector(`[data-cover-layer="${lid}"]`) }))
+      .filter((v): v is { id: string; el: Element } => Boolean(v.el) && !lockedOf(props, v.id))
+      .map((v) => ({ id: v.id, el: v.el, box: canvasBoxOf(v.el) }))
+    if (boxes.length < 2) return
+    const horizontal = mode === 'left' || mode === 'centerX' || mode === 'right'
+    const keyOf = (b: CanvasBox): number => horizontal
+      ? (mode === 'left' ? b.left : mode === 'centerX' ? b.left + b.w / 2 : b.left + b.w)
+      : (mode === 'top' ? b.top : mode === 'centerY' ? b.top + b.h / 2 : b.top + b.h)
+    const refs = boxes.map((v) => keyOf(v.box))
+    const ref = horizontal
+      ? (mode === 'left' ? Math.min(...refs) : mode === 'centerX' ? (Math.min(...refs) + Math.max(...refs)) / 2 : Math.max(...refs))
+      : (mode === 'top' ? Math.min(...refs) : mode === 'centerY' ? (Math.min(...refs) + Math.max(...refs)) / 2 : Math.max(...refs))
+    for (const v of boxes) {
+      const delta = Math.round(ref - keyOf(v.box))
+      if (delta === 0) continue
+      if (v.id.startsWith('img-')) {
+        const layer = (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; x: number; y: number }>) : []).find((l) => l.id === v.id)
+        if (!layer) continue
+        setCustomLayer(v.id, horizontal ? { x: layer.x + delta } : { y: layer.y + delta })
+      } else {
+        const styles = (props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[v.id]
+        setLayerStyle(v.id, horizontal ? { dx: (styles?.dx ?? 0) + delta } : { dy: (styles?.dy ?? 0) + delta })
+      }
     }
   }
   /** 拖入图片 → 同步三写 → 新图层(锚点居中于投放点)。
@@ -429,7 +496,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (pcRunning) return // PhotoCraft 为主:画布交互在原生窗口,网页仅镜像
     if (dragRef.current) return // 已在拖动:忽略第二指
     let id = layerAt(e.clientX, e.clientY)
-    selectLayer(id)
+    /* R8 多选(对照 PhotoCraft Shift+点击加选):Shift+命中层=切换其多选态(主选跟随),
+       不启动拖动;普通点击走单选(内部清多选)。 */
+    if (e.shiftKey && id) { toggleMultiSelect(id); return }
+    /* R8: 命中已选层(主选或多选成员)=保持选择整体拖;命中未选层/空处=替换选择 */
+    const alreadyIn = id !== null && (id === selectedLayer || multiSelected.includes(id))
+    if (!alreadyIn) selectLayer(id)
     if (!id) return
     // 锁定位置:只选中不拖动;Alt+拖动仍可拖出副本(副本不带锁,同 PhotoCraft)
     if (lockedOf(props, id) && !(e.altKey && id.startsWith('img-'))) return
@@ -459,14 +531,47 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       baseX = styles?.dx ?? 0
       baseY = styles?.dy ?? 0
     }
-    hostRef.current?.setPointerCapture?.(e.pointerId) // 两分支都捕获:拖出画布事件不断流
+    try { hostRef.current?.setPointerCapture?.(e.pointerId) } catch { /* 指针已释放等场景捕获可抛(NotFoundError),拖动链不因此中断 */ } // 两分支都捕获:拖出画布事件不断流
+    /* R8 多选整体移: moves=主选+全部多选层,各自基位与元素;主选=layerId(吸附/读数/live 通道) */
+    /* 选择集=点击层+主选+多选成员(点 multi 成员时主选也要一起动) */
+    const primary = useEditor.getState().selectedLayer
+    const moveIds = [...new Set([id, ...(primary ? [primary] : []), ...useEditor.getState().multiSelected])]
+    const moves = moveIds.map((mid) => {
+      if (mid === id) return { id: mid, kind, baseX, baseY, el: dragEl as HTMLElement | null }
+      if (mid.startsWith('img-')) {
+        const l = (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; x: number; y: number }>) : []).find((v) => v.id === mid)
+        return { id: mid, kind: 'custom' as const, baseX: l?.x ?? 0, baseY: l?.y ?? 0, el: hostRef.current?.querySelector('[data-cover-layer="' + mid + '"]') as HTMLElement | null }
+      }
+      const st = (props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[mid]
+      return { id: mid, kind: 'fixed' as const, baseX: st?.dx ?? 0, baseY: st?.dy ?? 0, el: hostRef.current?.querySelector('[data-cover-layer="' + mid + '"]') as HTMLElement | null }
+    })
     dragRef.current = {
       kind, layerId: id, pointerId: e.pointerId,
       startX: e.clientX, startY: e.clientY, baseX, baseY, scale,
       baseLeft: baseBox ? baseBox.left - baseX : 0, baseTop: baseBox ? baseBox.top - baseY : 0, boxW: baseBox?.w ?? 200, boxH: baseBox?.h ?? 200,
       el: dragEl as HTMLElement | null, active: false, curX: baseX, curY: baseY,
       snapX: null, snapY: null, candsX: [], candsY: [], raf: 0, curCX: e.clientX, curCY: e.clientY,
+      moves,
     }
+  }
+  /** 标尺对齐: 刻度层平移=内容原点相对 wrap 视口的偏移(随滚动/缩放;ref 直写) */
+  const syncRulers = (): void => {
+    const wrap = playerWrapRef.current
+    const content = contentRef.current
+    if (!wrap || !content) return
+    const wr = wrap.getBoundingClientRect()
+    const cr = content.getBoundingClientRect()
+    if (rulerXRef.current) rulerXRef.current.style.transform = `translateX(${cr.left - wr.left}px)`
+    if (rulerYRef.current) rulerYRef.current.style.transform = `translateY(${cr.top - wr.top}px)`
+  }
+  React.useLayoutEffect(() => { syncRulers() }, [tpl, fitScale, zoom])
+  /** 标尺十字标跟随指针(视口 px;ref 直写) */
+  const syncRulerMarker = (clientX: number, clientY: number): void => {
+    const wrap = playerWrapRef.current
+    if (!wrap) return
+    const wr = wrap.getBoundingClientRect()
+    if (markerXRef.current) { markerXRef.current.style.transform = `translateX(${clientX - wr.left}px)`; markerXRef.current.style.display = 'block' }
+    if (markerYRef.current) { markerYRef.current.style.transform = `translateY(${clientY - wr.top}px)`; markerYRef.current.style.display = 'block' }
   }
   const onPointerMove = (e: React.PointerEvent): void => {
     const drag = dragRef.current
@@ -477,6 +582,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       auxUpdateHover({ hoverRef, hostRef, playerWrapRef, pcRunning, purePreview }, false, e.clientX, e.clientY)
       return
     }
+    syncRulerMarker(e.clientX, e.clientY)
     if (e.pointerId !== drag.pointerId) return
     e.preventDefault() // 拖动中禁原生行为(文本选择/图片拖拽)——选区重绘是抖动源之一
     const dxs = e.clientX - drag.startX
@@ -484,14 +590,14 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (!drag.active) {
       if (Math.hypot(dxs, dys) < 3) return // 死区:手抖不算拖
       drag.active = true
-      if (drag.el) { drag.el.style.outline = '2px solid var(--accent)'; drag.el.style.willChange = 'translate' } // 提升合成层,预览不重绘整栈
+      for (const m of drag.moves) if (m.el) { m.el.style.outline = '2px solid var(--accent)'; m.el.style.willChange = 'translate' } // 全部选中层提升合成层(R8)
       canvasDragFreeze.active = true
       // 层间智能吸附候选(激活时一次实测;拖动中其它层静止):其它图层的 左/中/右、上/中/下 线
       { const xs: { at: number; guide: number }[] = []; const ys: { at: number; guide: number }[] = []
         const push = (arr: { at: number; guide: number }[], at: number, guide: number) => { if (!arr.some((c) => Math.abs(c.at - at) < 0.5)) arr.push({ at, guide }) }
         hostRef.current?.querySelectorAll('[data-cover-layer]').forEach((elm) => {
           const node = elm as HTMLElement
-          if (node.dataset.coverLayer === drag.layerId) return
+          if (drag.moves.some((m) => m.id === node.dataset.coverLayer)) return // 多选整体作为拖动主体(全部排除出候选)
           const b = canvasBoxOf(node)
           for (const L of [b.left, b.left + b.w / 2, b.left + b.w]) { push(xs, L, L); push(xs, L - drag.boxW / 2, L); push(xs, L - drag.boxW, L) }
           for (const L of [b.top, b.top + b.h / 2, b.top + b.h]) { push(ys, L, L); push(ys, L - drag.boxH / 2, L); push(ys, L - drag.boxH, L) }
@@ -552,8 +658,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       drag.raf = 0
       if (dragRef.current !== drag || !drag.active) return
       updateGuides(gv, gh)
-      if (!drag.el?.isConnected) drag.el = (hostRef.current?.querySelector(`[data-cover-layer="${drag.layerId}"]`) as HTMLElement | null) ?? null
-      if (drag.el) drag.el.style.translate = `${x - drag.baseX}px ${y - drag.baseY}px` // 与模板 translate/rotate 基变换可叠加;props 零写入
+      const ddx = x - drag.baseX
+      const ddy = y - drag.baseY
+      for (const m of drag.moves) {
+        if (!m.el?.isConnected) m.el = (hostRef.current?.querySelector(`[data-cover-layer="${m.id}"]`) as HTMLElement | null) ?? null
+        if (m.el) m.el.style.translate = `${ddx}px ${ddy}px` // 同一指针位移(R8 整体移);props 零写入
+      }
       /* live 值广播(2026-11-10 对齐 PhotoCraft #128): 编辑卡 X/Y 拖动中实时跟随 */
       liveLayer.posId = drag.layerId
       liveLayer.posDx = Math.round(drag.curX)
@@ -566,7 +676,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (drag.raf) cancelAnimationFrame(drag.raf)
     updateGuides(null, null)
     hideReadout()
-    if (drag.el) { drag.el.style.outline = ''; drag.el.style.translate = ''; drag.el.style.willChange = '' }
+    for (const m of drag.moves) if (m.el) { m.el.style.outline = ''; m.el.style.translate = ''; m.el.style.willChange = '' }
     canvasDragFreeze.active = false
     const host = hostRef.current
     if (host) host.style.userSelect = ''
@@ -579,8 +689,11 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     const dx = Math.round(drag.curX - drag.baseX)
     const dy = Math.round(drag.curY - drag.baseY)
     if (dx === 0 && dy === 0) return // 0,0 早退(对照 PhotoCraft finish)
-    if (drag.kind === 'custom') setCustomLayer(drag.layerId, { x: Math.round(drag.curX), y: Math.round(drag.curY) })
-    else setLayerStyle(drag.layerId, { dx: Math.round(drag.curX), dy: Math.round(drag.curY) })
+    /* R8: 全部选中层同一 delta 提交(吸附 delta 按主选算,整体平移不破坏相对关系) */
+    for (const m of drag.moves) {
+      if (m.kind === 'custom') setCustomLayer(m.id, { x: Math.round(m.baseX + dx), y: Math.round(m.baseY + dy) })
+      else setLayerStyle(m.id, { dx: Math.round(m.baseX + dx), dy: Math.round(m.baseY + dy) })
+    }
   }
   const onPointerUp = (e: React.PointerEvent): void => {
     const drag = dragRef.current
@@ -622,7 +735,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const compMap = sel ? { left: sel.compLeft, top: sel.compTop, width: sel.scale * tpl.width } : null
   const screen = (p: { x: number; y: number }): { x: number; y: number } | null =>
     compMap ? toScreen(p, compMap, tpl.width) : null
-  const showHandles = Boolean(sel && !pcRunning && !purePreview && !locked && (isImageLayer || selectedTextDef))
+  const showHandles = Boolean(sel && multiSelected.length === 0 && !pcRunning && !purePreview && !locked && (isImageLayer || selectedTextDef))
   const customSel = selectedLayer?.startsWith('img-')
     ? ((props.customLayers as CustomLayer[] | undefined) ?? []).find((l) => l.id === selectedLayer) ?? null
     : null
@@ -638,7 +751,11 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
       /* 捕获失败的兜底:指针已松开(无按键)却仍挂着拖动态 = 丢弃 */
-      onPointerLeave={(e) => { if (!e.buttons && dragRef.current) onPointerCancel() }}
+      onPointerLeave={(e) => {
+        if (!e.buttons && dragRef.current) onPointerCancel()
+        if (markerXRef.current) markerXRef.current.style.display = 'none'
+        if (markerYRef.current) markerYRef.current.style.display = 'none'
+      }}
       onDoubleClick={(e) => openInlineEdit(e.clientX, e.clientY)}
       onDragOver={(e) => { if (!pcRunning) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}
       onDrop={(e) => {
@@ -662,8 +779,8 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
           <div ref={playerWrapRef} style={{ position: 'relative', width: '100%', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
             {/* 滚动层(2026-10-31 画布缩放 §2.6):内容按 zoom 放大,超出即滚动;对齐工具条/选择框
                 在 playerWrap 层不随滚动(按实时 rect 定位)。Ctrl+滚轮缩放=useCanvasZoom 锚点缩放 */}
-            <div ref={scrollRef} style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', alignItems: zoom > 1 ? 'flex-start' : 'center', justifyContent: zoom > 1 ? 'flex-start' : 'center' }} onScroll={measureSel}>
-              <div style={{ position: 'relative', width: Math.round(tpl.width * fitScale * zoom), height: Math.round(tpl.height * fitScale * zoom), flexShrink: 0, margin: 'auto', imageRendering: zoom > 2 ? 'pixelated' : 'auto' }}>
+            <div ref={scrollRef} style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', alignItems: zoom > 1 ? 'flex-start' : 'center', justifyContent: zoom > 1 ? 'flex-start' : 'center' }} onScroll={() => { measureSel(); syncRulers() }}>
+              <div ref={contentRef} style={{ position: 'relative', width: Math.round(tpl.width * fitScale * zoom), height: Math.round(tpl.height * fitScale * zoom), flexShrink: 0, margin: 'auto', imageRendering: zoom > 2 ? 'pixelated' : 'auto' }}>
                 {/* WP-A2: 自持画布=模板组件直接渲染(无 Player 壳);remotion 经 shim */}
                 <RenderSurface
                   component={tpl.component}
@@ -682,8 +799,54 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                 <div ref={guideHRef} style={{ position: 'absolute', left: 0, right: 0, height: 1, background: GUIDE_COLOR, pointerEvents: 'none', zIndex: 95, display: 'none' }} />
               </div>
             </div>
+            {/* R8 标尺(顶/左;刻度随内容平移,十字标随指针;v1 不含拖出参考线) */}
+            {(() => {
+              const scale = Math.max(fitScale * zoom, 0.0001)
+              const minor = scale < 0.25 ? 100 : scale < 0.6 ? 50 : 25
+              const major = minor * 4
+              const ticksX: React.ReactNode[] = []
+              const ticksY: React.ReactNode[] = []
+              for (let c = 0; c <= tpl.width; c += minor) {
+                const isMajor = c % major === 0
+                ticksX.push(
+                  <div key={'x' + c} style={{ position: 'absolute', left: c * scale, bottom: 0, width: 1, height: isMajor ? 9 : 4, background: 'var(--border-strong)' }}>
+                    {isMajor && c > 0 ? <span style={{ position: 'absolute', left: 2, bottom: 8, fontSize: 8, lineHeight: 1, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{c}</span> : null}
+                  </div>,
+                )
+              }
+              for (let c = 0; c <= tpl.height; c += minor) {
+                const isMajor = c % major === 0
+                ticksY.push(
+                  <div key={'y' + c} style={{ position: 'absolute', top: c * scale, right: 0, height: 1, width: isMajor ? 9 : 4, background: 'var(--border-strong)' }}>
+                    {isMajor && c > 0 ? <span style={{ position: 'absolute', top: 2, right: 9, fontSize: 8, lineHeight: 1, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{c}</span> : null}
+                  </div>,
+                )
+              }
+              return (
+                <>
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 18, background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)', zIndex: 60, overflow: 'hidden', pointerEvents: 'none' }}>
+                    <div ref={rulerXRef} style={{ position: 'absolute', top: 0, left: 0, width: Math.round(tpl.width * scale), height: '100%' }}>{ticksX}</div>
+                    <div ref={markerXRef} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 1, background: 'var(--accent)', display: 'none' }} />
+                  </div>
+                  <div style={{ position: 'absolute', top: 18, left: 0, bottom: 0, width: 18, background: 'var(--bg-panel)', borderRight: '1px solid var(--border)', zIndex: 60, overflow: 'hidden', pointerEvents: 'none' }}>
+                    <div ref={rulerYRef} style={{ position: 'absolute', top: 0, left: 0, height: Math.round(tpl.height * scale), width: '100%' }}>{ticksY}</div>
+                    <div ref={markerYRef} style={{ position: 'absolute', top: 0, left: 0, height: 1, background: 'var(--accent)', display: 'none' }} />
+                  </div>
+                  {/* 原点角块 */}
+                  <div style={{ position: 'absolute', top: 0, left: 0, width: 18, height: 18, background: 'var(--bg-panel)', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', zIndex: 61, pointerEvents: 'none' }} />
+                </>
+              )
+            })()}
             {/* WP-A3 旋转感知选择框:边框随层旋转;拖动中由拖动轮廓接管(outlineRef 隐藏) */}
-            {sel && !pcRunning && !purePreview && centerScreen ? (
+            {multiUnion && compMap && !pcRunning && !purePreview ? (
+              <div style={{
+                position: 'absolute',
+                left: compMap.left + multiUnion.x * sel!.scale, top: compMap.top + multiUnion.y * sel!.scale,
+                width: multiUnion.w * sel!.scale, height: multiUnion.h * sel!.scale,
+                border: '1px solid var(--accent)', pointerEvents: 'none', zIndex: 86,
+              }} />
+            ) : null}
+            {sel && multiSelected.length === 0 && !pcRunning && !purePreview && centerScreen ? (
               <div ref={outlineRef} style={{
                 position: 'absolute',
                 left: centerScreen.x, top: centerScreen.y,
