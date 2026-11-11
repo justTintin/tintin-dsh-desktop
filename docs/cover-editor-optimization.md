@@ -387,6 +387,14 @@
 3. **修真 bug(调试页图片必崩)**: `vite.config.ts` 从未 alias `remotion` → dist/editor 调试页跑真 remotion,`Img` 在无 Composition 上下文抛「No video config found」,任何图片层都把整块画布打成错误态(夹具实证;应用内 client.js 有 esbuild alias 不受影响)。补 alias 与 client.js 同口径=调试页与应用一致。
 - 验证: 140 用例+37 基线+三构建+check:tintin+staging 新鲜;夹具端到端(真 PNG):视频模板主体图 276→2760、自由图片 129→847、cover 模板环境底图 552×311→5520×3105(提交 transform scale(10,10)),预览期 `style.scale` 生效,零页面错误。
 
+### 6.5¹³ @ 菜单素材组只列当前项目素材(2026-11-11 续批 R21,用户截图指认)
+
+用户:「这个在引用的素材,为什么这么多,不是应该只有本项目的素材吗」——@ 菜单「素材」组混入了插件 `public/` 自带的演示素材(a.png/b.png/drag-photo.png/lib-m1-*.png 等 76B 占位图),因为 `/acp/files` 路由=项目目录 + public/ 回退,而编辑器素材面板有 `!path.startsWith('public/')` 过滤、chat 桥的 `projectFiles` 没有。
+
+1. **修法**: `chat-shell/cover-chat-bridge.ts` 的 `projectFiles` 加同口径过滤(剔除 `public/` 前缀),@ 菜单=只列当前项目 cover 目录素材。
+2. 路由层不动:agent/工具面仍可见 public/(模板素材词汇在 SKILL 里有约定),仅 @ 菜单收口。
+- 验证: 真路由+新 chat 构建夹具(项目目录 2 图 + 插件 public/):`projectFiles()` total=2、hasPublic=false;@ 菜单打开后素材组恰为 2 个项目文件、无 a.png 族,零 pageerror;check:tintin+staging 新鲜全绿。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。

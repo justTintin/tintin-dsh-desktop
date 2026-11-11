@@ -443,7 +443,11 @@ const coverBridge: AppBridgeContract & Record<string, unknown> = {
     (window.parent as Window).postMessage({ type: 'tintin-cover:draft-refs', refs }, '*');
   },
   onStudioHover: noopStop,
-  projectFiles: async () => j<{ files?: Array<{ path: string; kind: string; size: number }> }>('files').then((r) => ({ files: r.files ?? [] })).catch(() => ({ files: [] })),
+  /* @ 菜单「素材」组=只列当前项目的素材(2026-11-11 用户裁决:插件 public/ 自带演示素材
+     a.png/b.png/drag-photo.png 混进来=噪声;与编辑器素材面板同口径剔除 public/ 前缀) */
+  projectFiles: async () => j<{ files?: Array<{ path: string; kind: string; size: number }> }>('files')
+    .then((r) => ({ files: (r.files ?? []).filter((f) => !f.path.startsWith('public/')) }))
+    .catch(() => ({ files: [] })),
   /* @ 菜单的「图层」组数据源:编辑器 postMessage 推来的实时图层清单(含当前取值)。
      清单为空时向编辑器拉一次(推送可能丢进未就绪的 iframe),1.2s 超时兜底返回。 */
   coverLayers: async () => {
