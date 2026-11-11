@@ -108,6 +108,12 @@ function ensurePjStyle(): void {
     '.tintin-pj-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:12px;color:var(--text-muted)}',
     '.tintin-pj-item:hover{background:var(--bg-hover)}',
     '.tintin-pj-item.is-current{color:#fff}',
+    /* 项目右键菜单(2026-11-11 用户裁决):tab/打开项目列表右键=删除项目(确认后连目录删) */
+    '.tintin-pj-menu{position:fixed;z-index:2090;min-width:132px;background:var(--bg-raised);border:1px solid var(--border-strong);border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.5);padding:4px}',
+    '.tintin-pj-menu-item{padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer;color:var(--text-muted);white-space:nowrap}',
+    '.tintin-pj-menu-item:hover{background:var(--bg-hover)}',
+    '.tintin-pj-menu-item.danger{color:#f87171}',
+    '.tintin-pj-menu-item.danger:hover{background:rgba(248,113,113,.12)}',
   ].join('\n')
   document.head.append(s)
 }
@@ -189,6 +195,27 @@ export const EditorApp: React.FC = () => {
     if (name === currentProject) return
     void switchProject(name)
   }
+  /* 项目右键菜单(2026-11-11 用户裁决):tab 与「打开项目」列表项右键都可删 */
+  const [pjMenu, setPjMenu] = React.useState<{ name: string; x: number; y: number } | null>(null)
+  /** 删除项目(2026-11-11 用户裁决:右键→确认→连目录一起删,素材/状态文件/会话记录
+      随目录消失,与 × 仅收起不同)。删当前项目=切到剩余打开项,无剩余则新建——
+      引擎侧已把指针回退到剩余最新项目,这里再按前端打开 tab 择一覆盖。 */
+  const deleteProject = async (name: string): Promise<void> => {
+    if (!window.confirm(`确认删除项目「${name}」？\n项目目录（素材、状态文件、会话记录）将一并删除，不可恢复。`)) return
+    let r: { ok?: boolean; error?: string; projects?: Array<{ name: string; mtimeMs: number }> } | null = null
+    try {
+      r = await fetch('/tintin/ipc/cover/projects/delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) }).then((x) => x.json())
+    } catch { /* 网络失败保持原状 */ }
+    if (!r?.ok) { window.alert('删除失败：' + String(r?.error ?? '请求未送达')); return }
+    const nextClosed = closedProjects.filter((n) => n !== name)
+    setClosedProjects(nextClosed)
+    const nextProjects = Array.isArray(r.projects) ? r.projects : projects.filter((p) => p.name !== name)
+    setProjects(nextProjects)
+    if (name !== currentProject) return
+    const stillOpen = nextProjects.filter((p) => !nextClosed.includes(p.name))
+    if (stillOpen.length) void switchProject(stillOpen[0]?.name ?? '')
+    else void createProject()
+  }
   ensurePjStyle()
   useChatContextPush()
   useAgentPropsSync(() => canvasDragFreeze.active)
@@ -241,7 +268,8 @@ export const EditorApp: React.FC = () => {
                       key={p.name}
                       className={'tintin-pj-item' + (p.name === currentProject ? ' is-current' : '')}
                       onClick={() => { openProjectFromList(p.name); setProjectListOpen(false) }}
-                      title={open ? `切换到 ${p.name}` : `重新打开 ${p.name}（项目数据保留在磁盘）`}
+                      onContextMenu={(e) => { e.preventDefault(); setProjectListOpen(false); setPjMenu({ name: p.name, x: e.clientX, y: e.clientY }) }}
+                      title={open ? `切换到 ${p.name}` : `重新打开 ${p.name}（项目数据保留在磁盘）· 右键删除`}
                     >
                       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
                       {p.name === currentProject ? <span style={{ fontSize: 11, color: '#8fd6a4' }}>当前</span> : open ? <span style={{ fontSize: 11, color: '#8a8a90' }}>已打开</span> : null}
@@ -265,7 +293,8 @@ export const EditorApp: React.FC = () => {
                 className={'tintin-pj-tab' + (active ? ' is-active' : '')}
                 onClick={() => { if (!isRenaming && !active) void switchProject(p.name) }}
                 onDoubleClick={() => setRenaming({ from: p.name, value: p.name })}
-                title={active ? `${p.name}（当前项目）· 双击重命名` : `${p.name} · 点击切换 · 双击重命名`}
+                onContextMenu={(e) => { e.preventDefault(); setPjMenu({ name: p.name, x: e.clientX, y: e.clientY }) }}
+                title={active ? `${p.name}（当前项目）· 双击重命名 · 右键删除` : `${p.name} · 点击切换 · 双击重命名 · 右键删除`}
                 style={{
                   flexShrink: 0, maxWidth: 180, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
                   padding: '4px 10px', borderRadius: 7, fontSize: 12, whiteSpace: 'nowrap',
@@ -323,6 +352,18 @@ export const EditorApp: React.FC = () => {
       {showExport ? <ExportModal onClose={() => setShowExport(false)} /> : null}
       {showServer ? <ServerSettingsModal onClose={() => setShowServer(false)} /> : null}
       {showSkills ? <SkillsModal onClose={() => setShowSkills(false)} /> : null}
+      {/* 项目右键菜单(2026-11-11 用户裁决):删除项目——与 tab × 仅收起不同,确认后连目录删 */}
+      {pjMenu ? (
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 2080 }} onClick={() => setPjMenu(null)} onContextMenu={(e) => { e.preventDefault(); setPjMenu(null) }} />
+          <div className="tintin-pj-menu" style={{ left: Math.min(pjMenu.x, window.innerWidth - 150), top: Math.min(pjMenu.y, window.innerHeight - 76) }}>
+            <div
+              className="tintin-pj-menu-item danger"
+              onClick={() => { const name = pjMenu.name; setPjMenu(null); void deleteProject(name) }}
+            >删除项目…</div>
+          </div>
+        </>
+      ) : null}
       {/* 布局(2026-11-02 用户裁决:素材条右侧让出给图层列——素材条只随预览列宽,
           图层+编辑列下延至窗口底;2026-10-30「素材横带跨预览列+中栏」裁决由本条取代) */}
       <div style={{ flex: '1 1 auto', display: 'flex', minHeight: 0 }}>

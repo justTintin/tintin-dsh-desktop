@@ -3,7 +3,7 @@
 // 依赖:@remotion/bundler + @remotion/renderer(renderStill;Chromium 随包已裁决——
 // renderer 会在首次调用时定位/下载 headless shell,打包核验纳入 check 链)。
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -123,6 +123,34 @@ export function renameCoverProject(from: string, to: string): { name: string } {
     writeFileSync(join(root, POINTER_FILENAME), JSON.stringify({ name: cleanTo }, null, 2), 'utf8')
   }
   return { name: cleanTo }
+}
+
+/** 删除项目(2026-11-11 用户裁决:tab 右键删除,确认后连目录一起删——素材/props/会话
+ *  记录随项目目录消失,不可恢复)。删的是当前项目时指针回退到剩余最新项目,无剩余则
+ *  清指针(current=null,由调用方新建);回退在引擎侧完成,避免指针悬空期间任何
+ *  resolveCoverDir 轮询把空项目当首访又造一个。 */
+export function deleteCoverProject(rawName: string): { current: string | null } {
+  const root = join(resolveWorkspaceDir(), 'cover')
+  const projectsDir = projectsDirOf(root)
+  const name = sanitizeProjectName(rawName)
+  const target = join(projectsDir, name)
+  /* 防穿越:sanitize 只洗文件非法字符,'.'/'..' 会洗后残留——目录名回读必须等于原名 */
+  if (name === '.' || name === '..' || basename(target) !== name) throw new Error(`非法项目名: ${name}`)
+  if (!existsSync(target)) throw new Error(`项目不存在: ${name}`)
+  const wasCurrent = readCurrentProject(root, projectsDir) === name
+  rmSync(target, { recursive: true, force: true })
+  let current = readCurrentProject(root, projectsDir)
+  if (wasCurrent && !current) {
+    const remaining = listCoverProjects()
+    if (remaining.length) {
+      current = remaining[0]?.name ?? null
+      if (current) writeFileSync(join(root, POINTER_FILENAME), JSON.stringify({ name: current }, null, 2), 'utf8')
+    } else {
+      try { rmSync(join(root, POINTER_FILENAME), { force: true }) } catch { /* 无指针可清 */ }
+      current = null
+    }
+  }
+  return { current }
 }
 
 export interface RenderCoverInput {

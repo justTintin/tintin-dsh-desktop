@@ -689,6 +689,13 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     const renamed = engine.renameCoverProject(String(p.from ?? ''), String(p.to ?? ''))
     return { ...renamed, current: basename(await engine.resolveCoverDir()), projects: engine.listCoverProjects() }
   })
+  /* 删除项目(2026-11-11 用户裁决:tab 右键删除+确认)。引擎侧已回退当前指针,
+     current=null=无剩余项目(前端自行新建);此处不再 resolveCoverDir——指针已清时
+     它会按「首访」再造一个空项目,污染剩余清单。 */
+  projectAction('/tintin/cover/api/projects/delete', async (engine, p) => {
+    const removed = engine.deleteCoverProject(String(p.name ?? ''))
+    return { ...removed, projects: engine.listCoverProjects() }
+  })
 
   // 打开产物目录(资源管理器;body 可带 {dir} 打开指定目录(须存在),缺省封面目录本身,防任意路径打开)
   const disposeReveal = registeringWebServer.register({

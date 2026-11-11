@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createCoverProject, renameCoverProject, resolveCoverDir, resolveWorkspaceDir, switchCoverProject, renderCover } from '../src/engine.ts'
+import { createCoverProject, deleteCoverProject, renameCoverProject, resolveCoverDir, resolveWorkspaceDir, switchCoverProject, renderCover } from '../src/engine.ts'
 
 const testRoot = 'D:/Project/tintin-dsh-desktop/dsh-tintin-cover-plugin/.tmp/test'
 
@@ -54,6 +54,30 @@ describe('产物目录解析(G5 + 2026-10-30 项目制:cover/projects/<当前项
     renameCoverProject('产品A', '产品A-改')
     expect(existsSync(join(ws, 'cover', 'projects', '产品A-改'))).toBe(true)
     expect(resolveCoverDir()).toContain('产品A-改') // 当前项目改名=指针跟随
+  })
+  it('删除项目语义(delete:连目录删;删当前=指针回退剩余最新;删空=清指针;防穿越)', () => {
+    const ws = mkdtempSync(join(testRoot, 'ws-del-'))
+    process.env.TINTIN_WORKSPACE_DIR = ws
+    delete process.env.TINTIN_COVER_DIR
+    createCoverProject('甲项目')
+    const b = createCoverProject('乙项目')
+    const c = createCoverProject('丙项目') // 当前=丙(新建即设当前)
+    writeFileSync(join(ws, 'cover', 'projects', '丙项目', 'cover.props.json'), '{}', 'utf8')
+    // 删非当前:指针不动
+    expect(deleteCoverProject('甲项目').current).toBe(c.name)
+    expect(resolveCoverDir()).toContain('丙项目')
+    // 删当前:指针回退剩余最新(乙),目录连数据一起消失
+    expect(deleteCoverProject('丙项目').current).toBe(b.name)
+    expect(existsSync(join(ws, 'cover', 'projects', '丙项目'))).toBe(false)
+    expect(resolveCoverDir()).toContain('乙项目')
+    // 删空:清指针 current=null(前端自行新建;引擎不再按首访自动造)
+    expect(deleteCoverProject('乙项目').current).toBeNull()
+    expect(existsSync(join(ws, 'cover', 'projects', '乙项目'))).toBe(false)
+    // 防穿越:洗名后仍不得指到 projects 之外;不存在显式报错
+    expect(() => deleteCoverProject('..')).toThrow(/非法项目名/)
+    expect(() => deleteCoverProject('不存在的项目')).toThrow(/项目不存在/)
+    // 指针已清 → resolveCoverDir 走首访建新项目(既有语义)
+    expect(resolveCoverDir()).toContain(join('cover', 'projects'))
   })
   it('TINTIN_COVER_DIR 覆盖(测试注入口,保持旧单目录行为)', () => {
     process.env.TINTIN_COVER_DIR = join(testRoot, 'cover-override')
