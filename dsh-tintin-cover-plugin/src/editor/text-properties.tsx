@@ -133,7 +133,7 @@ function GlyphField({ glyph, children }: { glyph: string; children: React.ReactN
 /** 文字层属性面板(替换 TextStyleEditor;数据=styles[layerId],layerStyle 直投模板节点) */
 export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: string; baseFontSize: number; tplWidth: number }): React.ReactElement {
   const tpl = getTemplate(useEditor((s) => s.templateId))
-  type Sel = { dx?: number; dy?: number; scale?: number; gscale?: number; width?: number; lineHeight?: number; tracking?: number; hscale?: number; vscale?: number; baseline?: number; caseTransform?: string; align?: string; font?: string; color?: string; weight?: number; italic?: boolean; locked?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }
+  type Sel = { dx?: number; dy?: number; scale?: number; gscale?: number; width?: number; lineHeight?: number; tracking?: number; hscale?: number; vscale?: number; baseline?: number; rotate?: number; caseTransform?: string; align?: string; font?: string; color?: string; weight?: number; italic?: boolean; locked?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }
   const styles = useEditor((s) => (s.props.styles as Record<string, Sel | undefined> | undefined)?.[layerId])
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const hiddenLayers = useEditor((s) => s.hiddenLayers)
@@ -229,6 +229,12 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
             <span style={{ width: 13, flexShrink: 0 }} />
             <span style={{ fontSize: 11, color: PC.textDim, width: 16, flexShrink: 0 }}>Y</span>
             <NumField value={measure ? Math.round(measure.top) : undefined} suffix="px" min={-2000} max={4000} disabled={locked} title={locked ? '图层已锁定位置' : '画布绝对 Y'} onCommit={setPosY} />
+          </div>
+          {/* 角度: 画布旋转柄拆除(2026-11-11 用户裁决)后的旋转数字入口(styles.rotate,±180 钳位) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ fontSize: 11, color: PC.textDim, width: 24, flexShrink: 0 }}>角</span>
+            <NumField value={num('rotate')} placeholder="0" suffix="°" min={-180} max={180} disabled={locked} title="旋转角度(度,顺时针为正;留空=0)" onCommit={setNum('rotate')} />
+            <span style={{ width: 13, flexShrink: 0 }} />
           </div>
         </div>
       ) : null}

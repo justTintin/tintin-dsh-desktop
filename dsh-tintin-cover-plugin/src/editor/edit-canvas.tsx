@@ -1,56 +1,33 @@
 // edit-canvas — 画布面板(2026-11-11 WP-A2 自 App.tsx 提取付账 + 用户裁决「编辑态弃
 // Remotion Player 改自持画布」落地):
-// · RenderSurface 直接渲染模板(无 Player 壳,remotion 走 shim);几何/命中/手柄全归编辑器;
-// · WP-A3 选择框=旋转感知(sel-geom): 边框/手柄随层旋转,手柄保持屏幕等尺寸
-//   (对照 PhotoCraft transform_controls.rs 7×7 白底描边方块);参考线=PhotoCraft magenta;
-// · WP-A3 缩放: 未旋转自由层=对角锚(原 cornerResize),旋转自由层=视觉中心锚
-//   (centerResize),产品槽位=中心锚 sx/sy(原语义);边柄=单维缩放(仅未旋转自由层);
-// · WP-A4 文字角柄=几何缩放(text-scale gscale,不改字号不重排);
-// · 拖动/吸附/读数/悬停/Alt 循环/空格纯净预览/快捷键/就地编辑/拖放=原行为零改动;
+// · RenderSurface 直接渲染模板(无 Player 壳,remotion 走 shim);几何/命中全归编辑器;
+// · 2026-11-11 用户裁决:画布选择框/角柄/边柄/旋转柄/悬停框整套 chrome 移除(三轮修复
+//   不稳:偏移双重计入→修复后实测仍见旧位残影与连杆横穿画布;裁决「无法正常处理就
+//   不要此功能」)。保留:点选/Shift 多选/拖动+智能吸附/Alt 循环选层/Alt 复制/对齐
+//   工具条/快捷键/就地编辑/拖放建层/智能参考线/用户参考线/标尺/网格/纯净预览;
+//   尺寸/位置/缩放/旋转编辑走属性面板数值字段(text-properties / layer-editors)。
+//   几何数学(sel-geom/image-ops resize 族/text-scale)留档不删,待整套重设计后复用;
+// · 拖动/吸附/读数/Alt 循环/空格纯净预览/快捷键/就地编辑/拖放=原行为零改动;
 // · 顺手修: 旧 App 级 Ctrl+滚轮监听与 useCanvasZoom 重复挂载(每次滚轮 1.21 倍),
-//   本文件只留 useCanvasZoom 锚点缩放;拖动结束后恢复选择框显示(旧版 React 虚拟
-//   diff 不会重置外部直写的 display:none)。
+//   本文件只留 useCanvasZoom 锚点缩放。
 import React from 'react'
 import { getTemplate } from '../registry'
 import { RenderSurface } from './render-surface'
 import { useCanvasShortcuts } from './canvas-keys'
 import { canvasBoxIn, compositionRectIn, compRectRef, type CanvasBox } from './canvas-geom'
-import { clampScale, cornerResize, rotatedCornerResize, rotatedEdgeResize, lockedOf, type Corner } from './image-ops'
-import { useRotateHandles, useTextScaleHandles } from './text-scale'
-import { updateHover as auxUpdateHover, usePurePreview, cycleLayerSelection } from './canvas-aux'
+import { lockedOf } from './image-ops'
+import { usePurePreview, cycleLayerSelection } from './canvas-aux'
 import { useInlineEditor } from './inline-edit'
-import type { CustomLayer } from '../../templates/CustomLayers'
-import { lookScale, type ImageLook } from '../../templates/image-style'
 import { useEditor } from './store'
 import { canvasDragFreeze, useCanvasZoom } from './use-canvas-zoom'
 import { useUserGuides } from './use-user-guides'
-import { useGroupScale } from './use-group-scale'
 import { CanvasRulers } from './canvas-rulers'
 import { liveLayer, notifyLiveLayer } from './ui'
-import {
-  angleOf, cursorFor, frameOf, rotCorners, rotateHandlePos, rotEdges, toScreen,
-  type RotFrame, type SelEdge,
-} from './sel-geom'
 
-/** 选中框快照(旋转框 + 合成根屏幕映射)。直接存数值,DOMRect 引用每测必新,存对象=React #185 无限重渲 */
-interface SelSnapshot { frame: RotFrame; compLeft: number; compTop: number; scale: number }
-
-const snapEq = (a: SelSnapshot | null, f: RotFrame, comp: DOMRect, scale: number): boolean =>
-  a !== null
-  && Math.abs(a.frame.cx - f.cx) < 0.5 && Math.abs(a.frame.cy - f.cy) < 0.5
-  && Math.abs(a.frame.w - f.w) < 0.5 && Math.abs(a.frame.h - f.h) < 0.5
-  && Math.abs(a.frame.deg - f.deg) < 0.5
-  && a.compLeft === comp.left && a.compTop === comp.top
-  && Math.abs(a.scale - scale) < 0.001
-
-/* PhotoCraft 智能参考线 magenta(crates/engine/src/snap.rs smart guides 同色系);
-   手柄 7×7 白底 accent 描边(transform_controls.rs 同规格)。 */
+/* PhotoCraft 智能参考线 magenta(crates/engine/src/snap.rs smart guides 同色系) */
 const GUIDE_COLOR = '#ff2bbf'
-/* 选择框/手柄 chrome = PhotoCraft 蓝(transform_controls.rs accent;用户裁决一比一) */
-const SEL_COLOR = '#378EF0'
 /* R9b 用户参考线青色(PS guides 视觉系) */
 const GUIDE_USER_COLOR = 'rgba(0,191,255,0.85)'
-const HANDLE_PX = 7
 
 export function CanvasPanel({ project }: { project: string }): React.ReactElement {
   const { templateId, props, hiddenLayers } = useEditor()
@@ -62,8 +39,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const addCustomLayer = useEditor((s) => s.addCustomLayer)
   const setCustomLayer = useEditor((s) => s.setCustomLayer)
-  const applyLayerGeometry = useEditor((s) => s.applyLayerGeometry)
-  const applyGroupScale = useEditor((s) => s.applyGroupScale)
   const duplicateCustomLayer = useEditor((s) => s.duplicateCustomLayer)
   const userGuides = useEditor((s) => s.userGuides)
   const addUserGuide = useEditor((s) => s.addUserGuide)
@@ -74,13 +49,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const fitScale = useEditor((s) => s.fitScale)
   const scrollRef = React.useRef<HTMLDivElement>(null)
   /* R8 标尺(对照 PhotoCraft/PS 画布标尺): 顶/左两条,画布 px 刻度;刻度层随滚动/缩放
-     平移对齐(ref 直写零重渲染),指针十字标跟随。v1 不含拖出参考线。 */
+     平移对齐(ref 直写零重渲染),指针十字标跟随。 */
   const contentRef = React.useRef<HTMLDivElement>(null)
   const rulerXRef = React.useRef<HTMLDivElement>(null)
   const rulerYRef = React.useRef<HTMLDivElement>(null)
   const markerXRef = React.useRef<HTMLDivElement>(null)
   const markerYRef = React.useRef<HTMLDivElement>(null)
-  const setZoom = useEditor((s) => s.setZoom)
   const selectedLayer = useEditor((s) => s.selectedLayer)
   /* 拖动吸附参考线:直接 DOM 更新(ref),不走 React 状态——拖动全程零重渲染(2026-10-31 方案 B) */
   const guideVRef = React.useRef<HTMLDivElement>(null)
@@ -106,231 +80,14 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     | null
   >(null)
   useCanvasZoom(tpl, playerWrapRef, scrollRef)
-  /** 手柄强制重测(旋转/缩放松手后 frame 快照过期;reducer 触发重渲→layout effect 重测) */
-  const [, bumpFrame] = React.useReducer((n: number) => n + 1, 0)
-  const isImageLayer = selectedLayer !== null && (selectedLayer.startsWith('img-') || selectedLayer === 'product')
-  /* WP-A3 旋转感知选择框(2026-11-11):编辑器自持 DOM,选择框=旋转矩形(边框/手柄随层旋转) */
-  const [sel, setSel] = React.useState<SelSnapshot | null>(null)
-  /* R8 多选包围盒(画布 px AABB;≥2 层选中时取代旋转框,无手柄) */
-  const [multiUnion, setMultiUnion] = React.useState<{ x: number; y: number; w: number; h: number } | null>(null)
-  /* 旋转预览-提交分离(2026-10-31 方案 B,同拖动):拖动中改写被拖层内联 transform 里的 rotate 值
-     (纯视觉),pointerup 一次性提交 props;取消/未变化=还原基 transform。 */
-  const rotRef = React.useRef<{ cx: number; cy: number; a0: number; base: number; id: string; custom: boolean; el: HTMLElement | null; baseTransform: string; curDeg: number } | null>(null)
-  const outlineRef = React.useRef<HTMLDivElement>(null)
-  const hoverRef = React.useRef<HTMLDivElement>(null)
-  /** 选中旋转框测量(任何选中图层常驻;旋转/拖动中冻结;滚动后由 onScroll 重算) */
-  const measureSel = (): void => {
-    if (rotRef.current || dragRef.current?.active) return // 交互中冻结:几何在变,免得选择框跟着漂
-    if (!selectedLayer || pcRunning) {
-      setSel((prev) => (prev === null ? prev : null))
-      setMultiUnion((prev) => (prev === null ? prev : null))
-      return
-    }
-    const el = hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`)
-    const comp = compositionRect()
-    const got = el instanceof HTMLElement && comp ? frameOf(el, comp, tpl.width) : null
-    if (!got) {
-      setSel((prev) => (prev === null ? prev : null))
-      return
-    }
-    const scale = Math.max(comp!.width / tpl.width, 0.05)
-    /* 框/手柄渲染在 playerWrap 内(top/left 相对 playerWrap),而 comp 是视口坐标——
-       必须先剥掉 playerWrap 自身的视口偏移(应用顶栏+设置条+画布居中边距),
-       否则偏移被双重计入,选择框整体下/右漂(2026-11-11 用户截图实证,+129 画布px)。 */
-    const wrap = playerWrapRef.current?.getBoundingClientRect()
-    const relLeft = comp!.left - (wrap?.left ?? 0)
-    const relTop = comp!.top - (wrap?.top ?? 0)
-    setSel((prev) => (snapEq(prev, got.frame, comp!, scale) && prev !== null && prev.compLeft === relLeft && prev.compTop === relTop
-      ? prev
-      : { frame: got.frame, compLeft: relLeft, compTop: relTop, scale }))
-    /* R8: 多选联合盒(全部选中层的画布 AABB 并集) */
-    if (multiSelected.length > 0) {
-      const ids = [...new Set([selectedLayer, ...multiSelected])]
-      const boxes = ids
-        .map((lid) => hostRef.current?.querySelector('[data-cover-layer="' + lid + '"]'))
-        .filter((elm): elm is Element => Boolean(elm))
-        .map((elm) => canvasBoxIn(elm, comp!, tpl.width))
-      if (boxes.length >= 2) {
-        const x = Math.min(...boxes.map((b) => b.left))
-        const y = Math.min(...boxes.map((b) => b.top))
-        const u = { x, y, w: Math.max(...boxes.map((b) => b.left + b.w)) - x, h: Math.max(...boxes.map((b) => b.top + b.h)) - y }
-        setMultiUnion((prev) => (prev && Math.abs(prev.x - u.x) < 0.5 && Math.abs(prev.y - u.y) < 0.5 && Math.abs(prev.w - u.w) < 0.5 && Math.abs(prev.h - u.h) < 0.5 ? prev : u))
-      } else setMultiUnion((prev) => (prev === null ? prev : null))
-    } else setMultiUnion((prev) => (prev === null ? prev : null))
-  }
-  React.useLayoutEffect(() => { measureSel() })
-  /** 合成盒(按模板比例缩放的画布容器)= 拖动/对齐/落点的统一坐标系 */
+  /** 合成盒(按模板比例缩放的画布容器)= 拖动/对齐/落点的统一坐标系;
+   *  每渲染刷新 compRectRef(text-properties 变换段 W/H/X/Y 的测量基准)。 */
   const compositionRect = (): DOMRect | null => {
     const rect = compositionRectIn(hostRef.current, playerWrapRef.current)
     compRectRef.current = rect // R11c: 属性面板测量共享
     return rect
   }
-  /** 缩放手柄(PhotoCraft 角柄,2026-11-02 用户裁决:对角为锚等比缩放;预览-提交分离)。
-   *  自由图层未旋转=对角锚改宽(cornerResize);旋转自由层=对侧内容角精确锚定
-   *  (rotatedCornerResize,R6——手柄=内容角附着随层旋转,拖拽比同口径,翻转不改盒几何);
-   *  产品图槽位=以中心为锚改缩放倍率(槽位变换原点在中心,四角等价)。 */
-  const resRef = React.useRef<{
-    id: string; slot: boolean; rotated: boolean; corner: Corner
-    ax: number; ay: number; startDist: number; hVis: number
-    deg: number; layout0: { x: number; y: number; w: number; h: number }; hExplicit: number | null
-    el: HTMLElement | null; f: number
-    w0: number; h0?: number
-    sx0: number; sy0: number; signX: number; signY: number; baseTransform: string
-    box0: CanvasBox
-    layer: CustomLayer | null
-  } | null>(null)
-  const resized = (r: NonNullable<typeof resRef.current>): { w: number; h?: number; sx: number; sy: number } => ({
-    w: Math.max(20, Math.min(4000, Math.round(r.w0 * r.f))),
-    h: r.h0 === undefined ? undefined : Math.max(20, Math.min(4000, Math.round(r.h0 * r.f))),
-    sx: clampScale(r.sx0 * r.f), sy: clampScale(r.sy0 * r.f),
-  })
-  const onResizeDown = (corner: Corner) => (e: React.PointerEvent): void => {
-    if (!sel || !selectedLayer || lockedOf(props, selectedLayer)) return
-    const slot = selectedLayer === 'product'
-    if (!slot && !selectedLayer.startsWith('img-')) return
-    e.stopPropagation()
-    const layer = ((props.customLayers as CustomLayer[] | undefined) ?? []).find((l) => l.id === selectedLayer) ?? null
-    const look = (props.styles as Record<string, ImageLook> | undefined)?.[selectedLayer]
-    const el = hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`) as HTMLElement | null
-    const rect = compositionRect()
-    if ((!slot && !layer) || !el || !rect) return
-    const box = canvasBoxOf(el)
-    const got = frameOf(el, rect, tpl.width)
-    const rotated = !slot && Math.abs(got?.frame.deg ?? 0) > 0.5
-    const scale = Math.max(rect.width / tpl.width, 0.05)
-    const px = (e.clientX - rect.left) / scale
-    const py = (e.clientY - rect.top) / scale
-    /* 锚:槽位=视觉中心(变换原点在中心);旋转自由层=对侧内容角(rotatedCornerResize
-       内部处理,这里只记起测量);未旋转自由层=对角 */
-    const centerAnchor = slot
-    const ax = centerAnchor ? box.left + box.w / 2 : corner === 'nw' || corner === 'sw' ? box.left + box.w : box.left
-    const ay = centerAnchor ? box.top + box.h / 2 : corner === 'nw' || corner === 'ne' ? box.top + box.h : box.top
-    resRef.current = {
-      id: selectedLayer, slot, rotated, corner, ax, ay, startDist: Math.max(8, Math.hypot(px - ax, py - ay)), el, f: 1,
-      hVis: box.h,
-      deg: got?.frame.deg ?? 0,
-      layout0: { x: layer?.x ?? 0, y: layer?.y ?? 0, w: layer?.width ?? 0, h: layer?.height ?? got?.frame.h ?? 100 },
-      hExplicit: layer?.height ?? null,
-      w0: layer?.width ?? 0, h0: layer?.height, sx0: lookScale(look?.sx), sy0: lookScale(look?.sy),
-      signX: look?.flipX ? -1 : 1, signY: look?.flipY ? -1 : 1, baseTransform: el.style.transform,
-      box0: { left: box.left, top: box.top, w: box.w, h: box.h }, layer,
-    }
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-  }
-  const onResizeMove = (e: React.PointerEvent): void => {
-    const r = resRef.current
-    const rect = compositionRect()
-    if (!r || !rect) return
-    const scale = Math.max(rect.width / tpl.width, 0.05)
-    const distNow = Math.hypot((e.clientX - rect.left) / scale - r.ax, (e.clientY - rect.top) / scale - r.ay)
-    r.f = distNow / r.startDist
-    const n = resized(r)
-    if (!r.el) return // 预览-提交分离:以下纯视觉
-    if (r.slot) {
-      const i = r.baseTransform.lastIndexOf(' scale(')
-      r.el.style.transform = `${i < 0 ? r.baseTransform : r.baseTransform.slice(0, i)} scale(${n.sx * r.signX}, ${n.sy * r.signY})`
-    } else if (r.rotated) {
-      const c = rotatedCornerResize(r.layout0, r.corner, canvasPoint(e.clientX, e.clientY), r.deg, { hExplicit: r.hExplicit })
-      r.el.style.width = `${c.width}px`
-      if (c.height !== null) r.el.style.height = `${c.height}px`
-      r.el.style.left = `${c.x}px`
-      r.el.style.top = `${c.y}px`
-    } else {
-      const c = cornerResize(r.box0, r.corner, distNow, r.startDist, { x: r.layer?.x ?? 0, y: r.layer?.y ?? 0, w: r.layer?.width ?? n.w, h: r.layer?.height ?? null })
-      r.el.style.width = `${c.width}px`
-      if (c.height !== null) r.el.style.height = `${c.height}px`
-      r.el.style.left = `${c.x}px`
-      r.el.style.top = `${c.y}px`
-    }
-  }
-  const onResizeUp = (e: React.PointerEvent): void => {
-    const r = resRef.current
-    resRef.current = null
-    ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
-    if (!r) return
-    const n = resized(r)
-    const unchanged = r.slot ? n.sx === r.sx0 && n.sy === r.sy0 : n.w === r.w0
-    if (unchanged) { // 不写 props 就不重渲染:还原预览
-      if (r.el && r.slot) r.el.style.transform = r.baseTransform
-      else if (r.el) {
-        r.el.style.width = `${r.w0}px`
-        if (r.h0 !== undefined) r.el.style.height = `${r.h0}px`
-        if (r.layer) { r.el.style.left = `${r.layer.x}px`; r.el.style.top = `${r.layer.y}px` }
-      }
-      return
-    }
-    if (r.slot) { setLayerStyle(r.id, { sx: n.sx, sy: n.sy }); return }
-    if (r.rotated) {
-      const c = rotatedCornerResize(r.layout0, r.corner, canvasPoint(e.clientX, e.clientY), r.deg, { hExplicit: r.hExplicit })
-      setCustomLayer(r.id, c.height === null ? { x: c.x, y: c.y, width: c.width } : { x: c.x, y: c.y, width: c.width, height: c.height })
-      return
-    }
-    const c = cornerResize(r.box0, r.corner, r.f * r.startDist, r.startDist, { x: r.layer?.x ?? 0, y: r.layer?.y ?? 0, w: r.layer?.width ?? 0, h: r.layer?.height ?? null })
-    setCustomLayer(r.id, c.height === null ? { x: c.x, y: c.y, width: c.width } : { x: c.x, y: c.y, width: c.width, height: c.height })
-  }
-  /** 边柄单维缩放(WP-A3;R2 起旋转层同样支持:rotatedEdgeResize 以指针轴向分量驱动,
-   *  对侧边为锚,deg=0 退化为轴对齐。n/s 仅显式高度的自由层) */
-  const edgeRef = React.useRef<{
-    id: string; side: SelEdge; deg: number; start: { x: number; y: number }
-    layer: CustomLayer; el: HTMLElement | null
-  } | null>(null)
-  const onEdgeDown = (side: SelEdge) => (e: React.PointerEvent): void => {
-    if (!selectedLayer?.startsWith('img-') || lockedOf(props, selectedLayer)) return
-    const layer = ((props.customLayers as CustomLayer[] | undefined) ?? []).find((l) => l.id === selectedLayer)
-    if (!layer || ((side === 'n' || side === 's') && layer.height === undefined)) return
-    e.stopPropagation()
-    const el = hostRef.current?.querySelector(`[data-cover-layer="${selectedLayer}"]`) as HTMLElement | null
-    const rect = compositionRect()
-    if (!el || !rect) return
-    const deg = frameOf(el, rect, tpl.width)?.frame.deg ?? 0
-    edgeRef.current = { id: selectedLayer, side, deg, start: canvasPoint(e.clientX, e.clientY), layer, el }
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
-  }
-  const onEdgeMove = (e: React.PointerEvent): void => {
-    const r = edgeRef.current
-    const rect = compositionRect()
-    if (!r || !rect || !r.el) return
-    const p = canvasPoint(e.clientX, e.clientY)
-    const patch = rotatedEdgeResize(
-      { x: r.layer.x, y: r.layer.y, w: r.layer.width, h: r.layer.height ?? 0 },
-      r.side,
-      { x: p.x - r.start.x, y: p.y - r.start.y },
-      r.deg,
-    )
-    if (patch.x !== undefined) r.el.style.left = `${patch.x}px`
-    if (patch.width !== undefined) r.el.style.width = `${patch.width}px`
-    if (patch.y !== undefined) r.el.style.top = `${patch.y}px`
-    if (patch.height !== undefined) r.el.style.height = `${patch.height}px`
-  }
-  const onEdgeUp = (e: React.PointerEvent): void => {
-    const r = edgeRef.current
-    edgeRef.current = null
-    ;(e.target as HTMLElement).releasePointerCapture?.(e.pointerId)
-    if (!r || !r.el) return
-    const p = canvasPoint(e.clientX, e.clientY)
-    const patch = rotatedEdgeResize(
-      { x: r.layer.x, y: r.layer.y, w: r.layer.width, h: r.layer.height ?? 0 },
-      r.side,
-      { x: p.x - r.start.x, y: p.y - r.start.y },
-      r.deg,
-    )
-    const changed = (patch.width !== undefined && patch.width !== r.layer.width)
-      || (patch.height !== undefined && patch.height !== r.layer.height)
-      || (patch.x !== undefined && patch.x !== r.layer.x)
-      || (patch.y !== undefined && patch.y !== r.layer.y)
-    if (!changed) { // 未变:还原预览
-      r.el.style.width = `${r.layer.width}px`
-      if (r.layer.height !== undefined) r.el.style.height = `${r.layer.height}px`
-      r.el.style.left = `${r.layer.x}px`
-      r.el.style.top = `${r.layer.y}px`
-      return
-    }
-    r.el.style.width = '' // 提交后 React 重渲写入(手动清防外改残留)
-    r.el.style.height = ''
-    r.el.style.left = ''
-    r.el.style.top = ''
-    setCustomLayer(r.id, patch)
-  }
+  React.useLayoutEffect(() => { compositionRect() })
   /** 客户端坐标 → 画布 px(含换算比例) */
   const canvasPoint = (clientX: number, clientY: number): { x: number; y: number; scale: number } => {
     const rect = compositionRect()
@@ -477,7 +234,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const showReadout = (clientX: number, clientY: number, dx: number, dy: number): void => {
     showReadoutText(clientX, clientY, `${Math.round(dx)} px, ${Math.round(dy)} px`)
   }
-  /** 通用读数(2026-10-31 §2.6 P1:旋转角度读数同源) */
   const showReadoutText = (clientX: number, clientY: number, text: string): void => {
     const el = readoutRef.current
     if (!el) return
@@ -496,25 +252,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     tpl, props, setProp, hostRef, playerWrapRef, layerAt, pcRunning, fitScale, zoom,
   })
   const openInlineEdit = (clientX: number, clientY: number): void => inline.open(clientX, clientY)
-  /* 文字层画布几何缩放(逻辑在 text-scale.ts,live 值经 liveLayer 通道) */
-  const selectedTextDef = selectedLayer && !isImageLayer
-    ? tpl.layerDefs.find((d) => d.id === selectedLayer && d.type === 'text') ?? null
-    : null
-  const textScale = useTextScaleHandles({
-    readout: showReadoutText, hideReadout,
-    props, selectedLayer,
-    selectedTextDef: selectedTextDef ? { id: selectedTextDef.id, fontSize: selectedTextDef.fontSize } : null,
-    tpl, hostRef, playerWrapRef, setLayerStyle,
-    locked: selectedLayer ? lockedOf(props, selectedLayer) : false,
-  })
-  const rotate = useRotateHandles({
-    readout: showReadoutText, hideReadout, onEnd: bumpFrame,
-    props, customLayers: props.customLayers as Array<{ id: string; rotate?: number }> | undefined,
-    center: sel ? { x: sel.compLeft + sel.frame.cx * sel.scale, y: sel.compTop + sel.frame.cy * sel.scale } : null,
-    selectedLayer, hostRef,
-    setLayerStyle, setCustomLayer,
-    locked: selectedLayer ? lockedOf(props, selectedLayer) : false,
-  })
 
   const onPointerDown = (e: React.PointerEvent): void => {
     if (pcRunning) return // PhotoCraft 为主:画布交互在原生窗口,网页仅镜像
@@ -604,7 +341,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       // 悬停光标(2026-11-02 用户裁决:对齐 PhotoCraft=箭头,不用手型)
       const host = hostRef.current
       if (host) host.style.cursor = 'default'
-      auxUpdateHover({ hoverRef, hostRef, playerWrapRef, pcRunning, purePreview }, false, e.clientX, e.clientY)
       return
     }
     syncRulerMarker(e.clientX, e.clientY)
@@ -615,7 +351,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (!drag.active) {
       if (Math.hypot(dxs, dys) < 3) return // 死区:手抖不算拖
       drag.active = true
-      for (const m of drag.moves) if (m.el) { m.el.style.outline = `2px solid ${SEL_COLOR}`; m.el.style.willChange = 'translate' } // 全部选中层提升合成层(R8)
+      for (const m of drag.moves) if (m.el) m.el.style.willChange = 'translate' // 全部选中层提升合成层(R8)
       canvasDragFreeze.active = true
       // 层间智能吸附候选(激活时一次实测;拖动中其它层静止):其它图层的 左/中/右、上/中/下 线
       { const xs: { at: number; guide: number }[] = []; const ys: { at: number; guide: number }[] = []
@@ -638,7 +374,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
         for (const g of userGuides.h) { push(ys, g, g); push(ys, g - drag.boxH, g) }
         drag.candsX = xs
         drag.candsY = ys }
-      if (outlineRef.current) outlineRef.current.style.display = 'none' // 常驻选择框让位给拖动轮廓
       const host = hostRef.current
       if (host) host.style.userSelect = 'none'
     }
@@ -704,11 +439,10 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (drag.raf) cancelAnimationFrame(drag.raf)
     updateGuides(null, null)
     hideReadout()
-    for (const m of drag.moves) if (m.el) { m.el.style.outline = ''; m.el.style.translate = ''; m.el.style.willChange = '' }
+    for (const m of drag.moves) if (m.el) { m.el.style.translate = ''; m.el.style.willChange = '' }
     canvasDragFreeze.active = false
     const host = hostRef.current
     if (host) host.style.userSelect = ''
-    if (outlineRef.current) outlineRef.current.style.display = '' // 恢复选择框(外部直写 React 不重置)
   }
   const commitDrag = (drag: NonNullable<NonNullable<typeof dragRef.current>>): void => {
     liveLayer.posId = null
@@ -756,7 +490,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (!drag) return
     endDragVisual(drag) // 丢弃预览:props 未动,元素回原位
   }
-  /* T3.9 空格纯净预览(2026-11-10):按住 Space 隐藏全部辅助线/轮廓/手柄/网格(只看画面) */
+  /* T3.9 空格纯净预览(2026-11-10):按住 Space 隐藏全部辅助线/网格(只看画面) */
   const [purePreview, setPurePreview] = React.useState(false)
   const purePreviewRef = React.useRef(purePreview)
   purePreviewRef.current = purePreview
@@ -765,27 +499,8 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     pcRunning, purePreview: purePreviewRef.current, fitScale, zoom, tpl, contentRef, userGuides, addUserGuide, removeUserGuide,
   })
   const locked = selectedLayer ? lockedOf(props, selectedLayer) : false
-  /* R9c 组缩放手柄(逻辑在 use-group-scale.ts;多选联合框四角=选区整体缩放) */
-  const groupScale = useGroupScale({
-    multiUnion, selectedLayer, multiSelected, locked, tplWidth: tpl.width, hostRef,
-    compositionRect, props, applyGroupScale,
-  })
   /* 快捷键(2026-11-01 对齐 PhotoCraft,自 onKeyDown 解耦为窗口级):见 canvas-keys.ts */
-  useCanvasShortcuts(() => ({ all: Boolean(pcRunning), layer: Boolean(dragRef.current || rotRef.current || resRef.current || edgeRef.current || groupScale.ref.current) }))
-
-  /* WP-A3 手柄族渲染数据(屏幕 px;旋转柄在视觉上边外侧,柄=白底描边方块) */
-  const corners = sel ? rotCorners(sel.frame) : []
-  const edges = sel ? rotEdges(sel.frame) : null
-  const rotPos = sel ? rotateHandlePos(sel.frame, 22) : null
-  const compMap = sel ? { left: sel.compLeft, top: sel.compTop, width: sel.scale * tpl.width } : null
-  const screen = (p: { x: number; y: number }): { x: number; y: number } | null =>
-    compMap ? toScreen(p, compMap, tpl.width) : null
-  const showHandles = Boolean(sel && multiSelected.length === 0 && !pcRunning && !purePreview && !locked && (isImageLayer || selectedTextDef))
-  const customSel = selectedLayer?.startsWith('img-')
-    ? ((props.customLayers as CustomLayer[] | undefined) ?? []).find((l) => l.id === selectedLayer) ?? null
-    : null
-  const showEdges = Boolean(showHandles && customSel && sel)
-  const centerScreen = sel && compMap ? toScreen({ x: sel.frame.cx, y: sel.frame.cy }, compMap, tpl.width) : null
+  useCanvasShortcuts(() => ({ all: Boolean(pcRunning), layer: Boolean(dragRef.current) }))
 
   return (
     <div
@@ -822,9 +537,9 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       ) : (
         <>
           <div ref={playerWrapRef} style={{ position: 'relative', width: '100%', flex: '1 1 auto', minHeight: 0, overflow: 'hidden' }}>
-            {/* 滚动层(2026-10-31 画布缩放 §2.6):内容按 zoom 放大,超出即滚动;对齐工具条/选择框
+            {/* 滚动层(2026-10-31 画布缩放 §2.6):内容按 zoom 放大,超出即滚动;对齐工具条
                 在 playerWrap 层不随滚动(按实时 rect 定位)。Ctrl+滚轮缩放=useCanvasZoom 锚点缩放 */}
-            <div ref={scrollRef} style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', alignItems: zoom > 1 ? 'flex-start' : 'center', justifyContent: zoom > 1 ? 'flex-start' : 'center' }} onScroll={() => { measureSel(); syncRulers() }}>
+            <div ref={scrollRef} style={{ position: 'absolute', inset: 0, overflow: 'auto', display: 'flex', alignItems: zoom > 1 ? 'flex-start' : 'center', justifyContent: zoom > 1 ? 'flex-start' : 'center' }} onScroll={() => { compositionRect(); syncRulers() }}>
               <div ref={contentRef} style={{ position: 'relative', width: Math.round(tpl.width * fitScale * zoom), height: Math.round(tpl.height * fitScale * zoom), flexShrink: 0, margin: 'auto', imageRendering: zoom > 2 ? 'pixelated' : 'auto' }}>
                 {/* WP-A2: 自持画布=模板组件直接渲染(无 Player 壳);remotion 经 shim */}
                 <RenderSurface
@@ -851,145 +566,36 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                 )) : null}
                 <div ref={previewHRef} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 96, display: 'none' }} />
                 <div ref={previewVRef} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 96, display: 'none' }} />
+                {inline.element}
+                {/* 对齐工具条(选中图层时出现;相对画布六向)。阻断冒泡:否则宿主 onPointerDown 按
+                    坐标命中落空 → selectLayer(null) → 工具条随选中态卸载,点击永远无效(实测) */}
+                {selectedLayer && !pcRunning && !purePreview ? (
+                  <div
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, background: 'rgba(30,30,32,0.92)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '3px 5px', zIndex: 80 }}>
+                    {([
+                      ['left', '⇤', '左对齐画布'],
+                      ['centerX', '⇔', '水平居中'],
+                      ['right', '⇥', '右对齐画布'],
+                      ['top', '⇧', '顶对齐画布'],
+                      ['centerY', '⇕', '垂直居中'],
+                      ['bottom', '⇩', '底对齐画布'],
+                    ] as const).map(([mode, glyph, titleText]) => (
+                      <button
+                        key={mode}
+                        title={locked ? '图层已锁定位置' : titleText}
+                        disabled={locked}
+                        onClick={() => selectedLayer && alignLayer(selectedLayer, mode)}
+                        style={{ width: 26, height: 24, borderRadius: 6, border: 0, cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, opacity: locked ? 0.35 : 1 }}
+                      >{glyph}</button>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
             {/* R8 标尺(组件在 canvas-rulers.tsx;刻度平移/十字标 ref 对齐,拖出参考线 R9b) */}
             <CanvasRulers tpl={tpl} scale={Math.max(fitScale * zoom, 0.0001)} rulerXRef={rulerXRef} rulerYRef={rulerYRef} markerXRef={markerXRef} markerYRef={markerYRef} onStartGuideDrag={startGuideDrag} />
-            {/* WP-A3 旋转感知选择框:边框随层旋转;拖动中由拖动轮廓接管(outlineRef 隐藏) */}
-            {multiUnion && compMap && !pcRunning && !purePreview ? (
-              <div style={{
-                position: 'absolute',
-                left: compMap.left + multiUnion.x * sel!.scale, top: compMap.top + multiUnion.y * sel!.scale,
-                width: multiUnion.w * sel!.scale, height: multiUnion.h * sel!.scale,
-                border: `1px solid ${SEL_COLOR}`, pointerEvents: 'none', zIndex: 86,
-              }} />
-            ) : null}
-            {/* R9c 组缩放角柄(多选时;联合框四角,白底描边方块同规格) */}
-            {multiUnion && compMap && !pcRunning && !purePreview && !locked ? (
-              ([['nw', multiUnion.x, multiUnion.y], ['ne', multiUnion.x + multiUnion.w, multiUnion.y], ['sw', multiUnion.x, multiUnion.y + multiUnion.h], ['se', multiUnion.x + multiUnion.w, multiUnion.y + multiUnion.h]] as const).map(([c, cx, cy]) => (
-                <div
-                  key={'gs-' + c}
-                  onPointerDown={groupScale.onDown(c)}
-                  onPointerMove={groupScale.onMove}
-                  onPointerUp={groupScale.onUp}
-                  title="拖动角=选区整体缩放"
-                  style={{
-                    position: 'absolute',
-                    left: compMap.left + cx * sel!.scale - (HANDLE_PX + 2) / 2,
-                    top: compMap.top + cy * sel!.scale - (HANDLE_PX + 2) / 2,
-                    width: HANDLE_PX + 2, height: HANDLE_PX + 2, borderRadius: 1,
-                    background: '#fff', border: `1px solid ${SEL_COLOR}`,
-                    cursor: c === 'nw' || c === 'se' ? 'nwse-resize' : 'nesw-resize',
-                    zIndex: 91, boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-                  }}
-                />
-              ))
-            ) : null}
-            {sel && multiSelected.length === 0 && !pcRunning && !purePreview && centerScreen ? (
-              <div ref={outlineRef} style={{
-                position: 'absolute',
-                left: centerScreen.x, top: centerScreen.y,
-                width: sel.frame.w * sel.scale, height: sel.frame.h * sel.scale,
-                transform: `translate(-50%, -50%) rotate(${sel.frame.deg}deg)`,
-                border: `1px solid ${SEL_COLOR}`, pointerEvents: 'none', zIndex: 86,
-              }} />
-            ) : null}
-            {/* T3.6 悬停预亮(ref 直写零重渲染) */}
-            <div ref={hoverRef} style={{ position: 'absolute', border: '1px dashed rgba(255,255,255,0.35)', borderRadius: 4, pointerEvents: 'none', zIndex: 85, display: 'none' }} />
-            {inline.element}
-            {/* 对齐工具条(选中图层时出现;相对画布六向)。阻断冒泡:否则宿主 onPointerDown 按
-                坐标命中落空 → selectLayer(null) → 工具条随选中态卸载,点击永远无效(实测) */}
-            {selectedLayer && !pcRunning && !purePreview ? (
-              <div
-                onPointerDown={(e) => e.stopPropagation()}
-                onDoubleClick={(e) => e.stopPropagation()}
-                style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: 2, background: 'rgba(30,30,32,0.92)', border: '1px solid var(--border-strong)', borderRadius: 8, padding: '3px 5px', zIndex: 80 }}>
-                {([
-                  ['left', '⇤', '左对齐画布'],
-                  ['centerX', '⇔', '水平居中'],
-                  ['right', '⇥', '右对齐画布'],
-                  ['top', '⇧', '顶对齐画布'],
-                  ['centerY', '⇕', '垂直居中'],
-                  ['bottom', '⇩', '底对齐画布'],
-                ] as const).map(([mode, glyph, titleText]) => (
-                  <button
-                    key={mode}
-                    title={locked ? '图层已锁定位置' : titleText}
-                    disabled={locked}
-                    onClick={() => selectedLayer && alignLayer(selectedLayer, mode)}
-                    style={{ width: 26, height: 24, borderRadius: 6, border: 0, cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, opacity: locked ? 0.35 : 1 }}
-                  >{glyph}</button>
-                ))}
-              </div>
-            ) : null}
-            {/* WP-A3 手柄族(旋转感知):角柄=图片尺寸/文字几何缩放;边柄=单维(未旋转自由层);
-                旋转柄在视觉上边外侧(柄=屏幕等尺寸白底描边方块,PhotoCraft transform_controls.rs)。 */}
-            {showHandles && sel && edges && rotPos && centerScreen ? (
-              <>
-                {/* 旋转柄连杆:上边中点 → 柄 */}
-                {(() => {
-                  const a = screen(edges.n)!
-                  const b = screen(rotPos)!
-                  const len = Math.hypot(b.x - a.x, b.y - a.y)
-                  const ang = Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI
-                  return (
-                    <div style={{ position: 'absolute', left: a.x, top: a.y, width: Math.max(len, 1), height: 1.5, background: SEL_COLOR, transformOrigin: '0 50%', transform: `rotate(${ang}deg)`, pointerEvents: 'none', zIndex: 88 }} />
-                  )
-                })()}
-                <div
-                  onPointerDown={rotate.onDown}
-                  onPointerMove={rotate.onMove}
-                  onPointerUp={rotate.onUp}
-                  title="拖动旋转(接近水平/垂直自动吸附)"
-                  style={{ position: 'absolute', left: screen(rotPos)!.x - 9, top: screen(rotPos)!.y - 9, width: 18, height: 18, borderRadius: 999, background: SEL_COLOR, border: '2px solid #fff', cursor: 'grab', zIndex: 90, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }}
-                />
-                {/* 角柄(文字层=几何缩放,其余=尺寸) */}
-                {corners.map((c) => {
-                  const p = screen(c)
-                  if (!p) return null
-                  const isText = Boolean(selectedTextDef)
-                  return (
-                    <div
-                      key={c.corner}
-                      onPointerDown={isText ? textScale.onDown(c.corner) : onResizeDown(c.corner)}
-                      onPointerMove={isText ? textScale.onMove : onResizeMove}
-                      onPointerUp={isText ? textScale.onUp : onResizeUp}
-                      title={isText ? '拖动角等比缩放(几何变换,不改字号)' : '拖动角改尺寸(等比)'}
-                      style={{
-                        position: 'absolute', left: p.x - (HANDLE_PX + 2) / 2, top: p.y - (HANDLE_PX + 2) / 2,
-                        width: HANDLE_PX + 2, height: HANDLE_PX + 2, borderRadius: 1,
-                        background: '#fff', border: `1px solid ${SEL_COLOR}`,
-                        cursor: cursorFor(angleOf(c, { x: sel.frame.cx, y: sel.frame.cy })),
-                        zIndex: 91, boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-                      }}
-                    />
-                  )
-                })}
-                {/* 边柄(未旋转自由层;e/w 恒有,n/s 需显式高度) */}
-                {showEdges && customSel ? ([
-                  ['w', true], ['e', true], ['n', customSel.height !== undefined], ['s', customSel.height !== undefined],
-                ] as const).filter(([, on]) => on).map(([side]) => {
-                  const p = screen(edges[side])
-                  if (!p) return null
-                  return (
-                    <div
-                      key={side}
-                      onPointerDown={onEdgeDown(side)}
-                      onPointerMove={onEdgeMove}
-                      onPointerUp={onEdgeUp}
-                      title="拖动边单维缩放"
-                      style={{
-                        position: 'absolute', left: p.x - (HANDLE_PX + 2) / 2, top: p.y - (HANDLE_PX + 2) / 2,
-                        width: HANDLE_PX + 2, height: HANDLE_PX + 2, borderRadius: 1,
-                        background: '#fff', border: `1px solid ${SEL_COLOR}`,
-                        cursor: side === 'w' || side === 'e' ? 'ew-resize' : 'ns-resize',
-                        zIndex: 91, boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
-                      }}
-                    />
-                  )
-                }) : null}
-              </>
-            ) : null}
           </div>
         </>
       )}

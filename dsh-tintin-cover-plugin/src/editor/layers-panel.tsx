@@ -459,7 +459,9 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
           </div>
         </>
       ) : null}
-      {/* 选中图层编辑 */}
+      {/* 选中图层编辑(2026-11-11 抖动裁决: 固定高 300px 内滚动——编辑卡高度随图层类型/
+          内容变化会挤压上方行区=切层整列跳动;定高后行区几何恒定) */}
+      <div style={{ flexShrink: 0, height: 300, overflowY: 'auto', overflowX: 'hidden' }}>
       {(() => {
         if (!selectedLayer) return null
         if (customById.has(selectedLayer)) return <CustomLayerEditor layer={customById.get(selectedLayer)!} project={project} />
@@ -517,6 +519,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
         }
         return null
       })()}
+      </div>
     </div>
   )
 }
