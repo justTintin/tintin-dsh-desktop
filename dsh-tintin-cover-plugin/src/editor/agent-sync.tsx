@@ -13,7 +13,8 @@ function pushChatContextNow(): void {
   const tpl = getTemplate(s.templateId)
   const layers = tpl.layerDefs.map((l) => {
     const key = l.propsKey ?? l.id
-    return { id: l.id, label: l.label, type: l.type, propsKey: key, value: referableValue(s.props[key]) }
+    /* R9d: 显示名优先(面板双击重命名,layerNames 契约)——会话 @ 菜单/agent 指层词汇跟随 */
+    return { id: l.id, label: s.layerNames[l.id] ?? l.label, type: l.type, propsKey: key, value: referableValue(s.props[key]) }
   })
   chatFrameRef.current?.contentWindow?.postMessage(
     { type: 'tintin-cover:context', templateId: s.templateId, orientation: tpl.orientation, layers, size: { w: tpl.width, h: tpl.height } },

@@ -178,3 +178,80 @@ export function cornerResize(
     height,
   }
 }
+
+/** R9c 组缩放条目计算(2026-11-11 §6.5: 多选角柄=选区整体缩放,对照 PS Free Transform
+ *  多选: 以选区包围盒中心为不动点,各成员视觉中心与尺寸按 f 缩放)。
+ *  · 自定义层: 视觉中心平移 + 布局宽高缩放(显式高同比);
+ *  · 文字层: 视觉中心平移(dx/dy)+ gscale×f(夹 0.3..3——文字缩放=几何变换,同 R 语义);
+ *  · 产品槽位: 视觉中心平移(dx/dy)+ sx/sy×f(夹取同 lookScale)。
+ *  box=成员视觉 AABB(画布 px);union=选区包围盒中心;f=拖拽比。旋转成员按 AABB 近似
+ *  (与对齐/微调同一口径);翻转不改盒几何。 */
+export interface GroupScaleMember {
+  id: string
+  custom: boolean
+  /** 视觉 AABB(画布 px) */
+  box: { left: number; top: number; w: number; h: number }
+  /** 自定义层布局几何(custom=true 必填) */
+  layout?: { x: number; y: number; w: number; h: number | null }
+  /** 固定层偏移(custom=false) */
+  dx?: number
+  dy?: number
+  gscale?: number
+  /** 产品槽位缩放(slot=true) */
+  sx?: number
+  sy?: number
+}
+
+export interface GroupScaleEntry {
+  id: string
+  custom: boolean
+  x: number
+  y: number
+  width?: number
+  height?: number | null
+  dx?: number
+  dy?: number
+  gscale?: number
+  sx?: number
+  sy?: number
+}
+
+export function groupScaleEntries(
+  union: { cx: number; cy: number },
+  members: GroupScaleMember[],
+  f: number,
+): GroupScaleEntry[] {
+  const out: GroupScaleEntry[] = []
+  for (const m of members) {
+    const cx = m.box.left + m.box.w / 2
+    const cy = m.box.top + m.box.h / 2
+    const nx = union.cx + (cx - union.cx) * f
+    const ny = union.cy + (cy - union.cy) * f
+    const shiftX = nx - cx
+    const shiftY = ny - cy
+    if (m.custom && m.layout) {
+      const width = Math.max(20, Math.round(m.layout.w * f))
+      const height = m.layout.h === null ? null : Math.max(20, Math.round(m.layout.h * f))
+      out.push({
+        id: m.id, custom: true,
+        x: Math.round(m.layout.x + shiftX), y: Math.round(m.layout.y + shiftY),
+        width, height,
+      })
+    } else if (m.sx !== undefined || m.sy !== undefined) {
+      const clamp = (v: number): number => Math.min(SCALE_MAX, Math.max(SCALE_MIN, Math.round(v * 1000) / 1000))
+      out.push({
+        id: m.id, custom: false,
+        x: Math.round((m.dx ?? 0) + shiftX), y: Math.round((m.dy ?? 0) + shiftY),
+        sx: clamp((m.sx ?? 1) * f), sy: clamp((m.sy ?? 1) * f),
+      })
+    } else {
+      const g = typeof m.gscale === 'number' ? m.gscale : 1
+      out.push({
+        id: m.id, custom: false,
+        x: Math.round((m.dx ?? 0) + shiftX), y: Math.round((m.dy ?? 0) + shiftY),
+        gscale: Math.min(3, Math.max(0.3, Math.round(g * f * 1000) / 1000)),
+      })
+    }
+  }
+  return out
+}

@@ -23,6 +23,9 @@ import type { CustomLayer } from '../../templates/CustomLayers'
 import { lookScale, type ImageLook } from '../../templates/image-style'
 import { useEditor } from './store'
 import { canvasDragFreeze, useCanvasZoom } from './use-canvas-zoom'
+import { useUserGuides } from './use-user-guides'
+import { useGroupScale } from './use-group-scale'
+import { CanvasRulers } from './canvas-rulers'
 import { liveLayer, notifyLiveLayer } from './ui'
 import {
   angleOf, cursorFor, frameOf, rotCorners, rotateHandlePos, rotEdges, toScreen,
@@ -43,6 +46,8 @@ const snapEq = (a: SelSnapshot | null, f: RotFrame, comp: DOMRect, scale: number
 /* PhotoCraft 智能参考线 magenta(crates/engine/src/snap.rs smart guides 同色系);
    手柄 7×7 白底 accent 描边(transform_controls.rs 同规格)。 */
 const GUIDE_COLOR = '#ff2bbf'
+/* R9b 用户参考线青色(PS guides 视觉系) */
+const GUIDE_USER_COLOR = 'rgba(0,191,255,0.85)'
 const HANDLE_PX = 7
 
 export function CanvasPanel({ project }: { project: string }): React.ReactElement {
@@ -55,7 +60,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const addCustomLayer = useEditor((s) => s.addCustomLayer)
   const setCustomLayer = useEditor((s) => s.setCustomLayer)
+  const applyLayerGeometry = useEditor((s) => s.applyLayerGeometry)
+  const applyGroupScale = useEditor((s) => s.applyGroupScale)
   const duplicateCustomLayer = useEditor((s) => s.duplicateCustomLayer)
+  const userGuides = useEditor((s) => s.userGuides)
+  const addUserGuide = useEditor((s) => s.addUserGuide)
+  const removeUserGuide = useEditor((s) => s.removeUserGuide)
   const showGuides = useEditor((s) => s.guides)
   const showGrid = useEditor((s) => s.canvasGrid)
   const zoom = useEditor((s) => s.zoom)
@@ -574,6 +584,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     if (markerYRef.current) { markerYRef.current.style.transform = `translateY(${clientY - wr.top}px)`; markerYRef.current.style.display = 'block' }
   }
   const onPointerMove = (e: React.PointerEvent): void => {
+    if (guideDragRef.current) { moveGuidePreview(e); return } // R9b 参考线拖拽优先
     const drag = dragRef.current
     if (!drag) {
       // 悬停光标(2026-11-02 用户裁决:对齐 PhotoCraft=箭头,不用手型)
@@ -608,6 +619,9 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
         for (let i = 0; i < sx.length - 1; i++) push(xs, (sx[i]! + sx[i + 1]!) / 2, (sx[i]! + sx[i + 1]!) / 2)
         const sy = [...new Set(ys.map((c) => c.at))].sort((a, b) => a - b)
         for (let i = 0; i < sy.length - 1; i++) push(ys, (sy[i]! + sy[i + 1]!) / 2, (sy[i]! + sy[i + 1]!) / 2)
+        /* R9b 用户参考线入候选(对照 PS: 参考线吸附) */
+        for (const g of userGuides.v) { push(xs, g, g); push(xs, g - drag.boxW, g) }
+        for (const g of userGuides.h) { push(ys, g, g); push(ys, g - drag.boxH, g) }
         drag.candsX = xs
         drag.candsY = ys }
       if (outlineRef.current) outlineRef.current.style.display = 'none' // 常驻选择框让位给拖动轮廓
@@ -696,6 +710,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     }
   }
   const onPointerUp = (e: React.PointerEvent): void => {
+    if (guideDragRef.current) { finishGuideDrag(e); return } // R9b 参考线落位/删除
     const drag = dragRef.current
     dragRef.current = null
     if (!drag) return
@@ -716,19 +731,35 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     try { hostRef.current?.releasePointerCapture?.(e.pointerId) } catch { /* 已隐式释放 */ }
   }
   const onPointerCancel = (): void => {
+    if (guideDragRef.current) { // 参考线取消:预览消失(move 旧线已拔起=删除语义)
+      guideDragRef.current = null
+      if (previewHRef.current) previewHRef.current.style.display = 'none'
+      if (previewVRef.current) previewVRef.current.style.display = 'none'
+      return
+    }
     const drag = dragRef.current
     dragRef.current = null
     if (!drag) return
     endDragVisual(drag) // 丢弃预览:props 未动,元素回原位
   }
-  /* 快捷键(2026-11-01 对齐 PhotoCraft,自 onKeyDown 解耦为窗口级):见 canvas-keys.ts */
-  useCanvasShortcuts(() => ({ all: Boolean(pcRunning), layer: Boolean(dragRef.current || rotRef.current || resRef.current || edgeRef.current) }))
   /* T3.9 空格纯净预览(2026-11-10):按住 Space 隐藏全部辅助线/轮廓/手柄/网格(只看画面) */
   const [purePreview, setPurePreview] = React.useState(false)
+  const purePreviewRef = React.useRef(purePreview)
+  purePreviewRef.current = purePreview
   usePurePreview(setPurePreview)
+  const { guideDragRef, previewHRef, previewVRef, startGuideDrag, moveGuidePreview, finishGuideDrag } = useUserGuides({
+    pcRunning, purePreview: purePreviewRef.current, fitScale, zoom, tpl, contentRef, userGuides, addUserGuide, removeUserGuide,
+  })
+  const locked = selectedLayer ? lockedOf(props, selectedLayer) : false
+  /* R9c 组缩放手柄(逻辑在 use-group-scale.ts;多选联合框四角=选区整体缩放) */
+  const groupScale = useGroupScale({
+    multiUnion, selectedLayer, multiSelected, locked, tplWidth: tpl.width, hostRef,
+    compositionRect, props, applyGroupScale,
+  })
+  /* 快捷键(2026-11-01 对齐 PhotoCraft,自 onKeyDown 解耦为窗口级):见 canvas-keys.ts */
+  useCanvasShortcuts(() => ({ all: Boolean(pcRunning), layer: Boolean(dragRef.current || rotRef.current || resRef.current || edgeRef.current || groupScale.ref.current) }))
 
   /* WP-A3 手柄族渲染数据(屏幕 px;旋转柄在视觉上边外侧,柄=白底描边方块) */
-  const locked = selectedLayer ? lockedOf(props, selectedLayer) : false
   const corners = sel ? rotCorners(sel.frame) : []
   const edges = sel ? rotEdges(sel.frame) : null
   const rotPos = sel ? rotateHandlePos(sel.frame, 22) : null
@@ -797,46 +828,19 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                 {/* 拖动吸附参考线(PhotoCraft magenta;ref 直写,拖动全程零重渲染)——在缩放内容层内,随缩放对齐画布 */}
                 <div ref={guideVRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, background: GUIDE_COLOR, pointerEvents: 'none', zIndex: 95, display: 'none' }} />
                 <div ref={guideHRef} style={{ position: 'absolute', left: 0, right: 0, height: 1, background: GUIDE_COLOR, pointerEvents: 'none', zIndex: 95, display: 'none' }} />
+                {/* R9b 用户参考线(青线;拖出建/拖动移/拖删;逻辑在 use-user-guides.ts) */}
+                {!purePreview ? userGuides.h.map((y) => (
+                  <div key={'ug-h' + y} style={{ position: 'absolute', left: 0, right: 0, top: `${(y / tpl.height) * 100}%`, height: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 94 }} />
+                )) : null}
+                {!purePreview ? userGuides.v.map((x) => (
+                  <div key={'ug-v' + x} style={{ position: 'absolute', top: 0, bottom: 0, left: `${(x / tpl.width) * 100}%`, width: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 94 }} />
+                )) : null}
+                <div ref={previewHRef} style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 96, display: 'none' }} />
+                <div ref={previewVRef} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 1, background: GUIDE_USER_COLOR, pointerEvents: 'none', zIndex: 96, display: 'none' }} />
               </div>
             </div>
-            {/* R8 标尺(顶/左;刻度随内容平移,十字标随指针;v1 不含拖出参考线) */}
-            {(() => {
-              const scale = Math.max(fitScale * zoom, 0.0001)
-              const minor = scale < 0.25 ? 100 : scale < 0.6 ? 50 : 25
-              const major = minor * 4
-              const ticksX: React.ReactNode[] = []
-              const ticksY: React.ReactNode[] = []
-              for (let c = 0; c <= tpl.width; c += minor) {
-                const isMajor = c % major === 0
-                ticksX.push(
-                  <div key={'x' + c} style={{ position: 'absolute', left: c * scale, bottom: 0, width: 1, height: isMajor ? 9 : 4, background: 'var(--border-strong)' }}>
-                    {isMajor && c > 0 ? <span style={{ position: 'absolute', left: 2, bottom: 8, fontSize: 8, lineHeight: 1, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{c}</span> : null}
-                  </div>,
-                )
-              }
-              for (let c = 0; c <= tpl.height; c += minor) {
-                const isMajor = c % major === 0
-                ticksY.push(
-                  <div key={'y' + c} style={{ position: 'absolute', top: c * scale, right: 0, height: 1, width: isMajor ? 9 : 4, background: 'var(--border-strong)' }}>
-                    {isMajor && c > 0 ? <span style={{ position: 'absolute', top: 2, right: 9, fontSize: 8, lineHeight: 1, color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>{c}</span> : null}
-                  </div>,
-                )
-              }
-              return (
-                <>
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 18, background: 'var(--bg-panel)', borderBottom: '1px solid var(--border)', zIndex: 60, overflow: 'hidden', pointerEvents: 'none' }}>
-                    <div ref={rulerXRef} style={{ position: 'absolute', top: 0, left: 0, width: Math.round(tpl.width * scale), height: '100%' }}>{ticksX}</div>
-                    <div ref={markerXRef} style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: 1, background: 'var(--accent)', display: 'none' }} />
-                  </div>
-                  <div style={{ position: 'absolute', top: 18, left: 0, bottom: 0, width: 18, background: 'var(--bg-panel)', borderRight: '1px solid var(--border)', zIndex: 60, overflow: 'hidden', pointerEvents: 'none' }}>
-                    <div ref={rulerYRef} style={{ position: 'absolute', top: 0, left: 0, height: Math.round(tpl.height * scale), width: '100%' }}>{ticksY}</div>
-                    <div ref={markerYRef} style={{ position: 'absolute', top: 0, left: 0, height: 1, background: 'var(--accent)', display: 'none' }} />
-                  </div>
-                  {/* 原点角块 */}
-                  <div style={{ position: 'absolute', top: 0, left: 0, width: 18, height: 18, background: 'var(--bg-panel)', borderRight: '1px solid var(--border)', borderBottom: '1px solid var(--border)', zIndex: 61, pointerEvents: 'none' }} />
-                </>
-              )
-            })()}
+            {/* R8 标尺(组件在 canvas-rulers.tsx;刻度平移/十字标 ref 对齐,拖出参考线 R9b) */}
+            <CanvasRulers tpl={tpl} scale={Math.max(fitScale * zoom, 0.0001)} rulerXRef={rulerXRef} rulerYRef={rulerYRef} markerXRef={markerXRef} markerYRef={markerYRef} onStartGuideDrag={startGuideDrag} />
             {/* WP-A3 旋转感知选择框:边框随层旋转;拖动中由拖动轮廓接管(outlineRef 隐藏) */}
             {multiUnion && compMap && !pcRunning && !purePreview ? (
               <div style={{
@@ -845,6 +849,27 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                 width: multiUnion.w * sel!.scale, height: multiUnion.h * sel!.scale,
                 border: '1px solid var(--accent)', pointerEvents: 'none', zIndex: 86,
               }} />
+            ) : null}
+            {/* R9c 组缩放角柄(多选时;联合框四角,白底描边方块同规格) */}
+            {multiUnion && compMap && !pcRunning && !purePreview && !locked ? (
+              ([['nw', multiUnion.x, multiUnion.y], ['ne', multiUnion.x + multiUnion.w, multiUnion.y], ['sw', multiUnion.x, multiUnion.y + multiUnion.h], ['se', multiUnion.x + multiUnion.w, multiUnion.y + multiUnion.h]] as const).map(([c, cx, cy]) => (
+                <div
+                  key={'gs-' + c}
+                  onPointerDown={groupScale.onDown(c)}
+                  onPointerMove={groupScale.onMove}
+                  onPointerUp={groupScale.onUp}
+                  title="拖动角=选区整体缩放"
+                  style={{
+                    position: 'absolute',
+                    left: compMap.left + cx * sel!.scale - (HANDLE_PX + 2) / 2,
+                    top: compMap.top + cy * sel!.scale - (HANDLE_PX + 2) / 2,
+                    width: HANDLE_PX + 2, height: HANDLE_PX + 2, borderRadius: 1,
+                    background: '#fff', border: '1px solid var(--accent)',
+                    cursor: c === 'nw' || c === 'se' ? 'nwse-resize' : 'nesw-resize',
+                    zIndex: 91, boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+                  }}
+                />
+              ))
             ) : null}
             {sel && multiSelected.length === 0 && !pcRunning && !purePreview && centerScreen ? (
               <div ref={outlineRef} style={{

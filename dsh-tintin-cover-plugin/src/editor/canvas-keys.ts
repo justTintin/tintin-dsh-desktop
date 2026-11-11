@@ -43,24 +43,27 @@ export function useCanvasShortcuts(blocked: () => { all: boolean; layer: boolean
         const targets = [...new Set([id, ...s.multiSelected])].filter((v) => v.startsWith('img-'))
         if (!targets.length) return
         take()
-        for (const t of targets) s.removeCustomLayer(t)
+        s.removeCustomLayers(targets) // R9a: 单条撤销
         return
       }
       const step = e.shiftKey ? 10 : 1
       const d = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, [number, number]>)[e.key]
       if (!d || mod) return
       take()
+      /* R9a: 一次 set 提交全部微调(单条撤销) */
       const moveIds = [...new Set([id, ...s.multiSelected])]
+      const entries: Array<{ id: string; custom: boolean; x: number; y: number }> = []
       for (const mid of moveIds) {
         if (lockedOf(s.props, mid)) continue
         if (mid.startsWith('img-')) {
           const layer = (Array.isArray(s.props.customLayers) ? (s.props.customLayers as Array<{ id: string; x: number; y: number }>) : []).find((l) => l.id === mid)
-          if (layer) s.setCustomLayer(mid, { x: layer.x + d[0], y: layer.y + d[1] })
+          if (layer) entries.push({ id: mid, custom: true, x: layer.x + d[0], y: layer.y + d[1] })
         } else {
           const st = (s.props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[mid]
-          s.setLayerStyle(mid, { dx: (st?.dx ?? 0) + d[0], dy: (st?.dy ?? 0) + d[1] })
+          entries.push({ id: mid, custom: false, x: (st?.dx ?? 0) + d[0], y: (st?.dy ?? 0) + d[1] })
         }
       }
+      if (entries.length) s.applyLayerGeometry(entries)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

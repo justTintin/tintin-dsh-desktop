@@ -33,6 +33,20 @@ export interface EditorState {
   multiSelected: string[]
   toggleMultiSelect: (id: string) => void
   clearMultiSelect: () => void
+  /** R9a 批量几何(2026-11-11 §6.5): 一次 set 提交多层的 x/y(自定义层)或 dx/dy(固定层)
+   *  ——多选整体移/组对齐/组微调=单条撤销记录(此前逐层 set=N 条) */
+  applyLayerGeometry: (entries: Array<{ id: string; custom: boolean; x: number; y: number }>) => void
+  /** R9a 批量删除自由图层(一次 set,一条撤销) */
+  removeCustomLayers: (ids: string[]) => void
+  /** R9c 组缩放提交(一次 set,一条撤销): 条目=groupScaleEntries 输出——
+   *  custom=x/y/width/height;fixed=x/y→dx/dy+gscale 或 sx/sy(条目键位同 applyLayerGeometry) */
+  applyGroupScale: (entries: Array<{ id: string; custom: boolean; x: number; y: number; width?: number; height?: number | null; gscale?: number; sx?: number; sy?: number }>) => void
+  /** R9b 用户参考线(2026-11-11 §6.5,对照 PS 标尺拖出): 画布 px 位置;会话内存态
+   *  (拖入/拖动/拖删各一条撤销);吸附与画布渲染共用 */
+  userGuides: { h: number[]; v: number[] }
+  addUserGuide: (axis: 'h' | 'v', pos: number) => void
+  moveUserGuide: (axis: 'h' | 'v', from: number, to: number) => void
+  removeUserGuide: (axis: 'h' | 'v', pos: number) => void
   /** 素材区当前选中项(2026-10-31 §2.5 P1:编辑卡「从素材替换/设为产品图」的数据源) */
   selectedAsset: string | null
   /** 图层显示名(2026-11-11 WP-B 对齐 PhotoCraft 双击重命名;会话内存态,不进 props 契约、
@@ -118,6 +132,75 @@ export const useEditor = create<EditorState>()(
           return { multiSelected: rest.filter((v) => v !== id), selectedLayer: id }
         }),
       clearMultiSelect: () => set({ multiSelected: [] }),
+      applyLayerGeometry: (entries) =>
+        set((s) => {
+          let customLayers = Array.isArray(s.props.customLayers) ? [...(s.props.customLayers as CustomLayer[])] : []
+          let styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
+          for (const e of entries) {
+            if (e.custom) {
+              customLayers = customLayers.map((l) => (l.id === e.id ? { ...l, x: Math.round(e.x), y: Math.round(e.y) } : l))
+            } else {
+              styles[e.id] = { ...styles[e.id], dx: Math.round(e.x), dy: Math.round(e.y) }
+            }
+          }
+          return { props: { ...s.props, customLayers, styles } }
+        }),
+      userGuides: { h: [], v: [] } as { h: number[]; v: number[] },
+      addUserGuide: (axis, pos) =>
+        set((s) => {
+          const v = Math.round(pos)
+          if (v < 0 || v > (axis === 'h' ? getTemplate(s.templateId).height : getTemplate(s.templateId).width)) return {}
+          const cur = s.userGuides[axis]
+          if (cur.some((g) => Math.abs(g - v) < 0.5)) return {}
+          return { userGuides: { ...s.userGuides, [axis]: [...cur, v] } }
+        }),
+      moveUserGuide: (axis, from, to) =>
+        set((s) => {
+          const v = Math.round(to)
+          const cur = s.userGuides[axis]
+          const i = cur.indexOf(Math.round(from))
+          if (i < 0 || v < -50 || v > (axis === 'h' ? getTemplate(s.templateId).height : getTemplate(s.templateId).width) + 50) return {}
+          const next = [...cur]
+          next[i] = v
+          return { userGuides: { ...s.userGuides, [axis]: next } }
+        }),
+      removeUserGuide: (axis, pos) =>
+        set((s) => ({ userGuides: { ...s.userGuides, [axis]: s.userGuides[axis].filter((g) => g !== Math.round(pos)) } })),
+      applyGroupScale: (entries) =>
+        set((s) => {
+          const customEntries = entries.filter((e) => e.custom)
+          const fixedEntries = entries.filter((e) => !e.custom)
+          let customLayers = Array.isArray(s.props.customLayers) ? [...(s.props.customLayers as CustomLayer[])] : []
+          for (const e of customEntries) {
+            customLayers = customLayers.map((l) => {
+              if (l.id !== e.id) return l
+              const next = { ...l, x: e.x, y: e.y, width: e.width ?? l.width }
+              if (e.height !== undefined) next.height = e.height === null ? undefined : e.height
+              return next
+            })
+          }
+          const styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
+          for (const e of fixedEntries) {
+            const cur = styles[e.id] ?? {}
+            const patch: TextStyleOverride & ImageLook = { ...cur, dx: e.x, dy: e.y }
+            if (e.gscale !== undefined) patch.gscale = e.gscale
+            if (e.sx !== undefined) patch.sx = e.sx
+            if (e.sy !== undefined) patch.sy = e.sy
+            styles[e.id] = patch
+          }
+          return { props: { ...s.props, customLayers, styles } }
+        }),
+      removeCustomLayers: (ids) =>
+        set((s) => {
+          const drop = new Set(ids)
+          const customLayers = (Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []).filter((l) => !drop.has(l.id))
+          const order = effectiveOrder(s).filter((v) => !drop.has(v))
+          return {
+            props: { ...s.props, customLayers, layerOrder: order },
+            selectedLayer: s.selectedLayer && drop.has(s.selectedLayer) ? null : s.selectedLayer,
+            multiSelected: s.multiSelected.filter((v) => !drop.has(v)),
+          }
+        }),
       selectedAsset: null as string | null,
       layerNames: {} as Record<string, string>,
       renameLayer: (id, name) =>

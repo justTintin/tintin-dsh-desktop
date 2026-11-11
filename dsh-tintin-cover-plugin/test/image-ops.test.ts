@@ -1,6 +1,6 @@
 // 选中图片图层基本操作(2026-11-01 对齐 PhotoCraft)的纯逻辑与 store 动作回归面。
 import { beforeEach, describe, expect, it } from 'vitest'
-import { arrangeOrder, centerResize, clampScale, cloneLayer, cornerResize, rotatedCornerResize, rotatedEdgeResize, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
+import { arrangeOrder, centerResize, clampScale, cloneLayer, cornerResize, groupScaleEntries, rotatedCornerResize, rotatedEdgeResize, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
 import { effectiveOrder, useEditor } from '../src/editor/store'
 import { backdropStyle, lookBlend, lookOpacity, lookTransform } from '../templates/image-style'
 
@@ -217,5 +217,72 @@ describe('rotatedCornerResize (旋转层角柄精确锚定,2026-11-11 §6.4 R6)'
     expect(p.width).toBe(20)
     expect(p.x + p.width).toBe(300)
     expect(p.y + (p.height ?? 0)).toBe(180)
+  })
+})
+
+describe('多选撤销粒度(2026-11-11 §6.5 R9a: 批量动作=单条撤销)', () => {
+  it('applyLayerGeometry 三层一次提交,撤销栈只进一条,undo 一次全还原', () => {
+    const s0 = useEditor.getState()
+    s0.setTemplate('product')
+    s0.setProp('image', 'a.png')
+    s0.addCustomLayer('b.png', 10, 10, 100)
+    s0.addCustomLayer('c.png', 40, 40, 100)
+    const st = useEditor.getState()
+    const pastBefore = (useEditor as unknown as { temporal: { getState: () => { pastStates: unknown[] } } }).temporal.getState().pastStates.length
+    st.applyLayerGeometry([
+      { id: st.selectedLayer!, custom: true, x: 111, y: 222 },
+      { id: 'img-x1', custom: false, x: 5, y: 6 }, // 固定层走 styles
+    ])
+    const after1 = useEditor.getState()
+    const custom = (after1.props.customLayers as Array<{ id: string; x: number; y: number }>)
+    expect(custom.find((l) => l.x === 111)?.y).toBe(222)
+    expect((after1.props.styles as Record<string, { dx: number }>)[after1.selectedLayer ?? ''] ?? null).toBeNull()
+    const pastAfter1 = (useEditor as unknown as { temporal: { getState: () => { pastStates: unknown[] } } }).temporal.getState().pastStates.length
+    expect(pastAfter1).toBe(pastBefore + 1) // 单条记录
+  })
+  it('removeCustomLayers 一次删除多条并清 z 序/选择', () => {
+    const st = useEditor.getState()
+    const ids = (st.props.customLayers as Array<{ id: string }>).map((l) => l.id)
+    st.removeCustomLayers(ids)
+    const after = useEditor.getState()
+    expect((after.props.customLayers as unknown[]).length).toBe(0)
+    expect(after.multiSelected.length).toBe(0)
+  })
+})
+
+describe('groupScaleEntries (多选组缩放,2026-11-11 §6.5 R9c)', () => {
+  it('自定义层: 视觉中心绕选区中心缩放,布局宽高同比', () => {
+    // 选区中心 (200,150);成员视觉盒中心 (150,120) → 新中心 (100,90)
+    const e = groupScaleEntries(
+      { cx: 200, cy: 150 },
+      [{ id: 'a', custom: true, box: { left: 100, top: 70, w: 100, h: 100 }, layout: { x: 100, y: 70, w: 100, h: 100 } }],
+      0.5,
+    )
+    expect(e[0]).toEqual({ id: 'a', custom: true, x: 125, y: 85, width: 50, height: 50 })
+  })
+  it('文字层: dx/dy 平移 + gscale×f', () => {
+    const e = groupScaleEntries(
+      { cx: 0, cy: 0 },
+      [{ id: 't', custom: false, box: { left: 300, top: 200, w: 100, h: 40 }, dx: 10, dy: 20, gscale: 1 }],
+      2,
+    )
+    expect(e[0]?.x).toBe(360) // 视觉中心 (350,220) → (700,440): dx(条目 x) += 350
+    expect(e[0]?.y).toBe(240)
+    expect(e[0]?.gscale).toBe(2)
+  })
+  it('gscale 夹取 0.3..3', () => {
+    const e = groupScaleEntries({ cx: 0, cy: 0 }, [
+      { id: 't', custom: false, box: { left: 10, top: 10, w: 10, h: 10 }, gscale: 2.5 },
+    ], 0.1)
+    expect(e[0]?.gscale).toBe(0.3)
+  })
+  it('产品槽位: sx/sy×f 夹取', () => {
+    const e = groupScaleEntries(
+      { cx: 100, cy: 100 },
+      [{ id: 'p', custom: false, box: { left: 50, top: 50, w: 100, h: 100 }, dx: 0, dy: 0, sx: 1, sy: 1 }],
+      0.5,
+    )
+    expect(e[0]?.sx).toBe(0.5)
+    expect(e[0]?.sy).toBe(0.5)
   })
 })
