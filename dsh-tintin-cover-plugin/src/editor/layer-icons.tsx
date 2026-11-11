@@ -78,3 +78,58 @@ export const IconDisclosure: React.FC<{ size: number; expanded: boolean }> = ({ 
       : <polygon points="1.9,0.5 6.1,4 1.9,7.5" />}
   </svg>
 )
+
+/** Lucide align-*(字符面板对齐/分布行;路径逐字) */
+export const IconAlignLeft: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M21 5H3" /><path d="M15 12H3" /><path d="M17 19H3" />
+  </svg>
+)
+export const IconAlignCenter: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M21 5H3" /><path d="M17 12H7" /><path d="M19 19H5" />
+  </svg>
+)
+export const IconAlignRight: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M21 5H3" /><path d="M21 12H9" /><path d="M21 19H7" />
+  </svg>
+)
+export const IconAlignJustify: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M3 5h18" /><path d="M3 12h18" /><path d="M3 19h18" />
+  </svg>
+)
+export const IconEdgeLeft: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}><path d="M4 3v18" /></svg>
+)
+export const IconEdgeHCenter: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}><path d="M12 3v18" /></svg>
+)
+export const IconEdgeRight: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}><path d="M20 3v18" /></svg>
+)
+export const IconEdgeTop: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}><path d="M3 4h18" /></svg>
+)
+export const IconEdgeVCenter: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}><path d="M3 12h18" /></svg>
+)
+export const IconEdgeBottom: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}><path d="M3 20h18" /></svg>
+)
+export const IconDistributeHorizontal: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M3 4v16" /><path d="M21 4v16" />
+  </svg>
+)
+export const IconDistributeVertical: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M4 3h16" /><path d="M4 21h16" />
+  </svg>
+)
+export const IconLink2: React.FC<{ size: number }> = ({ size }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M9 17H7A5 5 0 0 1 7 7h2" /><path d="M15 7h2a5 5 0 1 1 0 10h-2" />
+  </svg>
+)

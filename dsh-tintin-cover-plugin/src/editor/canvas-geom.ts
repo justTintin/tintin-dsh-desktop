@@ -1,6 +1,10 @@
 // 画布几何:合成盒(Player 内按模板比例缩放的画布容器)↔ 画布 px。App 的拖动/对齐/手柄与属性卡共用。
 export interface CanvasBox { left: number; top: number; w: number; h: number }
 
+/** 合成根屏幕矩形共享单例(R11c): edit-canvas 每次取坐标系时回写,属性面板据此把
+ *  屏幕 rect 换算画布 px(W/H/X/Y 测量)——面板与画布分属两组件,走模块单例不走 props */
+export const compRectRef: { current: DOMRect | null } = { current: null }
+
 /** 图层节点(模板与自定义层都打 data-cover-layer) */
 export const layerEl = (id: string): HTMLElement | null => document.querySelector(`[data-cover-layer="${id}"]`) as HTMLElement | null
 

@@ -51,7 +51,7 @@ export const ProductCover: React.FC<ProductCoverProps> = ({ brand, title, subtit
             </div>
           )}
           {!hidden('title') && (
-            <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: 1.05, letterSpacing: -1, transform: titleStyle.translate || undefined }}>{title}</div>
+            <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: titleStyle.lineHeight ?? 1.05, letterSpacing: titleStyle.letterSpacing ?? -1, transform: titleStyle.translate || undefined }}>{title}</div>
           )}
           {!hidden('subtitle') && (
             <div data-cover-layer="subtitle" style={{ ...subStyle, marginTop: 20, fontWeight: subStyle.fontWeight ?? 600, transform: subStyle.translate || undefined }}>{subtitle}</div>

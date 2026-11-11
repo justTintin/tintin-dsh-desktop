@@ -23,6 +23,22 @@ export interface TextStyleOverride {
   stroke?: { width: number; color: string }
   /** 旋转(度,±180;画布旋转手柄写入;2026-11-10 对齐 PhotoCraft 文字变换) */
   rotate?: number
+  /** 文本框宽(px;undefined=模板原样;属性面板「变换·宽」写入;2026-11-11 R11 对齐 PhotoCraft 属性面板) */
+  width?: number
+  /** 行距(px;undefined=模板硬编码;字符面板「行距」) */
+  lineHeight?: number
+  /** 字距(px,letter-spacing;undefined=模板硬编码) */
+  tracking?: number
+  /** 水平缩放(%;100=原样;字符面板) */
+  hscale?: number
+  /** 垂直缩放(%;100=原样) */
+  vscale?: number
+  /** 基线偏移(px;position:relative+top) */
+  baseline?: number
+  /** 大小写转换(text-transform;undefined=原样) */
+  caseTransform?: 'uppercase' | 'lowercase' | 'capitalize'
+  /** 段落对齐(text-align;undefined=模板原样) */
+  align?: 'left' | 'center' | 'right' | 'justify'
   /** 几何缩放(0.3..3,等比,原点=层中心;画布角柄写入;2026-11-11 对齐 PhotoCraft
    *  Free Transform——文字画布缩放=几何变换不改字号,字号仍由 scale/编辑卡管) */
   gscale?: number
@@ -71,6 +87,11 @@ export function layerStyle(
   strokeCss?: string
   opacity: number
   mixBlendMode?: React.CSSProperties['mixBlendMode']
+  width?: number
+  lineHeight?: number
+  letterSpacing?: number
+  textTransform?: 'uppercase' | 'lowercase' | 'capitalize'
+  textAlign?: 'left' | 'center' | 'right' | 'justify'
 } {
   const s = props?.styles?.[layerId]
   const scale = typeof s?.scale === 'number' && Number.isFinite(s.scale) ? Math.min(3, Math.max(0.3, s.scale)) : 1
@@ -78,11 +99,24 @@ export function layerStyle(
   const dy = clampOffset(s?.dy)
   const rotate = typeof s?.rotate === 'number' && Number.isFinite(s.rotate) ? Math.min(180, Math.max(-180, Math.round(s.rotate))) : undefined
   const gscale = typeof s?.gscale === 'number' && Number.isFinite(s.gscale) ? Math.min(3, Math.max(0.3, s.gscale)) : undefined
-  // 变换链: translate → rotate → uniform scale(scale 段缺省不输出;顺序对均匀缩放无关)
+  // 字符缩放(h/v %,夹 25..400;100=原样)+基线偏移(夹 ±200)
+  const hscale = typeof s?.hscale === 'number' && Number.isFinite(s.hscale) ? Math.min(400, Math.max(25, s.hscale)) : 100
+  const vscale = typeof s?.vscale === 'number' && Number.isFinite(s.vscale) ? Math.min(400, Math.max(25, s.vscale)) : 100
+  const baseline = typeof s?.baseline === 'number' && Number.isFinite(s.baseline) ? Math.min(200, Math.max(-200, s.baseline)) : undefined
+  const widthPx = typeof s?.width === 'number' && Number.isFinite(s.width) && s.width > 0 ? Math.round(s.width) : undefined
+  const lineHeightPx = typeof s?.lineHeight === 'number' && Number.isFinite(s.lineHeight) && s.lineHeight > 0 ? Math.round(s.lineHeight * 10) / 10 : undefined
+  const trackingPx = typeof s?.tracking === 'number' && Number.isFinite(s.tracking) ? Math.round(s.tracking * 10) / 10 : undefined
+  const caseT = s?.caseTransform === 'uppercase' || s?.caseTransform === 'lowercase' || s?.caseTransform === 'capitalize' ? s.caseTransform : undefined
+  const alignT = s?.align === 'left' || s?.align === 'center' || s?.align === 'right' || s?.align === 'justify' ? s.align : undefined
+  // 变换链: translate → rotate → uniform scale(scale 段缺省不输出;h/v≠100 时输出两轴积)
   const xform = [
-    dx === undefined && dy === undefined ? null : `translate(${dx ?? 0}px, ${dy ?? 0}px)`,
+    dx === undefined && dy === undefined && !baseline ? null : `translate(${dx ?? 0}px, ${dy ?? 0 + (baseline ?? 0)}px)`,
     rotate ? `rotate(${rotate}deg)` : null,
-    gscale !== undefined && gscale !== 1 ? `scale(${gscale})` : null,
+    hscale !== 100 || vscale !== 100
+      ? `scale(${((gscale ?? 1) * hscale) / 100}, ${((gscale ?? 1) * vscale) / 100})`
+      : gscale !== undefined && gscale !== 1
+        ? `scale(${gscale})`
+        : null,
   ].filter((v): v is string => v !== null)
   const translate = xform.join(' ')
   const font = sanitizeFontFamily(s?.font)
@@ -114,6 +148,11 @@ export function layerStyle(
     strokeCss: stroke ? `${stroke.width}px ${stroke.color}` : undefined,
     opacity,
     mixBlendMode: blend,
+    width: widthPx,
+    lineHeight: lineHeightPx,
+    letterSpacing: trackingPx,
+    textTransform: caseT,
+    textAlign: alignT,
   }
 }
 

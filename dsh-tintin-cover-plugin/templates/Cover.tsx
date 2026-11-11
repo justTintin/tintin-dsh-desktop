@@ -49,12 +49,12 @@ export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, h
 
       <div style={{ position: 'absolute', inset: 0, padding: '72px 84px', display: 'flex', flexDirection: 'column', justifyContent: 'center', zIndex: layerZ(layerOrder, 'title') }}>
         {!hidden('title') && (
-          <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: 1.12, textShadow: titleStyle.textShadow ?? '0 10px 40px rgba(0,0,0,0.45)', maxWidth: 1000, transform: titleStyle.translate || undefined }}>
+          <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: titleStyle.lineHeight ?? 1.12, textShadow: titleStyle.textShadow ?? '0 10px 40px rgba(0,0,0,0.45)', maxWidth: 1000, transform: titleStyle.translate || undefined }}>
             {title}
           </div>
         )}
         {!hidden('subtitle') && (
-          <div data-cover-layer="subtitle" style={{ ...subStyle, marginTop: 26, fontWeight: 500, letterSpacing: 1, transform: subStyle.translate || undefined }}>
+          <div data-cover-layer="subtitle" style={{ ...subStyle, marginTop: 26, fontWeight: 500, letterSpacing: subStyle.letterSpacing ?? 1, transform: subStyle.translate || undefined }}>
             {subtitle}
           </div>
         )}

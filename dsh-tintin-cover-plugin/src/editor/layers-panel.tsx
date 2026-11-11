@@ -16,7 +16,8 @@ import { BLEND_MODES, imgDropShadow, lookBlend, lookOpacity, lookTransform, type
 import { lockedOf } from './image-ops'
 import { effectiveOrder, useEditor } from './store'
 import { buildLayerRows } from './layer-rows'
-import { CustomLayerEditor, DelayedTextEditor, ImageLayerEditor, TextStyleEditor } from './layer-editors'
+import { CustomLayerEditor, DelayedTextEditor, ImageLayerEditor } from './layer-editors'
+import { TextProperties } from './text-properties'
 import { ensureMenuStyle, headStyle } from './ui'
 import { layerEl } from './canvas-geom'
 import { IconChevronDown, IconDisclosure, IconEye, IconFolder, IconLock, IconSquarePlus, IconTrash, IconType } from './layer-icons'
@@ -494,7 +495,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
                   >＋ 添加一行</button>
                 </div>
               ) : null}
-              <TextStyleEditor layerId={layer.id} baseFontSize={layer.fontSize ?? 36} />
+              <TextProperties layerId={layer.id} baseFontSize={layer.fontSize ?? 36} tplWidth={tpl.width} />
               <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
                 {Array.isArray(value) ? '每行一条(钩子/卖点);末行默认跳色可被颜色覆盖' : '支持中文;改动即时预览'}
               </div>

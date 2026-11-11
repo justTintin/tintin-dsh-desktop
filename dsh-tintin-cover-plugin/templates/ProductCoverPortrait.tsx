@@ -47,7 +47,7 @@ export const ProductCoverPortrait: React.FC<ProductCoverProps> = ({ brand, title
         {/* 产品卡与文案列各自带层级(2026-11-01,flex 子项的 z-index 不需要定位):排列按图层序生效 */}
         <div style={{ marginTop: 40, display: 'flex', flexDirection: 'column', zIndex: layerZ(layerOrder, 'title') }}>
           {!hidden('title') && (
-            <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: 1.08, letterSpacing: -1, transform: titleStyle.translate || undefined }}>{title}</div>
+            <div data-cover-layer="title" style={{ ...titleStyle, fontWeight: titleStyle.fontWeight ?? 900, lineHeight: titleStyle.lineHeight ?? 1.08, letterSpacing: titleStyle.letterSpacing ?? -1, transform: titleStyle.translate || undefined }}>{title}</div>
           )}
           {!hidden('subtitle') && (
             <div data-cover-layer="subtitle" style={{ ...subStyle, marginTop: 18, fontWeight: subStyle.fontWeight ?? 600, transform: subStyle.translate || undefined }}>{subtitle}</div>

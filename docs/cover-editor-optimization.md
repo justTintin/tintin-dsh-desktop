@@ -294,6 +294,19 @@
 
 「产品图」→**「主体图」**(图层可能是人也可能是产品)。图层 **id 仍为 `product`**(会话词汇/props 键/styles.product/工具通道全锚 id,不动);registry.ts 4 模板 label + 编辑卡串(「设为主体图」等)+ cover SKILL 词汇(第 6/7 条与典型流,注明更名与 id 不变)随批;cover_context/面板行/校验报错自动跟随(均由 label 派生)。
 
+### 6.5‴ 文字层属性面板一比一(2026-11-11 续批 R11,用户裁决截图指认「字符操作 1比1复制」)
+
+对照 properties.rs + layer_props_ui.rs + type_panels_ui.rs(截图对照):编辑卡 TextStyleEditor 退役,新 **text-properties.tsx** 四段面板:
+- **变换**: 宽[px](文本框宽,可改=换行约束,H 随内容只读,W-H 链接钮禁用态)/X[px]/Y[px](画布绝对位,改=平移 dx/dy;测量=compRectRef 共享单例,canvas-geom 导出+edit-canvas compositionRect 回写);字段 24px field/border/圆角 3+px 后缀(mono)。
+- **对齐与分布**: 六向对齐图标(相对画布,与画布工具条同数学,面板本地实现)+水平/垂直分布段钮(需 ≥3 选中,面板单选语义=禁用态);图标 Lucide align-edge-*/distribute-* 路径逐字。
+- **字符**: 字体/样式下拉(既有组件重排);字号 pt(基准×scale,**画布拖角 live 跟随**)/行距 pt/字距 px/基线偏移 px/水平缩放 %/垂直缩放 %(各字段留空=还原模板默认);颜色=单色块+取色(色板退役);大小写四钮(Aa/TT/tt/Tt=text-transform)。
+- **段落**: 左/居中/右/两端对齐(text-align,继承到逐行子节点)。
+- **图层样式尾段**: 投影/描边(既有功能收编,PhotoCraft 语义=fx 面板另开,此处保守收编)。
+
+**新能力(TextStyleOverride 字段+layerStyle 输出)**: width(文本框宽,VideoCover×2 title 硬编码宽接 override)/lineHeight/letterSpacing(**6 模板硬编码 1.12-1.2 与 ±1 全接 override,缺省=原值**)/hscale·vscale(25..400%,折入 transform 两轴 scale,与 gscale 相乘)/baseline(±200px,折入 translate dy)/caseTransform(text-transform)/align(text-align)。消毒全夹取;translate 链=translate(dx,dy+baseline)→rotate→scale(g·h,g·v)。
+- 基线不落 position/top(与模板 absolute 冲突),折 translate——实测选定。
+- 既有 toEqual 断言兼容: toEqual 忽略 undefined 键,零改动。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。

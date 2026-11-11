@@ -2,10 +2,9 @@
 // 千行门禁)。滑条预览-提交分离(PreviewSlider)/文本防抖(DelayedTextEditor)/文字样式细调/
 // 自定义图片层与产品图编辑卡(从素材替换/抠图直达——抠图结果=素材,2026-10-31 裁决)。
 import React from 'react'
-import { liveLayer, liveLayerSnapshot, subscribeLiveLayer } from './ui'
-import { getTemplate, type LayerDef } from '../registry'
+import { liveLayer } from './ui'
+import { getTemplate } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
-import { FontFamilyPicker, FontStylePicker } from './font-picker'
 import { layerEl } from './canvas-geom'
 import { ImageLayerProps, numBox, type ImageTarget } from './image-props'
 import { useEditor } from './store'
@@ -70,7 +69,6 @@ function CustomLayerEditor({ layer, project }: { layer: CustomLayer; project: st
  *  底图保留 AI 生成;产品图来源=素材面板拖入/会话生成。
  *  2026-10-31 §2.5 P1:产品图补「用选中素材设为产品图」(素材区点选→一键设图)与「抠图去背景」;
  *  2026-11-01 用户裁决:删除「恢复默认」;外观/变换/排列统一走 ImageLayerProps(对齐 PhotoCraft)) */
-const STYLE_COLORS = ['#ffffff', '#22d3ee', '#facc15', '#f97316', 'var(--err)', '#4ade80', '#93c5fd', '#0f172a']
 
 /** 文本防抖提交(方案 B §2.5 P0):输入中只写本地态,停顿 250ms 或失焦才写 props——
  *  击键风暴合并为单次渲染。外部值变更(智能体/轮询)即时同步本地。 */
@@ -98,124 +96,6 @@ function DelayedTextEditor({ value, isArray, rows, onCommit }: {
   return isArray
     ? <textarea {...shared} rows={rows ?? 3} style={inputStyle({ height: 'auto', resize: 'vertical', minHeight: 64, fontFamily: 'inherit' })} />
     : <input {...shared} style={inputStyle()} />
-}
-
-/** 文字样式(PhotoCraft 式,2026-10-28):字体 / 大小(px 绝对,基准字号×倍率换算)/
- *  位置(X·Y 数值输入+滑条)/ 颜色(色板+自由取色器)。存储契约不变(styles.scale 等)。 */
-function TextStyleEditor({ layerId, baseFontSize }: { layerId: string; baseFontSize: number }): React.ReactElement {
-  const styles = useEditor((s) => (s.props.styles as Record<string, { scale?: number; gscale?: number; color?: string; dx?: number; dy?: number; font?: string; weight?: number; italic?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }> | undefined)?.[layerId])
-  const setLayerStyle = useEditor((s) => s.setLayerStyle)
-  /* live 值(2026-11-10 对齐 PhotoCraft #128): 画布拖动/缩放中编辑卡实时跟随——
-     useSyncExternalStore 订阅 liveLayer(v 变化即重渲),选中层匹配时显示 live 值。 */
-  React.useSyncExternalStore(subscribeLiveLayer, liveLayerSnapshot)
-  const scale = typeof styles?.scale === 'number' ? styles.scale : 1
-  const gs = typeof styles?.gscale === 'number' ? styles.gscale : 1
-  // 有效视觉字号 = 基准 × 字号倍率 × 几何缩放(2026-11-11 WP-A4:画布角柄=几何缩放)
-  const px = liveLayer.scaleId === layerId ? liveLayer.scalePx : Math.round(baseFontSize * scale * gs)
-  const [liveSlide, setLiveSlide] = React.useState<number | null>(null)
-  const shownPx = liveSlide ?? px
-  const setPx = (v: number): void => {
-    if (!Number.isFinite(v)) return
-    setLayerStyle(layerId, { scale: Math.min(3, Math.max(0.3, v / baseFontSize)) })
-  }
-  const dx = styles?.dx ?? 0
-  const dy = styles?.dy ?? 0
-  return (
-    <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: 'rgba(127,127,127,0.07)', border: '1px solid var(--border)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>字体</span>
-        <FontFamilyPicker
-          value={styles?.font}
-          onChange={(f) => setLayerStyle(layerId, { font: f, weight: undefined, italic: undefined })} // 换字体重置样式字面
-        />
-      </div>
-      {styles?.font ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-          <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>样式</span>
-          <FontStylePicker
-            font={styles.font}
-            weight={typeof styles?.weight === 'number' ? styles.weight : undefined}
-            italic={styles?.italic === true}
-            onChange={(v) => setLayerStyle(layerId, v ? { weight: v.weight, italic: v.italic } : { weight: undefined, italic: undefined })}
-          />
-        </div>
-      ) : null}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>大小</span>
-        {/* 滑条 live 显示(2026-11-10 用户报障「放大拖动时右边的值没变」): 拖动中显示 live 值
-            (受控 value 锚 store 值=React 拉回,滑块回弹+显示不变),松手/失焦提交 store。 */}
-        <input
-          type="range" min={Math.max(14, Math.round(baseFontSize * 0.3))} max={Math.round(baseFontSize * 3)} step={1} value={shownPx}
-          onChange={(e) => { const v = Number(e.target.value); setLiveSlide(v); const el = layerEl(layerId); if (el) el.style.fontSize = `${v}px` }}
-          onPointerUp={(e) => { setPx(Number(e.currentTarget.value)); setLiveSlide(null) }}
-          onKeyUp={(e) => { setPx(Number(e.currentTarget.value)); setLiveSlide(null) }}
-          onBlur={(e) => { setPx(Number(e.currentTarget.value)); setLiveSlide(null) }}
-          style={{ flex: 1, accentColor: 'var(--accent)' }}
-        />
-        <input type="number" min={10} max={400} value={shownPx} onChange={(e) => { setPx(Number(e.target.value)); setLiveSlide(null) }} style={numBox} />
-        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>px</span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>位置</span>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>X</span>
-        <input type="number" min={-1200} max={1200} value={liveLayer.posId === layerId ? liveLayer.posDx : dx} onChange={(e) => setLayerStyle(layerId, { dx: Number(e.target.value) })} style={numBox} />
-        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Y</span>
-        <input type="number" min={-1200} max={1200} value={liveLayer.posId === layerId ? liveLayer.posDy : dy} onChange={(e) => setLayerStyle(layerId, { dy: Number(e.target.value) })} style={numBox} />
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>颜色</span>
-        {STYLE_COLORS.map((c) => (
-          <button
-            key={c}
-            onClick={() => setLayerStyle(layerId, styles?.color === c ? { color: undefined } : { color: c })}
-            title={styles?.color === c ? `${c}(点击还原默认)` : c}
-            style={{
-              width: 20, height: 20, borderRadius: 999, cursor: 'pointer', padding: 0,
-              background: c, border: styles?.color === c ? '2px solid var(--accent)' : '1px solid #555',
-            }}
-          />
-        ))}
-        <input
-          type="color"
-          value={styles?.color ?? '#ffffff'}
-          onChange={(e) => setLayerStyle(layerId, { color: e.target.value })}
-          title="自由取色"
-          style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }}
-        />
-      </div>
-      {/* 投影/描边(2026-11-02 对齐 PhotoCraft 图层样式;设置后覆盖模板硬编码阴影) */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>投影</span>
-        <button
-          onClick={() => setLayerStyle(layerId, styles?.shadow ? { shadow: undefined } : { shadow: { dx: 0, dy: 6, blur: 14, color: 'rgba(0,0,0,0.6)' } })}
-          title={styles?.shadow ? '关闭投影' : '开启投影'}
-          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 11, color: styles?.shadow ? 'var(--accent)' : 'var(--text-faint)', borderColor: styles?.shadow ? 'var(--accent)' : undefined }}
-        >{styles?.shadow ? '开' : '关'}</button>
-        {styles?.shadow ? (
-          <>
-            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>大小</span>
-            <input type="number" min={0} max={60} value={styles.shadow.blur} onChange={(e) => setLayerStyle(layerId, { shadow: { ...styles.shadow!, blur: Math.max(0, Math.min(60, Number(e.target.value) || 0)) } })} style={numBox} />
-            <input type="color" value="#000000" onChange={(e) => setLayerStyle(layerId, { shadow: { ...styles.shadow!, color: e.target.value } })} title="投影颜色" style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }} />
-          </>
-        ) : null}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)', flexShrink: 0 }}>描边</span>
-        <button
-          onClick={() => setLayerStyle(layerId, styles?.stroke ? { stroke: undefined } : { stroke: { width: 3, color: 'rgba(2,6,23,0.65)' } })}
-          title={styles?.stroke ? '关闭描边' : '开启描边'}
-          style={{ ...ghostBtn, width: 'auto', padding: '2px 10px', fontSize: 11, color: styles?.stroke ? 'var(--accent)' : 'var(--text-faint)', borderColor: styles?.stroke ? 'var(--accent)' : undefined }}
-        >{styles?.stroke ? '开' : '关'}</button>
-        {styles?.stroke ? (
-          <>
-            <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>宽</span>
-            <input type="number" min={0} max={12} value={styles.stroke.width} onChange={(e) => setLayerStyle(layerId, { stroke: { ...styles.stroke!, width: Math.max(0, Math.min(12, Number(e.target.value) || 0)) } })} style={numBox} />
-            <input type="color" value="#ffffff" onChange={(e) => setLayerStyle(layerId, { stroke: { ...styles.stroke!, color: e.target.value } })} title="描边颜色" style={{ width: 26, height: 20, padding: 0, border: '1px solid #555', borderRadius: 4, background: 'transparent', cursor: 'pointer' }} />
-          </>
-        ) : null}
-      </div>
-    </div>
-  )
 }
 
 function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: string; layerLabel: string; propKey: string; project: string }): React.ReactElement {
@@ -319,4 +199,4 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
     </div>
   )
 }
-export { CustomLayerEditor, DelayedTextEditor, ImageLayerEditor, TextStyleEditor }
+export { CustomLayerEditor, DelayedTextEditor, ImageLayerEditor }

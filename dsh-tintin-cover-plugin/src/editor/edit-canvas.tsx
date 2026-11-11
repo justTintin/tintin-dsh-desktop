@@ -14,7 +14,7 @@ import React from 'react'
 import { getTemplate } from '../registry'
 import { RenderSurface } from './render-surface'
 import { useCanvasShortcuts } from './canvas-keys'
-import { canvasBoxIn, compositionRectIn, type CanvasBox } from './canvas-geom'
+import { canvasBoxIn, compositionRectIn, compRectRef, type CanvasBox } from './canvas-geom'
 import { clampScale, cornerResize, rotatedCornerResize, rotatedEdgeResize, lockedOf, type Corner } from './image-ops'
 import { useRotateHandles, useTextScaleHandles } from './text-scale'
 import { updateHover as auxUpdateHover, usePurePreview, cycleLayerSelection } from './canvas-aux'
@@ -150,7 +150,11 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   }
   React.useLayoutEffect(() => { measureSel() })
   /** 合成盒(按模板比例缩放的画布容器)= 拖动/对齐/落点的统一坐标系 */
-  const compositionRect = (): DOMRect | null => compositionRectIn(hostRef.current, playerWrapRef.current)
+  const compositionRect = (): DOMRect | null => {
+    const rect = compositionRectIn(hostRef.current, playerWrapRef.current)
+    compRectRef.current = rect // R11c: 属性面板测量共享
+    return rect
+  }
   /** 缩放手柄(PhotoCraft 角柄,2026-11-02 用户裁决:对角为锚等比缩放;预览-提交分离)。
    *  自由图层未旋转=对角锚改宽(cornerResize);旋转自由层=对侧内容角精确锚定
    *  (rotatedCornerResize,R6——手柄=内容角附着随层旋转,拖拽比同口径,翻转不改盒几何);

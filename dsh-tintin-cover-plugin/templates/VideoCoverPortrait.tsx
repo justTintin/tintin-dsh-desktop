@@ -36,7 +36,7 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
       )}
 
       {!hidden('title') && (
-        <div data-cover-layer="title" style={{ position: 'absolute', left: 56, top: 130, width: 968, zIndex: layerZ(layerOrder, 'title'), opacity: hookStyle.opacity, mixBlendMode: hookStyle.mixBlendMode, transform: hookStyle.translate || undefined }}>
+        <div data-cover-layer="title" style={{ position: 'absolute', left: 56, top: 130, width: hookStyle.width ?? 968, zIndex: layerZ(layerOrder, 'title'), opacity: hookStyle.opacity, mixBlendMode: hookStyle.mixBlendMode, transform: hookStyle.translate || undefined }}>
           {hookLines.map((line, i) => (
             <div
               key={line}
@@ -45,7 +45,7 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
                 fontFamily: hookStyle.fontFamily,
                 fontWeight: hookStyle.fontWeight ?? 900,
                 fontStyle: hookStyle.fontStyle,
-                lineHeight: 1.2,
+                lineHeight: hookStyle.lineHeight ?? 1.2,
                 color: hookStyle.color === '#ffffff' && i === hookLines.length - 1 ? '#22d3ee' : hookStyle.color,
                 textShadow: hookStyle.textShadow ?? '0 6px 0 rgba(2,6,23,0.9), 0 14px 44px rgba(0,0,0,0.7)',
                 WebkitTextStroke: hookStyle.strokeCss ?? '2px rgba(2,6,23,0.65)',
@@ -83,7 +83,7 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
           data-cover-layer="subtitle"
           style={{
             position: 'absolute', left: 60, bottom: 150, right: 60, maxWidth: 968, zIndex: layerZ(layerOrder, 'subtitle'),
-            ...subtitleStyle, fontWeight: subtitleStyle.fontWeight ?? 600, letterSpacing: 1,
+            ...subtitleStyle, fontWeight: subtitleStyle.fontWeight ?? 600, letterSpacing: subtitleStyle.letterSpacing ?? 1,
             textShadow: '0 2px 12px rgba(2,6,23,0.85)',
             transform: subtitleStyle.translate || undefined,
           }}
