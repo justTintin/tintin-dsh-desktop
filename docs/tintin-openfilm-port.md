@@ -641,8 +641,8 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 
 - **图标**: 📦 emoji → lucide Package SVG(16px/stroke 1.75, 与官方工具行 LibraryBig/Plus 同一画法);`aria-pressed` 走官方 `.openfilm-composer-tool[aria-pressed=true]` 按下态;
 - **显隐开关**: fab 再点一次=关闭(setOpen 收口显隐+aria-pressed), close 键同走 setOpen——与在线素材按钮同款开关语义;
-- **贴输入框**: 面板底=输入框顶(`[data-prompt-shell]` composer 卡片根为锚, MentionMenuPlugin 同款), 替代原 128px 固定预留(面板不再悬空一段);锚缺失退回 128px 兜底;
-- 验证: dsh-tintin-bundle 22 文件 204 用例全绿(同车提交)。
+- **贴输入框**: 面板底=输入框顶(`[data-prompt-shell]` composer 卡片根为锚, MentionMenuPlugin 同款), 替代原 128px 固定预留(面板不再悬空一段);锚缺失退回 128px 兜底;面板补 `box-sizing:border-box`(边框计入定位尺寸,否则 1px 边框把面板底压过输入框顶 2px);
+- 验证: dsh-tintin-bundle 22 文件 204 用例全绿;check:tintin/热调载荷新鲜绿;独立渲染面探针(harness=假 composer 列+假 products 桥,静态服务+浏览器实测)=打开时面板底=输入框顶(634==634)、面板宽=列宽(420==420)、点开→再点关→再点开序列与 `aria-pressed` 同步、图标与素材按钮同类(`.openfilm-composer-tool`)且为 SVG 无 emoji(2026-11-11 实测,与实现同车提交)。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 

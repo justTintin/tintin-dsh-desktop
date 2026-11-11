@@ -13,7 +13,7 @@ const STYLE = [
   '.tintin-pd-fab{z-index:2147483000}',
   /* 素材式嵌入(2026-11-09 用户裁决): 面板占聊天列的会话区域(列顶→输入框上缘), 不再浮在
      Studio 画布上 —— 四边由打开时按 #of-chat 的实位 JS 设定, 这里只是形状兜底。 */
-  '.tintin-pd-panel{position:fixed;left:0;top:32px;width:420px;max-height:70vh;z-index:2147483001;background:#101114;border:1px solid #26272b;border-radius:12px;display:flex;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6;box-shadow:0 12px 32px rgba(0,0,0,.5)}',
+  '.tintin-pd-panel{position:fixed;left:0;top:32px;width:420px;max-height:70vh;z-index:2147483001;background:#101114;border:1px solid #26272b;border-radius:12px;display:flex;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6;box-shadow:0 12px 32px rgba(0,0,0,.5);box-sizing:border-box}',
   '.tintin-pd-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1c1d21}',
   '.tintin-pd-title{flex:1;font-weight:700;font-size:14px}',
   '.tintin-pd-close{background:#1a1b1f;border:1px solid #2a2b31;border-radius:8px;color:#c9c9cf;font-size:14px;cursor:pointer;min-width:28px;height:28px}',
