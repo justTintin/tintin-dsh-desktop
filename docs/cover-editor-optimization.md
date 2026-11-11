@@ -451,3 +451,13 @@
 - **取消贯通**:聊天停止键(cancel 路由)→`bridge.cancel({cancelTasks:true})`→对本会话登记的未结算任务发 batch_cancel 并标记结算;**护栏自动中止(bumpGuard)不杀任务**(可能已付费在跑),只停回合。
 - SKILL.md 同批:能力通道表与仿封面节改两步口径(提交→立即 wait;settled:false 续等;cancel 语义)。
 - 测试:tintin-cover-tools-mcp.test.ts 重写为两步契约(提交不打轮询/settled:false 续等/completed 双写回显/failed 原文/cancel 走 batch_cancel/非法 task_id 拒绝),11 用例全绿。
+
+### 7.2 read_image 进模型前压缩阶梯(方案 3;对标 claude-code imageResizer)
+
+原 `read_image` 8MB 全量 base64 直进模型(大参考图=上下文爆炸+慢)。新增 `lib/cover-image-resize.js`:
+
+- 常量口径照搬参考实现:原图 ≤3.75MB(=base64 5MB API 上限×3/4)且长边 ≤2000px 直通;超限等比缩到长边 2000,JPEG 走质量阶梯 80→60→40→20,PNG 保格式降采样 1500→1200(nativeImage 无调色板 PNG、透明转 JPEG 会黑底,不冒进);终产仍超 8MB 抛人话错误。
+- 解码器=Electron `nativeImage` 惰性接入(宿主插件跑在桌面主进程);拿不到(单测 node/异常宿主)一律 **fail-open 返回 null=原字节直通**,零新依赖零回归;WebP 不支持解码→直通。
+- 缩放发生时文本块附坐标换算元信息(`[Image: 原始 WxH, 已缩放至 wxh, 像素坐标 ×f 换算]`,claude-code createImageMetadataText 同思路)——仿封面 OCR 拆版式按所见图报 box 不失真。
+- 聊天侧(用户拖入/粘贴图)经查**上游 shell 已自带**同款阶梯(ref-pictures.ts `attachedPicture`:2000px/4MB JPEG q0.85),无需另做。
+- 测试:cover-image-resize.test.ts 7 用例(fail-open/直通/超分缩放/质量阶梯/硬上限/空图/元信息),全绿。

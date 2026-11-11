@@ -38,6 +38,7 @@ import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, isAbsolute, join, resolve as resolvePath, sep } from 'node:path'
+import { imageMetaText, shrinkForModelRead } from './cover-image-resize.js'
 
 const MCP_PATH = '/tintin/cover/api/tools-mcp'
 const MATTING_CHAIN = ['isnet-general-use', 'u2net', 'isnet-anime']
@@ -174,10 +175,16 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     const bytes = readFileSync(path)
     const mime = magicMime(bytes)
     if (!mime) throw new Error('不是可识别的图片(PNG/JPEG/WebP 魔数校验失败)')
+    /* 进模型前压缩阶梯(2026-11-12 封面参考批方案 3): >3.75MB 或长边 >2000 缩放压缩,
+       失败 fail-open 原字节直通;缩放时附坐标换算元信息(OCR box 报数不失真)。 */
+    let shrunk = null
+    try { shrunk = shrinkForModelRead(bytes, mime) } catch (e) { throw new Error(e instanceof Error ? e.message : String(e)) }
+    const dataBytes = shrunk?.bytes ?? bytes
+    const dataMime = shrunk?.mime ?? mime
     return {
       content: [
-        { type: 'image', data: bytes.toString('base64'), mimeType: mime },
-        { type: 'text', text: `${path}(${size} bytes,${mime})` },
+        { type: 'image', data: dataBytes.toString('base64'), mimeType: dataMime },
+        { type: 'text', text: `${path}(${size} bytes,${mime})${imageMetaText(shrunk)}` },
       ],
     }
   }
