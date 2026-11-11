@@ -277,6 +277,19 @@
 5. ⏸ **成组持久化**(显式 Group 数据模型): 涉及新数据模型与组语义用户裁决(与既有"图层组=模板槽位"概念叠加),未实施——现有多选+组变换覆盖临时成组操作。
 6. ⏸ **翻转体感校准**: 几何已正确(翻转不改盒几何,内容角锚定公式与 flip 无关),把手-内容对应感属实机体感项,等用户实测反馈。
 
+### 6.5′ 图层面板元素一比一(2026-11-11 续批 R10,用户裁决「按钮/图标一比一复制 PhotoCraft」)
+
+**图标管线实证**: PhotoCraft 图标=Lucide 24 栅格 SVG(assets/icons/*.svg),加载时 stroke 2→1.75、currentColor 按用途着色(icon_data.rs/icons.rs)——本批把 SVG 路径**逐字拷贝**进 layer-icons.tsx(eye/lock/folder/type/trash/square-plus/chevron-down),非重绘近似。
+
+- 行规格(layer_row*.rs): 32px 行高;眼列 30px 全高(可见=eye 15px icon 色,**隐藏=空白**,Photoshop 同款;Alt+点击=只显示此层 :407-411);行左 1px 竖分隔+行底 1px 横分隔;选中=#525252(theme row_selected 暗档);名 12px 隐藏→faint;右缘=混合模式标签 10.5px(≠正常时)+lock 12px(仅锁定,点击解锁);**整行拖拽,⠿ 手柄退役**(layer_row.rs:203-214);表情图标(👁🚫🖼📷◇🔒⠿)全退役。
+- 组=实心展开三角(layer_tree_ui.rs:65-71,展开朝下/折叠朝右)+每层缩进 14px+**组可折叠**(折叠隐藏默认行与成员行)。
+- 缩略芯片 24px(layer_row.rs:617-677): 图片=棋盘格 5px 单元+信箱图+外描边 1px #141414;文字=#DEDEDE 芯片+type 20px #282828(pro 形态);组/空=field 底 radius 6+folder 18。文字行真字体 canvas 缩略图(TextThumb)按 1:1 退役。
+- 投放指示(layer_drag.rs:180-188): 行上/下缘=2px accent 横线;拖入组=组内描边 radius 3(替代旧 inset 阴影 hack)。
+- 页脚(layers.rs:402-528): 1px 分隔+30px 条右对齐 26×26 按钮(glyph 14): trash=删选中自由层/行拖到=删,square-plus=复制选中自由层/行拖到=复制;link/mask/fx/adjustment/folder 按钮无对应业务语义,不做死按钮。
+- 头行(layers.rs:149-184+fields.rs): blend 下拉=field #242424/border #4A4A4A/radius 3/chevron 14 区(appearance:none+绝对定位图标);不透明度=80px 数值字段(24px 高,mono 数字+% 后缀+▾ 区),点击开 160px 弹出滑条(:323)。
+- Pro-dark 调色板(theme.rs:225-334 暗档)常量 PC.*:field #242424/border #4A4A4A/selected #525252/separator #1E1E1E/text #DEDEDE/dim #B2B2B2/faint #808080/icon #C8C8C8/accent #378EF0(仅面板内)。
+- 浏览器截图核验: 眼列/三角/芯片/选中态/头行字段/页脚按钮全按规格呈现(见验证截图)。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。
