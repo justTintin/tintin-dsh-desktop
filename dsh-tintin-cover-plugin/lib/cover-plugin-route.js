@@ -781,9 +781,31 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
           const coverDir = await engine.resolveCoverDir()
           const target = join(coverDir, name)
           if (!existsSync(target)) throw new Error(`文件不存在:${name}`)
-          const { rmSync } = await import('node:fs')
           rmSync(target, { force: true })
-          sendJson(res, 200, { ok: true, name })
+          /* 三写位清理(2026-11-12 素材创作批方案 7): 原只删项目目录副本,素材位(public/ 等
+             三写)常驻——删除后仍可被裸文件名引用、磁盘只增不减。现扫其余项目的 cover.props.json
+             (引用语义=ensureCoverAssets 同面:image/bgImage/customLayers[].image),无任何他项目
+             引用才清三写位;有引用则保留并在响应说明(public/ 跨项目共享,原注释口径)。当前项目
+             自己的引用不拦——用户明确删了,引用它的图层随渲染如实报缺。 */
+          const keptForProjects = []
+          const projectsRoot = projectsRootOf(coverDir)
+          if (projectsRoot) {
+            for (const entry of readdirSync(projectsRoot, { withFileTypes: true })) {
+              if (!entry.isDirectory() || entry.name === basename(coverDir)) continue
+              try {
+                const record = JSON.parse(readFileSync(join(projectsRoot, entry.name, 'cover.props.json'), 'utf8'))
+                const props = record?.props && typeof record.props === 'object' ? record.props : {}
+                const layers = Array.isArray(props.customLayers) ? props.customLayers : []
+                if ([props.image, props.bgImage, ...layers.map((l) => l?.image)].some((n) => n === name)) keptForProjects.push(entry.name)
+              } catch { /* 无记录/坏记录=不引用 */ }
+            }
+          }
+          if (!keptForProjects.length) {
+            const { coverAssetTargets } = await import('./cover-asset.js')
+            const pluginDir = resolvePluginDir()
+            if (pluginDir) for (const t of coverAssetTargets(pluginDir)) { try { rmSync(join(t, name), { force: true }) } catch { /* 单位失败不阻断 */ } }
+          }
+          sendJson(res, 200, { ok: true, name, ...(keptForProjects.length ? { keptInAssets: true, referencedBy: keptForProjects } : {}) })
         } catch (err) {
           sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) })
         }

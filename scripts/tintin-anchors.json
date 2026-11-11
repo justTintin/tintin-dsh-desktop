@@ -546,6 +546,24 @@
     "minCount": 1
   },
   {
+    "comment": "replay: mention items carry the asset thumbnail field (cover @ menu thumbnails, 2026-11-12)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/components/prompt-editor/mention-menu.ts",
+    "pattern": "thumbUrl",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the mention menu renders the thumbnail over the icon with icon fallback",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/components/prompt-editor/MentionMenuPlugin.tsx",
+    "pattern": "item.thumbUrl",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: the asset provider passes the host thumbnail through",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/App.tsx",
+    "pattern": "thumbUrl",
+    "minCount": 2
+  },
+  {
     "comment": "replay: the show-skills host command exists",
     "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/lib/host.ts",
     "pattern": "'show-skills'",

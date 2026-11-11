@@ -328,8 +328,19 @@ function MentionMenu({
                     : `cursor-pointer ${selected ? 'bg-[var(--bg-hover)]' : ''}`
                 }`}
               >
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${selected && !item.disabled ? 'bg-[var(--bg-raised)] text-[var(--text)]' : 'bg-[var(--bg-field)] text-[var(--text-muted)]'}`}>
+                {/* TinTin replay (2026-11-12): an image asset's thumbnail loads over the icon and
+                    drops out on error, so a dead URL leaves the icon showing. */}
+                <span className={`relative flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md ${selected && !item.disabled ? 'bg-[var(--bg-raised)] text-[var(--text)]' : 'bg-[var(--bg-field)] text-[var(--text-muted)]'}`}>
                   <Icon size={13} />
+                  {item.thumbUrl ? (
+                    <img
+                      src={item.thumbUrl}
+                      alt=""
+                      loading="lazy"
+                      onError={(event) => { event.currentTarget.remove(); }}
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  ) : null}
                 </span>
                 {/* A disabled item keeps its full name and the hint shrinks instead. */}
                 <span className={`truncate text-[var(--text)] ${item.disabled || item.describes ? 'max-w-[60%] shrink-0' : 'min-w-0 flex-1'}`}>{item.label}</span>

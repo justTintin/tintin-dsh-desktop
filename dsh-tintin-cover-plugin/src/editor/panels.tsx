@@ -324,10 +324,12 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
             <button className="danger" onClick={() => {
               void (async () => {
                 try {
-                  const r = await (await fetch('/tintin/ipc/cover/delete-asset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: menu.name }) })).json() as { ok?: boolean; error?: string }
+                  const r = await (await fetch('/tintin/ipc/cover/delete-asset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: menu.name }) })).json() as { ok?: boolean; error?: string; keptInAssets?: boolean; referencedBy?: string[] }
                   if (!r.ok) throw new Error(r.error || '删除失败')
                   if (selected === menu.name) setSelected(null)
                   reloadNow()
+                  /* 素材位保留说明(2026-11-12 素材创作批:他项目仍引用时三写位不清) */
+                  if (r.keptInAssets) flashNotice(`已从项目删除；素材位保留（仍被其它项目引用：${(r.referencedBy ?? []).join('、')}）`)
                 } catch (e) { flashNotice(e instanceof Error ? e.message : String(e)) }
               })()
               setMenu(null)

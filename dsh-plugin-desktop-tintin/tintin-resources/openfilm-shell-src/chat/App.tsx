@@ -399,7 +399,7 @@ function ChatPane({ project, banners, selection, assetsOpen, assetsOverlay }: { 
   );
 
   /* ── the @ menu: this moment in Studio, and the project's files (asked for when the menu opens) ── */
-  const [mentionFiles, setMentionFiles] = React.useState<Array<{ path: string; kind: string; size: number }>>([]);
+  const [mentionFiles, setMentionFiles] = React.useState<Array<{ path: string; kind: string; size: number; thumbUrl?: string }>>([]);
   const loadMentionFiles = React.useCallback(() => {
     void app.projectFiles().then((listing) => setMentionFiles([
       ...(listing.files ?? []).filter((f) => ['image', 'video', 'audio'].includes(f.kind)),
@@ -524,6 +524,8 @@ function ChatPane({ project, banners, selection, assetsOpen, assetsOverlay }: { 
           const pill: PromptReference = { id: fileReferenceId(file.path), kind: 'file', label: file.kind === 'mg' ? name.replace(/\.html?$/i, '') : name, detail: formatFileSize(file.size) };
           return {
             id: pill.id, kind: pill.kind, label: pill.label, detail: pill.detail, keywords: [file.path],
+            /* TinTin replay (2026-11-12): the host may hand a thumbnail for image assets */
+            ...(file.thumbUrl ? { thumbUrl: file.thumbUrl } : {}),
             select: () => { setFileRefs((list) => (list.some((p) => p.id === pill.id) ? list : [...list, pill])); return pill; },
           };
         }),

@@ -23,6 +23,9 @@ export interface MentionItem {
   detail?: string;
   /** Other words that find it besides the label: English aliases, the full path. */
   keywords?: string[];
+  /** A small picture standing in for the icon (an image asset's own thumbnail; the host serves
+   * the URL). It loads over the icon and drops out on error, so a dead URL changes nothing. */
+  thumbUrl?: string;
   /** Not usable now; with no film yet, there is no current time. */
   disabled?: boolean;
   /** Why it is not usable; a gray item without a reason looks broken. */

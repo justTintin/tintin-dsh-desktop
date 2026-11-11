@@ -287,6 +287,78 @@ describe('cover project asset root (2026-10-31 doubled-projects regression)', ()
     expect(existsSync(join(coverDir, 'flat.png'))).toBe(true)
     expect(existsSync(join(coverDir, 'proj-a'))).toBe(false)
   })
+
+  /* delete-asset 三写位清理(2026-11-12 素材创作批方案 7): 无他项目引用=三写位同清;
+     他项目仍引用=保留三写位并回 keptInAssets(素材位 public/ 跨项目共享口径)。 */
+  const fireDelete = async (coverDir: string, name: string): Promise<{ status: number; body?: { ok?: boolean; error?: string; keptInAssets?: boolean; referencedBy?: string[] } }> => {
+    process.env.TINTIN_TEST_COVER_DIR = coverDir
+    const handlers = new Map<string, (req: never, res: never) => Promise<void>>()
+    const responses: Array<{ status: number; body?: { ok?: boolean; error?: string; keptInAssets?: boolean; referencedBy?: string[] } }> = []
+    const { registerCoverPluginRoute } = await import('../lib/cover-plugin-route.js')
+    const dispose = registerCoverPluginRoute({
+      webServer: {
+        register: (spec: { path: string; handler: (req: never, res: never) => Promise<void> }) => {
+          handlers.set(spec.path, spec.handler)
+          return () => {}
+        },
+      },
+      isTrustedRequest: () => true,
+      sendJson: (_res: unknown, status: number, body?: { ok?: boolean; error?: string; keptInAssets?: boolean; referencedBy?: string[] }) => { responses.push({ status, body }) },
+      httpRequest: async () => ({}),
+      getServerUrl: () => '',
+    })
+    const handler = handlers.get('/tintin/cover/api/delete-asset')
+    expect(handler).toBeDefined()
+    const req = {
+      method: 'POST',
+      url: '/tintin/cover/api/delete-asset',
+      headers: {},
+      on: (ev: string, cb: (c?: Buffer) => void) => {
+        if (ev === 'data') cb(Buffer.from(JSON.stringify({ name })))
+        if (ev === 'end') setTimeout(cb as () => void, 0)
+      },
+    }
+    await handler?.(req as never, {} as never)
+    for (let i = 0; responses.length === 0 && i < 200; i++) await new Promise((r) => setTimeout(r, 10))
+    dispose()
+    return responses.at(-1) ?? { status: 0 }
+  }
+
+  it('delete-asset cleans the three-write positions when no other project references the image', async () => {
+    const root = tempRoot()
+    const coverDir = join(root, 'cover', 'projects', 'proj-a')
+    mkdirSync(coverDir, { recursive: true })
+    writeFileSync(join(coverDir, 'solo.png'), Buffer.from('x'))
+    writeFileSync(join(stubPluginDir, 'public', 'solo.png'), Buffer.from('x'))
+    for (const target of [['dist', 'editor'], ['dist', 'remotion-bundle', 'public']]) {
+      mkdirSync(join(stubPluginDir, ...target), { recursive: true })
+      writeFileSync(join(stubPluginDir, ...target, 'solo.png'), Buffer.from('x'))
+    }
+    const result = await fireDelete(coverDir, 'solo.png')
+    expect(result.status).toBe(200)
+    expect(existsSync(join(coverDir, 'solo.png'))).toBe(false)
+    expect(existsSync(join(stubPluginDir, 'public', 'solo.png'))).toBe(false)
+    expect(existsSync(join(stubPluginDir, 'dist', 'editor', 'solo.png'))).toBe(false)
+    expect(existsSync(join(stubPluginDir, 'dist', 'remotion-bundle', 'public', 'solo.png'))).toBe(false)
+  })
+
+  it('delete-asset keeps the three-write positions when another project still references the image', async () => {
+    const root = tempRoot()
+    const coverDir = join(root, 'cover', 'projects', 'proj-a')
+    const otherDir = join(root, 'cover', 'projects', 'proj-b')
+    mkdirSync(coverDir, { recursive: true })
+    mkdirSync(otherDir, { recursive: true })
+    writeFileSync(join(coverDir, 'shared.png'), Buffer.from('x'))
+    writeFileSync(join(otherDir, 'cover.props.json'), JSON.stringify({ templateId: 'video', props: { bgImage: 'shared.png' }, origin: 'agent' }))
+    writeFileSync(join(stubPluginDir, 'public', 'shared.png'), Buffer.from('x'))
+    const result = await fireDelete(coverDir, 'shared.png')
+    expect(result.status).toBe(200)
+    expect(result.body?.ok).toBe(true)
+    expect(result.body?.keptInAssets).toBe(true)
+    expect(result.body?.referencedBy).toEqual(['proj-b'])
+    expect(existsSync(join(coverDir, 'shared.png'))).toBe(false)
+    expect(existsSync(join(stubPluginDir, 'public', 'shared.png'))).toBe(true)
+  })
 })
 
 /* 2026-10-31 用户报障回归:①「发现」恒 0——httpRequest 成功返回信封 {data,status},

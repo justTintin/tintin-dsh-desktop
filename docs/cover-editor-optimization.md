@@ -471,3 +471,10 @@
 - **URL 导入项目落盘失败不再静默**:upload-url 回 `warning` 字段,素材条 flashNotice 如实呈现「已导入 x——项目目录落盘失败(素材位已有):原因」;
 - **画布多文件拖入**(edit-canvas.tsx,方案 5):原只收第一张——现逐张上传建层(第 2+ 张 +24px/张 错位堆放防叠死,上限 12 张);
 - 测试:tintin-cover-acp.test.ts 增 3 用例(中文名收下+413+穿越拒;引用图魔数扩展名+413),18 用例全绿;chat-shell vite 构建通过。
+
+### 7.4 @ 菜单近期置顶+缩略图(方案 6;用户裁决「缩略图做」)
+
+- **近期置顶**:files 路由每个条目附 `mtime`,图片组内按 mtime 新→旧排(空查询时 @ 菜单同分保持提供方顺序→近期素材自然置顶;素材条同源受益);非图片组维持路径序。
+- **缩略图**(vendor 三文件,锚点登记 143):`mention-menu.ts` MentionItem 增可选 `thumbUrl`;`MentionMenuPlugin.tsx` 行首有缩略图时 `<img object-cover>` 盖在图标上,加载失败 `onError` 移除=图标回退,死链零视觉回归;`App.tsx` asset provider 透传 host 给的 `thumbUrl`(提供方中性——影片侧不传即无感)。封面桥 projectFiles 对图片条目拼同源 `/tintin/cover/api/acp/asset?name=...` 缩略地址。
+- **删素材清三写位**(方案 7,cover-plugin-route.js delete-asset):原只删项目目录副本;现扫其余项目 cover.props.json(引用面=ensureCoverAssets 同语义 image/bgImage/customLayers[].image),**无他项目引用才清三写位**,有引用保留并回 `keptInAssets+referencedBy`(public/ 跨项目共享口径,原注释约束保留),素材条删除菜单如实提示;当前项目自身引用不拦(用户明确删,渲染如实报缺)。
+- 测试:tintin-cover-acp.test.ts 增删素材两用例(无引用=三写位同清/他项目引用=保留+回执),20 用例全绿;check:tintin 143 锚点/86 文档全绿+载荷新鲜。

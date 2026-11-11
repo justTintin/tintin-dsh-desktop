@@ -440,9 +440,10 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
       if (existsSync(candidate)) listDir = candidate
     }
     const files = []
-    const push = (root, prefix, rel, size) => {
+    /* mtime(2026-11-12 素材创作批,@ 菜单近期置顶): 图片按修改时间新→旧排(消费方按序展示) */
+    const push = (root, prefix, rel, size, mtime) => {
       const ext = rel.split('.').pop()?.toLowerCase() ?? ''
-      files.push({ path: prefix + rel, kind: ['png', 'jpg', 'jpeg', 'webp'].includes(ext) ? 'image' : 'file', size })
+      files.push({ path: prefix + rel, kind: ['png', 'jpg', 'jpeg', 'webp'].includes(ext) ? 'image' : 'file', size, ...(Number.isFinite(mtime) ? { mtime } : {}) })
     }
     const walk = (root, prefix, depth) => {
       let entries
@@ -455,8 +456,9 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
           continue
         }
         let size = 0
-        try { size = statSync(join(root, entry.name)).size } catch { /* 忽略 */ }
-        push(root, '', rel, size)
+        let mtime = 0
+        try { const st = statSync(join(root, entry.name)); size = st.size; mtime = st.mtimeMs } catch { /* 忽略 */ }
+        push(root, '', rel, size, mtime)
       }
     }
     walk(listDir, '', 2)
@@ -471,11 +473,17 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
         if (!entry.isFile() || entry.name.startsWith('.')) continue
         if (known.has(entry.name)) continue
         let size = 0
-        try { size = statSync(join(pub, entry.name)).size } catch { /* 忽略 */ }
-        push(pub, 'public/', entry.name, size)
+        let mtime = 0
+        try { const st = statSync(join(pub, entry.name)); size = st.size; mtime = st.mtimeMs } catch { /* 忽略 */ }
+        push(pub, 'public/', entry.name, size, mtime)
       }
     }
-    files.sort((a, b) => (a.kind === b.kind ? a.path.localeCompare(b.path) : a.kind === 'image' ? -1 : 1))
+    /* 图片组内按 mtime 新→旧(近期素材置顶), 其余维持路径序;图片组仍排在前 */
+    files.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'image' ? -1 : 1
+      if (a.kind === 'image' && Number.isFinite(a.mtime) && Number.isFinite(b.mtime) && a.mtime !== b.mtime) return b.mtime - a.mtime
+      return a.path.localeCompare(b.path)
+    })
     sendJson(res, 200, { files })
   })
 
