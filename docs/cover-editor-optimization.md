@@ -436,3 +436,18 @@
 - layerNames 进 cover.props.json 的 agent 侧词汇(智能体按显示名指层,现仅编辑器消费)。
 - 多选撤销粒度(整体移当前逐层入栈,一次拖动=多条撤销记录)。
 - 选择系统重设计(待裁决): 属性面板数字通道已全覆盖(W/H/X/Y/角度/缩放);画布框选/手柄如需回归,先做独立测量基准的整套验证方案再动工。
+
+## 七、封面参考与素材创作链路优化(2026-11-12 批,用户裁决「按推荐做优化,缩略图做」;对标 claude-code-main 参考实现)
+
+背景:双面盘点(我方封面插件现状 vs Claude Code 参考源码机制)后用户裁定按推荐序执行——长任务两步化、图片压缩阶梯、聊天图片链路三修、错误面、画布多文件、@ 菜单近期+缩略图、删素材清三写位。分节记执行批。
+
+### 7.1 仿封面两步拆分(方案 1b;长任务黑箱根修)
+
+`imitate_cover` 原单次同步调用最长 420s 零进度零取消、超时即丢任务(错误文案自认「可能在服务端继续执行」无附身通道)。按裁决拆提交与等待:
+
+- **`imitate_cover`=提交步**(cover-tools-mcp.js):参考图上传→`/generate/cover` 接单→**立即返回 `taskId`(phase=submitted)**,不轮询不下载;
+- **`imitate_cover_wait`=等待/落盘步**:`task_id` →统一任务轮询(3s 间隔,单次默认 420s/上限 540s<dsh-mcp-client 600s 超时)→completed 即下载产物双写(素材三写位+项目目录)并回显 face_similarity 全套字段;**未到终态返回 `settled:false`(可重复调用续等=重附身,任务不丢失)**;failed/cancelled 错误原文上返;`cancel:true` 走 `POST /tasks/batch_cancel {task_ids}` 显式取消(creation 域同款契约)。轮询间隔经 deps 注入(测试 5ms/生产 3s)。
+- **护栏接线**(cover-acp-bridge.js):`imitate_cover` 进异步任务看门狗登记表(30 分钟预算);`imitate_cover_wait` 列为轮询类不占回合护栏计数(与 task_status_unified 同款);`extractAsyncTaskIds` 兼容 camelCase `taskId`(本地工具回显键形)。
+- **取消贯通**:聊天停止键(cancel 路由)→`bridge.cancel({cancelTasks:true})`→对本会话登记的未结算任务发 batch_cancel 并标记结算;**护栏自动中止(bumpGuard)不杀任务**(可能已付费在跑),只停回合。
+- SKILL.md 同批:能力通道表与仿封面节改两步口径(提交→立即 wait;settled:false 续等;cancel 语义)。
+- 测试:tintin-cover-tools-mcp.test.ts 重写为两步契约(提交不打轮询/settled:false 续等/completed 双写回显/failed 原文/cancel 走 batch_cancel/非法 task_id 拒绝),11 用例全绿。

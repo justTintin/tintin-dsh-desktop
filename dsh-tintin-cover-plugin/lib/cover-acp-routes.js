@@ -147,7 +147,8 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
   register('cancel', async (req, res) => {
     if (req.method !== 'POST' || !guard(req, res, true)) return
     const bridge = await importBridge()
-    sendJson(res, 200, await bridge.cancel())
+    /* 显式用户取消(聊天停止键): 连带取消本会话登记的未结算服务端任务(1112 封面参考批) */
+    sendJson(res, 200, await bridge.cancel({ cancelTasks: true }))
   })
 
   register('close', async (req, res) => {

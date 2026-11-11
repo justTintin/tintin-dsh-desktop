@@ -12,17 +12,21 @@
 //                   失败错误原文上返, 换备选最多 2 个=交互纪律)
 //   render_preview  渲染当前 cover.props.json 并把预览图回给模型(渲染回看闭环=
 //                   完成判据: 不看预览不得宣称完成)
-//   imitate_cover   仿封面生成(2026-11-09 服务端核实批): 参考图上传(product-upload
+//   imitate_cover   仿封面生成·提交(2026-11-09 服务端核实批): 参考图上传(product-upload
 //                   换服务端路径)→/generate/cover 编排(images 路径数组+文案至少其一)
-//                   →统一任务轮询→产物下载落盘双写。1106 缺口(本机参考图无通路)
-//                   由服务端新增 /generate/cover + product-upload 打通, 契约实测。
+//                   →返回 task_id 立即结束。1106 缺口(本机参考图无通路)由服务端新增
+//                   /generate/cover + product-upload 打通, 契约实测。
 //                   1110 人物主体批: subject="person"=人物正脸恰 1 张(引擎人脸身份
 //                   锚定+ArcFace 相似度门, completed=门已过);1110 风格参考批:
 //                   style_image+style_weight 分参数透传(服务端面名,引擎 style_refs
-//                   名对服务端无效);prompt 禁写人物外貌(墨镜男事故守规);
-//                   1111 验收回显批: person 结果回显 face_similarity{score,threshold,pass}
-//                   +face_similarity_mode(result 顶层优先,shots_done[0] 兜底,
-//                   pass=false 加警示;字段缺省=引擎未回传不虚构)
+//                   名对服务端无效);prompt 禁写人物外貌(墨镜男事故守规)。
+//                   1112 两步拆分(封面参考批, 用户裁决方案 1b): 提交与等待分离——
+//                   轮询收进 imitate_cover_wait(可重复调用续等=会话面可见的进度,
+//                   超时不丢任务=可重新附身, cancel:true 可取消服务端任务)。
+//   imitate_cover_wait 仿封面等待/落盘(2026-11-12 封面参考批): task_id → 统一任务轮询
+//                   (默认 420s/上限 540s, 间隔 3s)→ completed 即下载产物双写并回显
+//                   face_similarity;未到终态返回 settled:false 可续等;failed/cancelled
+//                   错误原文上返;cancel:true 走 /tasks/batch_cancel 显式取消。
 //   ocr_image       拆解提字(/material/ocr): 逐行文本+位置框(box/box_rel/置信度,
 //                   实测含坐标), 供参考封面版式分析→文字层按位置重打。
 //   text_remove     去字(/image/text-remove, 2026-11-10 生产接线): LaMa 质量档抹掉
@@ -38,10 +42,12 @@ import { basename, isAbsolute, join, resolve as resolvePath, sep } from 'node:pa
 const MCP_PATH = '/tintin/cover/api/tools-mcp'
 const MATTING_CHAIN = ['isnet-general-use', 'u2net', 'isnet-anime']
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-/* 仿封面生成编排(2026-11-09 服务端核实批):上传→生图→轮询→取产物。
-   轮询节奏 3s、上限 420s(实测 t2i 6s/cover 编排百秒级;cover_background 同为分钟级量级)。 */
+/* 仿封面生成编排(2026-11-09 服务端核实批;1112 两步拆分):上传→生图提交(task_id 立即回)
+   →imitate_cover_wait 轮询(3s)→产物下载落盘。等待单次默认 420s/上限 540s
+   (实测 t2i 6s/cover 编排百秒级;540 < dsh-mcp-client toolCallTimeoutMs 600s,留余量)。 */
 const COVER_POLL_INTERVAL_MS = 3000
-const COVER_POLL_TIMEOUT_MS = 420_000
+const IMITATE_WAIT_DEFAULT_S = 420
+const IMITATE_WAIT_MAX_S = 540
 const COVER_MAX_REF_IMAGES = 4
 
 /** 文件头魔数 → mime(不认识的返回 null)。 */
@@ -113,21 +119,26 @@ async function uploadRefImages(serverUrl, imagePaths) {
   return paths
 }
 
-/** 统一任务轮询: 终态返回 {status, result, error}; 超时抛错。 */
-async function pollUnifiedTask(serverUrl, taskId, { timeoutMs = COVER_POLL_TIMEOUT_MS } = {}) {
-  const deadline = Date.now() + timeoutMs
-  for (;;) {
-    if (Date.now() > deadline) throw new Error(`生成超时(${Math.round(timeoutMs / 1000)}s 未到终态), 任务 ${taskId} 可能在服务端继续执行, 可稍后在服务端输出目录查看`)
-    const res = await fetch(serverUrl + `/tasks/unified/${encodeURIComponent(taskId)}`, { signal: AbortSignal.timeout(20_000) })
-    if (!res.ok) throw new Error(`任务查询失败 HTTP ${res.status}`)
-    const d = await res.json().catch(() => null)
-    const status = String(d?.status ?? '')
-    if (status === 'completed') return d
-    if (status === 'failed' || status === 'cancelled') {
-      throw new Error(`生成失败(${status}):${String(d?.error ?? d?.last_message ?? '无错误详情').slice(0, 400)}`)
-    }
-    await new Promise((r) => setTimeout(r, COVER_POLL_INTERVAL_MS))
-  }
+/** 单次统一任务查询: 返回 body;HTTP 失败抛错。终态裁决与等待循环在调用方。 */
+async function fetchUnifiedTask(serverUrl, taskId) {
+  const res = await fetch(serverUrl + `/tasks/unified/${encodeURIComponent(taskId)}`, { signal: AbortSignal.timeout(20_000) })
+  if (!res.ok) throw new Error(`任务查询失败 HTTP ${res.status}`)
+  const d = await res.json().catch(() => null)
+  if (!d || typeof d !== 'object') throw new Error('任务查询返回异常')
+  return d
+}
+
+/** 服务端任务显式取消(/tasks/batch_cancel,creation 域同款契约): 返回取消数;失败抛错原文。 */
+async function cancelUnifiedTasks(serverUrl, taskIds) {
+  const res = await fetch(serverUrl + '/tasks/batch_cancel', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ task_ids: [...taskIds] }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!res.ok) throw new Error(`任务取消失败 HTTP ${res.status}`)
+  const body = await res.json().catch(() => null)
+  return Number(body?.cancelled ?? 0)
 }
 
 /** 生图产物下载+双写(项目目录+素材三写位, 同 matting 语义)。 */
@@ -146,8 +157,9 @@ async function saveGeneratedImage(serverUrl, outputUrl, outName, coverDir, plugi
   return filePath
 }
 
-/** 工具实现: read_image → [{image}] / matting → 落盘+文本 / render_preview → [{image}]。 */
-export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir }) {
+/** 工具实现: read_image → [{image}] / matting → 落盘+文本 / render_preview → [{image}]。
+ *  pollIntervalMs(测试注入口): imitate_cover_wait 的轮询间隔,缺省 3s。 */
+export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, pollIntervalMs = COVER_POLL_INTERVAL_MS }) {
   const assetTargets = () => {
     const dir = resolvePluginDir()
     return dir ? [join(dir, 'public'), join(dir, 'dist', 'editor'), join(dir, 'dist', 'remotion-bundle', 'public')] : []
@@ -330,12 +342,14 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     const gen = await genRes.json().catch(() => null)
     const taskId = String(gen?.task_id ?? '')
     if (!taskId) throw new Error(`封面生成未返回任务 id:${JSON.stringify(gen).slice(0, 200)}`)
-    const done = await pollUnifiedTask(serverUrl, taskId)
-    const result = done?.result ?? {}
-    const outputUrl = String(result.output_url ?? '')
-    if (!outputUrl) throw new Error(`生成完成但无产物地址:${JSON.stringify(result).slice(0, 200)}`)
-    const outName = `imitate-${Date.now()}.png`
-    const filePath = await saveGeneratedImage(serverUrl, outputUrl, outName, coverDir, resolvePluginDir())
+    /* 1112 两步拆分: 提交到此结束——轮询/落盘/回显在 imitate_cover_wait(可续等可取消) */
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ ok: true, taskId, phase: 'submitted', ...(subject ? { subject } : {}), note: '任务已提交,参考图已上传(分钟级生成)。下一步立即调用 mcp__cover-tools__imitate_cover_wait(task_id=本 id) 等待终态并落盘;单次等待未到终态会返回 settled:false,重复调用即续等;用户改主意时对该 task_id 传 cancel:true 取消服务端任务。' }, null, 1) }],
+    }
+  }
+
+  /** 等待终态后的产物回显(1111 验收回显批字段全保留;subjectArg=提交档位,缺省用结果回显)。 */
+  const imitateResultEcho = (taskId, outName, filePath, result, subjectArg) => {
     const resultSubject = String(result.subject ?? result.subject_type ?? '')
     const resultStyleMode = String(result.style_mode ?? '')
     // 验收回显(2026-11-11 API 文档契约+实跑双单实证):person 模式完成态 result 另附
@@ -354,11 +368,54 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
         ? `注意:人脸相似度门分值未过(score=${faceSimilarity.score} < threshold=${faceSimilarity.threshold})——先 read_image 验人,疑似非本人即弃用。`
         : `人脸相似度门:score=${faceSimilarity.score} ≥ threshold=${faceSimilarity.threshold} 已过。`)
       : ''
-    const personNote = subject === 'person' || resultSubject === 'person'
+    const personNote = subjectArg === 'person' || resultSubject === 'person'
       ? '人物档:任务 completed=引擎人脸相似度门已过(失败会 partial_failed 带分值);人物身份由参考图锚定,prompt 里的外貌描述不参与身份。'
       : ''
+    return { ok: true, name: outName, file: filePath, asset: '素材区(三写位)', taskId, ...(resultSubject ? { subject: resultSubject } : {}), ...(resultStyleMode ? { styleMode: resultStyleMode } : {}), ...(faceSimilarity ? { face_similarity: faceSimilarity } : {}), ...(faceSimMode ? { face_similarity_mode: faceSimMode } : {}), note: `这是服务端仿封面产物(无分层)。要按项目版式组装:用 read_image 看它→取其中元素(可再 matting 抠主体)作为图层素材,再写 cover.props.json→render_preview 回看。${personNote}${faceNote}` }
+  }
+
+  /** 仿封面等待/落盘(1112 两步拆分): task_id → 轮询(默认 420s,可重复调用续等=重附身)
+   *  → completed 下载产物双写并回显;failed/cancelled 错误原文;cancel:true 显式取消。 */
+  const imitateCoverWait = async (args, { pollIntervalMs = COVER_POLL_INTERVAL_MS } = {}) => {
+    const engine = await loadEngine()
+    const coverDir = await engine.resolveCoverDir()
+    const serverUrl = String(getServerUrl() ?? '').replace(/\/+$/, '')
+    if (!serverUrl) throw new Error('服务端地址未配置(先在服务设置里保存并获取 MCP 服务)')
+    const taskId = typeof args?.task_id === 'string' ? args.task_id.trim() : ''
+    if (!/^[A-Za-z0-9_-]{4,64}$/.test(taskId)) throw new Error('缺少/非法 task_id(传 imitate_cover 返回的 taskId)')
+    if (args?.cancel === true) {
+      const cancelledCount = await cancelUnifiedTasks(serverUrl, [taskId])
+      return {
+        content: [{ type: 'text', text: JSON.stringify({ ok: true, taskId, cancelled: cancelledCount > 0, cancelledCount, note: cancelledCount > 0 ? '服务端任务已取消,不再继续等待。' : '服务端未取消该任务(可能已到终态)——用 task_status_unified 查确认状态。' }, null, 1) }],
+      }
+    }
+    const subjectArg = args?.subject === 'person' ? 'person' : args?.subject === 'product' ? 'product' : ''
+    /* 单次等待下限 1s=「只查一次」的合法用法;上限 540s < dsh-mcp-client 600s 超时 */
+    const timeoutS = Math.min(Math.max(Number(args?.timeout_s) || IMITATE_WAIT_DEFAULT_S, 1), IMITATE_WAIT_MAX_S)
+    const deadline = Date.now() + timeoutS * 1000
+    let last = null
+    for (;;) {
+      last = await fetchUnifiedTask(serverUrl, taskId)
+      const status = String(last?.status ?? '')
+      if (status === 'completed') break
+      if (status === 'failed' || status === 'cancelled') {
+        throw new Error(`生成失败(${status}):${String(last?.error ?? last?.last_message ?? '无错误详情').slice(0, 400)}`)
+      }
+      if (Date.now() > deadline) {
+        const progress = Number(last?.progress)
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ ok: true, settled: false, taskId, status: status || 'unknown', waitedS: timeoutS, ...(Number.isFinite(progress) ? { progress } : {}), note: `${timeoutS}s 未到终态,任务仍在服务端执行(不丢失)。再次调用 imitate_cover_wait(task_id=本 id) 续等;确定不要了传 cancel:true 取消服务端任务。` }, null, 1) }],
+        }
+      }
+      await new Promise((r) => setTimeout(r, pollIntervalMs))
+    }
+    const result = last?.result ?? {}
+    const outputUrl = String(result.output_url ?? '')
+    if (!outputUrl) throw new Error(`生成完成但无产物地址:${JSON.stringify(result).slice(0, 200)}`)
+    const outName = `imitate-${Date.now()}.png`
+    const filePath = await saveGeneratedImage(serverUrl, outputUrl, outName, coverDir, resolvePluginDir())
     return {
-      content: [{ type: 'text', text: JSON.stringify({ ok: true, name: outName, file: filePath, asset: '素材区(三写位)', taskId, ...(resultSubject ? { subject: resultSubject } : {}), ...(resultStyleMode ? { styleMode: resultStyleMode } : {}), ...(faceSimilarity ? { face_similarity: faceSimilarity } : {}), ...(faceSimMode ? { face_similarity_mode: faceSimMode } : {}), note: `这是服务端仿封面产物(无分层)。要按项目版式组装:用 read_image 看它→取其中元素(可再 matting 抠主体)作为图层素材,再写 cover.props.json→render_preview 回看。${personNote}${faceNote}` }, null, 1) }],
+      content: [{ type: 'text', text: JSON.stringify(imitateResultEcho(taskId, outName, filePath, result, subjectArg), null, 1) }],
     }
   }
 
@@ -423,7 +480,7 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     },
     {
       name: 'imitate_cover',
-      description: '仿封面生成(服务端 /generate/cover 编排):上传参考图→按文案生成同风格封面→产物落素材区+项目目录。普通档(缺省):images 1..4 张(第一张建议参考封面,其余产品/人物图)。人物档(subject="person"):images 恰 1 张人物正脸图,引擎人脸身份锚定+相似度门(换人=任务失败,完成态结果回显 face_similarity 分值)。风格迁移:style_image=风格参考封面(+style_weight 0.4/0.6/0.8),与 images/subject 分参数同传——不要把风格封面塞进 images。prompt 禁写人物外貌(外貌描述=画陌生人)。参数:images(必填)+文案至少其一(title/prompt/selling_points)。产物是整图(无分层)——组装进项目版式请看返回 note。分钟级耗时。',
+      description: '仿封面生成·提交(服务端 /generate/cover 编排):上传参考图→按文案提交生成任务→立即返回 task_id(不等待)。普通档(缺省):images 1..4 张(第一张建议参考封面,其余产品/人物图)。人物档(subject="person"):images 恰 1 张人物正脸图,引擎人脸身份锚定+相似度门(换人=任务失败,完成态结果回显 face_similarity 分值)。风格迁移:style_image=风格参考封面(+style_weight 0.4/0.6/0.8),与 images/subject 分参数同传——不要把风格封面塞进 images。prompt 禁写人物外貌(外貌描述=画陌生人)。参数:images(必填)+文案至少其一(title/prompt/selling_points)。提交后立即用 imitate_cover_wait 等待终态落盘。分钟级耗时。',
       inputSchema: { type: 'object', properties: {
         images: { type: 'array', items: { type: 'string' }, description: '参考图路径(项目目录/素材位文件名或绝对路径);普通档 1..4 张,人物档(subject=person)恰 1 张人物正脸图' },
         subject: { type: 'string', enum: ['person', 'product'], description: '可选,人物档传 "person"(人物身份锚定,恰 1 张人物正脸图);缺省=普通档' },
@@ -433,6 +490,16 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
         prompt: { type: 'string', description: '画面/动作/构图描述;人物档下禁写人物外貌(脸/发型/服装/配饰)' },
         selling_points: { type: 'array', items: { type: 'string' }, description: '卖点短语数组(角标文案)' },
       }, required: ['images'] },
+    },
+    {
+      name: 'imitate_cover_wait',
+      description: '仿封面等待/落盘(与 imitate_cover 配对):task_id → 服务端统一任务轮询 → completed 即下载产物落素材区+项目目录并回显(含 face_similarity)。单次默认等 420s,未到终态返回 settled:false——再次调用本工具(同 task_id)即续等,任务不丢失;failed/cancelled 返回服务端错误原文。cancel=true 显式取消服务端任务(用户改主意时用)。可选 subject 透传提交档位(person 档回显人物门文案),timeout_s 30..540。',
+      inputSchema: { type: 'object', properties: {
+        task_id: { type: 'string', description: 'imitate_cover 返回的 taskId' },
+        subject: { type: 'string', enum: ['person', 'product'], description: '可选,回显提交时的档位(person 档结果附人物门说明)' },
+        timeout_s: { type: 'number', description: '可选,本次最长等待秒数(默认 420,上限 540);到点未终态返回 settled:false 可续等' },
+        cancel: { type: 'boolean', description: '可选,true=取消该服务端任务(batch_cancel),不再等待' },
+      }, required: ['task_id'] },
     },
     {
       name: 'ocr_image',
@@ -455,6 +522,7 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir })
     if (name === 'matting') return matting(args)
     if (name === 'render_preview') return renderPreview(args)
     if (name === 'imitate_cover') return imitateCover(args)
+    if (name === 'imitate_cover_wait') return imitateCoverWait(args, { pollIntervalMs })
     if (name === 'ocr_image') return ocrImage(args)
     if (name === 'text_remove') return textRemove(args)
     return { isError: true, content: [{ type: 'text', text: `未知工具:${name}` }] }

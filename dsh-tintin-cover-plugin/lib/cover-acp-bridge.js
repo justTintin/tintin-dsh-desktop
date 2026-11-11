@@ -62,7 +62,8 @@ const COVER_AGENT_FALLBACK_MODELS = [
  *  同款同值——校准依据 docs/tintin-agent-pipeline.md §6: 实测正常回合 32 次 → 上界约 40,
  *  硬限=×1.5=60;轮询类(task_status_unified)按任务预算管理不计入。40 告警/60 中止本回合。 */
 const TOOL_CALL_GUARD = { warn: 40, stop: 60 }
-const isPollingToolCall = (title) => typeof title === 'string' && /__task_status_unified$/.test(title)
+/* imitate_cover_wait(1112 两步拆分)也是轮询类: 按任务预算管理, 不占回合护栏计数 */
+const isPollingToolCall = (title) => typeof title === 'string' && /__(task_status_unified|imitate_cover_wait)$/.test(title)
 
 /** 计一步并裁决动作;状态挂在 state.guard(prompt 建立、done 清除)。 */
 function bumpGuard(sess = state) {
@@ -83,13 +84,15 @@ function bumpGuard(sess = state) {
 /** 任务层兜底(2026-11-01 防空转第 3 步, 与影片侧 film-acp.ts 同款):桥登记 create_* 异步
  *  任务的 task_id 并看门狗提醒——模型放弃轮询或会话中断后任务不再失踪。 */
 const ASYNC_TASK_BUDGET_MINUTES = 30
-const ASYNC_CREATE_TOOL_SUFFIXES = ['create_video', 'create_image', 'create_digital_human']
+/* imitate_cover(1112 两步拆分)提交即返回 task_id —— 与 create_* 同样登记看门狗 */
+const ASYNC_CREATE_TOOL_SUFFIXES = ['create_video', 'create_image', 'create_digital_human', 'imitate_cover']
 const isAsyncCreateTool = (title) => typeof title === 'string' && ASYNC_CREATE_TOOL_SUFFIXES.some((s) => title.endsWith(s))
 
 /** 服务端任务 id=<1-3 小写字母>_+8 位十六进制(可带 -序号, 如 c_5ce35516-0;产物命名 bgm-/img- 等用连字符不会误中)。 */
 function extractAsyncTaskIds(text) {
   const ids = new Set()
-  const explicit = /task_id["'\s:=]+([A-Za-z0-9_-]{6,})/g
+  /* task_id/taskId 两种键形(1112: 本地工具回显用 camelCase taskId) */
+  const explicit = /task_?id["'\s:=]+([A-Za-z0-9_-]{6,})/gi
   for (let m = explicit.exec(text); m; m = explicit.exec(text)) ids.add(m[1])
   const bare = /\b[a-z]{1,3}_[0-9a-f]{8}(?:-[0-9A-Za-z]+)?\b/g
   for (let m = bare.exec(text); m; m = bare.exec(text)) ids.add(m[0])
@@ -754,11 +757,36 @@ export async function steer(text, images) {
   return { ok: true, outcome: 'queued' }
 }
 
-/** 取消进行中的一轮(session/cancel 通知;进程与会话保留) */
-export async function cancel() {
+/** 取消进行中的一轮(session/cancel 通知;进程与会话保留)。
+ *  options.cancelTasks(1112 封面参考批,用户裁决方案 1b): 显式用户取消时,对本会话登记的
+ *  未结算服务端任务发 /tasks/batch_cancel(creation 域同款契约 {task_ids}→{cancelled})——
+ *  用户停的就是这批生成;护栏中止(bumpGuard)不传此参,只停回合不杀任务(任务可能已付费在跑)。 */
+export async function cancel({ cancelTasks = false } = {}) {
   if (!state.ready || !state.conn) return { ok: false }
   await state.conn.agent.notify(acpSdk().methods.agent.session.cancel, { sessionId: state.sessionId })
-  return { ok: true }
+  let cancelledTasks = 0
+  if (cancelTasks) {
+    const pending = [...state.asyncTasks.entries()].filter(([, entry]) => !entry.settled)
+    if (pending.length && state.serverUrl) {
+      try {
+        const res = await fetch(`${state.serverUrl.replace(/\/+$/, '')}/tasks/batch_cancel`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ task_ids: pending.map(([id]) => id) }),
+          signal: AbortSignal.timeout(10_000),
+        })
+        const body = await res.json().catch(() => null)
+        cancelledTasks = Number(body?.cancelled ?? 0)
+        if (cancelledTasks > 0) {
+          for (const [, entry] of pending) { entry.settled = true; entry.reminded = true }
+        }
+        console.warn(`[cover-agent] cancel: batch_cancel ${cancelledTasks}/${pending.length} tasks`)
+      } catch (e) {
+        console.warn('[cover-agent] cancel: batch_cancel failed:', errText(e))
+      }
+    }
+  }
+  return { ok: true, ...(cancelTasks ? { cancelledTasks } : {}) }
 }
 
 /** 会话配置项切换(模型/思考档;官方 setOption 直通) */

@@ -17,7 +17,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 | 通道 | 内容 | 用途 |
 |---|---|---|
 | **服务端工具(MCP,工具名 `mcp__tintin-server__*`)** | create_image(生成)、task_status_unified(轮询) | **一切图片/封面生成唯一出口**;异步任务轮询 |
-| **本地工具 MCP(工具名 `mcp__cover-tools__*`)** | render_preview(渲染当前画布→回看预览图)、read_image(查看项目/素材位图片)、matting(抠图,内置健康模型链+落盘校验)、imitate_cover(仿封面生成:参考图上传→服务端编排→产物落盘)、ocr_image(拆解提字:逐行文本+位置框)、text_remove(去字:抹掉原字→干净底图) | **看结果**(渲染回看/查看任何图片)、抠图、仿封面、版式拆解 |
+| **本地工具 MCP(工具名 `mcp__cover-tools__*`)** | render_preview(渲染当前画布→回看预览图)、read_image(查看项目/素材位图片)、matting(抠图,内置健康模型链+落盘校验)、imitate_cover(仿封面生成·提交:参考图上传→服务端编排→返回 task_id)、imitate_cover_wait(仿封面等待/落盘:轮询到终态→产物落盘,可续等可取消)、ocr_image(拆解提字:逐行文本+位置框)、text_remove(去字:抹掉原字→干净底图) | **看结果**(渲染回看/查看任何图片)、抠图、仿封面、版式拆解 |
 | **本地/编辑器通道** | cover.props.json 读写、编辑器导出 API(render)、项目文件与素材位 | 排版、图层、导出——不生成任何画面 |
 
 **除抠图已收敛为 `mcp__cover-tools__matting` 外,不要用 curl/pwsh 调任何服务端端点(`/generate/*`、`/matting` 等)——那是编辑器界面与页面按钮自己的通道,不是会话的。**
@@ -66,8 +66,8 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 
 ## 仿封面与版式拆解(2026-11-09 服务端能力批;1110 人物主体批)
 
-- **仿封面生成**:`mcp__cover-tools__imitate_cover`(images=本机参考图 1..4 张 + 文案至少其一 title/prompt/selling_points)。工具内部完成参考图上传→服务端编排→轮询→产物落盘双写(素材区+项目目录),**不再需要先手动传素材库**——`images` 直接给本机路径/素材文件名即可(2026-11-09 服务端核实:product-upload 换路径→/generate/cover 全链通)。产物是**无分层整图**——要按项目版式组装:read_image 看产物→取其中元素(matting 抠主体)当图层素材→写 cover.props.json→render_preview 回看。
-- **人物封面(2026-11-10 人物主体批,用户给了人物图并要求"用这个人"时必走)**:`imitate_cover` 传 `subject:"person"`,images **恰 1 张人物正脸图**。引擎做人物身份锚定(脸 100% 同参考、禁换脸)+人脸相似度门(ArcFace,换人=任务失败)——**这是"人不变、换风格自然动作"的唯一正路,禁止用普通档或抠图叠放冒充**。三条硬规(1110 晚墨镜男事故):
+- **仿封面生成(两步,2026-11-12 拆分)**:①`mcp__cover-tools__imitate_cover`(images=本机参考图 1..4 张 + 文案至少其一 title/prompt/selling_points)——工具内部完成参考图上传→服务端编排,**立即返回 task_id(不等待)**;②马上 `mcp__cover-tools__imitate_cover_wait`(task_id=返回的 id)——轮询到终态,completed 即下载产物落素材区+项目目录并回显(含 face_similarity)。**未到终态返回 settled:false,重复调用同 task_id 即续等(任务不丢失);用户改主意时对该 task_id 传 cancel:true 取消服务端任务。**`images` 直接给本机路径/素材文件名(2026-11-09 服务端核实:product-upload 换路径→/generate/cover 全链通)。产物是**无分层整图**——要按项目版式组装:read_image 看产物→取其中元素(matting 抠主体)当图层素材→写 cover.props.json→render_preview 回看。
+- **人物封面(2026-11-10 人物主体批,用户给了人物图并要求"用这个人"时必走)**:`imitate_cover` 传 `subject:"person"`,images **恰 1 张人物正脸图**(提交后立即 `imitate_cover_wait` 等终态)。引擎做人物身份锚定(脸 100% 同参考、禁换脸)+人脸相似度门(ArcFace,换人=任务失败)——**这是"人不变、换风格自然动作"的唯一正路,禁止用普通档或抠图叠放冒充**。三条硬规(1110 晚墨镜男事故):
   1. **prompt 禁写人物外貌**(脸型/发型/眼镜/服装/配饰,也不许复述参考封面里人物的长相)——身份由引擎锚定模板负责,外貌描述=画陌生人;只写**动作/构图/场景**。
   2. **参考封面走 `style_image`(+`style_weight` 建议 0.4/0.6/0.8),不要塞进 images**(person 模式 images 恰 1 张,多张 400 拒;引擎侧字段名 style_refs 对服务端无效)——风格由风格图注入,prompt 不必再堆风格词;版式(标题/角标位置)另用 ocr_image 拆参考封面重排。
   3. **验收=任务 completed**(人脸相似度门已过,结果回显 `face_similarity{score,threshold,pass}` 与 `face_similarity_mode`;失败 partial_failed 带分值在错误原文,同请求最多重试 2 次)+read_image 看产物确认人与参考图一致后才写 props。

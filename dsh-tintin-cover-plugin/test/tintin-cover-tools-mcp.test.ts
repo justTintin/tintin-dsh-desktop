@@ -28,6 +28,8 @@ async function setup(opts: { renderCover?: (...args: unknown[]) => Promise<unkno
     isTrustedRequest: () => true,
     sendJson: (_res: unknown, status: number, body: Record<string, unknown>) => { sent.push({ status, body }) },
     getServerUrl: () => 'http://192.168.111.31:8000',
+    /* 轮询间隔注入口(测试 5ms;生产缺省 3s) */
+    pollIntervalMs: 5,
     loadEngine: (async () => ({
       resolveCoverDir: async () => coverDir,
       renderCover: opts.renderCover ?? (async (input: { fileName?: string; outDir?: string }) => {
@@ -72,7 +74,7 @@ describe('cover tools mcp endpoint', () => {
     expect(resultOf(init).serverInfo.name).toBe('cover-tools')
     const list = await call(rpc(2, 'tools/list'))
     const names = resultOf(list).tools.map((t: { name: string }) => t.name)
-    expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'ocr_image', 'text_remove'])
+    expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'imitate_cover_wait', 'ocr_image', 'text_remove'])
     const bad = await call(rpc(3, 'no/such'))
     expect((bad.body as Record<string, any>).error.code).toBe(-32601)
     const note = await call({ jsonrpc: '2.0', method: 'notifications/initialized' })
@@ -145,29 +147,24 @@ describe('cover tools mcp endpoint', () => {
     expect(resultOf(missing).content[0].text).toContain('cover.props.json')
   })
 
-  it('imitate_cover: 上传→接单→轮询→产物双写全链;无文案拒绝;编排失败错误原文上返', async () => {
+  it('imitate_cover(提交步): 上传→接单→立即回 task_id 不等待;无文案拒绝;编排失败错误原文上返', async () => {
     const jsonRes = (obj: unknown, status = 200) => ({ ok: true, status, headers: { get: () => 'application/json' }, json: async () => obj, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })
     const fetchMock = vi.fn()
       // product-upload
       .mockImplementationOnce(async () => jsonRes({ paths: ['/srv/uploads/ref.png'], count: 1 }))
       // /generate/cover 202
       .mockImplementationOnce(async () => jsonRes({ task_id: 'c_test-1', poll: '/tasks/unified/c_test-1' }, 202))
-      // poll → completed
-      .mockImplementationOnce(async () => jsonRes({ id: 'c_test-1', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_test-1.png', width: 704, height: 1248, engine: 'comfygen' } }))
-      // 产物下载
-      .mockImplementationOnce(async () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' }))
     vi.stubGlobal('fetch', fetchMock)
-    const { coverDir, pluginDir, call } = await setup()
+    const { coverDir, call } = await setup()
     writeFileSync(join(coverDir, 'ref-cover.png'), TINY_PNG)
     const ok = await call(rpc(1, 'tools/call', { name: 'imitate_cover', arguments: { images: ['ref-cover.png'], title: '探针标题', prompt: 'test' } }))
     const payload = JSON.parse(resultOf(ok).content[0].text)
     expect(payload.ok).toBe(true)
-    expect(payload.name).toMatch(/^imitate-\d+\.png$/)
     expect(payload.taskId).toBe('c_test-1')
-    expect(payload.note).toContain('无分层')
-    expect(existsSync(join(coverDir, payload.name))).toBe(true)
-    expect(existsSync(join(pluginDir, 'public', payload.name))).toBe(true)
-    // 上传 multipart 与生成载荷契约
+    expect(payload.phase).toBe('submitted')
+    expect(payload.note).toContain('imitate_cover_wait')
+    // 提交步只打上传+接单两次,不轮询不下载
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     const upCall = fetchMock.mock.calls[0] as [string, { body: FormData }]
     expect(upCall[0]).toContain('/api/storyboard/scripts/product-upload')
     expect(upCall[1].body.get('files')).toBeTruthy()
@@ -185,22 +182,71 @@ describe('cover tools mcp endpoint', () => {
     // 编排失败 → 错误原文上返
     const failMock = vi.fn()
       .mockImplementationOnce(async () => jsonRes({ paths: ['/srv/uploads/ref.png'], count: 1 }))
-      .mockImplementationOnce(async () => jsonRes({ task_id: 'c_test-2' }, 202))
-      .mockImplementationOnce(async () => jsonRes({ id: 'c_test-2', status: 'failed', error: '封面生成失败: status=partial_failed failed_shots=[cover]' }))
+      .mockImplementationOnce(async () => ({ ok: false, status: 500, headers: { get: () => 'application/json' }, json: async () => ({ detail: 'engine overloaded' }), arrayBuffer: async () => Buffer.from('x'), text: async () => JSON.stringify({ detail: 'engine overloaded' }) }))
     vi.stubGlobal('fetch', failMock)
     const bad = await call(rpc(3, 'tools/call', { name: 'imitate_cover', arguments: { images: ['ref-cover.png'], title: 'x' } }))
     expect(resultOf(bad).isError).toBe(true)
-    expect(resultOf(bad).content[0].text).toContain('partial_failed')
+    expect(resultOf(bad).content[0].text).toContain('接单失败 HTTP 500')
   })
 
-  it('imitate_cover: 人物档 subject=person+style_image/style_weight 透传与结果回显;人物多图/权重缺图本地拒绝', async () => {
+  it('imitate_cover_wait: 未终态 settled:false 可续等;completed 下载产物双写+回显;failed 错误原文;cancel 走 batch_cancel', async () => {
+    const jsonRes = (obj: unknown, status = 200) => ({ ok: true, status, headers: { get: () => 'application/json' }, json: async () => obj, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })
+    const { coverDir, pluginDir, call } = await setup()
+
+    // ① running 未终态 + 1s 到点 → settled:false(任务不丢,可续等)
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ id: 'c_test-1', status: 'running', progress: 40 })))
+    const running = await call(rpc(1, 'tools/call', { name: 'imitate_cover_wait', arguments: { task_id: 'c_test-1', timeout_s: 1 } }))
+    const runningPayload = JSON.parse(resultOf(running).content[0].text)
+    expect(runningPayload.ok).toBe(true)
+    expect(runningPayload.settled).toBe(false)
+    expect(runningPayload.status).toBe('running')
+    expect(runningPayload.progress).toBe(40)
+    expect(runningPayload.note).toContain('续等')
+
+    // ② 续等 → completed → 下载产物双写+note
+    vi.stubGlobal('fetch', vi.fn()
+      .mockImplementationOnce(async () => jsonRes({ id: 'c_test-1', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_test-1.png', width: 704, height: 1248, engine: 'comfygen' } }))
+      .mockImplementationOnce(async () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' })))
+    const ok = await call(rpc(2, 'tools/call', { name: 'imitate_cover_wait', arguments: { task_id: 'c_test-1' } }))
+    const payload = JSON.parse(resultOf(ok).content[0].text)
+    expect(payload.ok).toBe(true)
+    expect(payload.name).toMatch(/^imitate-\d+\.png$/)
+    expect(payload.taskId).toBe('c_test-1')
+    expect(payload.note).toContain('无分层')
+    expect(existsSync(join(coverDir, payload.name))).toBe(true)
+    expect(existsSync(join(pluginDir, 'public', payload.name))).toBe(true)
+
+    // ③ failed → 错误原文上返
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ id: 'c_test-3', status: 'failed', error: '封面生成失败: status=partial_failed failed_shots=[cover]' })))
+    const bad = await call(rpc(3, 'tools/call', { name: 'imitate_cover_wait', arguments: { task_id: 'c_test-3' } }))
+    expect(resultOf(bad).isError).toBe(true)
+    expect(resultOf(bad).content[0].text).toContain('partial_failed')
+
+    // ④ cancel:true → POST /tasks/batch_cancel {task_ids}
+    const cancelMock = vi.fn().mockImplementationOnce(async () => jsonRes({ cancelled: 1, total: 1 }))
+    vi.stubGlobal('fetch', cancelMock)
+    const cancelled = await call(rpc(4, 'tools/call', { name: 'imitate_cover_wait', arguments: { task_id: 'c_test-1', cancel: true } }))
+    const cancelPayload = JSON.parse(resultOf(cancelled).content[0].text)
+    expect(cancelPayload.cancelled).toBe(true)
+    expect(cancelPayload.cancelledCount).toBe(1)
+    const cancelCall = cancelMock.mock.calls[0] as [string, { body: string }]
+    expect(cancelCall[0]).toContain('/tasks/batch_cancel')
+    expect(JSON.parse(cancelCall[1].body)).toEqual({ task_ids: ['c_test-1'] })
+
+    // ⑤ 非法 task_id 本地拒绝
+    const badId = await call(rpc(5, 'tools/call', { name: 'imitate_cover_wait', arguments: { task_id: '' } }))
+    expect(resultOf(badId).isError).toBe(true)
+    expect(resultOf(badId).content[0].text).toContain('task_id')
+  })
+
+  it('imitate_cover 人物档: subject=person+style_image/style_weight 提交透传;wait 落盘回显 face_similarity;本地拒绝不变', async () => {
     const jsonRes = (obj: unknown, status = 200) => ({ ok: true, status, headers: { get: () => 'application/json' }, json: async () => obj, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })
     const fetchMock = vi.fn()
       // product-upload(人物图+风格图同批)
       .mockImplementationOnce(async () => jsonRes({ paths: ['/srv/uploads/person.png', '/srv/uploads/style.png'], count: 2 }))
       // /generate/cover 202
       .mockImplementationOnce(async () => jsonRes({ task_id: 'c_person-1', poll: '/tasks/unified/c_person-1' }, 202))
-      // poll → completed(person 档回显)
+      // wait poll → completed(person 档回显)
       .mockImplementationOnce(async () => jsonRes({ id: 'c_person-1', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_person-1.png', width: 704, height: 1248, engine: 'comfygen', subject: 'person', style_mode: 'style_ref', refs_used: ['style_ref.png'], face_similarity: { score: 0.723, threshold: 0.65, pass: true }, face_similarity_mode: 'arcface' } }))
       // 产物下载
       .mockImplementationOnce(async () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' }))
@@ -208,7 +254,10 @@ describe('cover tools mcp endpoint', () => {
     const { coverDir, call } = await setup()
     writeFileSync(join(coverDir, 'person.png'), TINY_PNG)
     writeFileSync(join(coverDir, 'ref-cover.png'), TINY_PNG)
-    const ok = await call(rpc(1, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png'], subject: 'person', style_image: 'ref-cover.png', style_weight: 0.6, title: '人物档', prompt: '动作与场景描述' } }))
+    const submit = await call(rpc(1, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png'], subject: 'person', style_image: 'ref-cover.png', style_weight: 0.6, title: '人物档', prompt: '动作与场景描述' } }))
+    const submitted = JSON.parse(resultOf(submit).content[0].text)
+    expect(submitted.taskId).toBe('c_person-1')
+    const ok = await call(rpc(2, 'tools/call', { name: 'imitate_cover_wait', arguments: { task_id: submitted.taskId, subject: 'person' } }))
     const payload = JSON.parse(resultOf(ok).content[0].text)
     expect(payload.ok).toBe(true)
     expect(payload.subject).toBe('person')
@@ -228,26 +277,24 @@ describe('cover tools mcp endpoint', () => {
     expect(genBody.style_weight).toBe(0.6)
 
     // 人物档多图 → 本地拒绝, 不打服务端(上传 4 次调用后不再新增)
-    const multi = await call(rpc(2, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png', 'person.png'], subject: 'person', title: 'x' } }))
+    const multi = await call(rpc(3, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png', 'person.png'], subject: 'person', title: 'x' } }))
     expect(resultOf(multi).isError).toBe(true)
     expect(resultOf(multi).content[0].text).toContain('恰 1 张人物正脸图')
     // style_weight 缺 style_image → 本地拒绝
-    const weightOnly = await call(rpc(3, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png'], style_weight: 0.6, title: 'x' } }))
+    const weightOnly = await call(rpc(4, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png'], style_weight: 0.6, title: 'x' } }))
     expect(resultOf(weightOnly).isError).toBe(true)
     expect(resultOf(weightOnly).content[0].text).toContain('style_weight 需与 style_image 同传')
     expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
-  it('imitate_cover: face_similarity 兜底链(result 顶层缺→shots_done[0])+pass=false 警示+subject_type 回退', async () => {
+  it('imitate_cover_wait: face_similarity 兜底链(result 顶层缺→shots_done[0])+pass=false 警示+subject_type 回退', async () => {
     const jsonRes = (obj: unknown, status = 200) => ({ ok: true, status, headers: { get: () => 'application/json' }, json: async () => obj, arrayBuffer: async () => Buffer.from('x'), text: async () => '' })
     vi.stubGlobal('fetch', vi.fn()
-      .mockImplementationOnce(async () => jsonRes({ paths: ['/srv/uploads/person.png'], count: 1 }))
-      .mockImplementationOnce(async () => jsonRes({ task_id: 'c_person-2', poll: '/tasks/unified/c_person-2' }, 202))
       .mockImplementationOnce(async () => jsonRes({ id: 'c_person-2', status: 'completed', progress: 100, result: { output_url: '/output/generate/c_person-2.png', width: 704, height: 1248, engine: 'comfygen', subject_type: 'person', shots_done: [{ name: 'cover', face_similarity: { score: 0.52, threshold: 0.65, pass: false } }] } }))
       .mockImplementationOnce(async () => ({ ok: true, status: 200, headers: { get: () => 'image/png' }, json: async () => ({}), arrayBuffer: async () => TINY_PNG, text: async () => '' })))
     const { coverDir, call } = await setup()
     writeFileSync(join(coverDir, 'person.png'), TINY_PNG)
-    const ok = await call(rpc(1, 'tools/call', { name: 'imitate_cover', arguments: { images: ['person.png'], subject: 'person', title: '兜底', prompt: '动作与场景描述' } }))
+    const ok = await call(rpc(1, 'tools/call', { name: 'imitate_cover_wait', arguments: { task_id: 'c_person-2', subject: 'person' } }))
     const payload = JSON.parse(resultOf(ok).content[0].text)
     expect(payload.ok).toBe(true)
     expect(payload.subject).toBe('person')
@@ -345,7 +392,7 @@ describe('cover tools mcp endpoint', () => {
       await fetch(server.url, { method: 'POST', headers: { ...h, 'mcp-session-id': sid! }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) })
       const list = await fetch(server.url, { method: 'POST', headers: { ...h, 'mcp-session-id': sid! }, body: JSON.stringify(rpc(2, 'tools/list')) })
       const names = ((await list.json()) as { result?: { tools?: Array<{ name: string }> } }).result?.tools?.map((t) => t.name)
-      expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'ocr_image', 'text_remove'])
+      expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'imitate_cover_wait', 'ocr_image', 'text_remove'])
     } finally {
       await server.dispose()
     }
