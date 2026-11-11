@@ -25,7 +25,7 @@ export const CoverPortrait: React.FC<CoverProps> = ({ title, subtitle, badge, bg
     <AbsoluteFill style={{ background: '#0b1026' }}>
       {!hidden('environment') && (
         bgImage ? (
-          <CoverImg name={bgImage} style={backdropStyle(styles?.environment)} />
+          <CoverImg name={bgImage} layerId="environment" style={backdropStyle(styles?.environment)} />
         ) : (
           <AbsoluteFill style={{
             background: 'radial-gradient(1000px 800px at 70% -8%, #4f46e5 0%, rgba(79,70,229,0) 55%), radial-gradient(800px 700px at -10% 108%, #0ea5e9 0%, rgba(14,165,233,0) 50%), linear-gradient(170deg, #0b1026 0%, #111a3e 100%)',

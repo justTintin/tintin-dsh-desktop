@@ -378,6 +378,15 @@
 3. **顺手修真 bug**: NumField 缺 `box-sizing:border-box`,`width:100%` + 右内边距 24px 溢出 32px,正好盖住右侧链接钮——Playwright 命中=输入框,真机点击同样落空(content-box 缺省坑)。
 - 验证: 140 用例+37 基线+两构建+门禁;探针:链接态改宽 242→121(高 62→31,字号 96 不变,transform scale 0.5)、解除后改宽 121→36(高随内容 62→127)、链接钮命中=自身、零 pageerror。
 
+### 6.5¹² Ctrl+拖动等比缩放扩到全部图片层(2026-11-11 续批 R20,用户裁决)
+
+用户:「Ctrl+拖动=等比缩放,这个功能在图片也需要有」。原有分支已覆盖自由图片/主体槽位,本轮补齐并修真问题:
+
+1. **环境底图也进图片缩放**: 环境层=背景也是图层(PhotoCraft 语义)——Cover/CoverPortrait 的 bgImage 节点补 `data-cover-layer="environment"` 标记(此前无标记=画布点不到、Ctrl 缩放无从命中);`backdropStyle` 消费 `styles.environment.sx/sy`(等比缩放)与 `dx/dy`(拖动取景);装饰性环境层(Video/Product 族的渐变)无底图时 Ctrl 分支直接放过。
+2. **Ctrl 命中穿透装饰覆盖层**: Cover 模板的网格/AbsoluteFill 未带图层标记会挡住底图命中——Ctrl+拖动改为 elementsFromPoint 全栈取第一个带标记图层(普通点击不启用,空白点选取消语义不变)。
+3. **修真 bug(调试页图片必崩)**: `vite.config.ts` 从未 alias `remotion` → dist/editor 调试页跑真 remotion,`Img` 在无 Composition 上下文抛「No video config found」,任何图片层都把整块画布打成错误态(夹具实证;应用内 client.js 有 esbuild alias 不受影响)。补 alias 与 client.js 同口径=调试页与应用一致。
+- 验证: 140 用例+37 基线+三构建+check:tintin+staging 新鲜;夹具端到端(真 PNG):视频模板主体图 276→2760、自由图片 129→847、cover 模板环境底图 552×311→5520×3105(提交 transform scale(10,10)),预览期 `style.scale` 生效,零页面错误。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。

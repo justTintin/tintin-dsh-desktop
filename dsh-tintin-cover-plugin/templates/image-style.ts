@@ -54,13 +54,22 @@ export function lookTransform(look: ImageLook | undefined): string {
   return sx === 1 && sy === 1 ? `rotate(${r}deg)` : `rotate(${r}deg) scale(${sx}, ${sy})`
 }
 
-/** 环境底图(全幅铺底):只吃外观与翻转;不透明度缺省保持模板原设计 0.85 */
-export function backdropStyle(look: ImageLook | undefined): React.CSSProperties {
+/** 环境底图(全幅铺底):外观+翻转+缩放/平移入口(2026-11-11 R20 背景也是图层——
+ *  Ctrl+拖动等比缩放=styles.environment.sx/sy,画布拖动=dx/dy;不透明度缺省保持模板原设计 0.85) */
+export function backdropStyle(look: (ImageLook & { dx?: number; dy?: number }) | undefined): React.CSSProperties {
+  const sx = lookScale(look?.sx) * (look?.flipX ? -1 : 1)
+  const sy = lookScale(look?.sy) * (look?.flipY ? -1 : 1)
+  const dx = typeof look?.dx === 'number' && Number.isFinite(look.dx) ? Math.round(look.dx) : 0
+  const dy = typeof look?.dy === 'number' && Number.isFinite(look.dy) ? Math.round(look.dy) : 0
+  const parts: string[] = []
+  if (dx !== 0 || dy !== 0) parts.push(`translate(${dx}px, ${dy}px)`)
+  if (sx !== 1 || sy !== 1) parts.push(`scale(${sx}, ${sy})`)
   return {
     position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
     opacity: look?.opacity === undefined ? 0.85 : lookOpacity(look),
     mixBlendMode: lookBlend(look),
-    transform: look?.flipX || look?.flipY ? `scale(${look.flipX ? -1 : 1}, ${look.flipY ? -1 : 1})` : undefined,
+    transform: parts.length ? parts.join(' ') : undefined,
+    transformOrigin: 'center',
   }
 }
 

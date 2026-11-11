@@ -26,7 +26,7 @@ export const Cover: React.FC<CoverProps> = ({ title, subtitle, badge, bgImage, h
     <AbsoluteFill style={{ background: '#0b1026' }}>
       {!hidden('environment') && (
         bgImage ? (
-          <CoverImg name={bgImage} style={backdropStyle(styles?.environment)} />
+          <CoverImg name={bgImage} layerId="environment" style={backdropStyle(styles?.environment)} />
         ) : (
           <AbsoluteFill
             style={{

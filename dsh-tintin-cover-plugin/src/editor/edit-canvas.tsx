@@ -217,23 +217,43 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     /* R8: 命中已选层(主选或多选成员)=保持选择整体拖;命中未选层/空处=替换选择 */
     const alreadyIn = id !== null && (id === selectedLayer || multiSelected.includes(id))
     if (!alreadyIn) selectLayer(id)
-    if (!id) return
-    // 锁定位置:只选中不拖动;Alt+拖动仍可拖出副本(副本不带锁,同 PhotoCraft)
-    if (lockedOf(props, id) && !(e.altKey && id.startsWith('img-'))) return
-    /* Ctrl+拖动=等比缩放(PhotoCraft free transform 语义;不落拖动) */
+    /* Ctrl+拖动=等比缩放(PhotoCraft free transform 语义;不落拖动)。2026-11-11 R20:
+       图片层同样可用——自由图片=custom(width/height)、主体槽位=sx/sy、环境底图=sx/sy
+       (仅模板真有底图时有意义,装饰环境层无缩放对象直接放过)。
+       命中回退:点击点若落在未标记的装饰覆盖层(如 Cover 的网格/AbsoluteFill),
+       layerAt 为空——用 elementsFromPoint 全栈找第一个带 data-cover-layer 的图层
+       (普通点击不启用=空白处点选取消语义不变)。 */
     if (e.ctrlKey && !e.altKey) {
-      const el = layerEl(id)
+      let sid = id
+      if (!sid) {
+        for (const n of document.elementsFromPoint(e.clientX, e.clientY)) {
+          const marked = (n as Element).closest?.('[data-cover-layer]')
+          if (marked && hostRef.current?.contains(marked)) { sid = marked.getAttribute('data-cover-layer'); break }
+        }
+      }
+      if (!sid) return
+      if (sid !== id) selectLayer(sid)
+      if (lockedOf(props, sid)) return
+      const el = layerEl(sid)
       if (!el) return
-      const kind: 'text' | 'custom' | 'slot' = id.startsWith('img-') ? 'custom' : id === 'product' ? 'slot' : 'text'
-      if (kind === 'text' && !tpl.layerDefs.some((d) => d.id === id && d.type === 'text')) return
-      const layer = kind === 'custom' ? (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; x: number; y: number; width: number; height?: number }>) : []).find((l) => l.id === id) : undefined
+      const def = tpl.layerDefs.find((d) => d.id === sid)
+      let kind: 'text' | 'custom' | 'slot' | null = null
+      if (sid.startsWith('img-')) kind = 'custom'
+      else if (def?.type === 'product') kind = 'slot'
+      else if (def?.type === 'text') kind = 'text'
+      else if (def?.type === 'environment') {
+        const bg = String((props as Record<string, unknown>)[def.propsKey ?? def.id] ?? '')
+        kind = bg ? 'slot' : null // 无底图的装饰环境层没有可缩放对象
+      }
+      if (!kind) return
+      const layer = kind === 'custom' ? (Array.isArray(props.customLayers) ? (props.customLayers as Array<{ id: string; x: number; y: number; width: number; height?: number }>) : []).find((l) => l.id === sid) : undefined
       if (kind === 'custom' && !layer) return
-      const look = (props.styles as Record<string, { gscale?: number; sx?: number; sy?: number }> | undefined)?.[id]
+      const look = (props.styles as Record<string, { gscale?: number; sx?: number; sy?: number }> | undefined)?.[sid]
       const r = el.getBoundingClientRect()
       const cx = r.left + r.width / 2
       const cy = r.top + r.height / 2
       scaleRef.current = {
-        id, kind, pointerId: e.pointerId, cx, cy,
+        id: sid, kind, pointerId: e.pointerId, cx, cy,
         startDist: Math.max(8, Math.hypot(e.clientX - cx, e.clientY - cy)),
         f: 1, el,
         baseGscale: typeof look?.gscale === 'number' ? look.gscale : 1,
@@ -247,6 +267,9 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       try { hostRef.current?.setPointerCapture?.(e.pointerId) } catch { /* 合成指针守卫 */ }
       return
     }
+    if (!id) return
+    // 锁定位置:只选中不拖动;Alt+拖动仍可拖出副本(副本不带锁,同 PhotoCraft)
+    if (lockedOf(props, id) && !(e.altKey && id.startsWith('img-'))) return
     const compRect = compositionRect()
     if (!compRect) return
     const scale = compRect.width / tpl.width
