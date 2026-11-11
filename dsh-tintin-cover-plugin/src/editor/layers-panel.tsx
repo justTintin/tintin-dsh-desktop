@@ -108,6 +108,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
   const renameLayer = useEditor((s) => s.renameLayer)
   const toggleLayer = useEditor((s) => s.toggleLayer)
   const selectLayer = useEditor((s) => s.selectLayer)
+  const toggleMultiSelect = useEditor((s) => s.toggleMultiSelect)
   const setProp = useEditor((s) => s.setProp)
   const removeCustomLayer = useEditor((s) => s.removeCustomLayer)
   const removeCustomLayers = useEditor((s) => s.removeCustomLayers)
@@ -311,7 +312,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
             return (
               <div
                 key={`${row.groupId}:default`}
-                onClick={() => selectLayer(row.groupId)}
+                onClick={(e) => { if (e.shiftKey) { toggleMultiSelect(row.groupId); return } selectLayer(row.groupId) }}
                 style={{
                   marginLeft: 30 + INDENT, height: 22, display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px', cursor: 'pointer', userSelect: 'none',
                   fontSize: 11.5, color: row.hidden ? PC.textFaint : PC.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -370,7 +371,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
                 endDrag()
               }}
               onDragEnd={endDrag}
-              onClick={() => selectLayer(id)}
+              onClick={(e) => { if (e.shiftKey) { toggleMultiSelect(id); return } selectLayer(id) }}
               onContextMenu={(e) => { e.preventDefault(); selectLayer(id); setMenu({ id, x: e.clientX, y: e.clientY }) }}
               style={{
                 height: ROW_H, display: 'flex', alignItems: 'stretch', position: 'relative', userSelect: 'none',

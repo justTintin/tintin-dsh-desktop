@@ -12,7 +12,7 @@ import { BLEND_MODES, lookOpacity, lookScale, type ImageLook } from '../../templ
 import { canvasBoxIn, compositionRectIn, layerEl, type CanvasBox } from './canvas-geom'
 import { clampScale, flipPatch, resizeWH, rotatePatch } from './image-ops'
 import { useEditor } from './store'
-import { AlignButtons, type AlignMode } from './align-row'
+import { AlignButtons, alignSelection, type AlignMode } from './align-row'
 import { ghostBtn, headStyle, inputStyle } from './ui'
 
 export type ImageTarget =
@@ -97,8 +97,10 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
   const setCustomLayer = useEditor((s) => s.setCustomLayer)
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const templateId = useEditor((s) => s.templateId)
+  const multiSelected = useEditor((s) => s.multiSelected)
   const [linked, setLinked] = React.useState(true)
   const id = target.kind === 'custom' ? target.layer.id : target.id
+  const ids = [...new Set([id, ...multiSelected])]
   const look: ImageLook & { dx?: number; dy?: number } = target.kind === 'custom' ? target.layer : target.look
   const geometry = target.kind === 'custom' || target.geometry
   const locked = look.locked === true
@@ -139,23 +141,10 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
     })
   }
   const opacity = Math.round(lookOpacity(look) * 100)
-  const tpl = getTemplate(templateId)
-  /* 六向对齐画布(2026-11-11 R15: 画布浮动对齐条删除后入口收进属性卡;与文字面板/旧工具条同数学=视觉盒对画布) */
+  /* 六向对齐画布(2026-11-11 R17: PhotoCraft 语义=选区内每层各自对齐;实现在 align-row=现场量 DOM) */
   const alignToCanvas = (mode: AlignMode): void => {
-    if (!metrics || locked) return
-    const box = metrics.box
-    const goal = {
-      left: 0, centerX: (tpl.width - box.w) / 2, right: tpl.width - box.w,
-      top: 0, centerY: (tpl.height - box.h) / 2, bottom: tpl.height - box.h,
-    }[mode]
-    const horizontal = mode === 'left' || mode === 'centerX' || mode === 'right'
-    if (target.kind === 'custom') {
-      apply(horizontal ? { x: Math.round(goal) } : { y: Math.round(goal) })
-      return
-    }
-    apply(horizontal
-      ? { dx: Math.round((look.dx ?? 0) + (goal - box.left)) }
-      : { dy: Math.round((look.dy ?? 0) + (goal - box.top)) })
+    if (locked) return
+    alignSelection(mode, ids)
   }
   const transformBtn = (text: string, patch: ImageLook, title: string): React.ReactElement => (
     <button key={text} disabled={locked} onClick={() => apply(patch)} title={locked ? '图层已锁定位置' : title} style={chip(!locked)}>{text}</button>
@@ -224,7 +213,7 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
       {geometry ? (
         <div style={{ ...row }}>
           <span style={label}>对齐</span>
-          <AlignButtons onAlign={alignToCanvas} disabled={locked || !metrics} />
+          <AlignButtons ids={ids} onAlign={alignToCanvas} disabled={locked} />
         </div>
       ) : null}
       <div style={{ ...row, flexWrap: 'wrap' }}>

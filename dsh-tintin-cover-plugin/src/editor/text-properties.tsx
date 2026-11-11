@@ -19,10 +19,10 @@ import { liveLayer, liveLayerSnapshot, subscribeLiveLayer } from './ui'
 import { useEditor } from './store'
 import {
   IconAlignCenter, IconAlignJustify, IconAlignLeft, IconAlignRight,
-  IconChevronDown, IconDistributeHorizontal, IconDistributeVertical,
+  IconChevronDown,
   IconLink2,
 } from './layer-icons'
-import { AlignButtons, IconBtn } from './align-row'
+import { AlignButtons, IconBtn, alignSelection, type AlignMode } from './align-row'
 
 const PC = {
   field: '#242424',
@@ -113,6 +113,8 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const hiddenLayers = useEditor((s) => s.hiddenLayers)
   const selectedLayer = useEditor((s) => s.selectedLayer)
+  const multiSelected = useEditor((s) => s.multiSelected)
+  const ids = [...new Set([layerId, ...multiSelected])]
   const customLayers = useEditor((s) => s.props.customLayers) as Array<{ id: string; x: number; y: number }> | undefined
   const [open, setOpen] = React.useState({ transform: true, align: true, char: true, para: true })
   const toggle = (k: keyof typeof open): void => setOpen((o) => ({ ...o, [k]: !o[k] }))
@@ -121,18 +123,22 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
   /* 投影/描边局部解构(类型收窄) */
   const shadow = styles?.shadow
   const stroke = styles?.stroke
-  /* 视觉盒测量(画布 px): props/选择/直显通道任一变化即重测 */
-  const [, force] = React.useReducer((n: number) => n + 1, 0)
+  /* 视觉盒测量(画布 px): props/选择/直显通道任一变化即重测。
+     2026-11-11 用户报「对齐点了不起作用」根因: memo 在提交前测量,force() 重渲又命中旧缓存
+     → 数字永远慢一拍(画布已动、面板不动)。修=measureTick 计入 memo deps(提交后重测一次),
+     动作类(对齐/X/Y 提交)不用快照,点击时现场 measureNow。 */
+  const [measureTick, force] = React.useReducer((n: number) => n + 1, 0)
   React.useLayoutEffect(() => { force() }, [styles, selectedLayer, live.v])
-  const measure = React.useMemo(() => {
+  const measureNow = (): { left: number; top: number; w: number; h: number } | null => {
     const el = document.querySelector(`[data-cover-layer="${layerId}"]`)
     const comp = compRectRef.current
     if (!(el instanceof HTMLElement) || !comp || comp.width <= 0) return null
     const scale = Math.max(comp.width / tplWidth, 0.05)
     const r = el.getBoundingClientRect()
     return { left: (r.left - comp.left) / scale, top: (r.top - comp.top) / scale, w: r.width / scale, h: r.height / scale }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layerId, tplWidth, styles, selectedLayer, live.v])
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const measure = React.useMemo(measureNow, [layerId, tplWidth, styles, selectedLayer, live.v, measureTick])
   const patch = (p: Record<string, unknown>): void => setLayerStyle(layerId, p)
   const num = (k: keyof NonNullable<typeof styles>): number | undefined => {
     const v = styles?.[k]
@@ -142,25 +148,19 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
   /* 变换 X/Y: 画布绝对位 → dx/dy 平移(锁层拒绝;与画布微调同一拒绝面) */
   const locked = styles?.locked === true
   const setPosX = (v: number | undefined): void => {
-    if (v === undefined || !measure || locked) return
-    patch({ dx: Math.round((styles?.dx as number ?? 0) + (v - measure.left)) })
+    const m = measureNow()
+    if (v === undefined || !m || locked) return
+    patch({ dx: Math.round((styles?.dx as number ?? 0) + (v - m.left)) })
   }
   const setPosY = (v: number | undefined): void => {
-    if (v === undefined || !measure || locked) return
-    patch({ dy: Math.round((styles?.dy as number ?? 0) + (v - measure.top)) })
+    const m = measureNow()
+    if (v === undefined || !m || locked) return
+    patch({ dy: Math.round((styles?.dy as number ?? 0) + (v - m.top)) })
   }
-  /* 六向对齐(相对画布;与画布对齐工具条同数学,自测视觉盒) */
-  const align = (mode: 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom'): void => {
-    if (!measure || locked) return
-    const target = {
-      left: 0, centerX: (tplWidth - measure.w) / 2, right: tplWidth - measure.w,
-      top: 0, centerY: (tpl.height - measure.h) / 2, bottom: tpl.height - measure.h,
-    }[mode]
-    const horizontal = mode === 'left' || mode === 'centerX' || mode === 'right'
-    const dx = styles?.dx as number ?? 0
-    const dy = styles?.dy as number ?? 0
-    if (horizontal) patch({ dx: Math.round(dx + (target - measure.left)) })
-    else patch({ dy: Math.round(dy + (target - measure.top)) })
+  /* 六向对齐(相对画布;多选=选区内每层各自对齐,实现在 align-row=现场量 DOM) */
+  const align = (mode: AlignMode): void => {
+    if (locked) return
+    alignSelection(mode, ids)
   }
   /* 字号 pt: 基准×scale;画布拖动中 live 跟随 */
   const scale = typeof styles?.scale === 'number' ? styles.scale : 1
@@ -217,15 +217,7 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
       <SectionHead label="对齐与分布" open={open.align} onToggle={() => toggle('align')} />
       {open.align ? (
         <div style={{ paddingBottom: 4 }}>
-          <AlignButtons onAlign={align} disabled={locked} />
-          <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
-            <button disabled title="水平分布(需 ≥3 个选中对象)" style={{ height: 22, flex: 1, border: `1px solid ${PC.fieldBorder}`, borderRadius: 3, background: PC.field, color: PC.textFaint, fontSize: 11, cursor: 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-              <IconDistributeHorizontal size={13} /> 水平
-            </button>
-            <button disabled title="垂直分布(需 ≥3 个选中对象)" style={{ height: 22, flex: 1, border: `1px solid ${PC.fieldBorder}`, borderRadius: 3, background: PC.field, color: PC.textFaint, fontSize: 11, cursor: 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-              <IconDistributeVertical size={13} /> 垂直
-            </button>
-          </div>
+          <AlignButtons ids={ids} onAlign={align} disabled={locked} />
         </div>
       ) : null}
       {/* ── 字符 ── */}
