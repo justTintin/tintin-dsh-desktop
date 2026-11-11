@@ -1,6 +1,6 @@
 ---
 name: cover
-description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与出图:文字/样式改写(cover.props.json)、comfygen 生成底图与产品图、Remotion 导出 PNG。用户在封面编辑器右栏会话里说「主标题改成…」「环境图换赛博朋克」「导出」时使用。中文触发词:封面/封面图/改标题/换底图/生成底图/导出封面。
+description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与出图:文字/样式改写(cover.props.json)、comfygen 生成底图与主体图、Remotion 导出 PNG。用户在封面编辑器右栏会话里说「主标题改成…」「环境图换赛博朋克」「导出」时使用。中文触发词:封面/封面图/改标题/换底图/生成底图/导出封面。
 ---
 
 <!-- tintin-managed: cover skill(动态环境附录由桌面端在会话启动时追加在文末) -->
@@ -49,17 +49,17 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 3. 字体(2026-11-02 起=本机全部已装字体,不再是 7 种白名单):`font` 填**英文族名**(GET `/tintin/cover/api/fonts` 可列全部:family=英文族名/local=中文名/styles=可用字面);`weight` 100–900(可选,如 700=粗体,须为该字体 styles 里存在的字面);`italic` true=斜体(可选);`shadow` = { dx, dy, blur, color } 投影对象(可选,设置后覆盖模板硬编码阴影;删除字段=还原);`stroke` = { width, color } 描边(仅文字);`scale` 0.5–1.8;`color` 十六进制。缺字字形自动回落微软雅黑。
 4. **图层显示名**(2026-11-11):记录里的可选 `layerNames` 字段 = { 图层id → 用户改的显示名 }(用户在面板双击重命名产生)。`<cover_context>` 里图层的 label 已按它显示——用户说「把『爆款标题』放大」时,先在 layerNames 里把该显示名映射回图层 id,再按 id 改对应键。保留该字段勿删。
 5. 图层显隐:把图层 id 加入 `hiddenLayers` 数组。固定图层 id 词汇 = `<cover_context>` 的清单(environment/product/title/subtitle/brand/footer/grid/features/badge/subTag);**拖入图片是动态图层**,id 形如 `img-xxx`,数据在 `props.customLayers`(x/y/width/opacity,画布 px),z 序由 `layerOrder`(自底向上全表)决定——**调整层级=重排 layerOrder;新增图片层前先把图放进插件素材位**(领养过的在线素材已在,或让用户上传)。
-6. **图层组(2026-10-31 阶段2,叠放语义)**:固定名称是**图层组**(如 产品图/环境图),每组模板自带一个**默认图层**;`customLayers` 每项可带 `group`(可选)=归属的**图片组**槽位 id(`product`/`environment`,仅这两组可挂,其余组剥除)——组内图层与默认图层**叠放渲染**,前后仍由 `layerOrder` 决定。用户说「放进产品图组/归到环境图组」时给对应项补 `group`;说「不归组/移出组」时删掉该字段。
-7. **图片图层外观与变换(2026-11-01,对齐 PhotoCraft)**:自由图层在 `customLayers[i]` 上、产品图在 `styles.product` 上、环境底图在 `styles.environment` 上,可写 `opacity`(0–1)、`blend`(混合模式:normal/multiply/screen/overlay/soft-light/hard-light/darken/lighten/color-dodge/color-burn/plus-lighter/difference/exclusion/hue/saturation/color/luminosity)、`flipX`/`flipY`(布尔)、`rotate`(度)、`locked`(true=锁定位置,用户锁定的图层**不要改其位置/尺寸/角度**)。尺寸:自由图层改 `width`(可加 `height`,不写=随原图比例);产品图改 `styles.product.sx`/`sy`(缩放倍率,1=模板原大小)。环境底图只支持 opacity/blend/flipX/flipY。
+6. **图层组(2026-10-31 阶段2,叠放语义)**:固定名称是**图层组**(如 主体图/环境图;2026-11-11 起「产品图」更名「主体图」——图层可能是人也可能是产品,图层 id 仍为 product),每组模板自带一个**默认图层**;`customLayers` 每项可带 `group`(可选)=归属的**图片组**槽位 id(`product`/`environment`,仅这两组可挂,其余组剥除)——组内图层与默认图层**叠放渲染**,前后仍由 `layerOrder` 决定。用户说「放进主体图组/归到环境图组」时给对应项补 `group`;说「不归组/移出组」时删掉该字段。
+7. **图片图层外观与变换(2026-11-01,对齐 PhotoCraft)**:自由图层在 `customLayers[i]` 上、主体图在 `styles.product` 上、环境底图在 `styles.environment` 上,可写 `opacity`(0–1)、`blend`(混合模式:normal/multiply/screen/overlay/soft-light/hard-light/darken/lighten/color-dodge/color-burn/plus-lighter/difference/exclusion/hue/saturation/color/luminosity)、`flipX`/`flipY`(布尔)、`rotate`(度)、`locked`(true=锁定位置,用户锁定的图层**不要改其位置/尺寸/角度**)。尺寸:自由图层改 `width`(可加 `height`,不写=随原图比例);主体图改 `styles.product.sx`/`sy`(缩放倍率,1=模板原大小)。环境底图只支持 opacity/blend/flipX/flipY。
 8. 横竖屏:`templateId` 同族互换——`cover↔cover-portrait`、`product↔product-portrait`、`video↔video-portrait`。内容键(含 customLayers/layerOrder)尽量原样保留。
 6. 校验失败(编辑器报「文本图层不能为空」等)= 你写坏了某键,读回文件修好再写。
 
 ## 生图(画面归 AI,文字归排版——铁律)
 
-- **所有生成(底图/环境图/产品图重绘)统一走服务端 MCP 工具 `create_image`**:mode=t2i(文生图,prompt 直接出图)或 mode=cover(封面图生图,参考图 script_id/images/material_ids 三选一)。**不要用 curl/pwsh 直调任何 `/generate/*` 端点或编辑器的 generate-background/generate-product**(那些是编辑器界面自身使用的通道;会话里的生成一律经 create_image 工具)。异步任务按会话工作纪律用 task_status_unified 轮询到终态(间隔 ≥5 秒,预算 30 分钟)。
+- **所有生成(底图/环境图/主体图重绘)统一走服务端 MCP 工具 `create_image`**:mode=t2i(文生图,prompt 直接出图)或 mode=cover(封面图生图,参考图 script_id/images/material_ids 三选一)。**不要用 curl/pwsh 直调任何 `/generate/*` 端点或编辑器的 generate-background/generate-product**(那些是编辑器界面自身使用的通道;会话里的生成一律经 create_image 工具)。异步任务按会话工作纪律用 task_status_unified 轮询到终态(间隔 ≥5 秒,预算 30 分钟)。
 - **参考图必须是服务端可达的引用(2026-11-02 用户裁决:传给服务端的不是路径)**:`images`/`material_ids`/`script_id` 只认 material id、script、服务端可达 URL;**本机/客户端项目里的文件路径对服务端不可见**(生成服务跑在另一台 Linux 主机上),传本地路径必报「找不到」且重试无效。用户拿本机图当参考时:①该图已在服务端素材库→给 material_ids;②用户能提供图片 URL→直传 URL;③都没有→如实说明「本机文件需先上传到服务端素材库才能作为参考」,等用户提供,不要传本地路径。抠图例外:`/matting` 是 multipart 上传文件字节,本地图可直接用。**仿封面例外:用 `imitate_cover`(见下节),它内置上传通路,images 直接给本机路径。**
-- 产物落盘后按用途写回 props(底图 → `props.bgImage` = 文件名;产品图 → `props.image`),写回规则见上节。
-- **抠图/去背景**:用 `mcp__cover-tools__matting`(image=源图绝对路径,可选 model),工具内置健康模型链 **isnet-general-use→u2net→isnet-anime**(1104 实测 bria-rmbg/silueta 服务端 ONNX 崩溃,禁用)与落盘校验(HTTP 状态+PNG 魔数,非 200/非 PNG 不落盘,失败返回错误原文)。约 2-3 秒直出**透明底 PNG**(RGBA),产物自动落素材区+项目目录。**抠图结果是一个素材(2026-10-31 用户裁决)**,可用于任何图层(产品图/底图/新增图层都行),用在哪由用户说了算;落盘后进素材区并告知路径即可,**不要默认写 `props.image`/`props.bgImage`、不要自动加图层**——用户明确要求设为产品图/底图时才写对应字段。
+- 产物落盘后按用途写回 props(底图 → `props.bgImage` = 文件名;主体图 → `props.image`),写回规则见上节。
+- **抠图/去背景**:用 `mcp__cover-tools__matting`(image=源图绝对路径,可选 model),工具内置健康模型链 **isnet-general-use→u2net→isnet-anime**(1104 实测 bria-rmbg/silueta 服务端 ONNX 崩溃,禁用)与落盘校验(HTTP 状态+PNG 魔数,非 200/非 PNG 不落盘,失败返回错误原文)。约 2-3 秒直出**透明底 PNG**(RGBA),产物自动落素材区+项目目录。**抠图结果是一个素材(2026-10-31 用户裁决)**,可用于任何图层(主体图/底图/新增图层都行),用在哪由用户说了算;落盘后进素材区并告知路径即可,**不要默认写 `props.image`/`props.bgImage`、不要自动加图层**——用户明确要求设为主体图/底图时才写对应字段。
   - **抠图结果直接当素材用,禁止客户端逐像素扫描**(PowerShell GetPixel/边界计算等):产物已是透明底 PNG,主体裁剪/摆放由用户在编辑器里做;确实需要边界信息时如实说明并等用户指示。
 - prompt 只描述画面/光影/材质/氛围;**任何文字、标语、Logo 都不要写进 prompt**(文字由模板排版,写了必崩)。
 - 生成期间如实告知用户「分钟级」;**失败或端点不可达时把错误原样转述,同一请求最多重试 2 次,禁止反复重试**(2026-10-30 重试风暴事故教训)。
@@ -73,7 +73,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
   3. **验收=任务 completed**(人脸相似度门已过,结果回显 `face_similarity{score,threshold,pass}` 与 `face_similarity_mode`;失败 partial_failed 带分值在错误原文,同请求最多重试 2 次)+read_image 看产物确认人与参考图一致后才写 props。
 - **参考封面拆解**:`mcp__cover-tools__ocr_image`(image=参考封面)→逐行文字+位置框(box 像素/box_rel 相对比例/置信度)。按 box_rel×模板宽高换算成文字层位置重打标题/角标文案——**文字一律回排版层,永不进生图 prompt**;系统字体复刻不了的花字效果如实说明。
 - **去字还原干净底图(2026-11-10 服务端 /image/text-remove 生产上线)**:`mcp__cover-tools__text_remove`(image=参考封面;boxes 省略=自动 OCR 全部字框,或显式传 `[[x1,y1,x2,y2],...]` 绝对像素=ocr_image 的 lines[].box)。LaMa 质量档约 6s,产物 PNG 落素材区+项目目录——**原字已抹的干净底图**,可直接当 bgImage/底图层;fast=true 仅适合纯色/渐变底小字。
-- 典型流(用户提供参考封面+产品图):ocr_image 拆参考版式(文字+位置) → text_remove 抹掉原字得干净底图 → 组装:干净底图当 bgImage+文字层按 OCR 位置重打(可改文案) + matting 抠产品主体/imitate_cover 补图 → render_preview 回看 → 导出。
+- 典型流(用户提供参考封面+主体图):ocr_image 拆参考版式(文字+位置) → text_remove 抹掉原字得干净底图 → 组装:干净底图当 bgImage+文字层按 OCR 位置重打(可改文案) + matting 抠主体/imitate_cover 补图 → render_preview 回看 → 导出。
 - 典型流(用户提供参考封面+人物图,要求"这个人"上封面):ocr_image 拆参考版式 → imitate_cover(subject:"person",恰 1 张人物图,style_image=参考封面+style_weight,prompt 只写动作/构图) → read_image 验人 → 产物当底图(environment)+文字层按 OCR 位置重打 → render_preview 回看 → 导出。
 
 ## 导出

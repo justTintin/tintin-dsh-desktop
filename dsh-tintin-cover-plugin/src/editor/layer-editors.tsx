@@ -241,7 +241,7 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
   }
   const mattingNow = (): void => {
     const name = String(current ?? '')
-    if (!name) { setState({ busy: false, msg: '当前产品图为空,无可抠图', ok: false }); return }
+    if (!name) { setState({ busy: false, msg: '当前主体图为空,无可抠图', ok: false }); return }
     setState({ busy: true, msg: '', ok: true })
     void (async () => {
       try {
@@ -249,7 +249,7 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name, project }),
         }).then((x) => x.json()) as { ok?: boolean; name?: string; error?: string }
         if (!r.ok) throw new Error(r.error || '抠图失败')
-        setState({ busy: false, msg: `已生成素材 ${r.name}(结果=素材;要用它请先在素材区点选,再点「用选中素材设为产品图」)`, ok: true })
+        setState({ busy: false, msg: `已生成素材 ${r.name}(结果=素材;要用它请先在素材区点选,再点「设为主体图」)`, ok: true })
       } catch (err) {
         setState({ busy: false, msg: err instanceof Error ? err.message : String(err), ok: false })
       }
@@ -284,9 +284,9 @@ function ImageLayerEditor({ layerId, layerLabel, propKey, project }: { layerId: 
           <button
             onClick={setFromAsset}
             disabled={!selectedAsset}
-            title={selectedAsset ? `用素材区的「${selectedAsset}」设为产品图` : '先在素材区点选一张图'}
+            title={selectedAsset ? `用素材区的「${selectedAsset}」设为主体图` : '先在素材区点选一张图'}
             style={{ ...ghostBtn, width: 'auto', padding: '4px 10px', fontSize: 11, opacity: selectedAsset ? 1 : 0.45 }}
-          >用选中素材设为产品图</button>
+          >设为主体图</button>
           <button
             onClick={mattingNow}
             disabled={state.busy}

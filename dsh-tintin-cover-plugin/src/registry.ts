@@ -1,5 +1,6 @@
 // 模板注册表(纯逻辑,可单测)。
-// 2026-10-27 15:09 用户裁决:图层分类学固定 = 环境图/产品图/主标题/副标题(+装饰层),
+// 2026-10-27 15:09 用户裁决:图层分类学固定 = 环境图/产品图/主标题/副标题(+装饰层)。
+// 2026-11-11 用户裁决:「产品图」更名「主体图」(图层可能是人也可能是产品;图层 id 仍为 product,下同)。
 // 会话按图层 id 引用与操作;设置 = 横竖屏(同族横竖变体,切换保留内容)。
 // 图层 id 即会话词汇:environment / product / title / subtitle(装饰层另计)。
 import type { ComponentType } from 'react'
@@ -75,7 +76,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     defaultProps: { brand: '', title: '', subtitle: '', badge: '', features: [], image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
-      { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
+      { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
       { id: 'title', label: '主标题', type: 'text', fontSize: 76 },
       { id: 'subtitle', label: '副标题', type: 'text', fontSize: 28 },
       { id: 'features', label: '卖点清单', type: 'text', fontSize: 24 },
@@ -90,7 +91,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     defaultProps: { brand: '', title: '', subtitle: '', badge: '', features: [], image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
-      { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
+      { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
       { id: 'title', label: '主标题', type: 'text', fontSize: 84 },
       { id: 'subtitle', label: '副标题', type: 'text', fontSize: 32 },
       { id: 'features', label: '卖点清单', type: 'text', fontSize: 27 },
@@ -107,7 +108,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 110 },
       { id: 'subtitle', label: '副标题', type: 'text', fontSize: 34 },
-      { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
+      { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
       { id: 'subTag', label: '栏目角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
     ],
@@ -121,7 +122,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 104 },
       { id: 'subtitle', label: '副标题', type: 'text', fontSize: 38 },
-      { id: 'product', label: '产品图', type: 'product', propsKey: 'image' },
+      { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
       { id: 'subTag', label: '栏目角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
     ],

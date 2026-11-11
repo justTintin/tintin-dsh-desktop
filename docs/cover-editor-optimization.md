@@ -290,6 +290,10 @@
 - Pro-dark 调色板(theme.rs:225-334 暗档)常量 PC.*:field #242424/border #4A4A4A/selected #525252/separator #1E1E1E/text #DEDEDE/dim #B2B2B2/faint #808080/icon #C8C8C8/accent #378EF0(仅面板内)。
 - 浏览器截图核验: 眼列/三角/芯片/选中态/头行字段/页脚按钮全按规格呈现(见验证截图)。
 
+### 6.5″ 图层更名(2026-11-11 用户裁决)
+
+「产品图」→**「主体图」**(图层可能是人也可能是产品)。图层 **id 仍为 `product`**(会话词汇/props 键/styles.product/工具通道全锚 id,不动);registry.ts 4 模板 label + 编辑卡串(「设为主体图」等)+ cover SKILL 词汇(第 6/7 条与典型流,注明更名与 id 不变)随批;cover_context/面板行/校验报错自动跟随(均由 label 派生)。
+
 ### 6.6 剩余方向(待裁决排期)
 
 - 标尺参考线持久化(现会话内存;进 cover.props.json 需契约扩展)。
