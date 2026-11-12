@@ -511,7 +511,7 @@
 
 7.8 的子进程化方向对但**载荷里没有它需要的东西**——实测证据链:staging(tintin-resources/cover-plugin)的 `node_modules/.remotion/chrome-headless-shell/win64/.../chrome-headless-shell.exe` 存在,win-unpacked 载荷**同路径缺失**(stage.mjs 保留缓存,但 electron-builder 收集 node_modules 时丢弃了插件嵌套 node_modules 里的 .remotion)。于是载荷内 `resolveBundledBrowser()` 返回 null → **静默回退 `ensureBrowser()` 联网下载 150MB** → 本机网络下挂起 → 180s 杀树,错误只说「可重试」零死因;agent 按 skill 反复重试=三轮+一轮全灭的完整闭环。dev 树裸 Electron 1.5s 能渲(缓存就在旁边)从外面看不出载荷缺货。
 
-- **修 1(package-dir.mjs)**:electron-builder 成功后从 staging 补拷 `.remotion` 缓存进载荷插件嵌套 node_modules,拷完自校验 exe——staging 缓存缺失或拷贝失败**宁可打包失败**,不静默产出渲染必挂的包。
+- **修 1(package-dir.mjs)**:electron-builder 成功后补拷 staging 的**生产 node_modules 整树**进载荷插件嵌套 node_modules(1112 初版只窄拷 `.remotion`,1113 用户裁决「node_modules 每次打包都要打进去」升级为整树),拷完双校验(exe+@remotion/renderer)——staging 缺缓存或缺渲染库**宁可打包失败**,不静默产出渲染必挂的包。整树依据:staging 生产档 324MB 里 .remotion 占 283MB,整树仅 +41MB;stage.mjs 的 npm install --omit=dev 生产树本就是为自包含载荷而建,electron-builder 的收集语义(每个包提升到 app 根级、留空壳嵌套 node_modules)让这一直断链——整树入载荷同时消灭「插件解析依赖 yarn 提升结果」的不确定性,未来任何非包数据(模型/缓存)自动随包。
 - **修 2(cover-tools-mcp.js)**:渲染子进程 stderr 截尾(4KB)进超时/退出错误——死因全在 stderr,旧版故意丢弃导致挂 180s 只剩一句「可重试」。
 - **修 3(engine.ts)**:缓存缺失回退 ensureBrowser 前向 stderr 告警一行(经修 2 直达超时错误,智能体可转述)。
 - 教训:门禁 verify-cover-payload 第 31 行显式跳过 node_modules/.remotion(staging↔工作区比对口径,本身正确)→「载荷缺货」从未有任何人检查;find 排查深度(-maxdepth 4/5)会把 6-8 层深的 exe 误判为缺失,结论前必须用精确路径 `test -f` 复核(本批即被 maxdepth 假阴性骗过一次)。

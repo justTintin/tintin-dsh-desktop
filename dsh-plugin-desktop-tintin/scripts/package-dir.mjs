@@ -90,26 +90,33 @@ export function packageDirectory(options = {}) {
     throw new Error(`electron-builder --dir exited with ${String(result.status)}`)
   }
 
-  // Remotion 浏览器缓存随载荷(2026-11-12 三轮渲染超时根修): electron-builder 收集
-  // node_modules 时丢弃插件的 .remotion/chrome-headless-shell——渲染必需,缺失=
-  // resolveBundledBrowser() 返回 null → 静默回退 ensureBrowser 联网下载 150MB,
-  // 受限网络挂到渲染超时(180s 杀树,错误还不带死因)。staging 缓存由 stage.mjs
-  // 保留,从那里补拷进载荷插件嵌套 node_modules 并自校验 exe——缺失宁可打包
-  // 失败,不静默产出一个渲染必挂的包。
+  // 插件生产 node_modules 随载荷(2026-11-13 用户裁决「node_modules 每次打包都要打进去」):
+  // electron-builder 收集依赖时把每个包提升到 app 根级,给插件留**空的**嵌套 node_modules 壳,
+  // 无主目录(.remotion 浏览器缓存=非包下载缓存)永远不被收集——7.8 后渲染仍 180s 超时的根因
+  // (先窄修只拷 .remotion,1113 升级为整树)。staging 的 node_modules 正是为此而建:stage.mjs
+  // 按 lockfile npm install --omit=dev 的生产树(.remotion 283MB 占大头,整树仅 +41MB)。
+  // 整树入载荷=插件自包含(imports 优先嵌套版,不再依赖 yarn 提升结果),未来任何非包数据
+  // (模型/缓存)自动随包。拷完双校验——缺浏览器或缺渲染库宁可打包失败,不产出渲染必挂的包。
   const distDir = join(packageRoot, 'dist')
   const unpacked = existsSync(join(distDir, 'win-unpacked'))
     ? join(distDir, 'win-unpacked')
     : readdirSync(distDir).map((name) => join(distDir, name)).find((dir) => dir.endsWith('-unpacked') && existsSync(join(dir, 'resources', 'app')))
   if (unpacked) {
-    const stagingCache = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '.remotion')
-    const cacheExe = (...parts) => join(...parts, 'chrome-headless-shell', 'win64', 'chrome-headless-shell-win64', 'chrome-headless-shell.exe')
-    if (!existsSync(cacheExe(stagingCache))) {
+    const stagingModules = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules')
+    const exeRel = join('chrome-headless-shell', 'win64', 'chrome-headless-shell-win64', 'chrome-headless-shell.exe')
+    if (!existsSync(join(stagingModules, '.remotion', exeRel))) {
       throw new Error('staging 缺 .remotion 浏览器缓存(渲染必需)——先跑 stage.mjs 并保留缓存,再打包')
     }
+    if (!existsSync(join(stagingModules, '@remotion', 'renderer'))) {
+      throw new Error('staging 缺 @remotion/renderer(引擎渲染必需)——先跑 stage.mjs 重建生产 node_modules')
+    }
     const dest = join(unpacked, 'resources', 'app', 'node_modules', 'dsh-tintin-cover-plugin')
-    cpSync(stagingCache, join(dest, 'node_modules', '.remotion'), { recursive: true })
-    if (!existsSync(cacheExe(dest, 'node_modules', '.remotion'))) {
+    cpSync(stagingModules, join(dest, 'node_modules'), { recursive: true })
+    if (!existsSync(join(dest, 'node_modules', '.remotion', exeRel))) {
       throw new Error('载荷浏览器缓存拷贝后仍缺失——检查 dist 载荷目录权限')
+    }
+    if (!existsSync(join(dest, 'node_modules', '@remotion', 'renderer'))) {
+      throw new Error('载荷 @remotion/renderer 拷贝后仍缺失——检查 dist 载荷目录权限')
     }
   }
 }
