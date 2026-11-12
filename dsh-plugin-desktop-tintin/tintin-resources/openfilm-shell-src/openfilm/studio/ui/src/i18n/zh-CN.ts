@@ -117,6 +117,8 @@ export const zhCN: Words = {
     offLine: '已关闭，智能体不会用它。',
     installedOne: '已安装',
     serverVersion: '版本',
+    serverUpdate: '更新',
+    serverInstalledVersion: '已装版本',
     serverExecutor: '执行方',
     serverTags: '标签',
     serverOwner: '注册者',

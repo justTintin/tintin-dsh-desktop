@@ -856,5 +856,47 @@
     "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
     "pattern": "tintin-ops",
     "minCount": 2
+  },
+  {
+    "comment": "replay: SkillsPane server lines carry the installed-version ledger and update flag (2026-11-12 aligned with the cover skill modal)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/SkillsPane.tsx",
+    "pattern": "installedVersion",
+    "minCount": 2
+  },
+  {
+    "comment": "replay: SkillsLibrary server views carry the installed-version ledger and update flag (2026-11-12 aligned with the cover skill modal)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/SkillsLibrary.tsx",
+    "pattern": "installedVersion",
+    "minCount": 2
+  },
+  {
+    "comment": "replay: studio i18n zh-CN keeps the server update keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/zh-CN.ts",
+    "pattern": "serverUpdate",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio i18n en keeps the server update keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/en.ts",
+    "pattern": "serverUpdate",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio i18n ja keeps the server update keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/ja.ts",
+    "pattern": "serverUpdate",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio i18n es keeps the server update keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/es.ts",
+    "pattern": "serverUpdate",
+    "minCount": 1
+  },
+  {
+    "comment": "replay: studio i18n ko keeps the server update keys",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/ko.ts",
+    "pattern": "serverUpdate",
+    "minCount": 1
   }
 ]

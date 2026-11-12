@@ -116,6 +116,8 @@ export const es: Words = {
     offLine: 'Desactivada. Los agentes no la usan.',
     installedOne: 'Instalada',
     serverVersion: 'Versión',
+    serverUpdate: 'Actualizar',
+    serverInstalledVersion: 'Versión instalada',
     serverExecutor: 'Ejecutor',
     serverTags: 'Etiquetas',
     serverOwner: 'Registrado por',

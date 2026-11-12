@@ -116,6 +116,8 @@ export const ja: Words = {
     offLine: 'オフ。エージェントは使いません。',
     installedOne: 'インストール済み',
     serverVersion: 'バージョン',
+    serverUpdate: '更新',
+    serverInstalledVersion: 'インストール済みバージョン',
     serverExecutor: '実行方法',
     serverTags: 'タグ',
     serverOwner: '登録者',

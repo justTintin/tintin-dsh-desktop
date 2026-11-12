@@ -117,6 +117,8 @@ export const en = {
     offLine: 'Off. Agents won\'t use it.',
     installedOne: 'Installed',
     serverVersion: 'Version',
+    serverUpdate: 'Update',
+    serverInstalledVersion: 'Installed version',
     serverExecutor: 'Executor',
     serverTags: 'Tags',
     serverOwner: 'Registered by',

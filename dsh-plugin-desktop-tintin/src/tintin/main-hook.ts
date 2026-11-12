@@ -646,9 +646,41 @@ export function installTinTinMainHook(): void {
       const packaged = join(dirname(process.env.TINTIN_BIN_DIR), 'openfilm', 'node_modules', 'openfilm', 'skills')
       if (existsSync(packaged)) return packaged
     }
-    const dev = resolve(dirname(fileURLToPath(import.meta.url)), '../../tintin-resources/openfilm/node_modules/openfilm/skills')
-    return existsSync(dev) ? dev : null
+  const dev = resolve(dirname(fileURLToPath(import.meta.url)), '../../tintin-resources/openfilm/node_modules/openfilm/skills')
+  return existsSync(dev) ? dev : null
+}
+/* 版本比较(2026-11-12 用户裁决: 对齐封面技能管理口径): 分段数值, 缺段=0, 容忍 v 前缀;
+   任一端缺失/坏值=不算有新版本(不误报)。 */
+const serverSkillVersionNewer = (serverVersion: unknown, installedVersion: unknown): boolean => {
+  const parse = (v: unknown): number[] | null => {
+    const t = String(v ?? '').trim().replace(/^v/i, '')
+    if (!t) return null
+    const parts = t.split('.').map((p) => (/^\d+$/.test(p) ? Number(p) : -1))
+    return parts.some((p) => p < 0) ? null : parts
   }
+  const sv = parse(serverVersion)
+  const iv = parse(installedVersion)
+  if (!sv || !iv) return false
+  const len = Math.max(sv.length, iv.length)
+  for (let i = 0; i < len; i++) {
+    const a = sv[i] ?? 0
+    const b = iv[i] ?? 0
+    if (a !== b) return a > b
+  }
+  return false
+}
+/* 安装副本的版本账本(2026-11-12): 服务端技能的 instruction 正文不带版本, install 时把服务端
+   version 记进技能目录的 tintin-server-skill.json; 清单比对用它判「有新版本」。
+   无账本的旧安装=未知版本, 如实不标更新(装一次即有账)。 */
+const serverSkillMetaName = 'tintin-server-skill.json'
+const serverSkillDir = (name: string): string =>
+  join(channelHome(), 'film-agent-home', 'skills', name.replace(/[/:*?"<>|]/g, '-'))
+const installedServerSkillVersion = (dir: string): string => {
+  try {
+    const doc = JSON.parse(readFileSync(join(dir, serverSkillMetaName), 'utf8')) as { version?: unknown }
+    return typeof doc.version === 'string' ? doc.version.trim() : ''
+  } catch { return '' }
+}
   ipcMain.handle('openfilm:native:skills-list', async (_event, payload: unknown) => {
     const q = (payload ?? {}) as { project?: unknown; agent?: unknown }
     void q
@@ -679,16 +711,41 @@ export function installTinTinMainHook(): void {
       const serverUrl = tinServerUrl()
       if (serverUrl) {
         const res = await fetch(serverUrl + '/skills')
-        /* 实测(2026-10-24 铁律 14): /skills 返回顶层 skills: [{id,name,description,instruction}] */
-        const body = await res.json() as { skills?: Array<{ name?: unknown; description?: unknown }>; data?: { skills?: Array<{ name?: unknown; description?: unknown }> } }
+        /* 实测(2026-10-24 铁律 14): /skills 返回顶层 skills: [{id,name,description,instruction}]
+           (2026-11-12 实测补: 行还带 version/executor/tags/machine_id/registered_by/created_at) */
+        const body = await res.json() as { skills?: Array<{ name?: unknown; description?: unknown; version?: unknown }>; data?: { skills?: Array<{ name?: unknown; description?: unknown; version?: unknown }> } }
         const serverSkills = Array.isArray(body.skills) ? body.skills : Array.isArray(body.data?.skills) ? body.data.skills : []
         for (const s of serverSkills) {
           const name = String(s.name ?? '')
           if (!name || openfilm.some((row) => String(row.name ?? '') === name)) continue
+          const dir = serverSkillDir(name)
+          const installed = existsSync(dir)
+          let installedVersion = installed ? installedServerSkillVersion(dir) : ''
+          let update = serverSkillVersionNewer(s.version, installedVersion)
+          /* 内容兜底(2026-11-12 用户报障「为什么没有显示更新」实证: 9 个已装里 6 个服务端已改,
+             全是账本诞生前的旧安装, 版本账本判不出)——无账本时拿本机 SKILL.md 与服务端 instruction
+             逐字比对: 一致=视为与服务端同版(已装版本显示服务端版), 不一致=有更新; 服务端行无
+             instruction 时兜底不判(不误报)。有账本只走版本比较(装时账本与正文同写, 双真源无意义)。 */
+          if (installed && !installedVersion) {
+            const instruction = String((s as { instruction?: unknown }).instruction ?? '')
+            if (instruction) {
+              try {
+                if (readFileSync(join(dir, 'SKILL.md'), 'utf8') === instruction) {
+                  installedVersion = String(s.version ?? '').trim()
+                } else {
+                  update = true
+                }
+              } catch { /* 无 SKILL.md: 保持不判 */ }
+            }
+          }
           openfilm.push({
             name, description: String(s.description ?? ''), source: 'server', folder: '', scripts: [],
             /* 已装标记(2026-10-30 技能弹窗服务端 tab): 安装落点=install handler 同款路径, 弹窗按它区分 安装/已安装 */
-            installed: existsSync(join(channelHome(), 'film-agent-home', 'skills', name.replace(/[/:*?"<>|]/g, '-'))),
+            installed,
+            /* 更新判定(2026-11-12 用户裁决: 对齐封面技能管理): 服务端 version 新于安装账本 → update,
+               账本前旧安装退内容比对; 前端据此把「已安装」换成「更新」并挂「有新版 vX」徽标 */
+            installedVersion,
+            update,
             /* 详情(2026-10-31 用户裁决: 点卡片看全部信息, 对齐封面技能管理详情弹窗): 服务端原行透传
                (instruction/tags/version/executor/registered_by/created_at 等), 弹窗本地渲染不再二次请求 */
             detail: s,
@@ -726,17 +783,20 @@ export function installTinTinMainHook(): void {
     if (!serverUrl) return { error: '服务端未配置' }
     try {
       const res = await fetch(serverUrl + '/skills')
-      const body = await res.json() as { skills?: Array<{ name?: unknown; instruction?: unknown }> }
+      const body = await res.json() as { skills?: Array<{ name?: unknown; instruction?: unknown; version?: unknown }> }
       const skill = (body.skills ?? []).find((s) => String(s.name ?? '') === name)
       const instruction = String(skill?.instruction ?? '')
       if (!instruction) return { error: `服务端未返回「${name}」的正文` }
-      const target = join(channelHome(), 'film-agent-home', 'skills', name.replace(/[/:*?"<>|]/g, '-'))
+      const target = serverSkillDir(name)
       mkdirSync(target, { recursive: true })
       writeFileSync(join(target, 'SKILL.md'), instruction)
+      /* 版本账本(2026-11-12): 服务端 version 落盘, 清单比对据此判「有新版本」; 更新=重装同路径覆盖 */
+      const version = String(skill?.version ?? '').trim()
+      if (version) writeFileSync(join(target, serverSkillMetaName), JSON.stringify({ version, installed_at: Math.floor(Date.now() / 1000) }))
       /* 安装即广播官方的技能变更事件(2026-10-24 用户问的"自动引用"): 聊天清单自动刷新,
          新装的技能立刻可引用, 无需重进视频剪辑。 */
       try { await studioView?.webContents.executeJavaScript("window.dispatchEvent(new Event('openfilm:skills-changed'))", true) } catch { /* 页面不在: 下次挂载自然刷新 */ }
-      return { ok: true, path: target }
+      return { ok: true, path: target, version }
     } catch (error) { return { error: error instanceof Error ? error.message : String(error) } }
   })
   /* 服务端技能删除(2026-10-31 用户裁决: 服务端 tab 卡片加删除按钮): 只删本机安装副本
@@ -745,7 +805,7 @@ export function installTinTinMainHook(): void {
   ipcMain.handle('openfilm:skills:remove', async (_event, payload: unknown) => {
     const name = String((payload as { name?: unknown } | null)?.name ?? '')
     if (!name) return { error: '缺少技能名' }
-    const target = join(channelHome(), 'film-agent-home', 'skills', name.replace(/[/:*?"<>|]/g, '-'))
+    const target = serverSkillDir(name)
     if (!existsSync(target)) return { error: `「${name}」尚未安装` }
     try {
       rmSync(target, { recursive: true, force: true })

@@ -25,8 +25,10 @@ import { SourceBadge, SourceChips, sourcesIn, type Source } from './SourceChips'
 
 /* TinTin(2026-11-09 用户裁决方案 1): the server's skills (the 服务端 group, ported from the
    0.2.7 SkillsLibrary) listed by the desktop bridge's raw listing (the main process merges
-   the TinTin server's registry; installed ones live in the film agent's home). */
-type ServerSkill = { name: string; description: string; installed?: boolean; detail?: Record<string, unknown> }
+   the TinTin server's registry; installed ones live in the film agent's home).
+   TinTin(2026-11-12 对齐封面技能管理): the bridge also compares the server's version with the
+   installed copy's ledger (`update`), so the line can offer 更新 like the cover modal does. */
+type ServerSkill = { name: string; description: string; installed?: boolean; installedVersion?: string; update?: boolean; detail?: Record<string, unknown> }
 interface NativeSkillsBridge {
   openfilmNative?: {
     skills?: {
@@ -45,7 +47,12 @@ function useServerSkills(shown: boolean) {
       const rows = Array.isArray(listing?.openfilm) ? listing.openfilm : []
       setSkills(rows
         .filter((s) => String(s.source ?? '') === 'server')
-        .map((s) => ({ name: String(s.name ?? ''), description: String(s.description ?? ''), installed: s.installed === true, detail: (s.detail ?? {}) as Record<string, unknown> }))
+        .map((s) => ({
+          name: String(s.name ?? ''), description: String(s.description ?? ''),
+          installed: s.installed === true,
+          installedVersion: String(s.installedVersion ?? ''), update: s.update === true,
+          detail: (s.detail ?? {}) as Record<string, unknown>,
+        }))
         .filter((s) => s.name))
     }, () => setSkills([]))
   }, [])
@@ -266,7 +273,9 @@ export function SkillsPane({ line, query, projectId, opened, onOpen, onDiscover 
 
 /** A TinTin server skill: its name and purpose; a click unfolds the whole row the server keeps
     (its version, executor, tags, who registered it and when, then its instruction); Install
-    brings it into the film agent's home, Remove takes the local copy back out. */
+    brings it into the film agent's home, Remove takes the local copy back out. A server version
+    newer than the installed copy's ledger shows the 「有新版」 mark and swaps 已安装 for 更新
+    (2026-11-12 对齐封面技能管理: 更新=重装覆盖, 新会话生效). */
 function ServerLine({ skill, onInstall, onRemove }: {
   skill: ServerSkill; onInstall: () => void; onRemove: () => void;
 }) {
@@ -276,8 +285,10 @@ function ServerLine({ skill, onInstall, onRemove }: {
   const run = (op: () => void) => { setBusy(true); op(); window.setTimeout(() => setBusy(false), 1500); };
   const detail = skill.detail ?? {};
   const words = (v: unknown): string => (typeof v === 'string' && v.trim() ? v.trim() : Array.isArray(v) && v.length ? v.map(String).join('、') : '');
+  const serverVersion = words(detail.version);
   const fields: Array<[string, string]> = [
-    [t('gallery.serverVersion'), words(detail.version)],
+    [t('gallery.serverVersion'), serverVersion],
+    ...(skill.installed ? [[t('gallery.serverInstalledVersion'), skill.installedVersion || '—'] as [string, string]] : []),
     [t('gallery.serverExecutor'), words(detail.executor)],
     [t('gallery.serverTags'), words(detail.tags)],
     [t('gallery.serverOwner'), words(detail.registered_by)],
@@ -291,7 +302,14 @@ function ServerLine({ skill, onInstall, onRemove }: {
         className="group flex cursor-pointer items-center gap-2.5 rounded-[8px] outline-none hover:bg-[var(--bg-hover)] focus-visible:ring-1 focus-visible:ring-[var(--accent)]">
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[6px] bg-[var(--bg-field)] text-[var(--text-muted)]"><Server size={14} strokeWidth={1.75} /></span>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[12.5px] font-medium leading-[17px] text-[var(--text)]">{skill.name}</div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[12.5px] font-medium leading-[17px] text-[var(--text)]">{skill.name}</span>
+            {skill.update && serverVersion ? (
+              <span className="shrink-0 rounded-full border border-[color-mix(in_srgb,var(--warn)_45%,transparent)] bg-[color-mix(in_srgb,var(--warn)_12%,transparent)] px-1.5 py-[1px] text-[10px] font-semibold text-[var(--warn)]">
+                ⟳ {t('gallery.updateOut').replace('{version}', serverVersion)}
+              </span>
+            ) : null}
+          </div>
           <div className="truncate text-[11px] leading-[15px] text-[var(--text-faint)]">{skill.description}</div>
         </div>
         {skill.installed ? (
@@ -300,9 +318,9 @@ function ServerLine({ skill, onInstall, onRemove }: {
             className={`${PANEL_ROUND} text-[var(--text-muted)] hover:text-[var(--text)]`}><Trash2 size={11} /></button>
         ) : null}
         <button type="button" disabled={busy}
-          onClick={(e) => { e.stopPropagation(); run(skill.installed ? () => {} : onInstall); }}
-          className={`h-7 shrink-0 rounded-md px-2.5 text-[12px] font-medium ${skill.installed ? 'text-[var(--text-muted)]' : 'bg-[var(--bg-field)] text-[var(--text)] hover:bg-[var(--bg-hover)]'}`}>
-          {skill.installed ? t('gallery.installed') : t('gallery.install')}
+          onClick={(e) => { e.stopPropagation(); run(skill.installed && !skill.update ? () => {} : onInstall); }}
+          className={`h-7 shrink-0 rounded-md px-2.5 text-[12px] font-medium ${skill.installed && !skill.update ? 'text-[var(--text-muted)]' : 'bg-[var(--bg-field)] text-[var(--text)] hover:bg-[var(--bg-hover)]'}`}>
+          {skill.installed ? (skill.update ? t('gallery.serverUpdate') : t('gallery.installed')) : t('gallery.install')}
         </button>
       </div>
       {open ? (

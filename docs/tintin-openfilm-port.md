@@ -139,11 +139,12 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 
 ### 9.1 数据
 
-- 名单:`openfilm:native:skills-list` = 随包分发的原生技能(`resources/skills/openfilm`)+ 服务端 `/skills`(实测**顶层 `skills`**,字段 id/name/description/instruction;2026-10-24 实测服务端共 7 个);每项带 `source: 'native' | 'server'` 供分组;
+- 名单:`openfilm:native:skills-list` = 随包分发的原生技能(`resources/skills/openfilm`)+ 服务端 `/skills`(实测**顶层 `skills`**,字段 id/name/description/instruction;2026-10-24 实测服务端共 7 个;2026-11-12 实测 15 个,行还带 version/executor/tags/machine_id/registered_by/created_at);每项带 `source: 'native' | 'server'` 供分组;
 - **Studio 官方技能目录**(/api/skills): 项目的+个人的+官方的(视频复刻等) —— 在 Studio 页内 fetch(自带鉴权), 与本地/服务端清单合并;
 - 正文:`openfilm:native:skills-texts` = 本地 SKILL.md + 服务端 `instruction` 补齐 → 技能引用的上下文注入带全文;
 - 原生技能随包:`scripts/prepare-skills.mjs` 复制 → extraResources `skills/`;影片智能体启动时同步进 `film-agent-home/skills/openfilm/`;
-- 安装:`openfilm:skills:install`(服务端技能 → 写 `film-agent-home/skills/<name>/SKILL.md`,智能体即可用)。
+- 安装:`openfilm:skills:install`(服务端技能 → 写 `film-agent-home/skills/<name>/SKILL.md`,智能体即可用);
+- 更新(2026-11-12 对齐封面技能管理,详见 §16.35):安装时把服务端 `version` 记进技能目录账本 `tintin-server-skill.json`,清单比对账本与服务端版本(`update` 字段),前端「已安装」换「更新」并挂「有新版 vX」徽标;更新=重装覆盖,新会话生效;无账本的旧安装=未知版本,不误报。
 
 ### 9.2 交互表面
 
@@ -263,7 +264,7 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 | `/material/list?page&size&media_type&search` | `{items:[{id,filename,size,media_type,…}]}`(**顶层 items**) |
 | `/material/serve?material_id=` | 二进制流 |
 | `/material/thumbnail?material_id=` | 图片 |
-| `/skills` | `{ok:true,skills:[{id,name,description,instruction}]}`(**顶层 skills**) |
+| `/skills` | `{ok:true,skills:[{id,name,description,instruction,executor,api,tags,machine_id,version,registered_by,created_at}]}`(**顶层 skills**;2026-11-12 实测补全字段) |
 | `/v1/audio/transcriptions` | multipart(file/model/language/response_format=verbose_json)→ words[]+duration |
 | `/v1/audio/speech` | `{model,input,voice,response_format=wav}` → wav |
 | `/llm/models`、`/llm/chat/completions` | OpenAI 兼容 |
@@ -652,6 +653,19 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - `dsh-tintin-bundle/client.js`: 三处指路面注释(「按功能测试连接在 client-ui」等)随实现移除;
 - 面板消费的桥面成员(`window.tintin.server.llmModels` 等)是 tintin 桥公共面,另有/可能有其它消费方,不随面板退役;
 - 验证: 两 client.js `node --check` 通过、全仓 grep 零残留;check:tintin 绿(与实现同车提交)。
+
+## 16.35 视频剪辑服务端技能:版本显示+更新(2026-11-12, 用户裁决「对齐封面技能管理」)
+
+用户问「视频剪辑内的技能没有版本显示吗,没有更新显示吗」。盘点:版本只在详情弹窗/展开行显示服务端行的 `version`(§16.6 的 detail 透传),**已装副本无版本账本、无更新判定、无更新入口**——服务端改了技能,本机「已安装」永远显示已安装。封面技能管理(skills-modal.tsx)早有全套:装位 `skill.json`/SKILL.md frontmatter 记版本 → `versionNewer` 分段数值比较 → 「⟳ 有新版本」徽标+「更新」按钮(重装覆盖)。本批把同一口径接到视频剪辑两条表面(媒体抽屉技能页 SkillsPane 的服务端组 + 聊天技能弹窗 SkillsLibrary 的服务端 tab):
+
+- **版本账本(main-hook.ts)**:服务端技能的 `instruction` 正文不带版本(纯 markdown,不能注 frontmatter 污染注入正文),`openfilm:skills:install` 改为同时写 `film-agent-home/skills/<净化名>/tintin-server-skill.json` `{version, installed_at}`;账本是唯一版本事实源,与封面 `skill.json` 同款 sidecar 形态(SKILL.md 扫描方只认 SKILL.md,多文件无扰);
+- **清单判定(main-hook.ts skills-list)**:服务端行带 `installedVersion`(读账本)与 `update`(=`serverSkillVersionNewer(服务行 version, 账本 version)`);比较口径=封面同款(分段数值/缺段=0/容忍 v 前缀/任一端缺失坏值不误报);**账本前旧安装退内容比对兜底**(2026-11-12 用户报障「为什么没有显示更新」实证: 9 装里 6 个服务端已改全是旧装, 版本账本判不出)——无账本时本机 SKILL.md 与服务端 `instruction` 逐字比对: 一致=视为与服务端同版(已装版本显示服务端版), 不一致=`update:true`; 服务端行无 instruction 不判(不误报), 本机无 SKILL.md 不判; 有账本只走版本比较(装时账本与正文同写, 不做双真源);
+- **更新=重装覆盖**:`openfilm:skills:install` 本就 `mkdirSync+writeFileSync` 覆盖 SKILL.md,重装即更新(账本随写);装后广播 `openfilm:skills-changed`(既有链)清单自动刷新,新会话生效(与封面/官方技能同一生效语义);
+- **SkillsPane(媒体抽屉,截图表面)**:服务端行名旁挂「⟳ 有新版 vX」徽标(复用 `gallery.updateOut`);已安装按钮在有新版本时变「更新」(点击=onInstall,装后 `read()` 重拉清单徽标自消);展开详情加「已装版本」行(无账本显示 —);
+- **SkillsLibrary(聊天技能弹窗)**:ServerSkill 行/卡/详情页同三件套(徽标+「更新」按钮+详情页「已装版本」行);`installServer` 成功后本地把服务端行 version 记为已装版本并清 update 标;
+- **i18n ×5**:gallery 组新键 `serverUpdate`(更新/Update/更新/Actualizar/업데이트)与 `serverInstalledVersion`(已装版本/Installed version/インストール済みバージョン/Versión instalada/설치된 버전);
+- **锚点 +7**(`scripts/tintin-anchors.json` 143→150):SkillsPane `installedVersion`、SkillsLibrary `installedVersion`、i18n ×5 `serverUpdate` —— vendor 升级重放清单覆盖本批面,防重放丢失;
+- 验证:shell `build.mjs` 构建绿(两 .tsx 入包);插件 `tsc -p tsconfig.json` 绿;比较函数 9 用例(等版本/缺段/v 前缀/坏值/低位进位)全过;实测 `/skills` 行 `version` 在("1.0.0"/"1.0");**实测内容兜底命中**:现装 9 个里 3 个内容与服务端一致(显示已安装+服务端版)、6 个不一致(复刻视频/视频换角色/生成图片/文生视频 v1.2.2/生成音乐/文案混剪)→重载后亮「有新版」徽标+更新按钮;tsdown 重建 lib 并同步 win-unpacked `resources/app/lib`(与既有 18:26 载荷同链);check:tintin 绿(doc-sync 本节清偿)。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 

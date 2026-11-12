@@ -28,8 +28,10 @@ import { SettingsSwitch } from './settings/ui';
 export type SkillsView = 'installed' | 'discover';
 type Kind = 'all' | 'workflow' | 'style' | 'server';
 /** One of the TinTin server's skills (TinTin 2026-10-30: the 服务端 tab), as the desktop bridge lists it.
-    `detail` is the server's raw row (instruction, tags, version, executor, registered_by, created_at…). */
-type ServerSkill = { name: string; description: string; installed: boolean; detail?: Record<string, unknown> | null };
+    `detail` is the server's raw row (instruction, tags, version, executor, registered_by, created_at…).
+    TinTin 2026-11-12 (对齐封面技能管理): the bridge also compares the server's version with the
+    installed copy's ledger — `update` marks a newer one, the UI offers 更新 (re-install over it). */
+type ServerSkill = { name: string; description: string; installed: boolean; installedVersion?: string; update?: boolean; detail?: Record<string, unknown> | null };
 /** One of an agent's own skills (Settings → Agents lets the same in). */
 type AgentSkill = { name: string; description: string; allowed: boolean };
 type AgentGroup = { id: HostAgentId; name: string; skills: AgentSkill[] };
@@ -91,6 +93,7 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
         .filter((s) => String(s.source ?? '') === 'server' && s.name)
         .map((s) => ({
           name: String(s.name), description: String(s.description ?? ''), installed: s.installed === true,
+          installedVersion: String(s.installedVersion ?? ''), update: s.update === true,
           detail: (s.detail ?? null) as Record<string, unknown> | null,
         })));
     }).catch(() => { /* 服务端不可达: 服务端 tab 显示空态 */ });
@@ -104,7 +107,12 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
     setServerBusy(skill.name);
     setServerFailed(false);
     void install(skill.name).then((r) => {
-      if (r?.ok) setServerSkills((list) => list.map((s) => (s.name === skill.name ? { ...s, installed: true } : s)));
+      if (r?.ok) setServerSkills((list) => list.map((s) => (s.name === skill.name ? {
+        ...s, installed: true,
+        /* 安装/更新即记账: 服务端行的 version 成为本机已装版本, 更新标记随之消掉 */
+        installedVersion: String(s.detail?.version ?? ''),
+        update: false,
+      } : s)));
       else setServerFailed(true);
     }).catch(() => setServerFailed(true))
       .finally(() => setServerBusy(null));
@@ -261,7 +269,7 @@ export function SkillsLibrary({ skills, setSkills, projectId, opened, onOpen, on
               <section>
                 <GroupHead label={t('gallery.server')} hint={t('gallery.serverHint')} />
                 {serverInstalled.filter((s) => !q || [s.name, s.description].some((w) => w.toLowerCase().includes(q)))
-                  .map((s) => <ServerSkillRow key={s.name} skill={s} onOpen={() => setServerOpened(s)} onRemove={() => setRemovingServer(s)} />)}
+                  .map((s) => <ServerSkillRow key={s.name} skill={s} onOpen={() => setServerOpened(s)} onInstall={() => installServer(s)} onRemove={() => setRemovingServer(s)} />)}
               </section>
             ) : null}
           </div>
@@ -376,19 +384,30 @@ function AgentSkillRow({ skill, onTurn }: { skill: AgentSkill; onTurn: (on: bool
 }
 
 /** One of the TinTin server's installed skills in the installed view: its name and description (it lives in the
-    film agent's home, so there is no per-skill switch), plus its detail page and removal (2026-10-31 用户裁决). */
-function ServerSkillRow({ skill, onOpen, onRemove }: { skill: ServerSkill; onOpen: () => void; onRemove: () => void }) {
+    film agent's home, so there is no per-skill switch), plus its detail page, its removal, and 更新 when the
+    server has a newer version (2026-10-31 用户裁决; 2026-11-12 对齐封面技能管理). */
+function ServerSkillRow({ skill, onOpen, onInstall, onRemove }: { skill: ServerSkill; onOpen: () => void; onInstall: () => void; onRemove: () => void }) {
   const t = useT();
+  const serverVersion = String(skill.detail?.version ?? '');
   return (
     <div className="flex items-center gap-3.5 rounded-[10px] px-2 py-2">
       <div className="flex h-[46px] w-[82px] shrink-0 items-center justify-center rounded-[7px] bg-[var(--surface-2)] text-[var(--text-faint)] ring-1 ring-[var(--border)]">
         <Server size={16} strokeWidth={1.6} />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13.5px] font-medium text-[var(--text)]">{skill.name}</div>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-[13.5px] font-medium text-[var(--text)]">{skill.name}</span>
+          {skill.update && serverVersion ? (
+            <span className="shrink-0 rounded-full border border-[color-mix(in_srgb,var(--warn)_45%,transparent)] bg-[color-mix(in_srgb,var(--warn)_12%,transparent)] px-1.5 py-[1px] text-[10px] font-semibold text-[var(--warn)]">⟳ {t('gallery.updateOut').replace('{version}', serverVersion)}</span>
+          ) : null}
+        </div>
         {skill.description ? <div className="truncate text-[12px] text-[var(--text-muted)]" title={skill.description}>{skill.description}</div> : null}
       </div>
       <span className="flex shrink-0 items-center gap-1">
+        {skill.update ? (
+          <button type="button" onClick={onInstall}
+            className="flex h-7 items-center rounded-[8px] bg-[var(--surface-2)] px-2.5 text-[12px] font-medium text-[var(--text)] transition hover:bg-[var(--bg-hover)]">{t('gallery.serverUpdate')}</button>
+        ) : null}
         <button type="button" onClick={onOpen}
           className="flex h-7 items-center rounded-[8px] border border-[var(--border)] px-2.5 text-[12px] text-[var(--text)] transition hover:bg-[var(--bg-hover)]">{t('gallery.details')}</button>
         <button type="button" onClick={onRemove}
@@ -401,9 +420,11 @@ function ServerSkillRow({ skill, onOpen, onRemove }: { skill: ServerSkill; onOpe
 /** One of the TinTin server's skills in the 服务端 tab: the catalog card's look and size (click for its detail
     page), with the bridge as its installer. Installed shows the state, an explicit 详情 button (2026-10-31 用户
     裁决: 对齐封面技能管理的显式详情入口, 不只靠整卡点击) and 删除 (only the installed copy goes; the server
-    keeps its registration, so the skill falls back to the catalog as not installed). */
+    keeps its registration, so the skill falls back to the catalog as not installed). A server version newer than
+    the installed copy's ledger marks the card 「有新版」 and offers 更新 (2026-11-12 对齐封面技能管理). */
 function ServerCard({ skill, busy, onOpen, onInstall, onRemove }: { skill: ServerSkill; busy: boolean; onOpen: () => void; onInstall: () => void; onRemove: () => void }) {
   const t = useT();
+  const serverVersion = String(skill.detail?.version ?? '');
   return (
     <div className="flex min-w-0 flex-col">
       <button type="button" onClick={onOpen} className="group flex min-w-0 flex-col text-left outline-none">
@@ -413,13 +434,22 @@ function ServerCard({ skill, busy, onOpen, onInstall, onRemove }: { skill: Serve
       </button>
       <div className="mt-3 flex min-w-0 items-start gap-3">
         <button type="button" tabIndex={-1} onClick={onOpen} className="min-w-0 flex-1 text-left">
-          <div className="truncate text-[14.5px] font-semibold tracking-[-0.005em] text-[var(--text)]">{skill.name}</div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[14.5px] font-semibold tracking-[-0.005em] text-[var(--text)]">{skill.name}</span>
+            {skill.update && serverVersion ? (
+              <span className="shrink-0 rounded-full border border-[color-mix(in_srgb,var(--warn)_45%,transparent)] bg-[color-mix(in_srgb,var(--warn)_12%,transparent)] px-1.5 py-[1px] text-[10px] font-semibold text-[var(--warn)]">⟳ {t('gallery.updateOut').replace('{version}', serverVersion)}</span>
+            ) : null}
+          </div>
           {skill.description ? <div className="mt-1 line-clamp-2 text-[12.5px] leading-[18px] text-[var(--text-muted)]">{skill.description}</div> : null}
         </button>
         {skill.installed ? (
           <div className="flex shrink-0 flex-col items-end gap-1.5">
             <span className="flex h-8 items-center gap-1 px-1 text-[12.5px] text-[var(--text-faint)]"><Check size={13} />{t('gallery.installedOne')}</span>
             <div className="flex items-center gap-1">
+              {skill.update ? (
+                <button type="button" onClick={onInstall} disabled={busy}
+                  className="flex h-7 items-center rounded-[8px] bg-[var(--surface-2)] px-2.5 text-[12px] font-medium text-[var(--text)] transition hover:bg-[var(--bg-hover)] disabled:opacity-50">{t('gallery.serverUpdate')}</button>
+              ) : null}
               <button type="button" onClick={onOpen}
                 className="flex h-7 items-center rounded-[8px] border border-[var(--border)] px-2.5 text-[12px] text-[var(--text)] transition hover:bg-[var(--bg-hover)]">{t('gallery.details')}</button>
               <button type="button" onClick={onRemove} disabled={busy}
@@ -437,12 +467,16 @@ function ServerCard({ skill, busy, onOpen, onInstall, onRemove }: { skill: Serve
 
 /** A server skill's detail page, in place of the list (its Back returns to it as it was): the catalog page's
     layout, with every field the server knows (version, executor, tags, who registered it and when) and the
-    skill's full instruction text, then installing it (2026-10-31 用户裁决: 对齐封面技能管理的详情弹窗字段). */
+    skill's full instruction text, then installing it (2026-10-31 用户裁决: 对齐封面技能管理的详情弹窗字段).
+    When the server's version is newer than the installed copy's ledger, the page marks it and offers 更新
+    (2026-11-12 对齐封面技能管理). */
 function ServerDetail({ skill, busy, onBack, onInstall, onRemove }: { skill: ServerSkill; busy: boolean; onBack: () => void; onInstall: () => void; onRemove: () => void }) {
   const t = useT();
   const d = skill.detail ?? {};
   const instruction = String(d.instruction ?? '');
   const version = String(d.version ?? '');
+  const installedVersion = skill.installedVersion ?? '';
+  const update = skill.update === true && Boolean(version);
   const executor = String(d.executor ?? '');
   const tags = Array.isArray(d.tags) ? d.tags.map((v) => String(v)).filter(Boolean) : [];
   const registeredBy = String(d.registered_by ?? '');
@@ -470,10 +504,14 @@ function ServerDetail({ skill, busy, onBack, onInstall, onRemove }: { skill: Ser
             <span>{t('gallery.server')}</span>
             {version ? <span className="rounded-[5px] border border-[var(--border)] px-1.5 py-[1px] font-mono text-[10.5px] text-[var(--text-dim)]">v{version}</span> : null}
             {skill.installed ? <span className="flex items-center gap-1 text-[var(--text-faint)]"><Check size={13} />{t('gallery.installedOne')}</span> : null}
+            {update ? (
+              <span className="rounded-full border border-[color-mix(in_srgb,var(--warn)_45%,transparent)] bg-[color-mix(in_srgb,var(--warn)_12%,transparent)] px-1.5 py-[1px] text-[10px] font-semibold text-[var(--warn)]">⟳ {t('gallery.updateOut').replace('{version}', version)}</span>
+            ) : null}
           </div>
           {skill.description ? <p className="text-[14px] leading-[22px] text-[var(--text)]">{skill.description}</p> : null}
           <div className="flex flex-col gap-1.5">
             {row(t('gallery.serverVersion'), version ? `v${version}` : '—')}
+            {skill.installed ? row(t('gallery.serverInstalledVersion'), installedVersion ? `v${installedVersion.replace(/^v/i, '')}` : '—') : null}
             {row(t('gallery.serverExecutor'), executor || 'client_tool')}
             {row(t('gallery.serverTags'), tags.length ? (
               <span className="flex flex-wrap gap-1.5">{tags.map((tag) => (
@@ -492,8 +530,14 @@ function ServerDetail({ skill, busy, onBack, onInstall, onRemove }: { skill: Ser
             <button type="button" onClick={onInstall} disabled={busy}
               className="mt-1 flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-[var(--text)] text-[14px] font-medium text-[var(--bg)] transition hover:opacity-90 disabled:opacity-40"><Plus size={15} />{t('gallery.install')}</button>
           ) : (
-            <button type="button" onClick={onRemove} disabled={busy}
-              className="mt-1 flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] text-[13px] text-[var(--text-muted)] transition hover:bg-[color-mix(in_srgb,var(--err)_12%,transparent)] hover:text-[var(--err)] disabled:opacity-50"><Trash2 size={14} />{t('gallery.serverRemove')}</button>
+            <div className="mt-1 flex flex-col gap-1">
+              {update ? (
+                <button type="button" onClick={onInstall} disabled={busy}
+                  className="flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-[var(--text)] text-[14px] font-medium text-[var(--bg)] transition hover:opacity-90 disabled:opacity-40"><Plus size={15} />{t('gallery.serverUpdate')}</button>
+              ) : null}
+              <button type="button" onClick={onRemove} disabled={busy}
+                className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] text-[13px] text-[var(--text-muted)] transition hover:bg-[color-mix(in_srgb,var(--err)_12%,transparent)] hover:text-[var(--err)] disabled:opacity-50"><Trash2 size={14} />{t('gallery.serverRemove')}</button>
+            </div>
           )}
           {busy ? <p className="text-center text-[12px] text-[var(--text-muted)]">{t('gallery.installedOne')}…</p> : null}
         </div>
