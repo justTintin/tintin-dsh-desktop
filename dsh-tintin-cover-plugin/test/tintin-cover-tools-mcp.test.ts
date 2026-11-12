@@ -14,10 +14,20 @@ const tempRoot = (): string => { const dir = mkdtempSync(join(tmpdir(), 'tintin-
 // 1x1 红 PNG(合法魔数)
 const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
 
+/** 带可读 IHDR 的大 PNG(尺寸/总长可控;用于模型上限用例) */
+function bigPng(width: number, height: number, size: number): Buffer {
+  const b = Buffer.alloc(size)
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(b, 0)
+  b.writeUInt32BE(13, 8); b.write('IHDR', 12, 'ascii')
+  b.writeUInt32BE(width, 16); b.writeUInt32BE(height, 20)
+  b[24] = 8; b[25] = 6
+  return b
+}
+
 type Handler = (req: unknown, res: unknown) => Promise<void> | void
 interface RpcOut { status: number; body: Record<string, unknown>; res: { statusCode: number } }
 
-async function setup(opts: { renderCover?: (...args: unknown[]) => Promise<unknown> } = {}) {
+async function setup(opts: { renderCover?: (...args: unknown[]) => Promise<unknown>; resize?: (...args: unknown[]) => unknown } = {}) {
   const coverDir = tempRoot()
   const pluginDir = tempRoot()
   const handlers = new Map<string, Handler>()
@@ -39,6 +49,7 @@ async function setup(opts: { renderCover?: (...args: unknown[]) => Promise<unkno
       }),
     })) as never,
     resolvePluginDir: () => pluginDir,
+    ...(opts.resize ? { resize: opts.resize } : {}),
   })
   const handler = handlers.get('/tintin/cover/api/tools-mcp')
   expect(handler).toBeTruthy()
@@ -94,6 +105,64 @@ describe('cover tools mcp endpoint', () => {
     const bad = await call(rpc(2, 'tools/call', { name: 'read_image', arguments: { path: outside } }))
     expect(resultOf(bad).isError).toBe(true)
     expect(resultOf(bad).content[0].text).toContain('路径越界')
+  })
+
+  it('read_image: 压缩成功 → 返回压缩后的 image 块并附坐标换算元信息', async () => {
+    const { coverDir, call } = await setup({
+      resize: () => ({ bytes: TINY_PNG, mime: 'image/png', original: { width: 3840, height: 2160 }, scaled: { width: 2000, height: 1125 }, via: 'ffmpeg' }),
+    })
+    writeFileSync(join(coverDir, 'big.png'), bigPng(3840, 2160, 3 * 1024 * 1024))
+    const out = await call(rpc(1, 'tools/call', { name: 'read_image', arguments: { path: 'big.png' } }))
+    const content = resultOf(out).content
+    expect(content[0].type).toBe('image')
+    expect(content[0].mimeType).toBe('image/png')
+    expect(content[1].text).toContain('已缩放至 2000x1125')
+    expect(content[1].text).toContain('×1.920')
+  })
+
+  it('read_image: 超模型上限且压缩不成功 → 文字提示不附图(可转述并指路 matting/imitate)', async () => {
+    const { coverDir, call } = await setup({ resize: () => null })
+    writeFileSync(join(coverDir, 'big.png'), bigPng(3840, 2160, 3 * 1024 * 1024))
+    const out = await call(rpc(1, 'tools/call', { name: 'read_image', arguments: { path: 'big.png' } }))
+    const content = resultOf(out).content
+    expect(content.length).toBe(1)
+    expect(content[0].type).toBe('text')
+    expect(content[0].text).toContain('无法查看该图')
+    expect(content[0].text).toContain('压缩')
+    expect(content[0].text).toContain('matting')
+    expect(content[0].text).toContain('imitate_cover')
+    expect(content[0].data).toBeUndefined()
+    expect(resultOf(out).isError).toBeUndefined()
+  })
+
+  it('read_image: 超过 8MB 读取上限 → 文字提示(不抛裸错)', async () => {
+    const { coverDir, call } = await setup({ resize: () => null })
+    writeFileSync(join(coverDir, 'huge.png'), bigPng(6000, 4000, 9 * 1024 * 1024))
+    const out = await call(rpc(1, 'tools/call', { name: 'read_image', arguments: { path: 'huge.png' } }))
+    const content = resultOf(out).content
+    expect(content[0].type).toBe('text')
+    expect(content[0].text).toContain('8MB')
+    expect(content[0].text).toContain('matting')
+  })
+
+  it('render_preview: 预览超模型上限 → 文字提示且明确不得声称完成', async () => {
+    const { coverDir, call } = await setup({
+      resize: () => null,
+      renderCover: (async (raw: unknown) => {
+        const input = raw as { fileName?: string; outDir?: string }
+        const file = join(input.outDir ?? coverDir, input.fileName ?? 'preview.png')
+        writeFileSync(file, bigPng(1080, 1440, 3 * 1024 * 1024))
+        return { ok: true, file }
+      }) as never,
+    })
+    writeFileSync(join(coverDir, 'cover.props.json'), JSON.stringify({ templateId: 'video', props: {} }), 'utf8')
+    const out = await call(rpc(1, 'tools/call', { name: 'render_preview', arguments: {} }))
+    const content = resultOf(out).content
+    expect(content.length).toBe(1)
+    expect(content[0].type).toBe('text')
+    expect(content[0].text).toContain('无法送入模型查看')
+    expect(content[0].text).toContain('不要声称已完成')
+    expect(resultOf(out).isError).toBeUndefined()
   })
 
   it('matting: 首模型失败自动换备选,产物落项目目录+素材位;全败返回错误原文', async () => {

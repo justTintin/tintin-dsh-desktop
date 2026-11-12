@@ -38,7 +38,7 @@ import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, isAbsolute, join, resolve as resolvePath, sep } from 'node:path'
-import { imageMetaText, shrinkForModelRead } from './cover-image-resize.js'
+import { MODEL_SAFE_RAW_BYTES, imageMetaText, modelTooLargeText, shrinkForModelRead } from './cover-image-resize.js'
 
 const MCP_PATH = '/tintin/cover/api/tools-mcp'
 const MATTING_CHAIN = ['isnet-general-use', 'u2net', 'isnet-anime']
@@ -160,7 +160,7 @@ async function saveGeneratedImage(serverUrl, outputUrl, outName, coverDir, plugi
 
 /** 工具实现: read_image → [{image}] / matting → 落盘+文本 / render_preview → [{image}]。
  *  pollIntervalMs(测试注入口): imitate_cover_wait 的轮询间隔,缺省 3s。 */
-export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, pollIntervalMs = COVER_POLL_INTERVAL_MS }) {
+export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, pollIntervalMs = COVER_POLL_INTERVAL_MS, resize = shrinkForModelRead }) {
   const assetTargets = () => {
     const dir = resolvePluginDir()
     return dir ? [join(dir, 'public'), join(dir, 'dist', 'editor'), join(dir, 'dist', 'remotion-bundle', 'public')] : []
@@ -171,16 +171,30 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     const coverDir = await engine.resolveCoverDir()
     const path = resolveImagePath(args?.path, coverDir, resolvePluginDir())
     const size = statSync(path).size
-    if (size > MAX_IMAGE_BYTES) throw new Error(`图片超过 8MB 上限(${size} bytes), 请先缩小再查看`)
+    /* 8MB 是读盘上限(不是模型上限);超限不再抛裸错——给可转述的处置提示 */
+    if (size > MAX_IMAGE_BYTES) {
+      return {
+        content: [{
+          type: 'text',
+          text: `无法查看该图：${path}（${(size / 1024 / 1024).toFixed(1)} MB，超过 read_image 的 8MB 读取上限）。`
+            + '处理方式：①请用户把图片缩到长边 ≤2000px 且 ≤2.5MB 后再试；②或直接把该路径传给 matting / imitate_cover（这两个工具用原图，不需要模型看图）。'
+            + '请把这段提示转述给用户，不要静默继续。',
+        }],
+      }
+    }
     const bytes = readFileSync(path)
     const mime = magicMime(bytes)
     if (!mime) throw new Error('不是可识别的图片(PNG/JPEG/WebP 魔数校验失败)')
-    /* 进模型前压缩阶梯(2026-11-12 封面参考批方案 3): >3.75MB 或长边 >2000 缩放压缩,
-       失败 fail-open 原字节直通;缩放时附坐标换算元信息(OCR box 报数不失真)。 */
+    /* 进模型前压缩阶梯(2026-11-12 1112 修复批): nativeImage 不可用 → ffmpeg 后备;
+       仍超模型安全上限(2.5MB)时**不返回 image 块**, 改文字提示——超限图进 MCP 会在
+       dsh-mcp-client 的 base64 正则处栈溢出, 模型只会收到一段不可读的 unavailable。 */
     let shrunk = null
-    try { shrunk = shrinkForModelRead(bytes, mime) } catch (e) { throw new Error(e instanceof Error ? e.message : String(e)) }
+    try { shrunk = resize(bytes, mime, { sourcePath: path }) } catch (e) { throw new Error(e instanceof Error ? e.message : String(e)) }
     const dataBytes = shrunk?.bytes ?? bytes
     const dataMime = shrunk?.mime ?? mime
+    if (dataBytes.length > MODEL_SAFE_RAW_BYTES) {
+      return { content: [{ type: 'text', text: modelTooLargeText(path, size, MODEL_SAFE_RAW_BYTES, dataBytes.length) }] }
+    }
     return {
       content: [
         { type: 'image', data: dataBytes.toString('base64'), mimeType: dataMime },
@@ -461,10 +475,24 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
       throw new Error(`渲染失败:${result?.error ?? '未知错误'}`)
     }
     const bytes = readFileSync(result.file)
+    /* 预览同样过模型侧上限(1112 修复批): 大画布/复杂底图可能超 2.5MB, 超限不返回 image
+       块(否则 harness base64 正则栈溢出), 改文字提示且明确"不得声称已完成"。 */
+    let shrunk = null
+    try { shrunk = resize(bytes, magicMime(bytes) ?? 'image/png', { sourcePath: result.file }) } catch { /* 压缩失败按原图判断 */ }
+    const dataBytes = shrunk?.bytes ?? bytes
+    if (dataBytes.length > MODEL_SAFE_RAW_BYTES) {
+      return {
+        content: [{
+          type: 'text',
+          text: `预览已渲染但无法送入模型查看：${result.file}（原图 ${(bytes.length / 1024 / 1024).toFixed(1)} MB，压缩后 ${(dataBytes.length / 1024 / 1024).toFixed(1)} MB，模型可读上限 ${(MODEL_SAFE_RAW_BYTES / 1024 / 1024).toFixed(1)} MB）。`
+            + '不要声称已完成：请让用户在画布上确认文字不溢出、图层位置正确；或缩小画布/底图后再 render_preview 回看。',
+        }],
+      }
+    }
     return {
       content: [
-        { type: 'image', data: bytes.toString('base64'), mimeType: 'image/png' },
-        { type: 'text', text: `预览:${result.file}(${bytes.length} bytes,templateId=${doc.templateId})。完成判据:确认文字不溢出、图层位置符合用户要求、画面成立后才能向用户报告完成;不合格继续修,修完再渲染回看。` },
+        { type: 'image', data: dataBytes.toString('base64'), mimeType: shrunk?.mime ?? 'image/png' },
+        { type: 'text', text: `预览:${result.file}(${bytes.length} bytes,templateId=${doc.templateId})${imageMetaText(shrunk)}。完成判据:确认文字不溢出、图层位置符合用户要求、画面成立后才能向用户报告完成;不合格继续修,修完再渲染回看。` },
       ],
     }
   }
@@ -472,7 +500,7 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
   const tools = [
     {
       name: 'read_image',
-      description: '查看项目目录或素材位里的图片(生成结果/素材/导出图), 返回图片本体。凡要对图片下结论, 先用本工具看图, 不要用 pwsh 读像素。',
+      description: '查看项目目录或素材位里的图片(生成结果/素材/导出图), 返回图片本体。凡要对图片下结论, 先用本工具看图, 不要用 pwsh 读像素。大图会自动压缩到模型可读尺寸(长边≤2000、≤2.5MB);仍超限时返回文字提示(不附图), 按提示请用户缩小或改用 matting / imitate_cover。',
       inputSchema: { type: 'object', properties: { path: { type: 'string', description: '图片绝对路径, 或项目目录/素材位内的文件名' } }, required: ['path'] },
     },
     {
@@ -482,7 +510,7 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     },
     {
       name: 'render_preview',
-      description: '渲染当前 cover.props.json 为预览图并返回图片本体;fileName 可指定即=导出。完成判据: 凡改动 props/落位图片后必须调用本工具查看, 确认无误才能向用户报告完成。',
+      description: '渲染当前 cover.props.json 为预览图并返回图片本体;fileName 可指定即=导出。完成判据: 凡改动 props/落位图片后必须调用本工具查看, 确认无误才能向用户报告完成。超大预览会自动压缩;压缩后仍超模型上限时返回文字提示(不附图), 此时不得声称已完成。',
       inputSchema: { type: 'object', properties: { fileName: { type: 'string', description: '可选, 输出文件名(缺省 preview-<时间戳>.png, 落项目目录)' } } },
     },
     {
@@ -562,8 +590,8 @@ export function createCoverToolsRpc(deps) {
 }
 
 /** 在封面 webServer 上注册 tools-mcp 端点(页面侧可达面); 返回 dispose。 */
-export function registerCoverToolsMcp({ webServer, isTrustedRequest, sendJson, getServerUrl, loadEngine, resolvePluginDir }) {
-  const handleRpc = createCoverToolsRpc({ getServerUrl, loadEngine, resolvePluginDir })
+export function registerCoverToolsMcp({ webServer, isTrustedRequest, sendJson, getServerUrl, loadEngine, resolvePluginDir, resize }) {
+  const handleRpc = createCoverToolsRpc({ getServerUrl, loadEngine, resolvePluginDir, ...(resize ? { resize } : {}) })
   const dispose = webServer.register({
     kind: 'exact',
     path: MCP_PATH,
@@ -592,9 +620,9 @@ export function registerCoverToolsMcp({ webServer, isTrustedRequest, sendJson, g
  *  所以工具端点自带随机 token 闸独立监听 127.0.0.1:随机端口;补丁行 mcp-cover-tools
  *  经 dsh-mcp-client 的 headers 配置带令牌(cover-acp-bridge.js writePatch)。
  *  返回 { url, token, dispose }。 */
-export function startCoverToolsServer({ getServerUrl, loadEngine, resolvePluginDir, port = 0 }) {
+export function startCoverToolsServer({ getServerUrl, loadEngine, resolvePluginDir, resize, port = 0 }) {
   const token = randomUUID().replaceAll('-', '')
-  const handleRpc = createCoverToolsRpc({ getServerUrl, loadEngine, resolvePluginDir })
+  const handleRpc = createCoverToolsRpc({ getServerUrl, loadEngine, resolvePluginDir, ...(resize ? { resize } : {}) })
   const server = createServer((req, res) => {
     if (req.headers['x-tintin-cover-tools-token'] !== token) {
       res.writeHead(401, { 'content-type': 'application/json' })
