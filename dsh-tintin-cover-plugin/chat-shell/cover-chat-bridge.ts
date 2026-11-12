@@ -268,7 +268,10 @@ function destroyLibraryDrawer(): void {
 
 function positionLibraryDrawer(): void {
   if (!drawerEl) return;
-  drawerEl.style.bottom = `${Math.min(Math.max(composerHeight + 6, 60), window.innerHeight - 60)}px`;
+  /* 停靠无缝(2026-11-12 用户裁决「像视频剪辑那样,列表贴着输入框,不浮动」): 影片侧
+     drawer 底=composer 上缘("no strip between"), 这里同口径——bottom=composer 高度整值,
+     原 +6px 缝隙条去掉。composerHeight 由聊天 App 的 setComposerHeight 实时上报。 */
+  drawerEl.style.bottom = `${Math.min(Math.max(composerHeight, 60), window.innerHeight - 60)}px`;
 }
 
 function renderLibraryDrawer(): void {
@@ -375,10 +378,20 @@ function setLibraryDrawer(open: boolean): void {
   /* 标志位必须先落账:它从未置 true 时,关闭路径 open(false)===flag(false) 被守卫
      拦截 → ✕/关闭全部静默失效(2026-10-29 用户实报,列表版抽屉 day-one 缺陷) */
   assetsDrawerOpen = open;
-  if (open) renderLibraryDrawer();
+  if (open) {
+    /* 互斥(2026-11-12 用户裁决:素材与产品列表同区停靠, 不叠开): 开素材先关产品
+       (cover-chat-products.ts 挂的页级钩子) */
+    (window as unknown as { __tintinCoverCloseProducts?: () => void }).__tintinCoverCloseProducts?.();
+    renderLibraryDrawer();
+  }
   else destroyLibraryDrawer();
   assetsSignal.set(assetsDrawerOpen);
 }
+
+/* 产品面板(cover-chat-products.ts)的互斥入口: 它打开前调这个钩子关掉素材抽屉。
+   走本函数(而非直接摘 DOM)保证 assetsDrawerOpen 标志位落账, 官方素材按钮的
+   aria-pressed 状态不会脱账。 */
+(window as unknown as { __tintinCoverCloseAssets?: () => void }).__tintinCoverCloseAssets = () => setLibraryDrawer(false);
 
 /* 桥契约编译期校验(2026-11-09 方案 3):AppBridge 未导出,经 `app` 常量的类型提取;
    & Record<string, unknown> 放行封面合法扩展成员(agents/localAgents/coverLayers/

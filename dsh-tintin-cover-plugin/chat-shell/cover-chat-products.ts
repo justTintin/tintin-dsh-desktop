@@ -1,27 +1,32 @@
 /**
  * 选择产品(2026-10-29 用户要求: 视频剪辑会话的选择产品移植到封面会话):
- * composer 底部工具行的「📦 产品」按钮 → 产品库面板(搜索/列表) → 点选产品 →
+ * composer 底部工具行的「产品」按钮 → 产品库面板(搜索/列表) → 点选产品 →
  * 产品资料(品牌/型号/品类/货号/性能/卖点)以结构化文本注入会话输入框(Lexical 粘贴)。
- * 与影片 shell 的 tintin-products.ts 同源同形;数据经 /tintin/cover/api/acp/products*
- * (bundle 代理服务端 /api/product-library/*,封面页无 openfilmNative 故走同源路由)。
+ * 数据经 /tintin/cover/api/acp/products*(bundle 代理服务端 /api/product-library/*)。
+ *
+ * 2026-11-12 用户裁决三处对齐视频剪辑(影片 shell tintin-products.ts 同款):
+ * ①图标= lucide Package SVG(16px/stroke 1.75, 与官方工具行同画法;原 📦 emoji 不成套);
+ * ②fab 再点一次=关闭(aria-pressed 走官方按下态), 点选产品后列表必关;
+ * ③面板**停靠**在会话区(列顶→输入框上缘, [data-prompt-shell] 锚, 无缝无浮卡)——
+ *   与影片的素材/库面板同形态(composer 常驻底部, 面板铺满其上方区域), 不再浮动。
  */
 
 type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: unknown; goods_no?: unknown; features?: unknown; selling_points?: unknown }
 
 const STYLE = [
-  '.tintin-pd-fab{z-index:2147483000}',
-  '.tintin-pd-panel{position:fixed;right:8px;bottom:120px;width:400px;max-height:480px;z-index:2147483001;background:#101114;border:1px solid #26272b;border-radius:12px;display:flex;flex-direction:column;font:13px/1.5 system-ui;color:#e2e2e6;box-shadow:0 12px 32px rgba(0,0,0,.5)}',
-  '.tintin-pd-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #1c1d21}',
-  '.tintin-pd-title{flex:1;font-weight:700;font-size:14px}',
-  '.tintin-pd-close{background:#1a1b1f;border:1px solid #2a2b31;border-radius:8px;color:#c9c9cf;font-size:14px;cursor:pointer;min-width:28px;height:28px}',
-  '.tintin-pd-search{margin:10px 12px;background:#16171a;border:1px solid #26272b;border-radius:8px;color:#e8e8e6;font:12px system-ui;padding:6px 10px;outline:none}',
+  /* 停靠形态(2026-11-12): 铺满聊天列的会话区, 底=输入框上缘(open 时按实位 JS 设), 无圆角无投影 */
+  '.tintin-pd-panel{position:fixed;left:0;right:0;top:0;bottom:120px;z-index:70;background:var(--surface-2, #232326);border-bottom:1px solid var(--border, #3a3a3e);display:none;flex-direction:column;font:12.5px/1.5 system-ui;color:var(--text, #e8e8e6);box-sizing:border-box}',
+  '.tintin-pd-head{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border, #3a3a3e)}',
+  '.tintin-pd-title{flex:1;font-weight:600;font-size:12.5px}',
+  '.tintin-pd-close{border:0;background:transparent;color:var(--text-muted, #b8b8b6);font-size:14px;cursor:pointer;padding:0 2px;line-height:1}',
+  '.tintin-pd-search{margin:8px 12px;background:var(--surface, #1c1c1e);border:1px solid var(--border, #3a3a3e);border-radius:8px;color:var(--text, #e8e8e6);font:12px system-ui;padding:6px 10px;outline:none}',
   '.tintin-pd-list{flex:1;min-height:0;overflow:auto;padding:0 12px;display:flex;flex-direction:column;gap:8px}',
-  '.tintin-pd-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #26272b;border-radius:9px;background:#16171a;cursor:pointer}',
-  '.tintin-pd-row:hover{border-color:#3b6fd4;background:#1b2030}',
+  '.tintin-pd-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border, #3a3a3e);border-radius:9px;background:var(--surface, #1c1c1e);cursor:pointer}',
+  '.tintin-pd-row:hover{border-color:#3b6fd4;background:var(--surface-3, #1b2030)}',
   '.tintin-pd-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
   '.tintin-pd-name{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-  '.tintin-pd-meta{color:#77787e;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-  '.tintin-pd-status{padding:6px 12px 12px;color:#8a8a90;font-size:11px;min-height:18px;white-space:pre-wrap}',
+  '.tintin-pd-meta{color:var(--text-faint, #77787e);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+  '.tintin-pd-status{padding:6px 12px 12px;color:var(--text-faint, #8a8a90);font-size:11px;min-height:18px;white-space:pre-wrap}',
 ].join('\n')
 
 const API = '/tintin/cover/api/acp'
@@ -55,6 +60,14 @@ const contextOf = (item: Record<string, unknown>): string => {
   return lines.join('\n')
 }
 
+/** 页级互斥钩子: 在线素材抽屉(cover-chat-bridge)与产品面板同区停靠, 一个开着就别开另一个 */
+declare global {
+  interface Window {
+    __tintinCoverCloseAssets?: () => void
+    __tintinCoverCloseProducts?: () => void
+  }
+}
+
 const mount = (): void => {
   try {
     const style = document.createElement('style')
@@ -63,7 +76,9 @@ const mount = (): void => {
 
     const fab = document.createElement('button')
     fab.className = 'openfilm-composer-tool'
-    fab.textContent = '📦'
+    /* 图标(2026-11-12 用户裁决:与在线素材按钮同款样式风格)= lucide Package, 16px/stroke 1.75 */
+    fab.setAttribute('aria-pressed', 'false')
+    fab.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/></svg>'
     fab.title = '选择产品:资料注入会话(@ 引用)'
     fab.setAttribute('data-tintin-products', '1')
     /* 挂进官方 composer 工具条(与素材/技能按钮同行同款) —— 等工具条出现后注入 */
@@ -86,16 +101,33 @@ const mount = (): void => {
 
     const panel = document.createElement('div')
     panel.className = 'tintin-pd-panel'
-    panel.style.display = 'none'
     const head = document.createElement('div'); head.className = 'tintin-pd-head'
     const title = document.createElement('div'); title.className = 'tintin-pd-title'; title.textContent = '选择产品'
-    const close = document.createElement('button'); close.className = 'tintin-pd-close'; close.textContent = '×'
+    const close = document.createElement('button'); close.className = 'tintin-pd-close'; close.textContent = '✕'
     head.append(title, close)
     const search = document.createElement('input'); search.className = 'tintin-pd-search'; search.placeholder = '搜索产品(品类/品牌/型号)…'
     const list = document.createElement('div'); list.className = 'tintin-pd-list'
     const status = document.createElement('div'); status.className = 'tintin-pd-status'
     panel.append(head, search, list, status)
     document.body.append(panel)
+
+    /* 显隐收口(2026-11-12): fab 开→关同款开关语义; aria-pressed 走官方按下态 */
+    const isOpen = (): boolean => panel.style.display === 'flex'
+    const setOpen = (on: boolean): void => {
+      panel.style.display = on ? 'flex' : 'none'
+      fab.setAttribute('aria-pressed', on ? 'true' : 'false')
+      if (on) {
+        /* 互斥(同区停靠, 叠着没意义): 产品开了就关在线素材(桥层挂钩子) */
+        window.__tintinCoverCloseAssets?.()
+        /* 停靠定位: 底=输入框上缘([data-prompt-shell]=composer 卡片根), 铺满其上方会话区 */
+        const shellRect = document.querySelector('[data-prompt-shell]')?.getBoundingClientRect()
+        if (shellRect && shellRect.top > 40) panel.style.bottom = `${Math.round(innerHeight - shellRect.top)}px`
+        else panel.style.bottom = '120px'
+        if (!list.childElementCount && !status.textContent) void load('')
+      }
+    }
+    /* 桥层关产品(在线素材打开时调用) */
+    window.__tintinCoverCloseProducts = () => setOpen(false)
 
     const inject = (text: string): void => {
       const editor = document.querySelector('[data-lexical-editor="true"]') as HTMLElement | null
@@ -113,13 +145,6 @@ const mount = (): void => {
       const dt = new DataTransfer()
       dt.setData('text/plain', text)
       editor.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
-      /* 注入结果如实回报:粘贴仍被丢弃时给可执行的下一步,不谎报成功 */
-      if ((editor.textContent ?? '').includes(text.slice(0, 12))) {
-        status.textContent = '已注入产品资料到会话输入框'
-        panel.style.display = 'none'
-      } else {
-        status.textContent = '注入未生效:请先点击一下底部输入框,再选一次产品'
-      }
     }
 
     const rowOf = (item: ProductRow): HTMLElement => {
@@ -131,16 +156,15 @@ const mount = (): void => {
       meta.textContent = [item.category, item.goods_no ? `货号 ${item.goods_no}` : ''].map((v) => String(v)).filter(Boolean).join(' · ')
       main.append(name, meta); row.append(main)
       row.onclick = () => {
-        /* 注入 = 产品资料结构化文本进会话输入框(粘贴事件, Lexical 原生接住) */
+        /* 注入后**列表必关**(2026-11-12 用户裁决「点击选择后,此产品列表应该关闭」) */
         void (async () => {
           try {
             const res = await fetch(`${API}/products-detail?id=${encodeURIComponent(String(item.id ?? ''))}`)
             const detail = (await res.json()) as Record<string, unknown>
             const item0 = detail && typeof detail === 'object' && 'item' in detail ? (detail as { item?: Record<string, unknown> }).item : detail
             inject(contextOf(item0 ?? (item as Record<string, unknown>)))
-          } catch (error) {
-            status.textContent = '产品资料获取失败：' + (error instanceof Error ? error.message : String(error))
-          }
+          } catch { /* 资料拉取失败也照常注入行内已有字段并关闭 */ }
+          setOpen(false)
         })()
       }
       return row
@@ -166,12 +190,8 @@ const mount = (): void => {
         status.textContent = '产品加载失败：' + (error instanceof Error ? error.message : String(error))
       }
     }
-    const open = (): void => {
-      panel.style.display = 'flex'
-      if (!list.childElementCount && !status.textContent) void load('')
-    }
-    fab.onclick = open
-    close.onclick = () => { panel.style.display = 'none' }
+    fab.onclick = () => setOpen(!isOpen())
+    close.onclick = () => setOpen(false)
     let timer = 0
     search.oninput = () => { window.clearTimeout(timer); timer = window.setTimeout(() => { void load(search.value.trim()) }, 350) }
   } catch (error) {
