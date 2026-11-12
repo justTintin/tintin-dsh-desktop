@@ -252,6 +252,7 @@ OpenFilm 是开源 AI 视频智能体(仓库 `github.com/openfilm/openfilm`):Stu
 
 - **接管**:快轮询 → 命中接管;未命中清陈旧 run.json → `startStudio` 全新拉起(附着前**指纹对账**:editor dist 摘要 + 版本);
 - **净场**:`will-quit` + `process 'exit'`(failLoud 崩溃路径)同步收场;开机对账按可执行路径甄别清理 openfilm node 孤儿(不碰其它 node);
+- **退出整树收割(2026-11-12 用户裁决「退出的时候应该退出」)**:净场从「单 pid SIGTERM」升级为 **`taskkill /PID x /T /F` 整树**——实机实证:单 pid 杀法留下服务端再生子进程与服务端拉起的剪映存活成孤儿,工作目录钉死构建目录 → `releases/*-dir` 旧目录删不掉、过时版本驻留。配套:**共享收割器** `dsh-tintin-shared/lib/external-child-reaper.js`(registerExternalChild/reapExternalChildren/installReapOnQuit,will-quit+process exit 双钩,主进程内单例)——photocraft GUI(detached spawn,cover lib/photocraft.js)登记入册随退出收割;剪映不进收割器(可能是用户自装实例,误杀风险>收益),由服务端整树收割覆盖。开机对账(路径甄别 openfilm node)保留管崩溃残留;正常退出路径由收割器与整树净场覆盖;
 - **轮次自愈(2026-10-26)**:film-acp 看门狗 —— prompt/工具调用 **5 分钟无任何语义事件**即判定挂死:失败回执 + 终结智能体(会话已持久,下次 start 以 resume 续上);等待用户审批/提问期间挂起计时(等人是合法状态);智能体进程退出 → 在途轮次立即错误收尾;**回执按轮重置**(trackTurn 清上一轮 done/events,条目按项目复用)。背景:ACP 长请求无超时,实测轮次在第 13 步的模型/工具调用上无限等待(16:32 包,12 步后冻结,「已发送、无下文」)。
 - **事件直发本体(2026-10-26)**:`local-event` 通道载荷必须是 LocalAgentEvent 本体(`{key,kind,…}`)—— 曾发 `{project,event}` 包装壳,页面读 `event.kind` 恒 undefined,**所有 sessionUpdate 被静默丢弃**(实锤:项目 `.film/chat.json` 20 个轮次 items 全空、「没有进度与结果」;轮次状态只能靠 prompt IPC 的 Promise 翻转)。bridge.ts 对 localAgents 是原样透传,不拆包。
 - **dsh 固化全模式(2026-10-26)**:目录构建收尾统一用已验证构建覆盖打包副本(`package-dir.mjs` → resources/dsh-cli-lib → win-unpacked)—— 原覆盖只挂在 local 收尾,full/unpack 曾直发未固化副本(§16 挂死缺陷)。
@@ -666,6 +667,17 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - **i18n ×5**:gallery 组新键 `serverUpdate`(更新/Update/更新/Actualizar/업데이트)与 `serverInstalledVersion`(已装版本/Installed version/インストール済みバージョン/Versión instalada/설치된 버전);
 - **锚点 +7**(`scripts/tintin-anchors.json` 143→150):SkillsPane `installedVersion`、SkillsLibrary `installedVersion`、i18n ×5 `serverUpdate` —— vendor 升级重放清单覆盖本批面,防重放丢失;
 - 验证:shell `build.mjs` 构建绿(两 .tsx 入包);插件 `tsc -p tsconfig.json` 绿;比较函数 9 用例(等版本/缺段/v 前缀/坏值/低位进位)全过;实测 `/skills` 行 `version` 在("1.0.0"/"1.0");**实测内容兜底命中**:现装 9 个里 3 个内容与服务端一致(显示已安装+服务端版)、6 个不一致(复刻视频/视频换角色/生成图片/文生视频 v1.2.2/生成音乐/文案混剪)→重载后亮「有新版」徽标+更新按钮;tsdown 重建 lib 并同步 win-unpacked `resources/app/lib`(与既有 18:26 载荷同链);check:tintin 绿(doc-sync 本节清偿)。
+
+## 16.36 OpenFilm 0.3.1→0.3.2 升级(2026-11-12, 用户指令「更新为 0.3.2,检查以前的功能锚点,我自己定义的需要保留」)
+
+上游 v0.3.2=758b1a38("Improve Windows project switching, project duplication and media"发布线),179 文件/6566+/1866-。程序化升级流(0.3.1 经验固化后首跑,全程零手工 diff):
+
+- **补丁∩上游=9/26**(host.ts/ProjectView/LibraryDrawer/SkillsPane/i18n×5 被 0.3.2 动过,其余 17 个补丁文件+agent-definitions.mjs 未动=git checkout 直恢复);fetch FILES 两件(agent-definitions/openfilm-models)均未被动;
+- **三方合并重放**(git merge-file: base=v0.3.1/mine=HEAD 补丁版/theirs=v0.3.2)——8 文件一次零冲突;host.ts 因 replay.txt 末行无换行被 `while read` 吞掉漏跑,**老坑二犯**(keep/replay 清单末行必须带尾换行或用 for 读),补做后零冲突;
+- **pin ×2**:fetch-openfilm-shell.mjs COMMIT→758b1a38;fetch-openfilm-runtime.mjs OPENFILM_VERSION→0.3.2;vendored runtime 实测 0.3.2(tintin provider 2b 步/playwright/three.js 随 fetch 重挂);dsh-desktop-next/upstream-reference.json=deepseek-harness 线(0.2.2-rc.1)与 OpenFilm 升级无关(1105 坑不适用);
+- **上游 0.3.2 实动**:SkillsPane 仅 4 行(AudioList ADD_HOVER→ADD_COLOR 重命名+类调整——ADD_HOVER 仍导出,我的补丁行无悬空引用);host.ts 5 行;ProjectView 383 行/LibraryDrawer 321 行(大改区与我的补丁区零重叠=合并零冲突的原因);i18n ×5 新键照吞;
+- 验证:150 锚点全绿(merge 后一次过);shell build.mjs 一把过;bundle 204/204;i18n 双逗号扫描零命中;
+- 载荷:热同步待重启(见 §16.29 口径)。
 
 ## 17. 立项:素材自动粗剪 + 剪辑辅助(2026-11-04 用户立项,未开工)
 

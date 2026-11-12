@@ -482,13 +482,12 @@ export class LocalAgentTurn {
 
   /**
    * A note the platform leaves in this turn (`noticeKey` is an i18n key), such as an attachment that could
-   * not be put in the project folder. One per key. `text` carries the resolved wording when the note has
-   * the run's own values in it (a task id, minutes waited) that a bare key cannot hold.
+   * not be put in the project folder. One per key.
    */
-  notice(noticeKey: string, text?: string): void {
+  notice(noticeKey: string): void {
     const id = `notice:${this.turnNo}:${noticeKey}`;
     if (this.items.some((item) => item.id === id)) return;
-    this.items = [...this.items, { id, kind: 'notice', noticeKey, ...(text ? { text } : {}), turnNo: this.turnNo, pending: false, startedAt: Date.now() }];
+    this.items = [...this.items, { id, kind: 'notice', noticeKey, turnNo: this.turnNo, pending: false, startedAt: Date.now() }];
     this.emit();
   }
 
@@ -706,13 +705,6 @@ function listen(): void {
       if (turn && !turn.state.error) turn.patch({ error: 'The agent stopped unexpectedly.' });
       const waiter = doneWaiters.get(event.key);
       if (waiter) { doneWaiters.delete(event.key); waiter({ ok: false, error: 'The agent stopped unexpectedly.' }); }
-      return;
-    }
-    /* a server task passed its budget with no end in sight (the bridge's watchdog): say so in the turn */
-    if (event.kind === 'task-stale') {
-      if (turn) {
-        turn.notice('agent.taskStale', translate('agent.taskStale').replace('{tool}', () => event.tool).replace('{taskId}', () => event.taskId).replace('{minutes}', () => String(event.ageMinutes)));
-      }
       return;
     }
     if (turn && unprompted.has(event.key)) stillUnprompted(event.key);

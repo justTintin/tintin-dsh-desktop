@@ -69,8 +69,6 @@ export type LocalAgentEvent =
   | { key: string; kind: 'permission'; requestId: string; params: { toolCall?: { title?: string }; options: Array<{ optionId: string; name: string; kind: string }> } }
   | { key: string; kind: 'question'; requestId: string; message: string; toolCallId: string | null; questions: LocalAgentQuestion[] }
   | { key: string; kind: 'exit'; code: number | null; stderr: string }
-  /* an async server task (imitate_cover & co.) passed its budget with no terminal state seen */
-  | { key: string; kind: 'task-stale'; taskId: string; tool: string; ageMinutes: number }
   /* the turn settled — also said on the channel, for a page that was reloaded while it ran */
   | { key: string; kind: 'done'; turnId: string; ok: boolean; stopReason?: string; error?: string; balance?: Balance };
 
