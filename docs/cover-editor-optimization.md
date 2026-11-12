@@ -479,11 +479,11 @@
 - **删素材清三写位**(方案 7,cover-plugin-route.js delete-asset):原只删项目目录副本;现扫其余项目 cover.props.json(引用面=ensureCoverAssets 同语义 image/bgImage/customLayers[].image),**无他项目引用才清三写位**,有引用保留并回 `keptInAssets+referencedBy`(public/ 跨项目共享口径,原注释约束保留),素材条删除菜单如实提示;当前项目自身引用不拦(用户明确删,渲染如实报缺)。
 - 测试:tintin-cover-acp.test.ts 增删素材两用例(无引用=三写位同清/他项目引用=保留+回执),20 用例全绿;check:tintin 143 锚点/86 文档全绿+载荷新鲜。
 
-### 7.5 任务僵死双通道止损(2026-11-12 晚批;1112 当天实机复测事故)
+### 7.5 任务僵死双通道止损(2026-11-12 晚批;1112 当天实机复测事故;深夜任务史勘误后定稿)
 
-同日实机复测(14:46-15:11 人物档仿封面轮)暴露 7.1 的残余缺口:服务端 `/generate/cover` person 任务 30+ 分钟不落终态(看门狗 15:24=创建+30min 仍「未观察到终态」;事后查服务端 `/tasks/unified/{id}` 四任务全部 `partial_failed failed_shots=['cover']`,失败发生在取消之后),客户端按 7.1 设计无限 `settled:false` 续等——智能体每 2-3 秒一次 working 刷满聊天面 25 分钟直至用户手停。修=双通道止损:
+同日实机复测(14:46-15:11 人物档仿封面轮)暴露的残余缺口。**深夜服务端 `/tasks` 全史勘误定案**:下午实际提交**三次**(14:47:11/14:50:40/14:54:36,单任务分钟级即 failed `partial_failed failed_shots=['cover']`),`imitate_cover_wait` 每轮都在失败后几十秒内抛错(重提时刻与失败时刻精确咬合),模型按「最多重试 2 次」预算停手转做背景+抠像(均成功)——**终态识别无罪,initial「服务端 30+ 分钟不落终态」叙述有误(看门狗是纯计时器,不观测服务端)**。真残余=①模型三次失败后**全程零文字转述**(14:46 首句后 25 分钟无一字,违反 SKILL 反循环守规,模型行为)②15:02-15:11 高频空转无产物。当晚客户端仍落双通道止损(对真僵死与模型失语兜底):
 
 - **智能体通道**(cover-tools-mcp.js):`imitate_cover_wait` 加跨续等累计记账(`waitClock`,单次 timeoutS 全额计入);**累计 ≥30 分钟**(与桥侧看门狗 ASYNC_TASK_BUDGET_MINUTES 同预算)后 `settled:false` 升级为 **`stale:true`+停手指令**(如实转述/不再续等/可 cancel:true)——notice 只到用户聊天面,这是智能体唯一可见的止损信号。终态(completed/failed/cancelled/cancel)清账。
 - **用户通道**(共享 shell):桥侧看门狗本就 emit `{kind:'task-stale',taskId,tool,ageMinutes}`(11-02 起),但渲染端无人消费。`openfilm-shell-src/chat`:`LocalAgentEvent` 联合类型加变体(desktop-bridge.ts);`listen()` 接住→`turn.notice('agent.taskStale', 动态文案)`(local-agent-run.ts;notice() 签名扩展可选 text,复用 notice-with-text 现成渲染分支);五语言 locale 增 `agent.taskStale`(zh/en/ja/ko/es,{tool}/{taskId}/{minutes} 插值,沿用 modelGone 的 `.replace` 函数惯用法)。
-- 当日事实勘误:failed/cancelled 终态分支与 error 原文回显 7.1 已实现且 13:11 已同步 win-unpacked(14:44 重启后生效),本次循环非终态处理缺失,而是服务端终态迟到+无人喊停。
+- 当日事实勘误:failed/cancelled 终态分支与 error 原文回显 7.1 已实现且 13:11 已同步 win-unpacked(14:44 重启后生效),本次循环非终态处理缺失。另:上午 product 档两败(11:24/11:26)=服务端「LLM 输出含非 ASCII(全英文铁律)」误伤中文标题,服务端侧;person 档 `partial_failed` worker 内层根因仍待服务端日志。
 - 验证:package:dir 全编译链绿(stage.mjs+verify-cover-payload+tsc+vite+win-unpacked 重建);win-unpacked 载荷核验(tools 含 IMITATE_WAIT_STALE_TOTAL_MS/新 bundle DjVumVFK 含 taskStale/bridge 3 处 emit);修复期间 verify-hot-fresh 正确拦截「源码比产物新」(es.ts+并行会话 main-hook.ts),按指引改走全编译链。
