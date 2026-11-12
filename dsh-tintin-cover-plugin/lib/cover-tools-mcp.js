@@ -496,11 +496,14 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let out = ''
+    /* chromium/Remotion 噪音不入结果,但**死因全在 stderr**——截尾(4KB)进超时/退出错误
+       (2026-11-12 修复:载荷缺浏览器缓存挂 180s 时错误只说「可重试」,三轮超时零证据)。 */
+    let errTail = ''
     child.stdout.on('data', (c) => { out += c })
-    child.stderr.on('data', () => { /* chromium/Remotion 噪音:不入结果 */ })
+    child.stderr.on('data', (c) => { errTail = (errTail + String(c)).slice(-4000) })
     const timer = setTimeout(() => {
       try { spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { /* 尽力杀 */ }
-      reject(new Error(`渲染超时(${Math.round(timeoutMs / 1000)}s,子进程已终止)——可重试;反复出现请反馈`))
+      reject(new Error(`渲染超时(${Math.round(timeoutMs / 1000)}s,子进程已终止)。stderr 尾部: ${errTail.slice(-600) || '空'}`))
     }, timeoutMs)
     child.on('error', (e) => { clearTimeout(timer); reject(new Error(`渲染子进程启动失败:${e.message}`)) })
     child.on('exit', (code) => {
@@ -508,8 +511,8 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
       const line = out.trim().split(/\r?\n/).filter((l) => l.startsWith('{')).pop()
       let parsed = null
       try { parsed = JSON.parse(line ?? 'null') } catch { /* 非法输出按退出码处理 */ }
-      if (code !== 0) reject(new Error(parsed?.error ? `渲染失败:${parsed.error}` : `渲染子进程退出码 ${code}`))
-      else if (!parsed || typeof parsed !== 'object') reject(new Error(`渲染子进程输出无法解析:${out.slice(-200)}`))
+      if (code !== 0) reject(new Error(parsed?.error ? `渲染失败:${parsed.error}` : `渲染子进程退出码 ${code}。stderr 尾部: ${errTail.slice(-600) || '空'}`))
+      else if (!parsed || typeof parsed !== 'object') reject(new Error(`渲染子进程输出无法解析:${out.slice(-200)}。stderr 尾部: ${errTail.slice(-400) || '空'}`))
       else resolve(parsed)
     })
   })

@@ -506,3 +506,13 @@
 - **环境图静默丢弃真 bug+修**:video 族 layerDefs 有环境图层(面板显示文件名=假象)但组件只画内置渐变,`props.environment` 从未被消费——生成的背景落盘后永远不上画。修=两模板 environment 分支:设了→CoverImg 渲染真图(objectFit cover);未设→保留内置渐变;defaultProps 补 `environment:''`。连带修 engine public 同步清单(wanted 只认 bgImage/image/customLayers,漏 environment→渲染 404 EncodingError;11-10 同类修第二例)。
 - **「人物用 product」话术**:props 写法本身正确(7.4/11-11 裁决:产品图更名主体图,图层 id 保留 product);气点=模型对用户说内部 id。修=SKILL.md 图层组节加「对用户永远说主体图/环境图,严禁写内部 id product」+生成节加保人方案组装条(环境图=props.environment/主体图=props.image)。
 - 验证:engine CLI @props 形态实测 ok;修复后同一项目渲染=白盘消失+生成背景成底层+人物干净(实拍);tsc 本批文件零错(39 条既有漂移不变);check:tintin 全绿(150 锚+载荷新鲜);载荷 7 处同步 1755 win-unpacked(mount lib/engine.mjs×2/resources dist×3+skills×2)重启生效。
+
+### 7.9 渲染子进程仍超时的真根因:载荷丢浏览器缓存(2026-11-12 晚四;用户报「7.8 修完 render_preview 还是 180s 超时,三轮+一轮」)
+
+7.8 的子进程化方向对但**载荷里没有它需要的东西**——实测证据链:staging(tintin-resources/cover-plugin)的 `node_modules/.remotion/chrome-headless-shell/win64/.../chrome-headless-shell.exe` 存在,win-unpacked 载荷**同路径缺失**(stage.mjs 保留缓存,但 electron-builder 收集 node_modules 时丢弃了插件嵌套 node_modules 里的 .remotion)。于是载荷内 `resolveBundledBrowser()` 返回 null → **静默回退 `ensureBrowser()` 联网下载 150MB** → 本机网络下挂起 → 180s 杀树,错误只说「可重试」零死因;agent 按 skill 反复重试=三轮+一轮全灭的完整闭环。dev 树裸 Electron 1.5s 能渲(缓存就在旁边)从外面看不出载荷缺货。
+
+- **修 1(package-dir.mjs)**:electron-builder 成功后从 staging 补拷 `.remotion` 缓存进载荷插件嵌套 node_modules,拷完自校验 exe——staging 缓存缺失或拷贝失败**宁可打包失败**,不静默产出渲染必挂的包。
+- **修 2(cover-tools-mcp.js)**:渲染子进程 stderr 截尾(4KB)进超时/退出错误——死因全在 stderr,旧版故意丢弃导致挂 180s 只剩一句「可重试」。
+- **修 3(engine.ts)**:缓存缺失回退 ensureBrowser 前向 stderr 告警一行(经修 2 直达超时错误,智能体可转述)。
+- 教训:门禁 verify-cover-payload 第 31 行显式跳过 node_modules/.remotion(staging↔工作区比对口径,本身正确)→「载荷缺货」从未有任何人检查;find 排查深度(-maxdepth 4/5)会把 6-8 层深的 exe 误判为缺失,结论前必须用精确路径 `test -f` 复核(本批即被 maxdepth 假阴性骗过一次)。
+- 验证:插件全量 177 用例绿;package:dir 全链重建(含补拷步)EXIT=0;载荷 exe 精确路径核验;doc 本节同批。

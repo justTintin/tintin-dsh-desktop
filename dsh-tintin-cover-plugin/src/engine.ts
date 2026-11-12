@@ -283,7 +283,13 @@ export async function renderCover(input: RenderCoverInput): Promise<RenderCoverR
     // 浏览器钉死(2026-10-29 裁决):优先包内缓存(cwd 无关,传 browserExecutable 即跳过下载判定);
     // 缺失才回退 ensureBrowser 的 cwd 口径(老行为,开发态)。
     const bundled = resolveBundledBrowser()
-    if (!bundled) await ensureBrowser()
+    if (!bundled) {
+      // 缺缓存=Remotion 静默联网下载(150MB;受限网络=挂到渲染超时)。2026-11-12 三轮渲染
+      // 超时根因:electron-builder 丢插件 node_modules/.remotion。warn 进 stderr(render 子
+      // 进程的 stderr 已截尾进超时错误,智能体可直接转述死因)。
+      console.warn('[cover-engine] 包内 chrome-headless-shell 缺失,回退 ensureBrowser 联网下载(打包载荷应随插件 node_modules 带 .remotion 缓存)')
+      await ensureBrowser()
+    }
 
     // 运行时新图进渲染 staticFile 根(2026-11-10 用户报障「render_preview 无法读取新图片」):
     // staticFile 只认 serveUrl 的 public/(=打包时快照),项目目录里 text-remove/matting/AI 生成的

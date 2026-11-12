@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
+import { cpSync, existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { electronBuilderEnvironment } from './electron-builder-environment.ts'
@@ -88,6 +88,29 @@ export function packageDirectory(options = {}) {
   if (result.error !== undefined) throw result.error
   if (result.status !== 0) {
     throw new Error(`electron-builder --dir exited with ${String(result.status)}`)
+  }
+
+  // Remotion 浏览器缓存随载荷(2026-11-12 三轮渲染超时根修): electron-builder 收集
+  // node_modules 时丢弃插件的 .remotion/chrome-headless-shell——渲染必需,缺失=
+  // resolveBundledBrowser() 返回 null → 静默回退 ensureBrowser 联网下载 150MB,
+  // 受限网络挂到渲染超时(180s 杀树,错误还不带死因)。staging 缓存由 stage.mjs
+  // 保留,从那里补拷进载荷插件嵌套 node_modules 并自校验 exe——缺失宁可打包
+  // 失败,不静默产出一个渲染必挂的包。
+  const distDir = join(packageRoot, 'dist')
+  const unpacked = existsSync(join(distDir, 'win-unpacked'))
+    ? join(distDir, 'win-unpacked')
+    : readdirSync(distDir).map((name) => join(distDir, name)).find((dir) => dir.endsWith('-unpacked') && existsSync(join(dir, 'resources', 'app')))
+  if (unpacked) {
+    const stagingCache = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '.remotion')
+    const cacheExe = (...parts) => join(...parts, 'chrome-headless-shell', 'win64', 'chrome-headless-shell-win64', 'chrome-headless-shell.exe')
+    if (!existsSync(cacheExe(stagingCache))) {
+      throw new Error('staging 缺 .remotion 浏览器缓存(渲染必需)——先跑 stage.mjs 并保留缓存,再打包')
+    }
+    const dest = join(unpacked, 'resources', 'app', 'node_modules', 'dsh-tintin-cover-plugin')
+    cpSync(stagingCache, join(dest, 'node_modules', '.remotion'), { recursive: true })
+    if (!existsSync(cacheExe(dest, 'node_modules', '.remotion'))) {
+      throw new Error('载荷浏览器缓存拷贝后仍缺失——检查 dist 载荷目录权限')
+    }
   }
 }
 
