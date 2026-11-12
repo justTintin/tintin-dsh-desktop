@@ -709,9 +709,17 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
   })
   /* 删除项目(2026-11-11 用户裁决:tab 右键删除+确认)。引擎侧已回退当前指针,
      current=null=无剩余项目(前端自行新建);此处不再 resolveCoverDir——指针已清时
-     它会按「首访」再造一个空项目,污染剩余清单。 */
+     它会按「首访」再造一个空项目,污染剩余清单。
+     2026-11-12 占用修复:封面会话子进程以项目目录为 cwd(挂起的会话也不杀进程),
+     Windows 下 cwd 目录删不掉——删除前先停掉占用该目录的会话(活跃+池),再交引擎
+     (引擎侧另有改名探针兜资源管理器等其他占用者,零删除+人话报错)。 */
   projectAction('/tintin/cover/api/projects/delete', async (engine, p) => {
-    const removed = engine.deleteCoverProject(String(p.name ?? ''))
+    const name = String(p.name ?? '')
+    try {
+      const bridge = await import('./cover-acp-bridge.js')
+      bridge.stopSessionsForCwd(engine.coverProjectDirOf(name))
+    } catch { /* 停会话失败不阻断:引擎改名探针会兜住并报人话错误 */ }
+    const removed = engine.deleteCoverProject(name)
     return { ...removed, projects: engine.listCoverProjects() }
   })
 

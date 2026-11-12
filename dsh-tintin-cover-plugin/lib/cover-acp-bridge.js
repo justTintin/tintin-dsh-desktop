@@ -827,6 +827,30 @@ export function stopSession() {
   state.ready = false
 }
 
+/** 停掉占用某项目 cwd 的封面会话(活跃 + 挂起池快照;2026-11-12 删除项目占用修复):
+ *  会话子进程以项目目录为 cwd,Windows 下 cwd 目录删不掉/改名不掉——删除项目前必须
+ *  先杀掉这些子进程。杀掉即可,快照出池(池的 suspend 语义=任务继续跑,与删除互斥)。
+ *  路径比较做尾部分隔符归一(两处 join 来源不同,防 '\\'-vs-'/' 形态差)。 */
+export function stopSessionsForCwd(cwd) {
+  const norm = (p) => String(p ?? '').replace(/[\\/]+$/, '')
+  const wanted = norm(cwd)
+  if (!wanted) return 0
+  let stopped = 0
+  if (state.cwd && norm(state.cwd) === wanted) {
+    stopSession()
+    stopped += 1
+  }
+  const pooledKey = [...sessionsPool.keys()].find((k) => norm(k) === wanted)
+  if (pooledKey !== undefined) {
+    const snap = sessionsPool.get(pooledKey)
+    try { snap?.child?.kill() } catch { /* 已退出 */ }
+    if (snap) { snap.child = null; snap.conn = null; snap.ready = false }
+    sessionsPool.delete(pooledKey)
+    stopped += 1
+  }
+  return stopped
+}
+
 /** 轮次回执(页面重载恢复;官方 localAgents.running 语义) */
 export function runningTurns() {
   return [...state.turns.values()].map((turn) => ({ ...turn, events: [...turn.events] }))

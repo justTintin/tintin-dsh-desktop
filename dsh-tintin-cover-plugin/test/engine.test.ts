@@ -1,9 +1,9 @@
 // 引擎路径与输出清洗(不触渲染;渲染冒烟走 scripts/render.mjs 手动/打包核验)
 // 测试产物统一落 D 盘 .tmp(C: temp 受沙箱限制,photocraft CLI 子进程无法写入)
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { createCoverProject, deleteCoverProject, renameCoverProject, resolveCoverDir, resolveWorkspaceDir, switchCoverProject, renderCover } from '../src/engine.ts'
+import { createCoverProject, coverProjectDirOf, deleteCoverProject, listCoverProjects, renameCoverProject, resolveCoverDir, resolveWorkspaceDir, switchCoverProject, renderCover } from '../src/engine.ts'
 
 const testRoot = 'D:/Project/tintin-dsh-desktop/dsh-tintin-cover-plugin/.tmp/test'
 
@@ -78,6 +78,50 @@ describe('产物目录解析(G5 + 2026-10-30 项目制:cover/projects/<当前项
     expect(() => deleteCoverProject('不存在的项目')).toThrow(/项目不存在/)
     // 指针已清 → resolveCoverDir 走首访建新项目(既有语义)
     expect(resolveCoverDir()).toContain(join('cover', 'projects'))
+    // 路径拼接(删除前停会话用):工作区下 projects/<洗后名>
+    expect(coverProjectDirOf('占用项目')).toContain(join('cover', 'projects', '占用项目'))
+  })
+  it('删除占用探测(2026-11-12):目录被子进程 cwd 锁住 → 零删除+人话报错;解锁后可删', async () => {
+    if (process.platform !== 'win32') return // cwd 锁目录是 Windows 语义
+    const { spawn } = await import('node:child_process')
+    const ws = mkdtempSync(join(testRoot, 'ws-lock-'))
+    process.env.TINTIN_WORKSPACE_DIR = ws
+    delete process.env.TINTIN_COVER_DIR
+    const a = createCoverProject('占用项目')
+    writeFileSync(join(ws, 'cover', 'projects', '占用项目', 'keep.txt'), 'x', 'utf8')
+    // 占用者:一个 cwd 在项目目录里的存活子进程(会话子进程同款形态)
+    const holder = spawn(process.execPath, ['-e', 'setTimeout(()=>{},15000)'], { cwd: join(ws, 'cover', 'projects', '占用项目'), windowsHide: true })
+    // 等 holder 真正起来并握住 cwd(spawn 创建到内核持句柄有毫秒级时差)
+    await new Promise<void>((done) => {
+      const t = setInterval(() => {
+        try { renameSync(join(ws, 'cover', 'projects', '占用项目'), join(ws, 'cover', 'projects', '占用项目.lockprobe')); renameSync(join(ws, 'cover', 'projects', '占用项目.lockprobe'), join(ws, 'cover', 'projects', '占用项目')); }
+        catch { clearInterval(t); done(); return }
+      }, 100)
+      setTimeout(() => { clearInterval(t); done() }, 8000)
+    })
+    try {
+      expect(() => deleteCoverProject('占用项目')).toThrow(/正被占用/)
+      // 零删除:目录与内容原样都在(不存在删一半的残尸)
+      expect(existsSync(join(ws, 'cover', 'projects', '占用项目', 'keep.txt'))).toBe(true)
+      expect(listCoverProjects().some((p) => p.name === '占用项目')).toBe(true)
+    } finally {
+      holder.kill()
+      await new Promise<void>((done) => { holder.once('exit', () => done()); setTimeout(done, 3000) })
+    }
+    // 解锁后:改名探针过,连目录删
+    expect(deleteCoverProject('占用项目').current).toBeNull()
+    expect(existsSync(join(ws, 'cover', 'projects', '占用项目'))).toBe(false)
+    expect(a.name).toBe('占用项目')
+  })
+  it('删除残留墓碑过滤(2026-11-12):.deleting- 目录不进项目清单', () => {
+    const ws = mkdtempSync(join(testRoot, 'ws-tomb-'))
+    process.env.TINTIN_WORKSPACE_DIR = ws
+    delete process.env.TINTIN_COVER_DIR
+    createCoverProject('正常项目')
+    mkdirSync(join(ws, 'cover', 'projects', '正常项目.deleting-1790000000000', '残'), { recursive: true })
+    writeFileSync(join(ws, 'cover', 'projects', '正常项目.deleting-1790000000000', '残', 'f.txt'), 'x', 'utf8')
+    const names = listCoverProjects().map((p) => p.name)
+    expect(names).toEqual(['正常项目'])
   })
   it('TINTIN_COVER_DIR 覆盖(测试注入口,保持旧单目录行为)', () => {
     process.env.TINTIN_COVER_DIR = join(testRoot, 'cover-override')

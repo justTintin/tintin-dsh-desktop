@@ -72,15 +72,22 @@ export function resolveCoverDir(): string {
   } catch { return root }
 }
 
-/** 项目清单(目录名+修改时间,近期在前) */
+/** 项目清单(目录名+修改时间,近期在前)。`.deleting-` 前缀 = 删除失败的残留墓碑
+ *  (2026-11-12 占用修复), 不是项目, 不列出。 */
 export function listCoverProjects(): Array<{ name: string; mtimeMs: number }> {
   const root = join(resolveWorkspaceDir(), 'cover')
   const projectsDir = projectsDirOf(root)
   if (!existsSync(projectsDir)) return []
   return readdirSync(projectsDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+    .filter((e) => e.isDirectory() && !e.name.includes('.deleting-'))
     .map((e) => ({ name: e.name, mtimeMs: statSync(join(projectsDir, e.name)).mtimeMs }))
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
+}
+
+/** 项目目录路径(删除前停会话用;仅拼接,不要求存在) */
+export function coverProjectDirOf(rawName: string): string {
+  const root = join(resolveWorkspaceDir(), 'cover')
+  return join(projectsDirOf(root), sanitizeProjectName(rawName))
 }
 
 /** 新建项目(缺省名=日期时间;重名自动加 -2/-3 尾号)并设为当前 */
@@ -137,7 +144,12 @@ export function renameCoverProject(from: string, to: string): { name: string } {
 /** 删除项目(2026-11-11 用户裁决:tab 右键删除,确认后连目录一起删——素材/props/会话
  *  记录随项目目录消失,不可恢复)。删的是当前项目时指针回退到剩余最新项目,无剩余则
  *  清指针(current=null,由调用方新建);回退在引擎侧完成,避免指针悬空期间任何
- *  resolveCoverDir 轮询把空项目当首访又造一个。 */
+ *  resolveCoverDir 轮询把空项目当首访又造一个。
+ *  2026-11-12 占用修复(用户报障「只删了内容文件夹还在」):该项目的封面会话子进程以
+ *  项目目录为 cwd,Windows 下 cwd 目录删不掉——rmSync 半路 EBUSY 会留下删了一半的残尸。
+ *  现改为**改名探针先行**:目标目录先原子改名成 `.deleting-` 墓碑,改不动=被占用,
+ *  一个字节都不删并报人话错误(路由层先停会话再调,这里只兜其他占用,如资源管理器);
+ *  改得动=无锁,随改随删(连墓碑一起)。真删不动时目录已改名,清单里也不再显示。 */
 export function deleteCoverProject(rawName: string): { current: string | null } {
   const root = join(resolveWorkspaceDir(), 'cover')
   const projectsDir = projectsDirOf(root)
@@ -147,7 +159,22 @@ export function deleteCoverProject(rawName: string): { current: string | null } 
   if (name === '.' || name === '..' || basename(target) !== name) throw new Error(`非法项目名: ${name}`)
   if (!existsSync(target)) throw new Error(`项目不存在: ${name}`)
   const wasCurrent = readCurrentProject(root, projectsDir) === name
-  rmSync(target, { recursive: true, force: true })
+  const tomb = join(projectsDir, `${name}.deleting-${Date.now()}`)
+  let renamed = false
+  let lastErr: unknown = null
+  /* 改名探针(重试几拍:路由层刚 kill 的子进程退出有毫秒级时差) */
+  for (let i = 0; i < 5 && !renamed; i++) {
+    try { renameSync(target, tomb); renamed = true } catch (e) { lastErr = e; sleepSync(300) }
+  }
+  if (!renamed) {
+    throw new Error(`项目目录正被占用,无法删除（该项目的会话或其他窗口可能还在用它）。请关闭该项目相关会话/窗口后重试；若仍失败请重启应用再删。系统原因：${lastErr instanceof Error ? lastErr.message : String(lastErr)}`)
+  }
+  try {
+    rmSync(tomb, { recursive: true, force: true, maxRetries: 3, retryDelay: 150 })
+  } catch { /* 清理失败不阻断:目录已改名,项目已从清单消失,残留由下次删除/手工清 */ }
+  if (existsSync(tomb)) {
+    throw new Error(`项目已删除,但目录清理未完成（可能有文件仍被占用）,残留于 ${basename(tomb)}——不影响项目列表,可稍后手工清理`)
+  }
   let current = readCurrentProject(root, projectsDir)
   if (wasCurrent && !current) {
     const remaining = listCoverProjects()
@@ -160,6 +187,11 @@ export function deleteCoverProject(rawName: string): { current: string | null } 
     }
   }
   return { current }
+}
+
+/** 同步等待(Node 主线程可用 Atomics.wait;浏览器不可用但本模块只在宿主跑) */
+function sleepSync(ms: number): void {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } catch { /* 环境不支持=不等待 */ }
 }
 
 export interface RenderCoverInput {
