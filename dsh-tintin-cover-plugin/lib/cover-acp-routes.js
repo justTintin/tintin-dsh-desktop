@@ -136,6 +136,9 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
         /* 智能体选择(2026-10-31 双智能体;2026-11-01 用户裁决:TinTin智能体观察期禁用,
            缺省与归一化都落 deepseek —— 主进程侧 tintin-agent 请求也统一落到 deepseek) */
         agent: typeof p.agent === 'string' && p.agent ? p.agent : 'deepseek',
+        /* 会话续接 id(2026-11-12):壳层存的 agentSessions[agent] 透传,冷启动时据此走
+           ACP session/resume;仅本进程内存无此会话时生效 */
+        resume: typeof p.resume === 'string' && p.resume ? p.resume : null,
       })
       sendJson(res, result.ok ? 200 : 500, result)
     } catch (err) {

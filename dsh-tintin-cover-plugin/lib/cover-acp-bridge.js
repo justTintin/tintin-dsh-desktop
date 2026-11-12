@@ -437,23 +437,23 @@ export function lastEventSeq() {
  * 服务端就绪后放开)。补丁/home/会话仍按 id 分键。
  * @returns {Promise<{ok:true,key:string,info:object}|{ok:false,error:string}>}
  */
-export async function startSession({ cwd, serverUrl, channelHome, agent = 'deepseek' }, retryAllowed = true) {
-  const attempt = await startSessionOnce({ cwd, serverUrl, channelHome, agent })
+export async function startSession({ cwd, serverUrl, channelHome, agent = 'deepseek', resume = null }, retryAllowed = true) {
+  const attempt = await startSessionOnce({ cwd, serverUrl, channelHome, agent, resume })
   /* 自愈加固(2026-11-10 秒退取证): 服务端 /mcp 闪断窗口内 spawn, mcp-tintin-server 的
      failOnStartupError:true 会让孩子起不来(11:31 两次连败、22 秒后第三次成功=服务端恢复
      的时间差)。握手前退出且只重试一次: 短暂闪断自愈, 真坏死(参数/磁盘)不进入重试风暴。 */
   if (!attempt.ok && retryAllowed && /握手前退出|握手期间退出/.test(String(attempt.error ?? ''))) {
     console.warn(`[cover-agent] start failed once (${String(attempt.error).slice(0, 120)}) — retry in 2.5s`)
     await new Promise((r) => setTimeout(r, 2500))
-    return startSession({ cwd, serverUrl, channelHome, agent }, false)
+    return startSession({ cwd, serverUrl, channelHome, agent, resume }, false)
   }
   return attempt
 }
 
-async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek' }) {
+async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek', resume = null }) {
   const agentId = 'deepseek'
   const homeName = agentId === 'deepseek' ? 'cover-deepseek-agent-home' : 'cover-agent-home'
-  if (isRunning() && state.cwd === cwd && state.agentId === agentId) return { ok: true, key: 'cover', info: sessionInfo() }
+  if (isRunning() && state.cwd === cwd && state.agentId === agentId) return { ok: true, key: 'cover', info: sessionInfo(state, resume) }
   /* 方案 3(2026-11-10 用户裁决「每个项目独立、每个会话相互独立」): 目标 cwd 的快照在池里
      且子进程仍活 → 原样恢复(连接/事件环/运行中轮次全在,会话页 running() 接回);当前会话
      是别的项目 → 挂起进池(**不杀子进程**,任务继续跑,完成后自清扫),state 换全新对象。 */
@@ -462,15 +462,19 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
     if (state.child && state.cwd && state.cwd !== cwd) sessionsPool.set(state.cwd, state)
     sessionsPool.delete(cwd)
     state = targetSnap
-    return { ok: true, key: 'cover', info: sessionInfo(state) }
+    return { ok: true, key: 'cover', info: sessionInfo(state, resume) }
   }
   sessionsPool.delete(cwd) // 死快照(进程已退)丢弃
   if (state.child && state.cwd && state.cwd !== cwd) {
     sessionsPool.set(state.cwd, state) // 挂起:不杀,任务与连接随快照保留
     state = freshState()
   }
-  /* 跨智能体切换=人设不同,不续接对方会话;同智能体按内存会话续接 */
-  const resumeId = state.agentId === agentId ? state.sessionId : null
+  /* 跨智能体切换=人设不同,不续接对方会话;同智能体:进程内存里的会话优先(它更新),
+     内存没有(冷启动/换项目清了 state)才用壳层透传的 resume id 走 ACP session/resume */
+  const memoryResume = state.agentId === agentId ? state.sessionId : null
+  const resumeId = memoryResume || (typeof resume === 'string' && resume ? resume : null)
+  /* 壳层的续接意图留底,resumed 如实上报要对着它比(sessionInfo) */
+  state.resumeAsked = typeof resume === 'string' && resume ? resume : null
   stopSession()
   if (!serverUrl) return { ok: false, error: 'server.url 未配置: 封面智能体无法启动' }
   state.serverUrl = String(serverUrl).replace(/\/+$/, '')
@@ -643,17 +647,25 @@ async function startSessionOnce({ cwd, serverUrl, channelHome, agent = 'deepseek
     self.session = created
   }
   self.sessionId = String(sessionId)
+  /* resumed 如实上报(2026-11-12 会话整合三修):续接意图与最终活会话一致=真续上 */
+  self.resumeAsked = state.resumeAsked ?? null
   self.ready = true
   return { ok: true, key: 'cover', info: sessionInfo(self) }
 }
 
-/** 会话信息(聊天侧 start 的返回;LocalAgentSessionInfo 形状) */
-function sessionInfo(sess = state) {
+/**
+ * 会话信息(聊天侧 start 的返回;LocalAgentSessionInfo 形状)。
+ * resumed 如实上报(2026-11-12 会话整合三修,恒 false 是壳层重注历史+假警报的根因):
+ * 壳层带了续接意图且活会话 id 与之一致=真续上;否则如实报 false(壳层据此重注历史)。
+ */
+function sessionInfo(sess = state, resume) {
+  const asked = resume !== undefined ? resume : (sess.resumeAsked ?? null)
   const session = sess.session ?? {}
   const available = Array.isArray(session.models?.availableModels) ? session.models.availableModels : []
+  const sid = String(sess.sessionId ?? '')
   return {
-    sessionId: sess.sessionId ?? '',
-    resumed: false,
+    sessionId: sid,
+    resumed: asked ? sid === asked : true,
     ...(sess.steering ? { steering: true } : {}),
     agentInfo: sess.init?.agentInfo ?? null,
     authMethods: [],
@@ -684,8 +696,9 @@ export async function prompt(text, meta, images) {
        不再返回死路错误,而是用保留的启动参数自动重启一次并继续本条消息。 */
     console.warn('[cover-agent] prompt 时会话未就绪,自动重启…')
     /* 带 state.agentId 重启(2026-11-01):不传会回落默认角色,deepseek 会话死亡自愈
-       会被重启成别的角色人设(角色与默认不一致时 = 换人设续会话)。 */
-    const restarted = await startSession({ cwd: self.cwd, serverUrl: self.serverUrl, channelHome: self.channelHome, agent: self.agentId })
+       会被重启成别的角色人设(角色与默认不一致时 = 换人设续会话);
+       resume 带死亡前的会话 id(2026-11-12):自愈重启也续接,不丢对话 */
+    const restarted = await startSession({ cwd: self.cwd, serverUrl: self.serverUrl, channelHome: self.channelHome, agent: self.agentId, resume: self.sessionId ?? null })
     if (!restarted.ok) return { ok: false, error: `ACP 会话未启动(自动重启失败):${restarted.error}` }
     /* 重启后二次校验(2026-11-01 用户报障 Cannot read properties of null):startSession 返回 ok
        与实际发 prompt 之间存在竞态窗口——agent 进程可能在握手完成后立即退出(exit 看门狗置

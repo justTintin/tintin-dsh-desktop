@@ -188,9 +188,11 @@ const localAgents = {
     const r = await postJson('start', { agent }) as { ok: boolean; info?: Record<string, unknown>; error?: string };
     return r.ok && r.info ? { ok: true, info: sessionInfoOf(r.info) } : { ok: false, error: String(r.error ?? '会话启动失败') };
   },
-  start: async (agent: LocalAgentId, cwd: string, _resume?: string | null, _meta?: LocalAgentTurnMeta) => {
-    /* agent 透传(2026-10-31 名册双智能体):主进程按 id 分补丁/home/会话 */
-    const r = await postJson('start', { cwd, agent }) as { ok: boolean; key?: string; info?: Record<string, unknown>; error?: string };
+  start: async (agent: LocalAgentId, cwd: string, resume?: string | null, _meta?: LocalAgentTurnMeta) => {
+    /* agent 透传(2026-10-31 名册双智能体):主进程按 id 分补丁/home/会话;
+       resume 透传(2026-11-12):会话续接 id 交主进程,冷启动据此走 ACP session/resume;
+       resumed 如实回传,壳层据此决定是否重注历史 */
+    const r = await postJson('start', { cwd, agent, ...(resume ? { resume } : null) }) as { ok: boolean; key?: string; info?: Record<string, unknown>; error?: string };
     return r.ok && r.info
       ? { ok: true as const, key: String(r.key ?? 'cover'), info: sessionInfoOf(r.info) }
       : { ok: false as const, error: String(r.error ?? '会话启动失败') };
