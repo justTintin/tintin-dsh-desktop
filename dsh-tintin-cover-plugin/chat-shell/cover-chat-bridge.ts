@@ -297,17 +297,13 @@ function renderLibraryDrawer(): void {
     <div style="padding:8px 12px;border-bottom:1px solid var(--border, #3a3a3e)">
       <input class="tintin-lib-search" placeholder="搜索素材名" style="width:100%;box-sizing:border-box;background:var(--surface, #1c1c1e);border:1px solid var(--border, #3a3a3e);border-radius:8px;color:var(--text, #e8e8e6);font-size:12px;padding:6px 10px;outline:none" />
     </div>
-    <div class="tintin-lib-list" style="overflow-y:auto;flex:1 1 auto;min-height:0"></div>
-    <button class="tintin-lib-more" style="display:none;margin:0 12px 8px;padding:7px 0;border-radius:8px;border:1px solid var(--border, #3a3a3e);cursor:pointer;background:transparent;color:var(--text-muted, #b8b8b6);font-size:12px">加载更多</button>
-    <button class="tintin-lib-close2" style="margin:0 12px 10px;padding:8px 0;border-radius:8px;border:1px solid var(--border, #3a3a3e);cursor:pointer;background:transparent;color:var(--text-muted, #b8b8b6);font-size:12.5px">关闭</button>`;
+    <div class="tintin-lib-list" style="overflow-y:auto;flex:1 1 auto;min-height:0"></div>`;
   document.body.appendChild(el);
   drawerEl = el;
   positionLibraryDrawer();
   el.querySelector('.tintin-lib-close')?.addEventListener('click', () => setLibraryDrawer(false));
-  el.querySelector('.tintin-lib-close2')?.addEventListener('click', () => setLibraryDrawer(false));
   const state = el.querySelector('.tintin-lib-state') as HTMLElement;
   const list = el.querySelector('.tintin-lib-list') as HTMLElement;
-  const more = el.querySelector('.tintin-lib-more') as HTMLButtonElement;
   const adoptRow = (row: HTMLElement, item: Record<string, unknown>): void => {
     const btn = row.querySelector('.tintin-lib-dl') as HTMLElement;
     const id = String(item.material_id ?? item.id ?? '');
@@ -356,13 +352,11 @@ function renderLibraryDrawer(): void {
       if (reset) list.innerHTML = '';
       appendItems(items);
       const total = list.children.length;
-      state.textContent = `${total} 张${libraryPage.done ? '' : ' · 滚动或点击加载更多'}`;
-      more.style.display = libraryPage.done || total === 0 ? 'none' : 'block';
+      state.textContent = `${total} 张${libraryPage.done ? '' : ' · 滚动加载更多'}`;
     } catch (error) {
       state.textContent = String(error instanceof Error ? error.message : error);
     }
   };
-  more.addEventListener('click', () => { more.textContent = '加载中…'; void loadPage(false).then(() => { more.textContent = '加载更多'; }); });
   const search = el.querySelector('.tintin-lib-search') as HTMLInputElement;
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.addEventListener('input', () => {

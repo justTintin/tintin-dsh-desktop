@@ -487,3 +487,7 @@
 - **用户通道**(共享 shell):桥侧看门狗本就 emit `{kind:'task-stale',taskId,tool,ageMinutes}`(11-02 起),但渲染端无人消费。`openfilm-shell-src/chat`:`LocalAgentEvent` 联合类型加变体(desktop-bridge.ts);`listen()` 接住→`turn.notice('agent.taskStale', 动态文案)`(local-agent-run.ts;notice() 签名扩展可选 text,复用 notice-with-text 现成渲染分支);五语言 locale 增 `agent.taskStale`(zh/en/ja/ko/es,{tool}/{taskId}/{minutes} 插值,沿用 modelGone 的 `.replace` 函数惯用法)。
 - 当日事实勘误:failed/cancelled 终态分支与 error 原文回显 7.1 已实现且 13:11 已同步 win-unpacked(14:44 重启后生效),本次循环非终态处理缺失。另:上午 product 档两败(11:24/11:26)=服务端「LLM 输出含非 ASCII(全英文铁律)」误伤中文标题,服务端侧;person 档 `partial_failed` worker 内层根因仍待服务端日志。
 - 验证:package:dir 全编译链绿(stage.mjs+verify-cover-payload+tsc+vite+win-unpacked 重建);win-unpacked 载荷核验(tools 含 IMITATE_WAIT_STALE_TOTAL_MS/新 bundle DjVumVFK 含 taskStale/bridge 3 处 emit);修复期间 verify-hot-fresh 正确拦截「源码比产物新」(es.ts+并行会话 main-hook.ts),按指引改走全编译链。
+
+### 7.6 在线素材抽屉只留滚动加载(2026-11-12 晚;用户指图裁决「加载更多和关闭也删除,向下滚动就是加载更多」)
+
+- 底部「加载更多」「关闭」两按钮删除(cover-chat-bridge.ts):加载通道只留 7.1 已有的 scroll 近底触发(距底 60px,loading/done 双闸);关闭只留头部 ✕(close2 是它的第二份监听,一并拆);头部状态文案改「滚动加载更多」。载荷核验:新 bundle CKL9fLjv 无 tintin-lib-more/close2/按钮文本,门禁 verify-hot-fresh+verify-cover-payload 绿。
