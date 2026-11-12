@@ -52,3 +52,18 @@ export function staticFile(path: string): string {
 export function useRemotionEnvironment(): { isPlayer: boolean; isRendering: boolean } {
   return { isPlayer: false, isRendering: false }
 }
+
+// 2026-11-12 主体图 alpha 探针(templates/image-alpha.ts)新增触达的三个导出——编辑态(非
+// 渲染)没有渲染管线可挂,delayRender/continueRender 按上游语义做成空操作句柄;
+// getRemotionEnvironment 恒 isRendering:false → 探针不会真调 delayRender,仅为接口齐全。
+export function getRemotionEnvironment(): { isRendering: boolean } {
+  return { isRendering: false }
+}
+
+export function delayRender(_label?: string): number {
+  return -1
+}
+
+export function continueRender(_handle: number): void {
+  /* 编辑态空操作 */
+}

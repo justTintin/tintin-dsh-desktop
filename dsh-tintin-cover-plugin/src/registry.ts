@@ -103,7 +103,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     id: 'video', label: '视频缩略图·横屏', family: 'video', orientation: 'landscape',
     width: 1280, height: 720,
     component: VideoCover as ComponentType<VideoCoverProps>,
-    defaultProps: { hookLines: [], subtitle: '', subTag: '', brand: '', image: '' },
+    defaultProps: { hookLines: [], subtitle: '', subTag: '', brand: '', environment: '', image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 110 },
@@ -118,7 +118,7 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     id: 'video-portrait', label: '视频缩略图·竖屏', family: 'video', orientation: 'portrait',
     width: 1080, height: 1440,
     component: VideoCoverPortrait as ComponentType<VideoCoverProps>,
-    defaultProps: { hookLines: [], subtitle: '', subTag: '', brand: '', image: '' },
+    defaultProps: { hookLines: [], subtitle: '', subTag: '', brand: '', environment: '', image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 104 },

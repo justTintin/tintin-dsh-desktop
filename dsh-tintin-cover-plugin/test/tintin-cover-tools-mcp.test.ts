@@ -50,6 +50,13 @@ async function setup(opts: { renderCover?: (...args: unknown[]) => Promise<unkno
     })) as never,
     resolvePluginDir: () => pluginDir,
     ...(opts.resize ? { resize: opts.resize } : {}),
+    /* render_preview 走独立渲染子进程(2026-11-12 卡死根治);测试注入渲染缝=引擎
+       renderCover 同语义({templateId,props,fileName,outDir}),默认写 TINY_PNG 回 ok */
+    renderCover: opts.renderCover ?? (async (input: { fileName?: string; outDir?: string }) => {
+      const file = join((input as { outDir?: string }).outDir ?? coverDir, (input as { fileName?: string }).fileName ?? 'preview.png')
+      writeFileSync(file, TINY_PNG)
+      return { ok: true, file }
+    }),
   })
   const handler = handlers.get('/tintin/cover/api/tools-mcp')
   expect(handler).toBeTruthy()

@@ -293,7 +293,7 @@ export async function renderCover(input: RenderCoverInput): Promise<RenderCoverR
     {
       const { copyFileSync, statSync } = await import('node:fs')
       const layers = Array.isArray(inputProps.customLayers) ? (inputProps.customLayers as Array<{ image?: unknown }>) : []
-      const wanted = [inputProps.bgImage, inputProps.image, ...layers.map((l) => l.image)]
+      const wanted = [inputProps.bgImage, inputProps.environment, inputProps.image, ...layers.map((l) => l.image)]
         .filter((n): n is string => typeof n === 'string' && n !== '' && !/^(https?:|data:)/i.test(n))
         .map((n) => n.replace(/^public\//, ''))
       const servePublic = join(serveUrl, 'public')

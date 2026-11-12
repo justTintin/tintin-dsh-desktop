@@ -5,11 +5,12 @@ import React from 'react'
 import { AbsoluteFill } from 'remotion'
 import { CoverImg } from './CoverImg'
 import { imgDropShadow, lookBlend, lookOpacity, lookTransform } from './image-style'
+import { useImageHasAlpha } from './image-alpha'
 import { layerStyle, type StyleProps } from './text-style'
 import type { VideoCoverProps } from './VideoCover'
 import { CustomLayerOverlay, layerZ } from './CustomLayers'
 
-export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subtitle, subTag, brand, image, hiddenLayers = [], customLayers, layerOrder, styles }) => {
+export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subtitle, subTag, brand, environment, image, hiddenLayers = [], customLayers, layerOrder, styles }) => {
   const hidden = (id: string): boolean => hiddenLayers.includes(id)
   const hookStyle = layerStyle({ styles }, 'title', { fontSize: 104, color: '#ffffff' })
   const subtitleStyle = layerStyle({ styles }, 'subtitle', { fontSize: 38, color: '#bfdbfe' })
@@ -17,6 +18,8 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
   // 2026-11-01 对齐 PhotoCraft:翻转/宽高缩放/不透明度/混合模式,见 image-style.ts)
   const productOverride = styles?.product
   const productTransform = `translateX(-50%) translate(${productOverride?.dx ?? 0}px, ${productOverride?.dy ?? 0}px) ${lookTransform(productOverride)}`
+  // 主体图形态自适应(2026-11-12 用户报障「白背景和人混在一起」): 抠图(透明)免产品聚光装饰
+  const imageHasAlpha = useImageHasAlpha(image)
   /* 标题装饰条默认纵位(2026-11-11 拆层换算):标题块 top130 + 前各行行盒 + 末行缩小行盒(×0.88)
      + 原块内 marginTop20;字号被 styles.title.scale 覆盖时同步跟随 */
   const ruleLh = hookStyle.lineHeight ?? 1.2
@@ -26,12 +29,20 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
   return (
     <AbsoluteFill style={{ background: '#070b18' }}>
       {!hidden('environment') && (
-        <>
-          <AbsoluteFill style={{ background: 'radial-gradient(760px 900px at 50% 38%, #1d2b6e 0%, #0b1026 58%, #070b18 100%)' }} />
-          <div style={{ position: 'absolute', inset: -80, background: 'repeating-linear-gradient(115deg, transparent 0 90px, rgba(79,124,255,0.08) 90px 100px)' }} />
-          <div style={{ position: 'absolute', right: -160, top: -160, width: 520, height: 520, borderRadius: '50%', background: 'radial-gradient(circle, rgba(34,211,238,0.4), rgba(34,211,238,0) 68%)' }} />
-          <div style={{ position: 'absolute', left: -140, bottom: -180, width: 480, height: 480, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,70,229,0.5), rgba(79,70,229,0) 70%)' }} />
-        </>
+        /* 环境图吃真图(2026-11-12 用户报障: 生成的背景图被静默丢弃——本图层此前只有
+           内置渐变装饰, props.environment 从未被消费, 图层面板却显示文件名=假象)。
+           设了 environment=渲染该图为底层;未设=保留内置渐变。 */
+        environment ? (
+          <CoverImg name={environment} layerId="environment"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: layerZ(layerOrder, 'environment') }} />
+        ) : (
+          <>
+            <AbsoluteFill style={{ background: 'radial-gradient(760px 900px at 50% 38%, #1d2b6e 0%, #0b1026 58%, #070b18 100%)' }} />
+            <div style={{ position: 'absolute', inset: -80, background: 'repeating-linear-gradient(115deg, transparent 0 90px, rgba(79,124,255,0.08) 90px 100px)' }} />
+            <div style={{ position: 'absolute', right: -160, top: -160, width: 520, height: 520, borderRadius: '50%', background: 'radial-gradient(circle, rgba(34,211,238,0.4), rgba(34,211,238,0) 68%)' }} />
+            <div style={{ position: 'absolute', left: -140, bottom: -180, width: 480, height: 480, borderRadius: '50%', background: 'radial-gradient(circle, rgba(79,70,229,0.5), rgba(79,70,229,0) 70%)' }} />
+          </>
+        )
       )}
 
       {!hidden('subTag') && (
@@ -76,21 +87,25 @@ export const VideoCoverPortrait: React.FC<VideoCoverProps> = ({ hookLines, subti
 
       {!hidden('product') && (
         <div data-cover-layer="product" style={{ position: 'absolute', left: '50%', bottom: 250, transform: productTransform, width: 620, height: 620, zIndex: layerZ(layerOrder, 'product'), opacity: lookOpacity(productOverride), mixBlendMode: lookBlend(productOverride) }}>
-          {image ? (
+          {/* 产品聚光装饰(白辉光盘/虚线圈/-8° 倾斜/径向渐隐)只属于不透明产品照;
+              人物抠图(透明)免装饰只留投影, 否则人被白盘罩住(2026-11-12 用户报障) */}
+          {image && !imageHasAlpha ? (
           <div style={{ position: 'absolute', inset: 40, borderRadius: '50%', background: 'radial-gradient(circle, #f8fafc 0%, #cbd5e1 42%, rgba(203,213,225,0) 72%)' }} />
           ) : null}
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)' }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', transform: imageHasAlpha ? undefined : 'rotate(-8deg)' }}>
             <CoverImg
               name={image}
               style={{
                 width: 540, height: 540, objectFit: 'contain',
-                WebkitMaskImage: 'radial-gradient(circle, black 58%, transparent 76%)',
-                maskImage: 'radial-gradient(circle, black 58%, transparent 76%)',
+                ...(imageHasAlpha ? {} : {
+                  WebkitMaskImage: 'radial-gradient(circle, black 58%, transparent 76%)',
+                  maskImage: 'radial-gradient(circle, black 58%, transparent 76%)',
+                }),
                 filter: imgDropShadow(productOverride) ?? 'drop-shadow(0 30px 50px rgba(0,0,0,0.55))',
               }}
             />
           </div>
-          {image ? (
+          {image && !imageHasAlpha ? (
           <div style={{ position: 'absolute', inset: 26, borderRadius: '50%', border: '3px dashed rgba(34,211,238,0.5)' }} />
           ) : null}
         </div>

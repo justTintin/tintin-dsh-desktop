@@ -34,9 +34,10 @@
 // 协议面: 与 tintin-server 同款 JSON-RPC 2.0(会话经 mcp-session-id 头透传, 本端点无状态);
 // 响应 application/json(同 tintin-server 先例, dsh-mcp-client 可解析)。
 // 信任面: 仅 loopback(isTrustedRequest(req, true))——模型客户端在本机子进程内。
+import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, isAbsolute, join, resolve as resolvePath, sep } from 'node:path'
 import { MODEL_SAFE_RAW_BYTES, imageMetaText, modelTooLargeText, shrinkForModelRead } from './cover-image-resize.js'
 
@@ -166,7 +167,7 @@ async function saveGeneratedImage(serverUrl, outputUrl, outName, coverDir, plugi
 
 /** 工具实现: read_image → [{image}] / matting → 落盘+文本 / render_preview → [{image}]。
  *  pollIntervalMs(测试注入口): imitate_cover_wait 的轮询间隔,缺省 3s。 */
-export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, pollIntervalMs = COVER_POLL_INTERVAL_MS, resize = shrinkForModelRead }) {
+export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, pollIntervalMs = COVER_POLL_INTERVAL_MS, resize = shrinkForModelRead, renderCover: renderCoverInjected }) {
   const assetTargets = () => {
     const dir = resolvePluginDir()
     return dir ? [join(dir, 'public'), join(dir, 'dist', 'editor'), join(dir, 'dist', 'remotion-bundle', 'public')] : []
@@ -479,6 +480,40 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     }
   }
 
+  /** 渲染子进程(2026-11-12 用户报障「选保人方案后卡死」根治): 之前 renderCover 在**主进程内**
+   *  import('@remotion/renderer')+渲染, 该链路在应用进程里会永挂(实证: 同一 engine.mjs 裸
+   *  Electron 1.5s 渲完, 应用内 render_preview 三连挂且挂起期间主进程事件循环仍存活(其它
+   *  RPC 3-6ms 即答)——挂点在引擎的 90s 竞速 armed 之前的动态 import 里, 竞速永远没机会
+   *  触发; 智能体侧只能等 undici 300s headers 超时报 `fetch failed` 再无限重试=卡死观感)。
+   *  改为独立 node 子进程跑引擎既有 CLI(dist/engine.mjs <templateId> @propsFile fileName,
+   *  输出 JSON)——主进程零 Remotion import, 挂不回去; 异步 spawn 不阻塞事件循环,
+   *  超时 taskkill 杀树(Windows spawnSync 杀不掉孙进程的教训)。 */
+  const runEngineRender = ({ engineCliPath, templateId, propsFile, fileName, coverDir, timeoutMs = 180_000 }) => new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [engineCliPath, templateId, '@' + propsFile, fileName], {
+      cwd: coverDir,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', TINTIN_COVER_DIR: coverDir },
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let out = ''
+    child.stdout.on('data', (c) => { out += c })
+    child.stderr.on('data', () => { /* chromium/Remotion 噪音:不入结果 */ })
+    const timer = setTimeout(() => {
+      try { spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { /* 尽力杀 */ }
+      reject(new Error(`渲染超时(${Math.round(timeoutMs / 1000)}s,子进程已终止)——可重试;反复出现请反馈`))
+    }, timeoutMs)
+    child.on('error', (e) => { clearTimeout(timer); reject(new Error(`渲染子进程启动失败:${e.message}`)) })
+    child.on('exit', (code) => {
+      clearTimeout(timer)
+      const line = out.trim().split(/\r?\n/).filter((l) => l.startsWith('{')).pop()
+      let parsed = null
+      try { parsed = JSON.parse(line ?? 'null') } catch { /* 非法输出按退出码处理 */ }
+      if (code !== 0) reject(new Error(parsed?.error ? `渲染失败:${parsed.error}` : `渲染子进程退出码 ${code}`))
+      else if (!parsed || typeof parsed !== 'object') reject(new Error(`渲染子进程输出无法解析:${out.slice(-200)}`))
+      else resolve(parsed)
+    })
+  })
+
   const renderPreview = async (args) => {
     const engine = await loadEngine()
     const coverDir = await engine.resolveCoverDir()
@@ -488,7 +523,28 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     const props = { ...(doc.props && typeof doc.props === 'object' ? doc.props : {}) }
     if (Array.isArray(doc.hiddenLayers)) props.hiddenLayers = doc.hiddenLayers
     const fileName = typeof args?.fileName === 'string' && args.fileName.trim() ? args.fileName.trim() : `preview-${Date.now()}.png`
-    const result = await engine.renderCover({ templateId: String(doc.templateId || ''), props, fileName, outDir: coverDir })
+    /* 子进程渲染:合并后的 props 落临时文件走引擎 CLI(@文件形态=纯 props 对象), 用完即清。
+       注入的 renderCover(测试缝)=跳过子进程, 语义同引擎 renderCover({templateId,props,fileName,outDir})。 */
+    const pluginDir = resolvePluginDir()
+    let result
+    if (typeof renderCoverInjected === 'function') {
+      result = await renderCoverInjected({ templateId: String(doc.templateId || ''), props, fileName, outDir: coverDir })
+    } else {
+      if (!pluginDir) throw new Error('封面插件目录不存在')
+      const propsFile = join(coverDir, `.render-props-${Date.now()}.json`)
+      writeFileSync(propsFile, JSON.stringify(props, null, 1))
+      try {
+        result = await runEngineRender({
+          engineCliPath: join(pluginDir, 'dist', 'engine.mjs'),
+          templateId: String(doc.templateId || ''),
+          propsFile,
+          fileName,
+          coverDir,
+        })
+      } finally {
+        try { rmSync(propsFile, { force: true }) } catch { /* 清理失败不阻断 */ }
+      }
+    }
     if (!result?.ok || !result.file || !existsSync(result.file)) {
       throw new Error(`渲染失败:${result?.error ?? '未知错误'}`)
     }
@@ -608,8 +664,8 @@ export function createCoverToolsRpc(deps) {
 }
 
 /** 在封面 webServer 上注册 tools-mcp 端点(页面侧可达面); 返回 dispose。 */
-export function registerCoverToolsMcp({ webServer, isTrustedRequest, sendJson, getServerUrl, loadEngine, resolvePluginDir, resize }) {
-  const handleRpc = createCoverToolsRpc({ getServerUrl, loadEngine, resolvePluginDir, ...(resize ? { resize } : {}) })
+export function registerCoverToolsMcp({ webServer, isTrustedRequest, sendJson, getServerUrl, loadEngine, resolvePluginDir, resize, renderCover }) {
+  const handleRpc = createCoverToolsRpc({ getServerUrl, loadEngine, resolvePluginDir, ...(resize ? { resize } : {}), ...(renderCover ? { renderCover } : {}) })
   const dispose = webServer.register({
     kind: 'exact',
     path: MCP_PATH,
@@ -638,9 +694,9 @@ export function registerCoverToolsMcp({ webServer, isTrustedRequest, sendJson, g
  *  所以工具端点自带随机 token 闸独立监听 127.0.0.1:随机端口;补丁行 mcp-cover-tools
  *  经 dsh-mcp-client 的 headers 配置带令牌(cover-acp-bridge.js writePatch)。
  *  返回 { url, token, dispose }。 */
-export function startCoverToolsServer({ getServerUrl, loadEngine, resolvePluginDir, resize, port = 0 }) {
+export function startCoverToolsServer({ getServerUrl, loadEngine, resolvePluginDir, resize, renderCover, port = 0 }) {
   const token = randomUUID().replaceAll('-', '')
-  const handleRpc = createCoverToolsRpc({ getServerUrl, loadEngine, resolvePluginDir, ...(resize ? { resize } : {}) })
+  const handleRpc = createCoverToolsRpc({ getServerUrl, loadEngine, resolvePluginDir, ...(resize ? { resize } : {}), ...(renderCover ? { renderCover } : {}) })
   const server = createServer((req, res) => {
     if (req.headers['x-tintin-cover-tools-token'] !== token) {
       res.writeHead(401, { 'content-type': 'application/json' })
