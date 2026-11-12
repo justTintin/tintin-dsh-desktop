@@ -118,6 +118,7 @@ export const zhCN: Words = {
   agent: {
     contextCompacted: '之前的对话已折叠为摘要',
     sessionNotResumed: 'Agent 无法打开之前的会话，已把到目前为止的对话交给它',
+    taskStale: '任务 {taskId}（{tool}）已等待 {minutes} 分钟仍未到终态——疑似服务端任务僵死，可让智能体取消该任务',
     modelGone: '这个智能体已不再提供 {model}，请重新选择模型。',
     settingFailed: '无法将 {setting} 设为 {value}：{error}',
     settingRejected: '智能体无法应用这项设置。',

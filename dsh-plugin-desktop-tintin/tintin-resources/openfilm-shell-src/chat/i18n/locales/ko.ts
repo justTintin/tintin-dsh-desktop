@@ -114,6 +114,7 @@ export const ko: Words = {
   agent: {
     contextCompacted: '이전 대화를 요약으로 정리했습니다',
     sessionNotResumed: '에이전트가 이전 세션을 열 수 없어 지금까지의 대화를 전달했습니다',
+    taskStale: '작업 {taskId}({tool})이 {minutes}분 후에도 종료 상태에 도달하지 않았습니다. 서버 작업이 멈춘 것으로 보이며 에이전트에게 취소를 요청할 수 있습니다',
     modelGone: '이 에이전트는 더 이상 {model}을(를) 제공하지 않습니다. 모델을 다시 선택하세요.',
     settingFailed: '{setting}을(를) {value}(으)로 설정하지 못했습니다: {error}',
     settingRejected: '에이전트가 이 설정을 적용하지 못했습니다.',

@@ -478,3 +478,12 @@
 - **缩略图**(vendor 三文件,锚点登记 143):`mention-menu.ts` MentionItem 增可选 `thumbUrl`;`MentionMenuPlugin.tsx` 行首有缩略图时 `<img object-cover>` 盖在图标上,加载失败 `onError` 移除=图标回退,死链零视觉回归;`App.tsx` asset provider 透传 host 给的 `thumbUrl`(提供方中性——影片侧不传即无感)。封面桥 projectFiles 对图片条目拼同源 `/tintin/cover/api/acp/asset?name=...` 缩略地址。
 - **删素材清三写位**(方案 7,cover-plugin-route.js delete-asset):原只删项目目录副本;现扫其余项目 cover.props.json(引用面=ensureCoverAssets 同语义 image/bgImage/customLayers[].image),**无他项目引用才清三写位**,有引用保留并回 `keptInAssets+referencedBy`(public/ 跨项目共享口径,原注释约束保留),素材条删除菜单如实提示;当前项目自身引用不拦(用户明确删,渲染如实报缺)。
 - 测试:tintin-cover-acp.test.ts 增删素材两用例(无引用=三写位同清/他项目引用=保留+回执),20 用例全绿;check:tintin 143 锚点/86 文档全绿+载荷新鲜。
+
+### 7.5 任务僵死双通道止损(2026-11-12 晚批;1112 当天实机复测事故)
+
+同日实机复测(14:46-15:11 人物档仿封面轮)暴露 7.1 的残余缺口:服务端 `/generate/cover` person 任务 30+ 分钟不落终态(看门狗 15:24=创建+30min 仍「未观察到终态」;事后查服务端 `/tasks/unified/{id}` 四任务全部 `partial_failed failed_shots=['cover']`,失败发生在取消之后),客户端按 7.1 设计无限 `settled:false` 续等——智能体每 2-3 秒一次 working 刷满聊天面 25 分钟直至用户手停。修=双通道止损:
+
+- **智能体通道**(cover-tools-mcp.js):`imitate_cover_wait` 加跨续等累计记账(`waitClock`,单次 timeoutS 全额计入);**累计 ≥30 分钟**(与桥侧看门狗 ASYNC_TASK_BUDGET_MINUTES 同预算)后 `settled:false` 升级为 **`stale:true`+停手指令**(如实转述/不再续等/可 cancel:true)——notice 只到用户聊天面,这是智能体唯一可见的止损信号。终态(completed/failed/cancelled/cancel)清账。
+- **用户通道**(共享 shell):桥侧看门狗本就 emit `{kind:'task-stale',taskId,tool,ageMinutes}`(11-02 起),但渲染端无人消费。`openfilm-shell-src/chat`:`LocalAgentEvent` 联合类型加变体(desktop-bridge.ts);`listen()` 接住→`turn.notice('agent.taskStale', 动态文案)`(local-agent-run.ts;notice() 签名扩展可选 text,复用 notice-with-text 现成渲染分支);五语言 locale 增 `agent.taskStale`(zh/en/ja/ko/es,{tool}/{taskId}/{minutes} 插值,沿用 modelGone 的 `.replace` 函数惯用法)。
+- 当日事实勘误:failed/cancelled 终态分支与 error 原文回显 7.1 已实现且 13:11 已同步 win-unpacked(14:44 重启后生效),本次循环非终态处理缺失,而是服务端终态迟到+无人喊停。
+- 验证:package:dir 全编译链绿(stage.mjs+verify-cover-payload+tsc+vite+win-unpacked 重建);win-unpacked 载荷核验(tools 含 IMITATE_WAIT_STALE_TOTAL_MS/新 bundle DjVumVFK 含 taskStale/bridge 3 处 emit);修复期间 verify-hot-fresh 正确拦截「源码比产物新」(es.ts+并行会话 main-hook.ts),按指引改走全编译链。

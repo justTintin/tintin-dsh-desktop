@@ -50,6 +50,12 @@ const COVER_POLL_INTERVAL_MS = 3000
 const IMITATE_WAIT_DEFAULT_S = 420
 const IMITATE_WAIT_MAX_S = 540
 const COVER_MAX_REF_IMAGES = 4
+/* 续等累计僵死线(2026-11-12): 与桥侧看门狗 ASYNC_TASK_BUDGET_MINUTES(30) 同预算。settled:false
+   的「仍在服务端执行」对超预算任务是误导——今天实测任务 30 分钟不落终态, 模型无限续等刷满
+   聊天面。跨多次续等记账, 到线改发 stale:true + 停手指令(智能体看不见会话面 notice, 这是
+   它唯一的止损通道)。 */
+const IMITATE_WAIT_STALE_TOTAL_MS = 30 * 60 * 1000
+const waitClock = new Map()
 
 /** 文件头魔数 → mime(不认识的返回 null)。 */
 function magicMime(bytes) {
@@ -406,6 +412,7 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     if (!/^[A-Za-z0-9_-]{4,64}$/.test(taskId)) throw new Error('缺少/非法 task_id(传 imitate_cover 返回的 taskId)')
     if (args?.cancel === true) {
       const cancelledCount = await cancelUnifiedTasks(serverUrl, [taskId])
+      waitClock.delete(taskId)
       return {
         content: [{ type: 'text', text: JSON.stringify({ ok: true, taskId, cancelled: cancelledCount > 0, cancelledCount, note: cancelledCount > 0 ? '服务端任务已取消,不再继续等待。' : '服务端未取消该任务(可能已到终态)——用 task_status_unified 查确认状态。' }, null, 1) }],
       }
@@ -418,14 +425,25 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     for (;;) {
       last = await fetchUnifiedTask(serverUrl, taskId)
       const status = String(last?.status ?? '')
-      if (status === 'completed') break
+      if (status === 'completed') { waitClock.delete(taskId); break }
       if (status === 'failed' || status === 'cancelled') {
+        waitClock.delete(taskId)
         throw new Error(`生成失败(${status}):${String(last?.error ?? last?.last_message ?? '无错误详情').slice(0, 400)}`)
       }
       if (Date.now() > deadline) {
+        const totalMs = (waitClock.get(taskId)?.totalMs ?? 0) + timeoutS * 1000
+        waitClock.set(taskId, { totalMs })
+        const stale = totalMs >= IMITATE_WAIT_STALE_TOTAL_MS
         const progress = Number(last?.progress)
         return {
-          content: [{ type: 'text', text: JSON.stringify({ ok: true, settled: false, taskId, status: status || 'unknown', waitedS: timeoutS, ...(Number.isFinite(progress) ? { progress } : {}), note: `${timeoutS}s 未到终态,任务仍在服务端执行(不丢失)。再次调用 imitate_cover_wait(task_id=本 id) 续等;确定不要了传 cancel:true 取消服务端任务。` }, null, 1) }],
+          content: [{ type: 'text', text: JSON.stringify({
+            ok: true, settled: false, ...(stale ? { stale: true } : {}),
+            taskId, status: status || 'unknown', waitedS: timeoutS, waitedTotalS: Math.round(totalMs / 1000),
+            ...(Number.isFinite(progress) ? { progress } : {}),
+            note: stale
+              ? `已累计等待 ${Math.round(totalMs / 60000)} 分钟仍未到终态——疑似服务端任务僵死。停止续等:把这一情况如实转述给用户,不要再调用本工具等这个 task_id;用户不要该结果时可对该 task_id 传 cancel:true 取消服务端任务。`
+              : `${timeoutS}s 未到终态,任务仍在服务端执行(不丢失,已累计等待 ${Math.round(totalMs / 60000)} 分钟)。再次调用 imitate_cover_wait(task_id=本 id) 续等;确定不要了传 cancel:true 取消服务端任务。`,
+          }, null, 1) }],
         }
       }
       await new Promise((r) => setTimeout(r, pollIntervalMs))

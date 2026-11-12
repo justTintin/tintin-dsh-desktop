@@ -118,6 +118,7 @@ export const es: Words = {
   agent: {
     contextCompacted: 'La conversación anterior se resumió',
     sessionNotResumed: 'El agente no pudo reabrir su sesión anterior; se le pasó la conversación hasta ahora',
+    taskStale: 'La tarea {taskId} ({tool}) lleva {minutes} minutos sin estado final: la tarea del servidor parece bloqueada; puedes pedir al agente que la cancele',
     modelGone: 'Este agente ya no ofrece {model}. Vuelve a elegir un modelo.',
     settingFailed: 'No se pudo poner {setting} en {value}: {error}',
     settingRejected: 'El agente no pudo aplicar este ajuste.',

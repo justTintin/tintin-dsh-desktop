@@ -118,6 +118,7 @@ export const enUS = {
   agent: {
     contextCompacted: 'Earlier conversation folded into a summary',
     sessionNotResumed: 'The agent could not reopen its earlier session, so it was given the conversation so far',
+    taskStale: 'Task {taskId} ({tool}) has had no terminal state for {minutes} minutes — the server task looks stuck; you can ask the agent to cancel it',
     modelGone: 'This agent no longer offers {model}. Choose a model again.',
     settingFailed: 'Couldn’t set {setting} to {value}: {error}',
     settingRejected: 'The agent couldn’t apply this setting.',
