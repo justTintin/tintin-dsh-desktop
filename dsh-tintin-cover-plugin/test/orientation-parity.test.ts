@@ -1,7 +1,9 @@
-// 横竖屏双模式回归矩阵(2026-11-12 用户裁决:默认竖屏 + 切换比例迁移 + 两模式效果一致):
+// 横竖屏双模式回归矩阵(2026-11-12 用户裁决:默认竖屏 + 切换比例迁移 + 两模式效果一致;
+// 同日晚批:图片层迁移语义按种类分派——背景组统一比例居中,其余层丢弃显式 height
+// 重链接纵横比,根因=显式 height 按 wr/hr 各自映射把盒子长宽比翻转≈3倍=渲染拉伸变形):
 // · 默认模板=video-portrait(方案B);
-// · setOrientation 迁移:customLayers x/y/width/height、styles dx/dy/sx/sy、参考线、选中线;
-// · 往返(video→portrait→video)漂移≤2px(两次 Math.round 的取整上界);
+// · setOrientation 迁移:customLayers x/y/width(普通层 height 丢弃)、styles dx/dy/sx/sy、参考线、选中线;
+// · 往返(video→portrait→video)漂移≤2px(两次 Math.round 的取整上界;图片层 height 不再往返保持);
 // · setTemplate=换文档,参考线作废;setOrientation=同文档迁移,参考线保留;
 // · 参考线建线夹取语义两模板一致(addUserGuide 按当前模板界限拒绝越界)。
 import { describe, expect, it, beforeEach } from 'vitest'
@@ -23,25 +25,35 @@ describe('setOrientation 比例迁移(方案1)', () => {
     useEditor.setState({
       props: {
         ...s.props,
-        customLayers: [{ id: 'img-a', image: 'a.png', x: 1150, y: 650, width: 360, height: 120 }],
+        customLayers: [
+          { id: 'img-a', image: 'a.png', x: 1150, y: 650, width: 360, height: 120 },
+          { id: 'img-bg', image: 'bg.png', x: 0, y: 0, width: 1280, height: 720, group: 'environment' },
+        ],
         styles: { title: { dx: 100, dy: 50, sx: 1.2, sy: 1.2 }, subtitle: { dy: -30 } },
-        layerOrder: [...getTemplate('video').layerDefs.map((l) => l.id), 'img-a'],
+        layerOrder: [...getTemplate('video').layerDefs.map((l) => l.id), 'img-a', 'img-bg'],
       },
       userGuides: { h: [600, 610], v: [1200] },
       selectedGuide: { axis: 'h', pos: 600 },
     })
   })
 
-  it('video→video-portrait:图层几何/位移/参考线按比例落位', () => {
+  it('video→video-portrait:普通层几何按比例落位+显式 height 重链接;背景组统一比例居中', () => {
     S().setOrientation('portrait')
     const s = S()
     expect(s.templateId).toBe('video-portrait')
-    const l = (s.props.customLayers as Array<{ x: number; y: number; width: number; height: number }>)[0]!
-    // wr=1080/1280=0.84375, hr=1440/720=2.0;x 轴量跟 wr、y 轴量跟 hr
+    const ls = s.props.customLayers as Array<{ id: string; x: number; y: number; width: number; height?: number; group?: string }>
+    const l = ls.find((x) => x.id === 'img-a')!
+    // wr=1080/1280=0.84375, hr=1440/720=2.0;x 轴量跟 wr、y 轴量跟 hr;height 丢弃(重链接)
     expect(l.x).toBe(Math.round(1150 * 0.84375)) // 970
     expect(l.y).toBe(650 * 2) // 1300
     expect(l.width).toBe(Math.round(360 * 0.84375)) // 304
-    expect(l.height).toBe(120 * 2) // 240
+    expect(l.height).toBeUndefined()
+    const bg = ls.find((x) => x.id === 'img-bg')!
+    // s=max(0.84375,2)=2:统一比例(盒子纵横比 1280/720 不变=不变形),画布居中
+    expect(bg.width).toBe(2560)
+    expect(bg.height).toBe(1440)
+    expect(bg.x).toBe(Math.round((1080 - 2560) / 2)) // -740
+    expect(bg.y).toBe(0)
     const styles = s.props.styles as Record<string, { dx?: number; dy?: number; sx?: number; sy?: number }>
     expect(styles.title!.dx).toBe(Math.round(100 * 0.84375)) // 84
     expect(styles.title!.dy).toBe(50 * 2) // 100
@@ -53,19 +65,23 @@ describe('setOrientation 比例迁移(方案1)', () => {
     expect(s.selectedGuide).toEqual({ axis: 'h', pos: 1200 })
   })
 
-  it('往返 video→portrait→video 漂移≤2px', () => {
+  it('往返 video→portrait→video 漂移≤2px(图片层 height 例外:重链接后为 undefined)', () => {
     const before = {
-      layer: { x: 1150, y: 650, width: 360, height: 120 },
+      layer: { x: 1150, y: 650, width: 360 },
       dx: 100, dy: 50, guideV: 1200, guideH: 600,
     }
     S().setOrientation('portrait')
     S().setOrientation('landscape')
     const s = S()
-    const l = (s.props.customLayers as Array<{ x: number; y: number; width: number; height: number }>)[0]!
+    const ls = s.props.customLayers as Array<{ id: string; x: number; y: number; width: number; height?: number }>
+    const l = ls.find((x) => x.id === 'img-a')!
     expect(Math.abs(l.x - before.layer.x)).toBeLessThanOrEqual(2)
     expect(Math.abs(l.y - before.layer.y)).toBeLessThanOrEqual(2)
     expect(Math.abs(l.width - before.layer.width)).toBeLessThanOrEqual(2)
-    expect(Math.abs(l.height - before.layer.height)).toBeLessThanOrEqual(2)
+    expect(l.height).toBeUndefined()
+    const bg = ls.find((x) => x.id === 'img-bg')!
+    // 背景组统一比例往返不保尺寸(居中语义不可逆),但纵横比必须不变=永不变形
+    expect(bg.width / bg.height).toBeCloseTo(1280 / 720, 1)
     const styles = s.props.styles as Record<string, { dx?: number; dy?: number }>
     expect(Math.abs(styles.title!.dx! - before.dx)).toBeLessThanOrEqual(2)
     expect(Math.abs(styles.title!.dy! - before.dy)).toBeLessThanOrEqual(2)

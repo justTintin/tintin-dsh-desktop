@@ -281,15 +281,35 @@ export const useEditor = create<EditorState>()(
           }
           const merged: Record<string, unknown> = { ...next.defaultProps }
           for (const [k, v] of Object.entries(s.props)) if (k in merged && k !== 'styles') merged[k] = v
-          // 自定义图层与 z 序跨变体保留(图片不因横竖切换丢失)+ 几何按轴比例映射
+          // 自定义图层与 z 序跨变体保留(图片不因横竖切换丢失)。迁移语义按图层种类分派
+          // (2026-11-12 横屏变形定案:带显式 height 的图片层按 wr/hr 各自映射,盒子长宽比
+          // 被翻转≈3 倍(0.56 vs 1.78),渲染强制拉伸=变形;截图实证 bg-glasses 竖图 1268×949):
+          // · environment 组=「铺满画布」意图:统一比例 s=max(wr,hr)迁移(盒子纵横比不变
+          //   =永不变形),画布居中(背景意图=盖住画布,居中即 cover 语义);
+          // · 其余图片层:宽按 wr 迁移,**丢弃显式 height 重新链接纵横比**(1111 解链的
+          //   精确比例在切换时让位于不变形,height 渲染随图片纵横比)。
           const layers = Array.isArray(s.props.customLayers) ? (s.props.customLayers as CustomLayer[]) : []
-          merged.customLayers = layers.map((l) => ({
-            ...l,
-            x: Math.round(l.x * wr),
-            y: Math.round(l.y * hr),
-            width: Math.max(20, Math.round(l.width * wr)),
-            ...(typeof l.height === 'number' && l.height > 0 ? { height: Math.max(20, Math.round(l.height * hr)) } : {}),
-          }))
+          merged.customLayers = layers.map((l) => {
+            if (l.group === 'environment') {
+              const coverScale = Math.max(wr, hr)
+              const nw = Math.max(20, Math.round(l.width * coverScale))
+              const nh = typeof l.height === 'number' && l.height > 0 ? Math.max(20, Math.round(l.height * coverScale)) : undefined
+              return {
+                ...l,
+                width: nw,
+                ...(nh !== undefined ? { height: nh } : {}),
+                x: Math.round((next.width - nw) / 2),
+                ...(nh !== undefined ? { y: Math.round((next.height - nh) / 2) } : { y: Math.round(l.y * hr) }),
+              }
+            }
+            return {
+              ...l,
+              x: Math.round(l.x * wr),
+              y: Math.round(l.y * hr),
+              width: Math.max(20, Math.round(l.width * wr)),
+              height: undefined,
+            }
+          })
           merged.layerOrder = effectiveOrder(s)
           // 文字/图片图层位移与槽位缩放按各自轴映射(sx 跟宽比、sy 跟高比)
           const styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
