@@ -558,7 +558,10 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
             </div>
           )
         }
-        if (layer.type === 'product' || key === 'bgImage') {
+        /* 环境层同样是图片操作(2026-11-13 用户报障「点环境图出的是改名字」):7.8 起 video 族
+           环境图键=environment(propsKey 缺省),旧条件只认 product/bgImage,字符串文件名
+           掉进装饰文案分支——显式按 type 放行。 */
+        if (layer.type === 'product' || layer.type === 'environment' || key === 'bgImage') {
           return <ImageLayerEditor layerId={layer.id} layerLabel={layerNames[layer.id] ?? layer.label} propKey={key} project={project} />
         }
         if (typeof value === 'string') {

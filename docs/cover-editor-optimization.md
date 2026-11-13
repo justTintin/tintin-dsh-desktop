@@ -545,6 +545,12 @@ acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目�
 - 本机处置:config.json 预种 `photocraft.dir=D:/localprogram/photocraft-0.22.0-windows-x64-portable`(正斜杠路径,Windows 全链接受;首种反斜杠被 shell 转义吃掉=踩坑记录);安装版 lib 两文件已同步,刷新编辑器页生效。
 - 验证:插件全量 182 用例绿;载荷重打 EXIT=0(photocraft 消失 ✓,remotion 缓存仍在 ✓);两套定位器同契约。**教训:engine.ts 旧定位器第 5 候选 `'D:\localprogram\…'` 的 `\l` 非法转义丢反斜杠=该候选从未生效(与 lib 硬编码并存的双份死代码);「改默认值/改落位」类裁决要同步清点所有独立定位器副本。**
 
+### 7.16 环境图层属性面板掉进装饰文案分支(2026-11-13 晚;用户报「点环境图出的是改名字,不该是图片操作吗」)
+
+- 根因:layers-panel.tsx 属性分支只认 `type==='product' || key==='bgImage'` 走图片编辑;7.8 起 video 族环境图键换 `environment`(layerDefs 无 propsKey→键=layer.id),字符串文件名值掉进「装饰层文案」通用分支——用户点环境图看到的是文件名文本框+文案提示,而非图片操作(换图/AI 生成底图/缩放)。
+- 修=分支显式放行 `layer.type==='environment'`(ImageLayerEditor 对 propKey 通用,含空值换图/AI 生成流)。**教训:props 键改名/迁移(7.8 environment 键)必须同步清点按键字面量分支的消费方——面板/引擎/路由三类。**
+- 验证:182/182;双载荷重打+安装版 dist/editor 同步(编辑器页刷新生效)。
+
 ### 7.8 保人方案三修:渲染子进程化 + 白盘形态自适应 + 环境图吃真图(2026-11-12 晚三;用户四问「选保人方案为什么卡死/白背景和人混在一起/生成图为什么在项目文件夹/人物为什么用 product」)
 
 - **卡死根因(取证链)**:会话 zstd 解包还原保人 turn 全时间线——imitate_cover 人物档三连败(人脸相似度 0.482/0.389 低于 0.65 门)→模型转方案 B(复用旧抠图+旧背景写 props)→render_preview 三连挂:每次 ~304s 报 `Error: fetch failed`(undici 300s headers 超时形状)→模型无限重试=「仍在处理」卡死观感。深挖排除:同一 engine.mjs 裸 node 2.16s/裸 Electron 1.5s 渲完(排除引擎);运行包两份 engine 副本都带 90s 竞速超时;**挂起期间主进程事件循环存活**(initialize/tools/list 3-6ms 即答)且**无 chrome-headless-shell 进程**(排除 spawnSync 阻塞/渲染内部挂);外部复现 tools/call render_preview=304451ms HeadersTimeoutError。定案=**主进程内 `import('@remotion/renderer')`(引擎 90s 竞速 armed 之前的懒加载)在应用进程里永挂**,竞速从未 armed。修=**render_preview 改独立 node 子进程跑引擎既有 CLI**(dist/engine.mjs templateId @propsFile fileName 输出 JSON;ELECTRON_RUN_AS_NODE=1+process.execPath;异步 spawn 不阻塞循环;180s 超时 taskkill /T /F 杀树;@文件=纯 props 对象,wrapper 形态会报「hookLines 不能为空」实测)。取证教训:debug.log 的 puppeteer profile chromium 条目(photocraft spawnSync 所写)时间戳滞后,是红鲱鱼不可当时间线。
