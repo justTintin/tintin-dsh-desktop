@@ -7,7 +7,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameS
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { getTemplate, listTemplates, validateProps } from './registry.ts'
+import { getTemplate, listTemplates, normalizeTitleOrder, validateProps } from './registry.ts'
 
 // 面导出(cover-plugin-route.js 经 dist/engine.mjs 动态加载);目录/渲染函数在下方声明处导出
 export { listTemplates }
@@ -261,6 +261,8 @@ export async function renderCover(input: RenderCoverInput): Promise<RenderCoverR
     const { ensureBrowser, renderStill, selectComposition } = await import('@remotion/renderer')
 
     const inputProps = { ...check.value }
+    // 存档旧相对序迁移(2026-11-13 用户裁决「主标题在副标题上面」):渲染与编辑器装载同口径
+    inputProps.layerOrder = normalizeTitleOrder(inputProps.layerOrder)
     // serveUrl 解析:优先预构建 bundle(打包链产物,免运行时 webpack 与 bundler 依赖);
     // 无预构建时(dev)现场 bundle 并进程内缓存(按入口 mtime)。
     const prebuilt = join(pluginRoot, 'dist', 'remotion-bundle')

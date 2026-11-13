@@ -2,7 +2,7 @@
 // 2026-10-28 扩展:customLayers(拖入图片=新图层)+ layerOrder(全图层 z 序,含固定层)。
 import { temporal } from 'zundo'
 import { create } from 'zustand'
-import { getTemplate, templateOfOrientation, validateProps, type LayerDef } from '../registry'
+import { getTemplate, normalizeTitleOrder, templateOfOrientation, validateProps, type LayerDef } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
 import type { ImageLook } from '../../templates/image-style'
 import type { TextStyleOverride } from '../../templates/text-style'
@@ -96,12 +96,13 @@ export interface EditorState {
   setCanvasGrid: (v: boolean) => void
 }
 
-/** 生效 z 序(自底向上):layerOrder 缺失/失效时按 模板固定层→自定义层 播种(旧快照兼容) */
+/** 生效 z 序(自底向上):layerOrder 缺失/失效时按 模板固定层→自定义层 播种(旧快照兼容);
+ *  存档里的旧相对序(title 在 subtitle 前)按 1113 用户裁决迁移(normalizeTitleOrder) */
 export function effectiveOrder(state: Pick<EditorState, 'templateId' | 'props'>): string[] {
   const custom = Array.isArray(state.props.customLayers) ? (state.props.customLayers as CustomLayer[]) : []
   const customIds = custom.map((l) => l.id)
   const fixed = getTemplate(state.templateId).layerDefs.map((l) => l.id)
-  const saved = state.props.layerOrder
+  const saved = normalizeTitleOrder(state.props.layerOrder)
   if (!Array.isArray(saved)) return [...fixed, ...customIds]
   const known = new Set([...fixed, ...customIds])
   const ordered = (saved as string[]).filter((id) => known.has(id))

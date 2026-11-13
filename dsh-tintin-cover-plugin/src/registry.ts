@@ -137,6 +137,22 @@ export function getTemplate(id: string): TemplateDef {
   return tpl
 }
 
+/** 层序迁移(2026-11-13 用户裁决「主标题在副标题上面」;acedd29fb4 的模板换位只对新建
+ *  项目生效,既有项目存档里的显式 layerOrder 仍是旧相对序——title 排在 subtitle 之前
+ *  =副标题压在主标题上,1112-110521 项目实拍)。两图层互不重叠(acedd29fb4 裁决),
+ *  z 翻转零视觉风险:凡 title 排在 subtitle 之前的存档,消费时统一交换。
+ *  编辑器装载(effectiveOrder)与引擎渲染(renderCover)两处消费口同口径。 */
+export function normalizeTitleOrder(order: unknown): unknown {
+  if (!Array.isArray(order)) return order
+  const ti = order.indexOf('title')
+  const si = order.indexOf('subtitle')
+  if (ti < 0 || si < 0 || ti >= si) return order
+  const out = [...order]
+  out[si] = 'title'
+  out[ti] = 'subtitle'
+  return out
+}
+
 export function listTemplates(): Array<{ id: string; label: string; family: string; orientation: string; width: number; height: number }> {
   return Object.values(TEMPLATES).map(({ id, label, family, orientation, width, height }) => ({ id, label, family, orientation, width, height }))
 }

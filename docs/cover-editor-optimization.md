@@ -499,6 +499,15 @@
 - **修=setOrientation 按图层种类分派语义**(store.ts):①`group:'environment'` 层=背景意图,统一比例 `s=max(wr,hr)` 迁移(盒子纵横比不变=永不变形)+显式高随 s+画布居中(cover 语义);②其余自定义图片层:宽按 wr,**显式 height 丢弃重新链接纵横比**(height 渲染随图片自然比例,1111 解链比例在切换时让位于不变形);文字/参考线/sx/sy 轴映射维持原样。
 - 测试:orientation-parity.test.ts 随新语义更新(普通层 height 往返不再保持=断言 undefined;新增背景组统一比例+居中+纵横比不变断言),8 用例绿;插件全量 177 用例绿。
 
+### 7.10 层序换位的存量项目迁移(2026-11-13;用户持旧序截图问「不是让你改了吗」)
+
+acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目存档里的显式 `layerOrder`(面板拖拽/智能体重写都会写入)仍持久保持旧相对序,设计上不自动迁移(避免覆盖用户手动 z 序)。1112-110521 项目实拍:`[environment, product, titleRule, title, subtitle, subTag, brand]`=副标题压在主标题上。裁决普适化:
+
+- **语义迁移**(registry.ts `normalizeTitleOrder`):凡存档层序里 `title` 排在 `subtitle` 之前,消费时统一交换(两图层互不重叠=acedd29fb4 裁决,z 翻转零视觉风险;自定义图层 id 夹中间不影响)。**两个消费口同口径**:编辑器 `effectiveOrder`(面板/画布/拖拽基准)与引擎 `renderCover`(导出/回看渲染)——编辑器侧不改盘上数据但行为即正,首次图层操作写回时落盘自愈。
+- 测试:layer-order-migration.test.ts 5 用例(旧序交换/已正序不动/缺 id 透传/自定义 id 夹中间/装载集成),插件全量 182 用例绿。
+- 当日数据与载荷处置:110521 项目 props 已换序落盘(编辑器 2s 轮询即翻转);**安装版(AppData/Local/Programs/TinTin)同步两处**=dist 整目录换新(引擎渲染归一+面板 z)+`.remotion` 浏览器缓存补拷(7.9 同款缺口——热同步只拷代码不拷缓存,装版渲染不重启即恢复:子进程每次 spawn 现读缓存);win-unpacked 重打含两修复。
+- 教训:面板层序这类「换默认值」的改动,存档里写过显式值的存量项目永远看不到——改默认必须配「消费口归一」或明确声明不迁移的补偿操作(拖一次)。
+
 ### 7.8 保人方案三修:渲染子进程化 + 白盘形态自适应 + 环境图吃真图(2026-11-12 晚三;用户四问「选保人方案为什么卡死/白背景和人混在一起/生成图为什么在项目文件夹/人物为什么用 product」)
 
 - **卡死根因(取证链)**:会话 zstd 解包还原保人 turn 全时间线——imitate_cover 人物档三连败(人脸相似度 0.482/0.389 低于 0.65 门)→模型转方案 B(复用旧抠图+旧背景写 props)→render_preview 三连挂:每次 ~304s 报 `Error: fetch failed`(undici 300s headers 超时形状)→模型无限重试=「仍在处理」卡死观感。深挖排除:同一 engine.mjs 裸 node 2.16s/裸 Electron 1.5s 渲完(排除引擎);运行包两份 engine 副本都带 90s 竞速超时;**挂起期间主进程事件循环存活**(initialize/tools/list 3-6ms 即答)且**无 chrome-headless-shell 进程**(排除 spawnSync 阻塞/渲染内部挂);外部复现 tools/call render_preview=304451ms HeadersTimeoutError。定案=**主进程内 `import('@remotion/renderer')`(引擎 90s 竞速 armed 之前的懒加载)在应用进程里永挂**,竞速从未 armed。修=**render_preview 改独立 node 子进程跑引擎既有 CLI**(dist/engine.mjs templateId @propsFile fileName 输出 JSON;ELECTRON_RUN_AS_NODE=1+process.execPath;异步 spawn 不阻塞循环;180s 超时 taskkill /T /F 杀树;@文件=纯 props 对象,wrapper 形态会报「hookLines 不能为空」实测)。取证教训:debug.log 的 puppeteer profile chromium 条目(photocraft spawnSync 所写)时间戳滞后,是红鲱鱼不可当时间线。
