@@ -16,6 +16,7 @@ import {
   type DesktopReleaseChannel,
   type UpdateCheckResult,
 } from './update-checker.ts'
+import { checkForTintinDesktopUpdate, parseTintinReleaseVersion } from './tintin/tintin-update-check.ts'
 
 const MAX_STATE_BYTES = 4 * 1024
 
@@ -188,7 +189,12 @@ class DesktopUpdateLifecycleOwner implements DesktopUpdateLifecycle {
         controller.abort()
       }, this.options.policy.requestTimeoutMs)
       try {
-        return await checkForDesktopUpdate({
+        // TinTin stamps break the shared version-service grammar, so its
+        // channel resolves newer releases from its own GitHub repository.
+        const checker = channel === 'tintin'
+          ? checkForTintinDesktopUpdate
+          : checkForDesktopUpdate
+        return await checker({
           currentVersion: this.options.adapter.currentVersion,
           channel,
           currentChannel: this.options.adapter.releaseChannel ?? 'stable',
@@ -386,6 +392,9 @@ function isSupportedVersion(value: unknown): value is string {
     || (parsed?.prerelease.length === 2
       && parsed.prerelease[0] === 'beta'
       && /^[0-9]+$/u.test(parsed.prerelease[1]!))
+    // TinTin build stamps (`0.2.2-rc.1-20261112-2217`) are valid stored
+    // versions even though the shared channel grammar rejects them.
+    || parseTintinReleaseVersion(value) !== null
   return parsed !== null && supportedPrerelease && parsed.version === value
 }
 

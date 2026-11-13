@@ -9,6 +9,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { registerExternalChild } from 'dsh-tintin-shared/lib/external-child-reaper.js'
 
 const errText = (e) => (e instanceof Error ? e.message : String(e))
 
@@ -74,6 +75,10 @@ export function launchApp({ docPath, port = 7878, tokenFile, env = process.env }
     detached: true, stdio: 'ignore', windowsHide: false,
   })
   child.unref()
+  // 退出即收(2026-11-12 用户裁决「退出的时候应该退出」+ 实机实证: detached 孤儿
+  // 的工作目录钉死构建目录, releases 旧目录删不掉)——登记进共享收割器, 应用退出
+  // 时整树 taskkill; detached 语义保留(不随父进程控制台句柄走)。
+  registerExternalChild(child.pid, 'photocraft')
   return { ok: true, port, tokenFile: tf, pid: child.pid }
 }
 

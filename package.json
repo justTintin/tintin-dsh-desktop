@@ -874,6 +874,8 @@
     "package:tintin:dir": "node scripts/package-tintin.mjs",
     "package:tintin:dir:full": "yarn workspace dsh-tintin-bundle fetch:openfilm && yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin package:dir",
     "package:tintin:dir:local": "node scripts/package-tintin-local.mjs",
+    "package:tintin:publish": "node dsh-plugin-desktop-tintin/scripts/publish-github-release.mjs",
+    "package:tintin:release": "node scripts/release-tintin.mjs",
     "package:tintin:dir:hot": "yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin package:dir:hot",
     "dev:tintin": "yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && node dsh-tintin-cover-plugin/scripts/stage.mjs && yarn workspace dsh-plugin-desktop-tintin dev"
   }

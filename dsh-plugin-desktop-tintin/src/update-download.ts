@@ -11,6 +11,7 @@ import {
   parseCanonicalChannelVersion,
   type DesktopReleaseChannel,
 } from './update-checker.ts'
+import { parseTintinReleaseVersion } from './tintin/tintin-update-check.ts'
 
 /** Desktop platforms with a fixed installer download endpoint. */
 export type DesktopDownloadPlatform = 'darwin' | 'win32'
@@ -310,7 +311,10 @@ function validatedReleaseVersion(version: string): string {
     && parsed.prerelease[0] === 'beta'
     && /^[0-9]+$/u.test(parsed.prerelease[1]!)
   const isNext = parseCanonicalChannelVersion(version, 'next') !== null
-  if (parsed === null || parsed.version !== version || (!isStable && !isBeta && !isNext)) {
+  // TinTin build stamps (`0.2.2-rc.1-20261112-2217`) are retained installer
+  // versions too — the channel-only first-run/retention flow records them.
+  const isTintinStamp = parseTintinReleaseVersion(version) !== null
+  if (parsed === null || parsed.version !== version || (!isStable && !isBeta && !isNext && !isTintinStamp)) {
     throw new UpdateDownloadError('invalid-options', 'The update version must belong to a supported release channel.')
   }
   return version

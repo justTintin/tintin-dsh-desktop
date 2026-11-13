@@ -71,6 +71,17 @@ vi.mock('../src/update-download.ts', () => ({
   resolveDesktopUpdateArtifact: updater.resolve,
 }))
 
+// TinTin 通道的安装包解析/下载走 GitHub Releases(src/tintin/tintin-update-download.ts);
+// 本 spec 的 Windows 更新交接测试因此经 tintin 分流,用夹具喂同一组断言。
+const tintinUpdater = vi.hoisted(() => ({
+  resolveAsset: vi.fn(),
+  download: vi.fn(),
+}))
+vi.mock('../src/tintin/tintin-update-download.ts', () => ({
+  resolveTintinUpdateAsset: tintinUpdater.resolveAsset,
+  downloadTintinUpdateArtifact: tintinUpdater.download,
+}))
+
 vi.mock('node:child_process', async (importOriginal) => ({
   ...await importOriginal<typeof import('node:child_process')>(),
   spawn: childProcess.spawn,
@@ -385,6 +396,15 @@ describe('Electron desktop runtime', () => {
     updater.record.mockResolvedValue(undefined)
     updater.resolve.mockReset()
     updater.resolve.mockResolvedValue(undefined)
+    tintinUpdater.resolveAsset.mockReset()
+    tintinUpdater.resolveAsset.mockResolvedValue({
+      name: 'TinTin-2.1.0-x64-Setup.exe',
+      url: 'https://objects.githubusercontent.com/tintin/TinTin-2.1.0-x64-Setup.exe',
+      size: 1,
+      sha256: 'a'.repeat(64),
+    })
+    tintinUpdater.download.mockReset()
+    tintinUpdater.download.mockImplementation(async (options: { destinationPath: string }) => options.destinationPath)
     diagnostics.export.mockReset()
     electron.loadURL.mockReset()
     electron.loadURL.mockResolvedValue(undefined)
@@ -437,7 +457,7 @@ describe('Electron desktop runtime', () => {
     expect(options).not.toHaveProperty('titleBarOverlay')
     expect(electron.contentViews).toHaveLength(2)
     expect(electron.contentViews[1]?.options).toEqual({ webPreferences: {
-      preload: expect.stringMatching(/\/preload\.cjs$/),
+      preload: expect.stringMatching(/[\\/]preload\.cjs$/u),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

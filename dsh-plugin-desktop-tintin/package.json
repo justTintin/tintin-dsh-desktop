@@ -603,10 +603,6 @@
         "to": "openfilm/node_modules"
       },
       {
-        "from": "tintin-resources/playwright-browsers",
-        "to": "playwright-browsers"
-      },
-      {
         "from": "tintin-resources/ext-assets",
         "to": "ext-assets"
       }

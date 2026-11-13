@@ -65,6 +65,7 @@ import {
 import type { UpdateCheckResult } from './update-checker.ts'
 import type { DesktopInstallationId } from './desktop-installation-id.ts'
 import { DESKTOP_RELEASE_CHANNEL } from './product-identity.ts'
+import { downloadTintinUpdateArtifact, resolveTintinUpdateAsset } from './tintin/tintin-update-download.ts'
 import type { DesktopReleaseChannel } from './update-checker.ts'
 import {
   type WindowsVolumeQuery,
@@ -179,6 +180,15 @@ export function requestDesktopArtifact(url: string, init: RequestInit): Promise<
   })
 }
 
+/**
+ * Artifact adapter unwrapped for the tintin releases API. The JSON endpoints
+ * never redirect, so the settled URL of the artifact transport is irrelevant
+ * and only its Response is forwarded.
+ */
+function tintinReleaseRequest(url: string, init: RequestInit): Promise<Response> {
+  return requestDesktopArtifact(url, init).then(settled => settled.response)
+}
+
 /** Native adapter used by the DSH Desktop launcher and owned by its Cordis shell plugin. */
 export class ElectronDesktopRuntime implements DesktopRuntime {
   configureDeveloperLogging(preferences: DiagnosticPreferences): void { configureDeveloperLogging(preferences) }
@@ -233,7 +243,16 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       get releaseChannel() { return DESKTOP_RELEASE_CHANNEL },
       get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
       ...(installationId === undefined ? {} : { installationId }),
-      request: (url, init) => net.fetch(url, init),
+      /* 版本请求走主进程 Chromium 网络栈(系统代理/安全软件都会在这里生效);
+         传输失败必须留痕(铁律 3),否则用户弹「未能获取更新信息」时查无证据。 */
+      request: async (url, init) => {
+        try {
+          return await net.fetch(url, init)
+        } catch (cause) {
+          this.logError(`dsh-plugin-desktop: update version request to ${String(url)} failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+          throw cause
+        }
+      },
       confirmDownload: (version, channel) => this.confirmUpdateDownload(version, channel),
       showManualCheckResult: result => this.showManualUpdateCheckResult(result),
       downloadAndOpen: (version, signal, channel, installerSha256) => this.downloadAndOpenUpdate(version, signal, channel, installerSha256),
@@ -871,6 +890,9 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (platform === undefined) {
       throw new Error(`dsh-plugin-desktop: updates are unavailable on ${this.platform}`)
     }
+    if (DESKTOP_RELEASE_CHANNEL === 'tintin' && platform === 'win32') {
+      return await this.downloadAndOpenTintinUpdate(version, signal, platform, installerSha256)
+    }
     const destinationPath = await this.chooseUpdateDestination(version, channel)
     if (destinationPath === undefined) return
     signal.throwIfAborted()
@@ -919,6 +941,68 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     })
     if (result.response !== 0) return
 
+    const spec = this.scheduled
+    if (spec === undefined) throw new Error('dsh-plugin-desktop: no active shell can exit for update installation')
+    signal.throwIfAborted()
+    await this.launchWindowsUpdateInstaller(artifactPath)
+    this.quitting = true
+    spec.requestQuit(0)
+  }
+
+  /**
+   * TinTin-channel installer flow: the installer is resolved from this
+   * repository's GitHub Releases (the shared fixed endpoints do not serve the
+   * tintin channel), then handed to the same native installation handoff.
+   */
+  private async downloadAndOpenTintinUpdate(
+    version: string,
+    signal: AbortSignal,
+    platform: 'darwin' | 'win32',
+    installerSha256?: Readonly<Partial<Record<'win32' | 'darwin', string>>>,
+  ): Promise<void> {
+    const copy = desktopNativeCopy(this.currentLocale)
+    if (platform !== 'win32') {
+      throw new Error('dsh-plugin-desktop: tintin update installers are published for Windows only')
+    }
+    const release = await resolveTintinUpdateAsset(version, tintinReleaseRequest, signal)
+    if (release === null) {
+      throw new Error(`dsh-plugin-desktop: no tintin installer release matches ${version}`)
+    }
+    const destination = await this.showUpdateSaveDialog({
+      title: copy.saveInstallerTitle,
+      defaultPath: join(app.getPath('downloads'), release.name),
+      buttonLabel: copy.saveAndDownload,
+      filters: [{ name: copy.windowsInstaller, extensions: ['exe'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation', 'dontAddToRecent'],
+    })
+    if (destination.canceled || destination.filePath === undefined) return
+    signal.throwIfAborted()
+    const expectedSha256 = installerSha256?.win32 ?? release.sha256
+    const artifactPath = await downloadTintinUpdateArtifact({
+      platform: 'win32',
+      url: release.url,
+      destinationPath: destination.filePath,
+      request: requestDesktopArtifact,
+      signal,
+      ...(expectedSha256 === undefined ? {} : { expectedSha256 }),
+    })
+    signal.throwIfAborted()
+    try {
+      await recordDesktopUpdateArtifact(app.getPath('userData'), { platform: 'win32', version, path: artifactPath })
+    } catch (cause) {
+      this.logError(`dsh-plugin-desktop: failed to remember update installer for cleanup: ${cause instanceof Error ? cause.message : String(cause)}`)
+    }
+    const install = await this.showUpdateMessageBox({
+      type: 'info',
+      title: copy.updateDownloadedTitle,
+      message: copy.updateReady(version),
+      detail: copy.windowsInstallQuestion,
+      buttons: [copy.restartAndInstall, copy.later],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+    })
+    if (install.response !== 0) return
     const spec = this.scheduled
     if (spec === undefined) throw new Error('dsh-plugin-desktop: no active shell can exit for update installation')
     signal.throwIfAborted()

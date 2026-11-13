@@ -32,6 +32,13 @@ const allowedTintinAdditions = new Set([
   'tintin/film-model-calls.ts',
   'tintin/film-turn-changes.ts',
   'tintin/cover-acp.ts',
+  // TinTin channel-only update bridge: GitHub Releases check and installer
+  // download (the shared fixed dshdesktop.cn endpoints do not serve tintin).
+  'tintin/tintin-update-check.ts',
+  'tintin/tintin-update-download.ts',
+  // TinTin channel-only first-run browser download (2026-11-13 slim-package
+  // ruling: the 690MB playwright-browsers staging left the installer).
+  'tintin/film-browsers.ts',
 ])
 const normalizeIdentity = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop').replaceAll('DSH Desktop Beta', 'DSH Desktop')
 const normalizeTintin = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop-tintin').replaceAll('DSH Desktop Beta', 'TinTin')

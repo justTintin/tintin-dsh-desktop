@@ -4,11 +4,13 @@
 // installs itself from here, before the mirrored bootstrap runs.
 
 import { app, BrowserWindow, WebContentsView, dialog, ipcMain, shell, type WebContents } from 'electron'
-import { execFile } from 'node:child_process'
+import { execFile, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { installReapOnQuit } from 'dsh-tintin-shared/lib/external-child-reaper.js'
+import { ensureFilmBrowsersAsync, resolveFilmBrowsersDir } from './film-browsers.ts'
 import { FilmAgentManager, dshBinExists, filmAgentHomeDir, filmAgentPersona } from './film-acp.ts'
 import { filmChat } from './film-chat.ts'
 import { createTurnChangesTracker } from './film-turn-changes.ts'
@@ -37,6 +39,11 @@ void execFile(
   { windowsHide: true, timeout: 30_000 },
   () => {},
 )
+// 退出即收(2026-11-12 用户裁决「退出的时候应该退出」): 登记在共享收割器的应用派生
+// 外部工具(photocraft GUI 等)在 will-quit/进程 exit 时整树 taskkill。剪映不进本
+// 收割器——它可能是用户自装实例, 误杀风险>收益; 由 studio 服务端整树收割覆盖
+// (服务端拉起的剪映是其子进程, 见 teardownStudioSync)。
+installReapOnQuit(app)
 
 // TinTin 品牌(通道专属): 窗口标题固定为产品名 —— 上游页面把 <title> 写成
 // "DSH Desktop", 每个窗口创建时拦截标题更新, 保持 "TinTin"(2026-10-23 用户要求)。
@@ -231,12 +238,20 @@ export function installTinTinMainHook(): void {
       if (process.platform === 'win32' && process.env.PATH !== undefined) {
         process.env.PATH = `${process.env.PATH};${binDir}`
       }
-      const browsersDir = join(process.resourcesPath, 'playwright-browsers')
-      if (process.env.PLAYWRIGHT_BROWSERS_PATH === undefined && existsSync(browsersDir)) {
-        process.env.PLAYWRIGHT_BROWSERS_PATH = browsersDir
-      }
     }
   }
+
+  /* Playwright 浏览器(影片智能体用,2026-11-13 方案 A 瘦包裁决):安装包不再内置
+     690MB chromium——解析顺序=旧安装 resources 副本(升级机器零下载) → 开发 staging
+     → 通道 home 首跑下载;用户显式 env 仍最优先。下载启动期异步单飞,不阻塞引导。 */
+  if (process.env.PLAYWRIGHT_BROWSERS_PATH === undefined) {
+    process.env.PLAYWRIGHT_BROWSERS_PATH = resolveFilmBrowsersDir()
+  }
+  void ensureFilmBrowsersAsync().then(ok => {
+    if (!ok) {
+      reportMainError('film-browsers-unavailable', new Error('playwright-browsers 首跑下载未完成——影片智能体的浏览器功能在下一次启动重试前不可用'))
+    }
+  })
 
   app.on('browser-window-created', (_event, window) => {
     if (browserAttached) return
@@ -403,10 +418,13 @@ export function installTinTinMainHook(): void {
     try {
       const runPath = join(channelHome(), 'openfilm-studio', 'run.json')
       const run = JSON.parse(readFileSync(runPath, 'utf8')) as { pid?: unknown }
-      /* pid 来自我们自己几分钟前写入的 run.json, 复用风险趋零; 仍要求正数且存在才杀 */
+      /* pid 来自我们自己几分钟前写入的 run.json, 复用风险趋零; 仍要求正数且存在才杀。
+         整树收割(2026-11-12 实机实证: 单 pid SIGTERM 时服务端再生的子进程/服务端
+         拉起的剪映存活成孤儿, 工作目录钉死构建目录 → releases 旧目录删不掉)。
+         taskkill /T /F 同步执行, 'exit' 阶段也能跑完。 */
       if (typeof run.pid === 'number' && run.pid > 0) {
         try { process.kill(run.pid, 0) } catch { throw new Error('stale') }
-        process.kill(run.pid)
+        spawnSync('taskkill', ['/PID', String(run.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
       }
       rmSync(runPath, { force: true })
     } catch { /* 无 run.json 或进程已不在: 无需收场 */ }
