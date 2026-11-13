@@ -183,11 +183,37 @@ const mount = (): void => {
       return row;
     };
 
+    /* 分页(2026-11-13 用户问「产品选择是不是没有自动翻页,只有部分结果」实证): 服务端
+       /api/product-library/search 无 offset、limit 上限 500(>500 直接 422), 全库 500 条时
+       空搜索也正好触顶。旧实现一次 limit:50=只显示前 50 条且无从翻页。修=一次取服务端
+       上限 500 条, 面板**滚动到底自动续渲染**(每批 60 行, DOM 渐进免一次插 500 行的卡顿),
+       触顶时如实提示细化关键词; seq 防「输入新词覆盖旧响应」竞态。 */
+    const BATCH = 60;
+    const FETCH_LIMIT = 500;
+    let remaining: Array<Record<string, unknown>> = [];
+    let total = 0;
+    let seq = 0;
+    const renderMore = (): void => {
+      if (!remaining.length) return;
+      const batch = remaining.splice(0, BATCH);
+      for (const item of batch) list.append(rowOf(item));
+      const shown = list.querySelectorAll('.tintin-pd-row').length;
+      if (remaining.length) status.textContent = `已显示 ${shown} / ${total} 条——继续滚动自动加载`;
+      else status.textContent = total >= FETCH_LIMIT ? `已显示全部 ${total} 条（已达服务端单次上限，更多请细化关键词）` : '';
+    };
+    list.addEventListener('scroll', () => {
+      if (remaining.length && list.scrollTop + list.clientHeight >= list.scrollHeight - 32) renderMore();
+    });
+
     const load = async (q: string): Promise<void> => {
+      const my = ++seq;
       status.textContent = '搜索产品…';
       list.replaceChildren();
+      remaining = [];
+      total = 0;
       try {
-        const out = await native.products.call({ op: 'search', q, limit: 50 });
+        const out = await native.products.call({ op: 'search', q, limit: FETCH_LIMIT });
+        if (my !== seq) return; // 新搜索已接管: 丢弃旧响应
         const items = (out && typeof out === 'object' && Array.isArray((out as { items?: unknown[] }).items))
           ? (out as { items: Array<Record<string, unknown>> }).items
           : [];
@@ -197,9 +223,11 @@ const mount = (): void => {
           list.append(empty);
           return;
         }
-        for (const item of items) list.append(rowOf(item));
-        status.textContent = '';
+        total = items.length;
+        remaining = items;
+        renderMore();
       } catch (error) {
+        if (my !== seq) return;
         status.textContent = '产品加载失败：' + (error instanceof Error ? error.message : String(error));
       }
     };

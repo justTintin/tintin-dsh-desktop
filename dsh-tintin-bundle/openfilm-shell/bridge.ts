@@ -468,7 +468,8 @@ function commandFor(ref: StudioRef): StudioCommand {
      (productContextOf, the same text the picker panel injects). */
   products: {
     search: async (q: string) => {
-      const out = await native.products.call({ op: 'search', q, limit: 50 }) as { items?: Array<Record<string, unknown>> } | undefined;
+      /* limit 200(2026-11-13): 服务端上限 500、无翻页, @ 菜单随打字收敛, 200 够宽不卡弹层 */
+      const out = await native.products.call({ op: 'search', q, limit: 200 }) as { items?: Array<Record<string, unknown>> } | undefined;
       return (out?.items ?? []).map((item) => ({
         id: String(item.id ?? ''),
         name: [item.brand, item.model].map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean).join(' ')
