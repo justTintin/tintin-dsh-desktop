@@ -545,6 +545,15 @@ acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目�
 - 本机处置:config.json 预种 `photocraft.dir=D:/localprogram/photocraft-0.22.0-windows-x64-portable`(正斜杠路径,Windows 全链接受;首种反斜杠被 shell 转义吃掉=踩坑记录);安装版 lib 两文件已同步,刷新编辑器页生效。
 - 验证:插件全量 182 用例绿;载荷重打 EXIT=0(photocraft 消失 ✓,remotion 缓存仍在 ✓);两套定位器同契约。**教训:engine.ts 旧定位器第 5 候选 `'D:\localprogram\…'` 的 `\l` 非法转义丢反斜杠=该候选从未生效(与 lib 硬编码并存的双份死代码);「改默认值/改落位」类裁决要同步清点所有独立定位器副本。**
 
+### 7.19 PSD 底图生成不依赖 PhotoCraft(2026-11-13 晚;用户质问「没集成就打不开 psd 文件吗」)
+
+7.18 的 psd-import 把 PSD→PNG 交给了本机 photocraft-cli——没装 PhotoCraft 的机器上传 PSD 直接死,违背「模板管理」的存在意义。修=转换链两级:
+
+1. **本机配置了 PhotoCraft→cli convert**(Rust 渲染,字体/图层效果保真最优);
+2. **否则内置纯 JS 解析**:新依赖 `ag-psd`(纯 JS PSD 解析器)读 Photoshop 存盘时内嵌的**合成位图**(`readPsd(buf,{useImageData:true})`→psd.imageData),经新 `lib/psd-png.js` `encodeRgbaPng`(纯 node 内置 zlib deflate+手写 PNG 块/CRC,零新原生依赖)打包成 PNG。
+
+PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑母版随模板走,下载即可在 PhotoCraft/Photoshop 续修)。PSD 未含合成位图(存储未开「最大兼容」)时如实报错提示开启。**测试**:psd-png.test.ts 编码器往返(签名/IEND/逐行逐像素解回),183/183。**教训:lib/photocraft.js 旧文件里 `readFileSync` 未导入的同类潜伏雷,本次连同 `\l` 转义死候选一并清掉;外部工具依赖一律配「纯内置兜底」,否则可选依赖变硬依赖。**
+
 ### 7.16 环境图层属性面板掉进装饰文案分支(2026-11-13 晚;用户报「点环境图出的是改名字,不该是图片操作吗」)
 
 - 根因:layers-panel.tsx 属性分支只认 `type==='product' || key==='bgImage'` 走图片编辑;7.8 起 video 族环境图键换 `environment`(layerDefs 无 propsKey→键=layer.id),字符串文件名值掉进「装饰层文案」通用分支——用户点环境图看到的是文件名文本框+文案提示,而非图片操作(换图/AI 生成底图/缩放)。
