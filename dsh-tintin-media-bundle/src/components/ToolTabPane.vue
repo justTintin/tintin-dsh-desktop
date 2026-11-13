@@ -48,6 +48,7 @@ watch(() => props.discarded, () => { crashed.value = null })
 // busy 通道：任务型卡 inject 上报；直接维护 tab.busy/doneAt（tab 对象
 // 即模型层数组元素，响应式，tab 栏/LRU/关闭确认零转换消费）
 const ctx: ToolTabCtx = {
+  tabId: props.tab.id,
   busyInc() { props.tab.busy += 1 },
   busyDec() { if (props.tab.busy > 0) props.tab.busy -= 1 },
   notifyDone() { props.tab.doneAt = Date.now() },
@@ -83,6 +84,10 @@ watch(() => props.tab.busy, (n, o) => {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 2026-11-13: flex 列容器——普通工具页自然高照旧, height/flex 型工具页(素材库)
+     可用 flex:1 精确占满本层(百分比高度对滚动容器子元素不可靠) */
+  display: flex;
+  flex-direction: column;
 }
 
 /* 崩溃占位（errorCaptured 边界）：单 tab 崩溃不连累其他 tab */

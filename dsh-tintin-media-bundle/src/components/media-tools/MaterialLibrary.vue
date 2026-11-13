@@ -710,7 +710,7 @@ function oRunAction(): void {
   gap: var(--space-3);
   /* 2026-11-13 用户裁决: 占满工具 pane（height:100% 型工具页, ToolTabPane 注释口径）——
      分页/选择工具行钉到页底, 网格吃掉全部剩余高度（此前 320px/300px 预算留白=底部空条） */
-  height: 100%;
+  flex: 1 1 auto;
   min-height: 0;
 }
 
