@@ -1269,8 +1269,15 @@ function scoreClass(score: number | undefined): string {
 
 /* 素材库 tab（2026-09-22 用户裁决 A1：参考会话素材选择对话框，嵌入面板精简版） */
 .lib-input-sm { width: 110px; flex: none; }
-.lib-grid-wrap { max-height: 320px; overflow-y: auto; }
-.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.lib-grid-wrap {
+  /* 2026-11-13 用户裁决: 素材库 tab 与本地上传同布局——网格 flex 填满左栏剩余高度
+     (多显几行卡片, 栏内滚动), 分页/加入素材池工具行钉在左栏底部; 原 max-height:320px
+     让工具行悬在半空, 下方整块空置 */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; align-content: start; }
 .lib-card {
   position: relative; display: flex; flex-direction: column; gap: 3px;
   padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-md);
