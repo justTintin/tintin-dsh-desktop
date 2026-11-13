@@ -170,30 +170,54 @@ const mount = (): void => {
       return row
     }
 
-    const load = async (q: string): Promise<void> => {
-      status.textContent = '搜索产品…'
-      list.replaceChildren()
+    /* 分页装载(2026-11-13 用户裁决「滚动时自动翻页」): 服务端 /product-library/search
+       契约只有 q+limit(openapi 实证,offset 不存在)——累计 limit 增量拉取:每次请求
+       已载数+PAGE,只追加尾部新条目;返回数 < 请求数=到底。PAGE=50 同旧单页量。 */
+    const PAGE = 50
+    let loadedCount = 0
+    let currentQuery = ''
+    let loading = false
+    let exhausted = false
+    const loadMore = async (): Promise<void> => {
+      if (loading || exhausted) return
+      loading = true
+      const wanted = loadedCount + PAGE
+      status.textContent = loadedCount ? '加载更多…' : '搜索产品…'
       try {
-        const res = await fetch(`${API}/products?q=${encodeURIComponent(q)}&limit=50`)
+        const res = await fetch(`${API}/products?q=${encodeURIComponent(currentQuery)}&limit=${wanted}`)
         const out = (await res.json()) as { items?: ProductRow[]; error?: string }
         if (out && typeof out === 'object' && typeof out.error === 'string') { status.textContent = out.error; return }
         const items = Array.isArray(out?.items) ? out.items : []
-        if (!items.length) {
+        if (loadedCount === 0) list.replaceChildren()
+        const fresh = items.length > loadedCount ? items.slice(loadedCount) : []
+        for (const item of fresh) list.append(rowOf(item))
+        loadedCount = Math.max(loadedCount, items.length)
+        exhausted = items.length < wanted
+        if (!loadedCount) {
           const empty = document.createElement('div'); empty.style.cssText = 'color:#8a8a90;font-size:12px;padding:8px 2px'
           empty.textContent = '没有匹配的产品。'
           list.append(empty)
-          return
         }
-        for (const item of items) list.append(rowOf(item))
-        status.textContent = ''
+        status.textContent = loadedCount ? `${loadedCount} 条${exhausted ? '' : ' · 滚动加载更多'}` : '没有匹配的产品。'
       } catch (error) {
         status.textContent = '产品加载失败：' + (error instanceof Error ? error.message : String(error))
+      } finally {
+        loading = false
       }
+    }
+    const load = (q: string): void => {
+      currentQuery = q
+      loadedCount = 0
+      exhausted = false
+      void loadMore()
     }
     fab.onclick = () => setOpen(!isOpen())
     close.onclick = () => setOpen(false)
     let timer = 0
-    search.oninput = () => { window.clearTimeout(timer); timer = window.setTimeout(() => { void load(search.value.trim()) }, 350) }
+    search.oninput = () => { window.clearTimeout(timer); timer = window.setTimeout(() => { load(search.value.trim()) }, 350) }
+    list.addEventListener('scroll', () => {
+      if (list.scrollTop + list.clientHeight >= list.scrollHeight - 60) void loadMore()
+    })
   } catch (error) {
     console.warn('[cover-chat] 选择产品挂载失败:', error)
   }

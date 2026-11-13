@@ -518,6 +518,12 @@ acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目�
 - **发布侧欠账**:已发布 release(1112-22:17)先于全部修复,装到新机器渲染必挂——需要用带钩子的 NSIS 流重打并重新发布(发布是外向动作,等用户裁决)。
 - 教训:完整性保证必须挂在「所有产链共用的那一环」(afterPack 是 electron-builder 的公共装配点),补在单条产链=对其它产链的静默豁免;排查深度敏感的工具(maxdepth)与「门禁跳过清单」是缺口高发区。
 
+### 7.12 选择产品面板滚动翻页(2026-11-13;用户指截图「只有一页,滚动不翻页」)
+
+- 根因:选择产品面板(cover-chat-products.ts)单次 `GET /acp/products?limit=50` 后无任何翻页通道——`load()` 全量 replaceChildren,滚动无监听。服务端 `/api/product-library/search` 契约只有 `q`+`limit`(openapi 实证,`offset` 参数不存在且被忽略——两组实测同头)。
+- 修=**累计 limit 增量拉取**(不改服务端契约):每次请求 `limit=已载数+50`,只追加尾部新条目(`slice(loadedCount)`);返回数 < 请求数=到底(`exhausted`);loading/exhausted 双闸防重入;头部状态=「N 条 · 滚动加载更多」/到底即「N 条 · 已到底」;搜索输入重置计数与列表。与 7.6 在线素材抽屉的滚动口径一致(距底 60px)。
+- 载荷:chat-shell 新 bundle(双载荷 win-unpacked+安装版已同步,状态词 grep 双 2 命中)。重启/刷新会话页生效。
+
 ### 7.8 保人方案三修:渲染子进程化 + 白盘形态自适应 + 环境图吃真图(2026-11-12 晚三;用户四问「选保人方案为什么卡死/白背景和人混在一起/生成图为什么在项目文件夹/人物为什么用 product」)
 
 - **卡死根因(取证链)**:会话 zstd 解包还原保人 turn 全时间线——imitate_cover 人物档三连败(人脸相似度 0.482/0.389 低于 0.65 门)→模型转方案 B(复用旧抠图+旧背景写 props)→render_preview 三连挂:每次 ~304s 报 `Error: fetch failed`(undici 300s headers 超时形状)→模型无限重试=「仍在处理」卡死观感。深挖排除:同一 engine.mjs 裸 node 2.16s/裸 Electron 1.5s 渲完(排除引擎);运行包两份 engine 副本都带 90s 竞速超时;**挂起期间主进程事件循环存活**(initialize/tools/list 3-6ms 即答)且**无 chrome-headless-shell 进程**(排除 spawnSync 阻塞/渲染内部挂);外部复现 tools/call render_preview=304451ms HeadersTimeoutError。定案=**主进程内 `import('@remotion/renderer')`(引擎 90s 竞速 armed 之前的懒加载)在应用进程里永挂**,竞速从未 armed。修=**render_preview 改独立 node 子进程跑引擎既有 CLI**(dist/engine.mjs templateId @propsFile fileName 输出 JSON;ELECTRON_RUN_AS_NODE=1+process.execPath;异步 spawn 不阻塞循环;180s 超时 taskkill /T /F 杀树;@文件=纯 props 对象,wrapper 形态会报「hookLines 不能为空」实测)。取证教训:debug.log 的 puppeteer profile chromium 条目(photocraft spawnSync 所写)时间戳滞后,是红鲱鱼不可当时间线。
