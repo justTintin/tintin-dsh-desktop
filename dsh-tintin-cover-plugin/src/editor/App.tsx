@@ -229,6 +229,12 @@ export const EditorApp: React.FC = () => {
     window.addEventListener('message', onRequest)
     return () => window.removeEventListener('message', onRequest)
   }, [])
+  /* PhotoCraft 未安装引导(2026-11-13 用户裁决:PhotoCraft 不随包集成——点击时检测,
+     未装弹引导窗:下载地址+选择安装目录(粘贴目录或 exe 路径),保存进 config.json
+     photocraft.dir 后直接启动;之后一键直启。 */
+  const [pcNotInstalled, setPcNotInstalled] = React.useState<null | { downloadUrl: string; releasesUrl: string; hint?: string }>(null)
+  const [pcDirInput, setPcDirInput] = React.useState('')
+  const [pcPickError, setPcPickError] = React.useState('')
   const openPhotoCraft = (): void => {
     /* 送当前模板+props:主进程按其构建图层底稿,PhotoCraft 随文档启动(不再开空窗) */
     const s = useEditor.getState()
@@ -237,8 +243,29 @@ export const EditorApp: React.FC = () => {
       body: JSON.stringify({ templateId: s.templateId, props: { ...s.props, hiddenLayers: s.hiddenLayers } }),
     })
       .then((r) => r.json())
-      .then((r) => { if (r && r.ok === false) window.alert('PhotoCraft 打开失败：' + String(r.error ?? '')) })
+      .then((r) => {
+        if (r && r.notInstalled) {
+          setPcDirInput('')
+          setPcPickError('')
+          setPcNotInstalled({ downloadUrl: String(r.downloadUrl ?? 'https://getartcraft.com/'), releasesUrl: String(r.releasesUrl ?? ''), hint: String(r.hint ?? '') })
+          return
+        }
+        if (r && r.ok === false) window.alert('PhotoCraft 打开失败：' + String(r.error ?? ''))
+      })
       .catch(() => {})
+  }
+  const savePcDirAndLaunch = (): void => {
+    void fetch('/tintin/ipc/cover/pc/save-config', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dir: pcDirInput }),
+    })
+      .then((r) => r.json())
+      .then((r) => {
+        if (!r || r.ok !== true) { setPcPickError(String(r?.error ?? '保存失败')); return }
+        setPcNotInstalled(null)
+        openPhotoCraft()
+      })
+      .catch((e) => setPcPickError(e instanceof Error ? e.message : String(e)))
   }
   const iconBtn: React.CSSProperties = {
     width: 26, height: 26, borderRadius: 6, border: 0, cursor: 'pointer',
@@ -352,6 +379,39 @@ export const EditorApp: React.FC = () => {
       {showExport ? <ExportModal onClose={() => setShowExport(false)} /> : null}
       {showServer ? <ServerSettingsModal onClose={() => setShowServer(false)} /> : null}
       {showSkills ? <SkillsModal onClose={() => setShowSkills(false)} /> : null}
+      {pcNotInstalled ? (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 2100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)' }}>
+          <div style={{ width: 480, background: 'var(--surface-2, #232326)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', color: 'var(--text)', fontSize: 12.5, boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}>
+            <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>未安装 PhotoCraft</div>
+            <div style={{ color: 'var(--text-muted)', lineHeight: 1.7 }}>
+              PhotoCraft 不随客户端集成（安装包体积原因）。请下载 <b>windows-x64-portable</b> 版并解压到任意目录：
+              <div style={{ marginTop: 4 }}>
+                <a href={pcNotInstalled.downloadUrl} target="_blank" rel="noreferrer" style={{ color: '#7aa2ff' }}>官网 getartcraft.com</a>
+                {' · '}
+                <a href={pcNotInstalled.releasesUrl} target="_blank" rel="noreferrer" style={{ color: '#7aa2ff' }}>GitHub Releases</a>
+              </div>
+            </div>
+            <div style={{ margin: '12px 0 6px' }}>解压后选择安装目录（内含 photocraft-cli.exe；也可直接粘贴 exe 路径）。保存为配置后，以后一键直接启动：</div>
+            <input
+              value={pcDirInput}
+              onChange={(e) => { setPcDirInput(e.target.value); setPcPickError('') }}
+              placeholder="例如 D:\localprogram\photocraft-0.22.0-windows-x64-portable"
+              style={{ width: '100%', boxSizing: 'border-box', background: 'var(--surface, #1c1c1e)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 12, padding: '7px 10px', outline: 'none' }}
+            />
+            {pcPickError ? <div style={{ color: '#ff8a8a', marginTop: 6 }}>{pcPickError}</div> : null}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button
+                onClick={() => { setPcNotInstalled(null); setPcPickError('') }}
+                style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}
+              >取消</button>
+              <button
+                onClick={savePcDirAndLaunch}
+                style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid rgba(79,124,255,0.55)', background: 'rgba(79,124,255,0.18)', color: '#bfdbfe', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+              >保存并启动</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {/* 项目右键菜单(2026-11-11 用户裁决):删除项目——与 tab × 仅收起不同,确认后连目录删 */}
       {pjMenu ? (
         <>

@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, join, normalize, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { projectsRootOf } from './cover-asset.js'
-import { connectControl, launchApp } from './photocraft.js'
+import { configuredDir, connectControl, launchApp, resolvePhotocraftDir } from './photocraft.js'
 import { registerCoverAcpRoutes } from './cover-acp-routes.js'
 import { registerCoverToolsMcp } from './cover-tools-mcp.js'
 // 配置仓/技能落盘管线=宿主公共设施(dsh-tintin-shared 叶子包,2026-10-31 抽共享包
@@ -885,6 +885,18 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
      现在=按当前模板+props 先构建图层底稿(.pcraft,图层全保留),随文档路径启动 GUI
      (实测 GUI 接受文档参数,document.inspect 可见全部图层);构建失败如实报错,不开空窗。 */
   pcRoute('launch', 'POST', async (p) => {
+    /* 未安装检测(2026-11-13 用户裁决:PhotoCraft 不随包集成,安装包太大——点击时检测,
+       未装返回结构化提示(下载地址+选择目录引导),编辑器弹引导窗;用户选定的目录存
+       config.json photocraft.dir 后下次直接启动。 */
+    if (!resolvePhotocraftDir()) {
+      return {
+        ok: false,
+        notInstalled: true,
+        downloadUrl: 'https://getartcraft.com/',
+        releasesUrl: 'https://github.com/storytold/photocraft/releases/latest',
+        hint: '请下载 windows-x64-portable 版并解压到任意目录,然后在下方选择该目录(内含 photocraft-cli.exe)。',
+      }
+    }
     let docPath
     if (p && p.templateId) {
       const engine = await loadEngine()
@@ -896,6 +908,26 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
       docPath = built.file
     }
     return launchApp({ port: Number(process.env.TINTIN_PHOTOCRAFT_PORT || 7878), docPath })
+  })
+  /* 配置读写(2026-11-13 用户裁决):GET=当前生效目录;POST=保存用户选定的安装目录
+     (允许选到目录或直接选 photocraft-cli.exe,取其所在目录),落 config.json
+     photocraft.dir,下次启动直接命中。 */
+  pcRoute('config', 'GET', async () => {
+    return { ok: true, dir: resolvePhotocraftDir() ?? '', configuredDir: configuredDir() ?? '' }
+  })
+  pcRoute('save-config', 'POST', async (p) => {
+    let dir = String(p?.dir ?? '').trim().replace(/^["']|["']$/g, '')
+    if (!dir) return { ok: false, error: '目录为空——请选择/粘贴 PhotoCraft 安装目录' }
+    if (/\.exe$/i.test(dir)) dir = dirname(dir) // 选到 exe 文件=取其所在目录
+    if (!existsSync(join(dir, 'photocraft-cli.exe'))) {
+      return { ok: false, error: `该目录下没有 photocraft-cli.exe:${dir}` }
+    }
+    try {
+      mergeTintinConfigStore(process.env.DSH_HOME, { photocraft: { dir } })
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    }
+    return { ok: true, dir }
   })
   pcRoute('inspect', 'GET', async () => {
     const conn = await connectControl()

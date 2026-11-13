@@ -379,17 +379,20 @@ export async function renderCover(input: RenderCoverInput): Promise<RenderCoverR
 
 // ── 图层底稿(2026-10-27 用户裁决:中间产物 = 图层文件(.pcraft),PNG 只允许最终导出)──
 
-/** Photocraft CLI 定位:env > 通道包 vendored > 打包 resources/photocraft */
+/** Photocraft CLI 定位:env > 配置文件 photocraft.dir > 开发态仓内 vendored
+ *  (2026-11-13 用户裁决:PhotoCraft 不随包集成——extraResources/打包 resources 位、
+ *  localprogram 便携版候选全部移除;与 lib/photocraft.js resolvePhotocraftDir 同契约) */
 export function resolvePhotocraftCli(): string | null {
-  /* 候选与 lib/photocraft.js resolvePhotocraftDir 同源对齐(2026-11-10 用户报障「PhotoCraft
-     打开失败」): 安装形态=resources/photocraft(extraResources 打包链带入)与本机便携版,
-     此前只有开发树结构候选,装包后三个全落空。 */
+  let configured: string | null = null
+  try {
+    const doc = JSON.parse(readFileSync(join(process.env.DSH_HOME ?? '', 'tintin', 'config.json'), 'utf8')) as { photocraft?: { dir?: unknown } }
+    const dir = String(doc?.photocraft?.dir ?? '').trim()
+    configured = dir || null
+  } catch { /* 无配置=跳过 */ }
   for (const dir of [
     process.env.TINTIN_PHOTOCRAFT_DIR,
+    configured,
     join(pluginRoot, '..', 'dsh-plugin-desktop-tintin', 'tintin-resources', 'photocraft'),
-    join(pluginRoot, '..', 'photocraft'),
-    join(pluginRoot, '..', '..', '..', 'photocraft'),
-    'D:\localprogram\photocraft-0.16.0-windows-x64-portable',
   ]) {
     if (dir && existsSync(join(dir, 'photocraft-cli.exe'))) return join(dir, 'photocraft-cli.exe')
     if (dir && existsSync(join(dir, 'photocraft-cli'))) return join(dir, 'photocraft-cli')

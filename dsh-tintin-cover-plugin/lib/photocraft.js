@@ -1,35 +1,41 @@
 // photocraft.js — PhotoCraft 集成宿主门(2026-10-27 用户裁决:封面编辑器改用
 // PhotoCraft——开源 PS 式 Rust 图像编辑器,500+ 引擎命令,UI/CLI/JSON 控制通道/MCP
-// 四通道同引擎;vendored 于 tintin-resources/photocraft,openfilm 同款先例)。
+// 四通道同引擎)。
 //
-// 定位链(2026-11-13 用户裁决「photocraft 是集成到客户端的,与 localprogram 无关」——
-// 旧链里的 D:\localprogram 便携版回退是开发机残留,已删除):
-//   ①env TINTIN_PHOTOCRAFT_DIR(显式覆盖/测试)
-//   ②env TINTIN_RESOURCES_DIR/photocraft
-//   ③打包态集成位:<安装>/resources/photocraft——extraResources 把 vendored 拷到资源根,
-//     从插件包根(app/node_modules/dsh-tintin-cover-plugin)上溯三级定位,cwd 无关
-//   ④开发态:<cwd>/dsh-plugin-desktop-tintin/tintin-resources/photocraft(仓内 vendored)
+// **2026-11-13 用户裁决:PhotoCraft 不再随客户端集成(安装包太大)**——extraResources
+// 分发移除,定位链不再有「随包集成位」;点击启动时检测,未安装返回结构化提示
+// (下载地址+选择目录),用户选定的目录持久化进 <DSH_HOME>/tintin/config.json
+// photocraft.dir,下次直接启动。
+//
+// 定位链:①env TINTIN_PHOTOCRAFT_DIR(显式覆盖/测试) ②配置文件 photocraft.dir(用户选择,
+// 设置弹窗写入) ③开发态仓内 vendored(<cwd>/dsh-plugin-desktop-tintin/tintin-resources/
+// photocraft——仅开发机存在,装到别的机器自然落空)。
 // 两个可执行:photocraft.exe(原生窗口,--control 起环回控制通道)、photocraft-cli.exe(无头 run/batch/mcp)。
 import net from 'node:net'
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { registerExternalChild } from 'dsh-tintin-shared/lib/external-child-reaper.js'
 
 const errText = (e) => (e instanceof Error ? e.message : String(e))
 
-/** 插件包根(lib/photocraft.js → .../node_modules/dsh-tintin-cover-plugin) */
-const pluginPkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+/** 配置文件里的用户选择(<DSH_HOME>/tintin/config.json 的 photocraft.dir;设置弹窗保存) */
+export function configuredDir(env = process.env) {
+  try {
+    const doc = JSON.parse(readFileSync(join(env.DSH_HOME ?? '', 'tintin', 'config.json'), 'utf8'))
+    const dir = String(doc?.photocraft?.dir ?? '').trim()
+    return dir || null
+  } catch {
+    return null
+  }
+}
 
-/** 目录候选:env 覆盖 > env 资源根 > 打包态集成位 > 开发态仓内 vendored */
+/** 目录候选:env 覆盖 > 用户配置 > 开发态仓内 vendored */
 export function resolvePhotocraftDir(env = process.env) {
   const candidates = [
     env.TINTIN_PHOTOCRAFT_DIR,
-    env.TINTIN_RESOURCES_DIR ? join(env.TINTIN_RESOURCES_DIR, 'photocraft') : null,
-    // 打包态集成位:app/node_modules/<pkg> 上溯三级=resources/photocraft(extraResources 落点)
-    join(pluginPkgRoot, '..', '..', '..', 'photocraft'),
+    configuredDir(env),
     join(process.cwd(), 'dsh-plugin-desktop-tintin', 'tintin-resources', 'photocraft'),
   ].filter(Boolean)
   for (const dir of candidates) {
