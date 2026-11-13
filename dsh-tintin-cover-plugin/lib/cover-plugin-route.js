@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { basename, join, normalize, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { projectsRootOf } from './cover-asset.js'
-import { configuredDir, connectControl, launchApp, resolvePhotocraftDir } from './photocraft.js'
+import { cliConvert, configuredDir, connectControl, launchApp, resolvePhotocraftDir } from './photocraft.js'
 import { registerCoverAcpRoutes } from './cover-acp-routes.js'
 import { registerCoverToolsMcp } from './cover-tools-mcp.js'
 // 配置仓/技能落盘管线=宿主公共设施(dsh-tintin-shared 叶子包,2026-10-31 抽共享包
@@ -929,6 +929,129 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     }
     return { ok: true, dir }
   })
+  /* 模板管理(2026-11-13 用户裁决「右上角模板管理图标+上传 PSD 作封面模板」):列表/预览/
+     删除/PSD 导入。PSD 不上服务端——photocraft-cli convert 无头转 PNG,PNG 走
+     product-upload 进服务端,模板记录(templates 体系)挂底图引用。 */
+  pcRoute('tpl-list', 'GET', async () => {
+    const serverUrl = String(getServerUrl() || '').replace(/\/+$/, '')
+    if (!serverUrl) return { ok: false, error: '服务端未配置' }
+    const upstream = await fetch(`${serverUrl}/templates?type=cover`, { signal: AbortSignal.timeout(15_000) })
+    const doc = await upstream.json().catch(() => null)
+    return { ok: upstream.ok && !!doc, templates: Array.isArray(doc?.templates) ? doc.templates : [], total: Number(doc?.total) || 0, error: upstream.ok ? '' : `HTTP ${upstream.status}` }
+  })
+  /* 预览直出 PNG 字节流(服务端 /templates/preview 原样透传)——不能走 pcRoute 的 JSON 包装 */
+  pcDisposes.push(registeringWebServer.register({
+    kind: 'exact',
+    path: '/tintin/cover/api/pc/tpl-preview',
+    handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedRequest(req, true)) {
+        sendJson(res, 403, { error: 'Request rejected.' })
+        return
+      }
+      const serverUrl = String(getServerUrl() || '').replace(/\/+$/, '')
+      if (!serverUrl) { sendJson(res, 500, { ok: false, error: '服务端未配置' }); return }
+      let body = ''
+      await new Promise((done) => {
+        req.on('data', (c) => { body += c })
+        req.on('end', done)
+      })
+      let p = {}
+      try { p = body ? JSON.parse(body) : {} } catch { p = {} }
+      try {
+        const upstream = await fetch(`${serverUrl}/templates/preview`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ template_id: String(p?.template_id || ''), params: p?.params && typeof p.params === 'object' ? p.params : {}, type: 'cover' }),
+          signal: AbortSignal.timeout(180_000),
+        })
+        if (!upstream.ok) {
+          const text = (await upstream.text().catch(() => '')).slice(0, 200)
+          sendJson(res, upstream.status, { ok: false, error: `预览渲染失败 HTTP ${upstream.status} ${text}` })
+          return
+        }
+        const bytes = Buffer.from(await upstream.arrayBuffer())
+        res.writeHead(200, { 'content-type': upstream.headers.get('content-type') || 'image/png', 'cache-control': 'no-store' })
+        res.end(bytes)
+      } catch (err) {
+        sendJson(res, 502, { ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  }))
+  pcRoute('tpl-delete', 'POST', async (p) => {
+    const id = String(p?.id || '').replace(/[^A-Za-z0-9_\-]/g, '')
+    if (!id) return { ok: false, error: '缺少模板 id' }
+    const serverUrl = String(getServerUrl() || '').replace(/\/+$/, '')
+    if (!serverUrl) return { ok: false, error: '服务端未配置' }
+    const upstream = await fetch(`${serverUrl}/templates/${encodeURIComponent(id)}`, { method: 'DELETE', signal: AbortSignal.timeout(15_000) })
+    if (!upstream.ok) return { ok: false, error: `删除失败 HTTP ${upstream.status}` }
+    return { ok: true, id }
+  })
+  pcDisposes.push(registeringWebServer.register({
+    kind: 'exact',
+    path: '/tintin/cover/api/pc/psd-import',
+    handler: async (req, res) => {
+      if (req.method !== 'POST' || !isTrustedRequest(req, true)) {
+        sendJson(res, 403, { error: 'Request rejected.' })
+        return
+      }
+      const cli = resolveCli()
+      if (!cli) {
+        sendJson(res, 500, { ok: false, error: '未找到 photocraft-cli——先在 PhotoCraft 引导里选择安装目录' })
+        return
+      }
+      const name = decodeURIComponent(String(new URL(req.url, 'http://localhost').searchParams.get('name') || 'template.psd')).slice(-120)
+      const engine = await loadEngine()
+      const coverDir = await engine.resolveCoverDir()
+      mkdirSync(coverDir, { recursive: true })
+      const slug = (name.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'tpl') + '-' + Date.now().toString(36)
+      const psdFile = join(coverDir, `.psd-import-${Date.now()}.psd`)
+      const pngFile = join(coverDir, `${slug}.png`)
+      const chunks = []
+      await new Promise((done) => {
+        req.on('data', (c) => chunks.push(c))
+        req.on('end', done)
+      })
+      try { writeFileSync(psdFile, Buffer.concat(chunks)) } catch (err) { sendJson(res, 500, { ok: false, error: 'PSD 落盘失败:' + (err instanceof Error ? err.message : String(err)) }); return }
+      try {
+        if (!existsSync(psdFile) || statSync(psdFile).size === 0) { sendJson(res, 400, { ok: false, error: 'PSD 文件为空' }); return }
+        const conv = cliConvert({ src: psdFile, out: pngFile })
+        if (!conv.ok) { sendJson(res, 500, { ok: false, error: `PSD 转 PNG 失败:${conv.stderr || 'exit ' + conv.code}` }); return }
+        const serverUrl = String(getServerUrl() || '').replace(/\/+$/, '')
+        if (!serverUrl) { sendJson(res, 500, { ok: false, error: '服务端未配置' }); return }
+        const form = new FormData()
+        form.append('files', new Blob([readFileSync(pngFile)]), basename(pngFile))
+        const up = await fetch(serverUrl + '/api/storyboard/scripts/product-upload', { method: 'POST', body: form, signal: AbortSignal.timeout(120_000) })
+        if (!up.ok) { sendJson(res, 502, { ok: false, error: `底图上传服务端失败 HTTP ${up.status}` }); return }
+        const upJson = await up.json().catch(() => null)
+        const serverPath = Array.isArray(upJson?.paths) ? String(upJson.paths[0] ?? '') : ''
+        if (!serverPath) { sendJson(res, 502, { ok: false, error: '底图上传返回异常:' + JSON.stringify(upJson).slice(0, 160) }); return }
+        const tplId = 'psd_' + slug.replace(/-/g, '_').slice(0, 50)
+        const tpl = {
+          id: tplId,
+          name: name.replace(/\.[^.]+$/, ''),
+          category: 'custom',
+          type: 'cover',
+          canvas: { width: 1080, height: 1920, fps: 30 },
+          duration: 3,
+          params: [
+            { name: 'title', type: 'string', default: '', label: '主标题' },
+            { name: 'subtitle', type: 'string', default: '', label: '副标题' },
+          ],
+          effects: {},
+          cover: { image: serverPath, source: 'psd', psd: name },
+        }
+        const cr = await fetch(serverUrl + '/templates', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(tpl), signal: AbortSignal.timeout(30_000),
+        })
+        const crText = await cr.text().catch(() => '')
+        if (!cr.ok) { sendJson(res, 502, { ok: false, error: `模板创建失败 HTTP ${cr.status} ${crText.slice(0, 200)}` }); return }
+        sendJson(res, 200, { ok: true, templateId: tplId, coverImage: serverPath, png: pngFile })
+      } finally {
+        try { rmSync(psdFile, { force: true }) } catch { /* 尽力清理 */ }
+      }
+    },
+  }))
   pcRoute('inspect', 'GET', async () => {
     const conn = await connectControl()
     if (!conn.ok) return conn

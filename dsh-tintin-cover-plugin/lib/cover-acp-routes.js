@@ -656,6 +656,18 @@ export function registerCoverAcpRoutes({ webServer, isTrustedRequest, sendJson, 
     sendJson(res, 200, { ok: true, name, path: join(dir, name) })
   })
 
+  // ── 封面模板(2026-11-13 用户裁决:服务端 /templates 封面模板(type=cover)面板注入) ──
+  register('templates', async (req, res) => {
+    if (req.method !== 'GET' || !isTrustedRequest(req)) {
+      sendJson(res, 403, { error: 'Request rejected.' })
+      return
+    }
+    const serverUrl = String(getServerUrl() || '').replace(/\/+$/, '')
+    if (!serverUrl) { sendJson(res, 200, { error: '服务端未配置' }); return }
+    const upstream = await fetch(`${serverUrl}/templates?type=cover`, { signal: AbortSignal.timeout(15_000) })
+    sendJson(res, upstream.ok ? 200 : 502, await upstream.json())
+  })
+
   // ── 选择产品(2026-10-29 用户要求:视频剪辑会话的选择产品移植 — 按钮弹窗+资料注入) ──
   // 代理服务端 /api/product-library/*(与 film 的 openfilm:products 主进程代理同源同形状)
   register('products', async (req, res) => {

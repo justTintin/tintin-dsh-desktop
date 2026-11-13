@@ -6,6 +6,7 @@
  */
 import './cover-chat-bridge';
 import './cover-chat-products';
+import './cover-chat-templates';
 import './cover-chat-skills';
 import './cover-chat-tailwind.css';
 import './cover-chat-page.css';

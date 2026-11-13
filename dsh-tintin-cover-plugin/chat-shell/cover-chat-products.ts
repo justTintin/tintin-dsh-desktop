@@ -65,6 +65,7 @@ declare global {
   interface Window {
     __tintinCoverCloseAssets?: () => void
     __tintinCoverCloseProducts?: () => void
+    __tintinCoverCloseTemplates?: () => void
   }
 }
 
@@ -117,8 +118,9 @@ const mount = (): void => {
       panel.style.display = on ? 'flex' : 'none'
       fab.setAttribute('aria-pressed', on ? 'true' : 'false')
       if (on) {
-        /* 互斥(同区停靠, 叠着没意义): 产品开了就关在线素材(桥层挂钩子) */
+        /* 互斥(同区停靠, 叠着没意义): 产品开了就关在线素材+封面模板(桥层/模板层挂钩子) */
         window.__tintinCoverCloseAssets?.()
+        window.__tintinCoverCloseTemplates?.()
         /* 停靠定位: 底=输入框上缘([data-prompt-shell]=composer 卡片根), 铺满其上方会话区 */
         const shellRect = document.querySelector('[data-prompt-shell]')?.getBoundingClientRect()
         if (shellRect && shellRect.top > 40) panel.style.bottom = `${Math.round(innerHeight - shellRect.top)}px`

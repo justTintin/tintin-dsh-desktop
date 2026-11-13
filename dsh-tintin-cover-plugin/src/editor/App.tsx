@@ -15,7 +15,7 @@ import { SkillsModal } from './skills-modal'
 import { canvasDragFreeze } from './use-canvas-zoom'
 
 /** 预览区顶条(2026-10-29 用户裁决:设置从左面板移到预览区上方横条;横竖屏+预览显示同行) */
-function CanvasSettingsStrip(): React.ReactElement {
+function CanvasSettingsStrip({ onOpenTemplates }: { onOpenTemplates?: () => void }): React.ReactElement {
   const showGuides = useEditor((s) => s.guides)
   const showGrid = useEditor((s) => s.canvasGrid)
   const setGuides = useEditor((s) => s.setGuides)
@@ -64,6 +64,119 @@ function CanvasSettingsStrip(): React.ReactElement {
         title="重做(Ctrl+Shift+Z)"
         style={{ border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-muted)', borderRadius: 7, fontSize: 12, padding: '4px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}
       >↪ 重做</button>
+      {/* 模板管理(2026-11-13 用户裁决:右上角图标,管理服务端封面模板+上传 PSD 建模板) */}
+      {onOpenTemplates ? (
+        <button
+          onClick={onOpenTemplates}
+          title="封面模板管理——查看服务端封面模板/渲染预览/上传 PSD 建模板"
+          style={{ border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-muted)', borderRadius: 7, fontSize: 12, padding: '4px 10px', cursor: 'pointer', whiteSpace: 'nowrap' }}
+        >▦ 模板管理</button>
+      ) : null}
+    </div>
+  )
+}
+
+/** 模板管理弹窗(2026-11-13 用户裁决):服务端封面模板(/templates 体系 type=cover)的
+ *  列表/渲染预览/删除/上传 PSD 建模板(PSD 经 photocraft-cli convert 转 PNG 落底图)。 */
+type TplRow = Record<string, unknown>
+
+function TemplateManagerModal({ onClose }: { onClose: () => void }): React.ReactElement {
+  const [rows, setRows] = React.useState<Array<TplRow>>([])
+  const [busy, setBusy] = React.useState('')
+  const [err, setErr] = React.useState('')
+  const [previewSrc, setPreviewSrc] = React.useState('')
+  const load = (): void => {
+    void fetch('/tintin/ipc/cover/pc/tpl-list').then((r) => r.json()).then((r) => {
+      if (r && r.ok === false) { setErr(String(r.error ?? '')); return }
+      setRows(Array.isArray(r?.templates) ? r.templates : [])
+    }).catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+  }
+  React.useEffect(() => { load() }, [])
+  const defaultsOf = (tpl: TplRow): Record<string, unknown> => {
+    const out: Record<string, unknown> = {}
+    for (const p of Array.isArray(tpl.params) ? tpl.params : []) {
+      const n = String((p as { name?: unknown }).name ?? '')
+      const d = (p as { default?: unknown }).default
+      if (n && d !== null && d !== undefined && typeof d !== 'object') out[n] = d
+    }
+    return out
+  }
+  const previewTpl = (tpl: TplRow): void => {
+    setBusy(`渲染预览「${String(tpl.name ?? tpl.id)}」…(首次可能分钟级)`)
+    setErr(''); setPreviewSrc('')
+    void fetch('/tintin/ipc/cover/pc/tpl-preview', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ template_id: String(tpl.id ?? ''), params: defaultsOf(tpl), type: 'cover' }),
+    })
+      .then(async (r) => {
+        if (!r.ok) { const j = await r.json().catch(() => null); setErr(String(j?.error ?? `HTTP ${r.status}`)); return }
+        setPreviewSrc(URL.createObjectURL(await r.blob()))
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(''))
+  }
+  const removeTpl = (tpl: TplRow): void => {
+    const label = String(tpl.name ?? tpl.id ?? '')
+    if (!window.confirm(`删除模板「${label}」?服务端删除不可恢复。`)) return
+    setBusy(`删除 ${label}…`)
+    void fetch('/tintin/ipc/cover/pc/tpl-delete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: String(tpl.id ?? '') }) })
+      .then((r) => r.json()).then((r) => { if (r && r.ok !== true) { setErr(String(r.error ?? '删除失败')); return } load() })
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(''))
+  }
+  const uploadPsd = (file: File | null): void => {
+    if (!file) return
+    setBusy(`上传 ${file.name} 并转换…`)
+    setErr('')
+    void fetch('/tintin/ipc/cover/pc/psd-import?name=' + encodeURIComponent(file.name), { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file })
+      .then(async (r) => {
+        const j = await r.json().catch(() => null)
+        if (!j || j.ok !== true) { setErr(String(j?.error ?? `HTTP ${r.status}`)); return }
+        load()
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(''))
+  }
+  const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface, #1c1c1e)' }
+  const smallBtn: React.CSSProperties = { padding: '4px 10px', borderRadius: 7, border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 2110, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)' }}>
+      <div style={{ width: 560, maxHeight: '82vh', overflowY: 'auto', background: 'var(--surface-2, #232326)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', color: 'var(--text)', fontSize: 12.5, boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+          <div style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>模板管理（服务端封面模板）</div>
+          <button onClick={onClose} style={{ border: 0, background: 'transparent', color: 'var(--text-muted)', fontSize: 14, cursor: 'pointer' }}>✕</button>
+        </div>
+        {busy ? <div style={{ marginBottom: 8, color: 'var(--accent, #7aa2ff)' }}>{busy}</div> : null}
+        {err ? <div style={{ marginBottom: 8, color: '#ff8a8a', whiteSpace: 'pre-wrap' }}>{err}</div> : null}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {rows.map((tpl) => (
+            <div key={String(tpl.id ?? '')} style={rowStyle}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{String(tpl.name ?? tpl.id ?? '')}</div>
+                <div style={{ fontSize: 10.5, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {String(tpl.id ?? '')} · {String(tpl.category ?? '')} · {Array.isArray(tpl.params) ? tpl.params.length : 0} 参数
+                </div>
+              </div>
+              <button onClick={() => previewTpl(tpl)} style={smallBtn}>渲染预览</button>
+              <button onClick={() => removeTpl(tpl)} style={smallBtn}>删除</button>
+            </div>
+          ))}
+          {!rows.length && !busy ? <div style={{ color: 'var(--text-faint)', fontSize: 12, padding: '6px 2px' }}>服务端暂无封面模板——可上传 PSD 建模板,或由生成侧创建。</div> : null}
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <label style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border-strong)', background: 'transparent', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}>
+            上传 PSD 建模板
+            <input type="file" accept=".psd" style={{ display: 'none' }} onChange={(e) => { uploadPsd(e.target.files?.[0] ?? null); e.currentTarget.value = '' }} />
+          </label>
+          <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>PSD 经本机 PhotoCraft 无头转 PNG 后上传为封面模板底图</span>
+        </div>
+        {previewSrc ? (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-faint)', marginBottom: 4 }}>预览：</div>
+            <img src={previewSrc} alt="模板预览" style={{ maxWidth: '100%', maxHeight: 300, borderRadius: 8, border: '1px solid var(--border)' }} />
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -267,6 +380,8 @@ export const EditorApp: React.FC = () => {
       })
       .catch((e) => setPcPickError(e instanceof Error ? e.message : String(e)))
   }
+  /* 模板管理(2026-11-13 用户裁决:服务端封面模板/渲染预览/上传 PSD 建模板) */
+  const [tplManagerOpen, setTplManagerOpen] = React.useState(false)
   const iconBtn: React.CSSProperties = {
     width: 26, height: 26, borderRadius: 6, border: 0, cursor: 'pointer',
     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15,
@@ -379,6 +494,7 @@ export const EditorApp: React.FC = () => {
       {showExport ? <ExportModal onClose={() => setShowExport(false)} /> : null}
       {showServer ? <ServerSettingsModal onClose={() => setShowServer(false)} /> : null}
       {showSkills ? <SkillsModal onClose={() => setShowSkills(false)} /> : null}
+      {tplManagerOpen ? <TemplateManagerModal onClose={() => setTplManagerOpen(false)} /> : null}
       {pcNotInstalled ? (
         <div style={{ position: 'fixed', inset: 0, zIndex: 2100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)' }}>
           <div style={{ width: 480, background: 'var(--surface-2, #232326)', border: '1px solid var(--border)', borderRadius: 12, padding: '18px 20px', color: 'var(--text)', fontSize: 12.5, boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}>
@@ -429,7 +545,7 @@ export const EditorApp: React.FC = () => {
       <div style={{ flex: '1 1 auto', display: 'flex', minHeight: 0 }}>
         {/* 预览列 = 设置顶条 + 画布 + 素材条(底部,只随本列宽) */}
         <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <CanvasSettingsStrip />
+          <CanvasSettingsStrip onOpenTemplates={() => setTplManagerOpen(true)} />
           <CanvasPanel project={currentProject} />
           {/* 素材条感知项目(2026-10-30 用户裁决方案 1):key=项目纪元,切换/新建/改名即重挂
               重拉——此前它只靠 3 秒轮询,切完最慢 3 秒才出新项目素材 */}

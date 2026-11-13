@@ -375,9 +375,10 @@ function setLibraryDrawer(open: boolean): void {
      拦截 → ✕/关闭全部静默失效(2026-10-29 用户实报,列表版抽屉 day-one 缺陷) */
   assetsDrawerOpen = open;
   if (open) {
-    /* 互斥(2026-11-12 用户裁决:素材与产品列表同区停靠, 不叠开): 开素材先关产品
-       (cover-chat-products.ts 挂的页级钩子) */
+    /* 互斥(2026-11-12 用户裁决:素材与产品列表同区停靠, 不叠开): 开素材先关产品+封面模板
+       (cover-chat-products.ts / cover-chat-templates.ts 挂的页级钩子) */
     (window as unknown as { __tintinCoverCloseProducts?: () => void }).__tintinCoverCloseProducts?.();
+    (window as unknown as { __tintinCoverCloseTemplates?: () => void }).__tintinCoverCloseTemplates?.();
     renderLibraryDrawer();
   }
   else destroyLibraryDrawer();

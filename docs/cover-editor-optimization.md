@@ -551,6 +551,23 @@ acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目�
 - 修=分支显式放行 `layer.type==='environment'`(ImageLayerEditor 对 propKey 通用,含空值换图/AI 生成流)。**教训:props 键改名/迁移(7.8 environment 键)必须同步清点按键字面量分支的消费方——面板/引擎/路由三类。**
 - 验证:182/182;双载荷重打+安装版 dist/editor 同步(编辑器页刷新生效)。
 
+### 7.18 会话封面模板面板+编辑器模板管理(2026-11-13 晚;用户裁决「服务端封面模板面板注入快速模仿+右上角模板管理上传 PSD」)
+
+- **实证先行**:服务端封面模板 API 一直都在——`GET /templates?type=cover`(5 套:促销/大字标题/金句/渐变/极简,含 params 版式定义与 canvas),`POST /templates`(Create,TemplateIn)/PUT/{id}/DELETE/{id}/`POST /templates/preview`(RenderIn,直出 PNG 字节流)。**初判「服务端无此 API」是错的——错在按路径名 grep 扫 OpenAPI,`type=cover` 是查询参数过滤,路径名扫描天然看不见;模板源方向裁决时用户实测 `/templates?type=cover` 直接纠正。**
+- **会话模板面板**(chat-shell/cover-chat-templates.ts 新文件,与产品面板同构):composer 底栏「产品」右侧新增「模板」lucide layout-template 图标 → 停靠面板列服务端 type=cover 模板(名称/类目/画幅/参数数) → 点选注入结构化上下文(模板 id/name/画幅/版式参数=按此风格快速模仿说明,Lexical 粘贴)。三方互斥(素材/产品/模板同区停靠不叠开,__tintinCoverCloseTemplates 钩子,products/bridge/三处接线)。
+- **编辑器模板管理**(App.tsx 右上角「▦ 模板管理」按钮+TemplateManagerModal 弹窗):列表(名称/id/类目/参数数)/[渲染预览](POST pc/tpl-preview 字节透传→blob 显示)/[删除](确认后 DELETE)/[上传 PSD 建模板](file input→pc/psd-import)。
+- **PSD 管线(全客户端,零服务端改动)**:`pc/psd-import` 收 PSD 字节→**photocraft-cli convert 无头转 PNG**(0.22.0 convert 原生支持 .psd)→PNG 走 product-upload 上服务端→POST /templates 建 TemplateIn(type:cover,cover 字段挂服务端底图引用,自由对象 schema)。
+- 新路由:acp `templates`(chat 代理)/pc `tpl-list`/`tpl-preview`(PNG 字节透传,不走 JSON 包装)/`tpl-delete`/`save-config`+`config`(7.15 批)。
+- 验证:182/182;双载荷核验(chat bundle 封面模板×2/editor 模板管理×1/lib 路由×3);安装版 lib+chat-shell+dist/editor 全同步。**教训:OpenAPI 能力盘点必须包含查询参数驱动的端点(路径名扫描+参数枚举两层),否则能力清单系统性缺失;用户实测打脸扫描结论时,先怀疑扫描方法再怀疑用户。**
+
+### 7.17 横屏变形第二洞(主体图槽位)+回看预览堆积(2026-11-13 晚;用户再报「转横屏人又变形了/素材条四条相同」+质问双模式路线)
+
+- **槽位变形根因(用户 props 实证)**:`styles.product={sx:3.081,sy:1.3}` 非均匀——7.17 前的迁移对槽位缩放仍是 sx×wr/sy×hr 各自轴映射(wr≈0.56/hr≈1.78,比值≈2.4 倍),而 video 族槽位渲染=contain 适配+`scale(sx,sy)` 变换——非均匀 scale=横向拉扁。**7.16 前的修复只覆盖了自定义图层与环境组,槽位层漏网**。修=setOrientation 槽位缩放改**统一缩放迁移**:u=√(sx·sy) 双值同置(保视觉面积+保证纵横比,均匀缩放在 contain 适配下永不变形);dx/dy 纯位置量维持轴映射。parity 测试断言随新契约更新。
+- **四条相同预览根因**:render_preview 每次 `preview-<ts>.png` 落项目目录=素材条数据源,无清理——回看 4 次堆 4 条。修=渲染成功后清上一批 `preview-*.png`(仅保留本次,正则圈定不误删导出/资产);回看图是审查瞬态不是资产。
+- 本机处置:110521 项目 props 槽位缩放已归一落盘(product 2.0/2.0、environment 0.77/0.77,编辑器 2s 轮询即套用)。
+- 验证:182/182;stage+PKG 双绿;安装版 lib/engine/editor 三件同步。
+- **双模式路线再裁决(用户质问「上次说路线正确但老有问题」)**:路线维持——双模板+按图层种类分派迁移的架构没有推倒理由,问题是迁移语义的覆盖面是逐类补齐的(自定义层→环境组→槽位,三类现已全绿)。本条不改代码哲学,改的是「修完要自查覆盖面」的流程:迁移语义的分层清单(文字/装饰=轴映射;自定义图片层=宽迁移+保纵横比;环境组=统一缩放居中;槽位=统一缩放)已固化在 store.ts 注释与 parity 测试里,后续任何新图层种类必须先入清单再写迁移。
+
 ### 7.8 保人方案三修:渲染子进程化 + 白盘形态自适应 + 环境图吃真图(2026-11-12 晚三;用户四问「选保人方案为什么卡死/白背景和人混在一起/生成图为什么在项目文件夹/人物为什么用 product」)
 
 - **卡死根因(取证链)**:会话 zstd 解包还原保人 turn 全时间线——imitate_cover 人物档三连败(人脸相似度 0.482/0.389 低于 0.65 门)→模型转方案 B(复用旧抠图+旧背景写 props)→render_preview 三连挂:每次 ~304s 报 `Error: fetch failed`(undici 300s headers 超时形状)→模型无限重试=「仍在处理」卡死观感。深挖排除:同一 engine.mjs 裸 node 2.16s/裸 Electron 1.5s 渲完(排除引擎);运行包两份 engine 副本都带 90s 竞速超时;**挂起期间主进程事件循环存活**(initialize/tools/list 3-6ms 即答)且**无 chrome-headless-shell 进程**(排除 spawnSync 阻塞/渲染内部挂);外部复现 tools/call render_preview=304451ms HeadersTimeoutError。定案=**主进程内 `import('@remotion/renderer')`(引擎 90s 竞速 armed 之前的懒加载)在应用进程里永挂**,竞速从未 armed。修=**render_preview 改独立 node 子进程跑引擎既有 CLI**(dist/engine.mjs templateId @propsFile fileName 输出 JSON;ELECTRON_RUN_AS_NODE=1+process.execPath;异步 spawn 不阻塞循环;180s 超时 taskkill /T /F 杀树;@文件=纯 props 对象,wrapper 形态会报「hookLines 不能为空」实测)。取证教训:debug.log 的 puppeteer profile chromium 条目(photocraft spawnSync 所写)时间戳滞后,是红鲱鱼不可当时间线。
