@@ -2,42 +2,35 @@
 // PhotoCraft——开源 PS 式 Rust 图像编辑器,500+ 引擎命令,UI/CLI/JSON 控制通道/MCP
 // 四通道同引擎;vendored 于 tintin-resources/photocraft,openfilm 同款先例)。
 //
-// 定位链:TINTIN_PHOTOCRAFT_DIR > <通道包>/tintin-resources/photocraft > D:\localprogram\photocraft-*(用户自装便携版)。
+// 定位链(2026-11-13 用户裁决「photocraft 是集成到客户端的,与 localprogram 无关」——
+// 旧链里的 D:\localprogram 便携版回退是开发机残留,已删除):
+//   ①env TINTIN_PHOTOCRAFT_DIR(显式覆盖/测试)
+//   ②env TINTIN_RESOURCES_DIR/photocraft
+//   ③打包态集成位:<安装>/resources/photocraft——extraResources 把 vendored 拷到资源根,
+//     从插件包根(app/node_modules/dsh-tintin-cover-plugin)上溯三级定位,cwd 无关
+//   ④开发态:<cwd>/dsh-plugin-desktop-tintin/tintin-resources/photocraft(仓内 vendored)
 // 两个可执行:photocraft.exe(原生窗口,--control 起环回控制通道)、photocraft-cli.exe(无头 run/batch/mcp)。
 import net from 'node:net'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { registerExternalChild } from 'dsh-tintin-shared/lib/external-child-reaper.js'
 
 const errText = (e) => (e instanceof Error ? e.message : String(e))
 
-/** 用户 localprogram 便携版:按版本号降序取最新(2026-11-13 用户裁决「集成版本要升级」
- *  ——硬编码 0.16.0 的回退路径会随上游发版过期;目录名 photocraft-<版本>-windows-x64-portable)。 */
-function localPortableCandidates(root = 'D:\\localprogram') {
-  let entries
-  try {
-    entries = readdirSync(root)
-  } catch {
-    return []
-  }
-  return entries
-    .filter((name) => /^photocraft-(\d+(?:\.\d+)*)-windows-x64-portable$/.test(name))
-    .sort((a, b) => {
-      const va = a.match(/^photocraft-([\d.]+)-/)?.[1] ?? '0'
-      const vb = b.match(/^photocraft-([\d.]+)-/)?.[1] ?? '0'
-      return va.localeCompare(vb, undefined, { numeric: true }) * -1
-    })
-    .map((name) => join(root, name))
-}
+/** 插件包根(lib/photocraft.js → .../node_modules/dsh-tintin-cover-plugin) */
+const pluginPkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 目录候选:env > 通道包 vendored > 用户 localprogram 便携版(版本降序) */
+/** 目录候选:env 覆盖 > env 资源根 > 打包态集成位 > 开发态仓内 vendored */
 export function resolvePhotocraftDir(env = process.env) {
   const candidates = [
     env.TINTIN_PHOTOCRAFT_DIR,
-    join(env.TINTIN_RESOURCES_DIR ?? join(process.cwd(), 'dsh-plugin-desktop-tintin', 'tintin-resources'), 'photocraft'),
-    ...localPortableCandidates(),
+    env.TINTIN_RESOURCES_DIR ? join(env.TINTIN_RESOURCES_DIR, 'photocraft') : null,
+    // 打包态集成位:app/node_modules/<pkg> 上溯三级=resources/photocraft(extraResources 落点)
+    join(pluginPkgRoot, '..', '..', '..', 'photocraft'),
+    join(process.cwd(), 'dsh-plugin-desktop-tintin', 'tintin-resources', 'photocraft'),
   ].filter(Boolean)
   for (const dir of candidates) {
     if (existsSync(join(dir, 'photocraft-cli.exe')) || existsSync(join(dir, 'photocraft-cli'))) return dir
@@ -100,8 +93,6 @@ export function launchApp({ docPath, port = 7878, tokenFile, env = process.env }
   registerExternalChild(child.pid, 'photocraft')
   return { ok: true, port, tokenFile: tf, pid: child.pid }
 }
-
-function dirname(p) { return p.replace(/[\\/][^\\/]+$/, '') }
 
 /** 控制通道默认位(与 launchApp 写入一致) */
 export function controlTarget(env = process.env) {

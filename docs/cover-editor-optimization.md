@@ -533,8 +533,8 @@ acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目�
 - 定位:提示来自 PhotoCraft 应用自身的更新检查(集成代码无版本检查);vendored(通道包 tintin-resources/photocraft)与用户便携版(D:\localprogram)同为 **0.16.0(b1794c6e0, 2026-10-25)**,上游 storytold/photocraft 最新 **v0.22.0(5000240c6, 2026-11-09)**。
 - 升级路径:官方 release 资产 `photocraft-0.22.0-windows-x64-portable.zip`(135MB)。直连 github.com 下载被限(56 重置/KB 级龟速),改走 gh-proxy 镜像搬运字节,**sha256 钉死官方 digest**(d6e13cd7…,经 api.github.com release API 的资产 digest 字段直连获取——镜像只当运输,哈希可信)。
 - 三处落位:①vendored(tintin-resources/photocraft,git-ignore 的本地数据)整目录替换 187MB→274MB(新增 LXGW/南奈木/Noto CJK 等字体);②安装版 `resources/photocraft/`(extraResources 根级)替换——替换前优雅 taskkill 运行中的 photocraft(pid 75880,刚开无工作);③win-unpacked 重打。
-- lib/photocraft.js 同批:①**硬编码 0.16.0 回退路径改为 localprogram 版本扫描降序**(photocraft-<版本>-windows-x64-portable,numeric 降序取最新——回退候选永不过期);②修 `readFileSync` 未导入(connectControl 里 try/catch 吞 ReferenceError→控制通道恒报「令牌非法」的潜伏 bug)。
-- 解析链语义不变:env TINTIN_PHOTOCRAFT_DIR > vendored > localprogram 最新便携版;vendored 命中优先,装版/开发态一致拿 0.22.0。重启封面编辑器/PhotoCraft 后生效。
+- lib/photocraft.js 同批(1113 晚用户裁决「photocraft 是集成到客户端的,与 localprogram 无关」——初版加的版本扫描回退一并废除):**定位链删除 D:\localprogram 便携版回退**(开发机残留,装到别的机器=死路径;且打包态旧链三条候选全落空,装版其实一直在侥幸命中 dev 机的便携版)。新定位链:①env `TINTIN_PHOTOCRAFT_DIR` ②env `TINTIN_RESOURCES_DIR`/photocraft ③**打包态集成位** `<安装>/resources/photocraft`(extraResources 落点,从插件包根上溯三级定位,cwd 无关——打包态模拟实测从裸 cwd 解析出集成副本) ④开发态 `<cwd>/dsh-plugin-desktop-tintin/tintin-resources/photocraft`。②修 `readFileSync` 未导入(connectControl 里 try/catch 吞 ReferenceError→控制通道恒报「令牌非法」的潜伏 bug);③删遗留字符串版 dirname 助手(与 node:path 导入撞名)。
+- 解析链语义:env 覆盖 > 集成位(vendored 随包) > 开发态仓内 vendored;dev 解析=仓内 vendored,打包模拟=装版集成位,双态实测。重启封面编辑器/PhotoCraft 后生效。
 
 ### 7.8 保人方案三修:渲染子进程化 + 白盘形态自适应 + 环境图吃真图(2026-11-12 晚三;用户四问「选保人方案为什么卡死/白背景和人混在一起/生成图为什么在项目文件夹/人物为什么用 product」)
 
