@@ -142,10 +142,11 @@
     #hostTip { position: absolute; left: 10px; bottom: 8px; z-index: 2; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 72%, transparent); color: var(--surface); font-size: 11px; pointer-events: none; backdrop-filter: blur(4px); }
     .placeholder { padding: 48px 24px; text-align: center; color: var(--muted); font-size: 12px; line-height: 1.8; }
     .placeholder h3 { color: var(--ink); margin-bottom: 8px; }
-    /* ── 右栏 ── */
-    #right { width: var(--right-w); flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--line); padding: 12px; overflow-y: auto; }
+    /* ── 右栏（两区结构，2026-11-12 下载栏归位：滚动区 + 常驻底区）── */
+    #right { width: var(--right-w); flex-shrink: 0; background: var(--surface); border-left: 1px solid var(--line); overflow: hidden; display: flex; flex-direction: column; }
+    #rightScroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px; }
     #right h4 { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--muted); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed var(--line); }
-    /* ── 下载栏 ── */
+    /* ── 下载栏（右栏底部锚定，2026-11-12 用户裁决：不再横贯整个界面底部）── */
     #shelf { flex-shrink: 0; display: none; flex-direction: column; gap: 6px; padding: 8px 12px; background: var(--surface); border-top: 1px solid var(--line); max-height: 132px; overflow-y: auto; }
     .dl { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink); }
     .dl .name { flex: 0 1 auto; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -188,8 +189,14 @@
     .sn-card:hover { border-color: var(--line-strong); }
     .sn-name { font-size: 11px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sn-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
-    .sn-badge { padding: 1px 6px; border-radius: 4px; font-size: 10px; border: 0.5px solid var(--line); color: var(--muted); flex-shrink: 0; }
-    .sn-btn { margin-left: auto; height: 20px; padding: 0 8px; border: 0; border-radius: 6px; background: var(--primary); color: #fff; font: inherit; font-size: 11px; cursor: pointer; transition: background .15s var(--easing), transform .15s var(--easing); }
+    .sn-badge { padding: 1px 6px; border-radius: 4px; font-size: 10px; border: 0.5px solid var(--line); color: var(--muted); flex-shrink: 0; white-space: nowrap; }
+    .sn-btn { margin-left: auto; height: 20px; padding: 0 8px; border: 0; border-radius: 6px; background: var(--primary); color: #fff; font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: background .15s var(--easing), transform .15s var(--easing); }
+    /* 列表容器显式宽度（2026-11-12 实机诊断：解析期 display:none 的 flex 列容器在
+       none→flex 翻转后 Chromium 可能把 auto 宽钉死为 0——宽度塌缩，卡片/按钮被挤成
+       竖排（Playwright 三方复现：原节点 0px/克隆 239px/width:100% 修复 239px）；
+       解析期即 flex 的 #sniffList 从未塌缩，同为 none 起步的 #biliExtList/#dyStreams
+       显式 width 绕开 auto 计算路径。） */
+    #sniffList, #biliExtList, #dyStreams { width: 100%; }
     .sn-btn:hover:not(:disabled) { background: var(--primary-hover); }
     .sn-btn:not(:disabled):active { transform: scale(.96); }
     .sn-btn:disabled { opacity: .55; cursor: default; }
@@ -335,33 +342,42 @@
       </section>
     </main>
     <aside id="right">
+      <div id="rightScroll">
       <h4 id="sniffHead">媒体嗅探 <button id="sniffClear" title="清空当前平台嗅探列表" style="float:right;border:0.5px solid var(--line);border-radius:5px;background:transparent;color:var(--muted);font:inherit;font-size:11px;padding:2px 8px;cursor:pointer;">清空</button></h4>
       <div id="sniffList" style="display:flex;flex-direction:column;gap:6px;"></div>
       <!-- B站下载助手（2026-10-26 复活：SRC SniffTab B站扩展推送区；数据=browser:bili-ext-dl） -->
       <h4 id="biliExtHead" style="display:none;">B站下载助手 <span id="biliExtState" style="float:right;color:var(--muted);font-size:10px;"></span></h4>
       <div id="biliExtList" style="display:none;flex-direction:column;gap:6px;"></div>
-      <!-- 抖音分享链接解析（SRC SniffTab dy-parse-section；chrom-douyin 预装扩展能力） -->
+      <!-- 通用粘贴入口（2026-11-12 用户裁决「开通用粘贴入口」，原抖音解析卡升级：
+           链接按域名路由——YouTube 等视频站走 yt-dlp 通用链，抖音分享链接/口令走
+           既有捕获链，B站指回扩展助手区；引擎一套，不为新平台写专属代码） -->
       <div id="douyinParseSec" style="display:none;">
-        <h4>抖音视频下载助手</h4>
-        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">预装扩展能力：粘贴分享链接或口令，解析出视频后点「下载」（无水印完整视频）</div>
-        <input id="dyShare" placeholder="粘贴分享链接或口令（App 内分享→复制链接/口令）" spellcheck="false"
+        <h4>视频下载助手</h4>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">粘贴视频链接：YouTube 等视频站解析后直接下载；抖音分享链接/口令自动捕获合并下载（无水印完整视频）</div>
+        <input id="dyShare" placeholder="粘贴视频链接（YouTube 等）或抖音分享链接/口令" spellcheck="false"
           style="width:100%;height:26px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;font-size:11px;outline:none;user-select:text;" />
         <button id="dyParseBtn" class="btn-primary" style="width:100%;height:28px;margin-top:6px;font-size:12px;">解析</button>
         <div id="dyMsg" style="margin-top:6px;font-size:11px;color:var(--muted);user-select:text;"></div>
-        <!-- 解析/下载分离（2026-11-05 用户裁决）：解析出视频先出结果卡，点「下载视频」才下载 -->
+        <!-- 解析/下载分离（2026-11-05 用户裁决）：解析出视频先出结果卡，点「下载视频」才下载；
+             无水印徽标独立成行且仅抖音结果展示（通用链无此语义）；捕获流就地展示在本卡内
+             （同日裁决：捕获结果归助手卡=下方，顶部嗅探面板抖音隐藏） -->
         <div id="dyResult" style="display:none;">
           <div class="sn-card" style="margin-top:6px;">
             <div id="dyResultTitle" class="sn-name" style="white-space:normal;"></div>
             <div class="sn-meta" style="margin-top:6px;">
-              <span class="sn-badge">无水印</span>
-              <button id="dyDownloadBtn" class="btn-primary" style="width:100%;height:28px;font-size:12px;">下载视频</button>
+              <span id="dyBadge" class="sn-badge">无水印</span>
             </div>
+            <div id="dyStreams" style="display:none;flex-direction:column;gap:4px;margin-top:6px;"></div>
+            <button id="dyDownloadBtn" class="btn-primary" style="width:100%;height:28px;font-size:12px;margin-top:6px;">下载视频</button>
           </div>
         </div>
       </div>
+      </div>
+      <!-- 下载栏归位右栏底部（2026-11-12 用户裁决：进度属扩展区，不再横贯整个界面底部；
+           静态常驻底区，不随 rightScroll 滚动，长短内容都精确钉底） -->
+      <div id="shelf"></div>
     </aside>
   </div>
-  <div id="shelf"></div>
   <div id="toast"></div>
 <script>
 (function () {
@@ -811,8 +827,8 @@
   }
   function sniffTick() {
     if (!bridge || !sniffPlatform) return
-    // B站面板隐藏（2026-11-11）：分片流条目对用户无意义，不轮询不渲染
-    if (sniffPlatform === 'bilibili') return
+    // B站/抖音面板隐藏（2026-11-11 / 2026-11-12）：列表对用户无意义，不轮询不渲染
+    if (sniffPlatform === 'bilibili' || sniffPlatform === 'douyin') return
     bridge.sniffList(sniffPlatform).then(function (r) {
       sniffRender((r && r.data) || [])
     }).catch(function () { /* 桥不可达保持原状 */ })
@@ -826,11 +842,17 @@
     // B站降噪（2026-11-11 用户报障「右边的列表不需要这么多」）：B站嗅探捕获的是 DASH
     // 分片流（mcdn.bilivideo/mountaintys/mqpbk 等 PCDN 域名每几秒一片，刷满列表），
     // 且单抓一片不可播、下载已由下方助手承载（完整直链+画质+大小）→ B站隐藏嗅探面板。
-    document.getElementById('sniffHead').style.display = isBili ? 'none' : 'block'
-    document.getElementById('sniffList').style.display = isBili ? 'none' : 'flex'
+    // 抖音同理（2026-11-12 用户报障「捕获的列表应显示在下面不是上面」）：面板自 §16.27
+    // 收敛后无下载按钮=纯诊断展示，douyinvod 流（播放/捕获混在一起）堆在顶部被误读成
+    // 下载结果——捕获流改在助手卡内就地展示（dyRenderStreams），下载入口唯一=解析卡。
+    var hideSniff = isBili || isDy
+    document.getElementById('sniffHead').style.display = hideSniff ? 'none' : 'block'
+    document.getElementById('sniffList').style.display = hideSniff ? 'none' : 'flex'
     document.getElementById('biliExtHead').style.display = isBili ? 'block' : 'none'
     document.getElementById('biliExtList').style.display = isBili ? 'flex' : 'none'
-    document.getElementById('douyinParseSec').style.display = isDy ? 'block' : 'none'
+    // 通用粘贴入口（2026-11-12 用户裁决「开通用粘贴入口」：链接按域名路由，主进程内部分流）；
+    // B站页面不显示（同日续裁决：已有 B站下载助手，通用卡在 B站冗余）
+    document.getElementById('douyinParseSec').style.display = isBili ? 'none' : 'block'
     if (isBili) biliExtRender()
   }
   document.getElementById('sniffClear').onclick = function () {
@@ -877,15 +899,23 @@
           setTimeout(function () { btn.textContent = '下载' }, 2500)
         }).catch(function () { biliBusy[dl.url] = false; btn.textContent = '失败' })
       }
-      meta.append(badge, btn)
-      card.append(nm, meta)
+      meta.append(badge)
+      // 下载按钮独立成行（2026-11-12 用户裁决：与通用卡「下载视频」同构——全宽、
+      // 不与徽标挤同一行，彻底杜绝挤压换行）
+      btn.style.width = '100%'
+      btn.style.height = '24px'
+      btn.style.marginTop = '6px'
+      btn.style.marginLeft = '0'
+      card.append(nm, meta, btn)
       list.appendChild(card)
     })
   }
   if (bridge && bridge.onBiliExtDownloads) {
     bridge.onBiliExtDownloads(function (msg) {
       var payload = (msg && msg.payload) || {}
-      biliExt.title = payload.title || ''
+      // 扩展面板标题模板尾巴「的下载地址：」在右栏是噪音（2026-11-12 用户问「怎么来的」），
+      // 提取脚本按 #title textContent 原样取来，这里展示层剥掉
+      biliExt.title = String(payload.title || '').replace(/\s*的下载地址[:：]\s*$/, '')
       biliExt.items = Array.isArray(payload.downloads) ? payload.downloads : []
       if (sniffPlatform === 'bilibili') biliExtRender()
     })
@@ -901,6 +931,24 @@
   function dyResetResult() {
     dyParsed = null
     document.getElementById('dyResult').style.display = 'none'
+    document.getElementById('dyStreams').style.display = 'none'
+  }
+  // 捕获流就地展示（2026-11-12 用户裁决：捕获到的媒体流归助手卡=下方，顶部嗅探
+  // 面板抖音已隐藏——用户在下载动作发生的同一个卡里看到抓到了什么）
+  function dyRenderStreams(videoUrl, audioUrl) {
+    var box = document.getElementById('dyStreams')
+    box.textContent = ''
+    ;[[videoUrl, '视频'], [audioUrl, '音频']].forEach(function (row) {
+      if (!row[0]) return
+      var card = document.createElement('div'); card.className = 'sn-card'
+      var nm = document.createElement('div'); nm.className = 'sn-name'; nm.textContent = row[0]; nm.title = row[0]
+      var meta = document.createElement('div'); meta.className = 'sn-meta'; meta.style.marginTop = '4px'
+      var badge = document.createElement('span'); badge.className = 'sn-badge'; badge.textContent = row[1]
+      meta.append(badge)
+      card.append(nm, meta)
+      box.appendChild(card)
+    })
+    box.style.display = 'flex'
   }
   function dyParse() {
     if (!bridge) { dySetMsg(false, '桥不可达（客户端需更新）'); return }
@@ -913,9 +961,11 @@
       btn.disabled = false; btn.textContent = '解析'
       if (!r || !r.ok) { var m = (r && r.reason) || '解析失败'; dySetMsg(false, m); toast(m); return }
       dyParsed = r
-      document.getElementById('dyResultTitle').textContent = r.desc || r.author || '抖音视频'
+      // 无水印徽标仅抖音结果展示（2026-11-12 通用入口：generic 链无此语义）
+      document.getElementById('dyBadge').style.display = r.generic ? 'none' : ''
+      document.getElementById('dyResultTitle').textContent = r.desc || r.author || (r.generic ? r.videoPageUrl : '抖音视频')
       document.getElementById('dyResult').style.display = 'block'
-      dySetMsg(true, '解析成功' + (r.videoPageUrl ? '（无水印完整视频）' : '') + '，点下方「下载视频」')
+      dySetMsg(true, '解析成功' + (!r.generic && r.videoPageUrl ? '（无水印完整视频）' : '') + '，点下方「下载视频」')
     }).catch(function (e) {
       btn.disabled = false; btn.textContent = '解析'
       var m = '解析失败：' + (e && e.message || e)
@@ -926,6 +976,30 @@
     var btn = this
     if (!bridge || !dyParsed) return
     var r = dyParsed
+    // 通用链路（2026-11-12 用户裁决「开通用粘贴入口」）：YouTube 等视频站直接交引擎
+    // yt-dlp 模式（分区/cookie 由链接域名归属），不经抖音捕获链——平台策略分叉只在
+    // 主进程路由层，这里只认 r.generic 旗标
+    if (r.generic) {
+      btn.disabled = true; btn.textContent = '下载中…'
+      var gname = String(r.desc || 'video_' + Date.now()).slice(0, 80).replace(/[\\/:*?"<>|\s]+/g, '_') || ('video_' + Date.now())
+      bridge.downloadMediaStart({
+        url: r.videoPageUrl,
+        useYtdlp: true,
+        filename: gname + '.mp4',
+        ...(r.desc ? { title: r.desc } : {}),
+        ...(r.platformId ? { platformId: r.platformId, subDir: r.platformId } : { subDir: 'video' })
+      }).then(function (d) {
+        btn.disabled = false; btn.textContent = '下载视频'
+        var ok = !!(d && d.success)
+        dySetMsg(ok, ok ? '已开始下载（进度见底部下载栏）' : ((d && d.error) || '下载发起失败'))
+        if (!ok) toast((d && d.error) || '下载发起失败')
+      }).catch(function (e) {
+        btn.disabled = false; btn.textContent = '下载视频'
+        var m = '下载发起失败：' + (e && e.message || e)
+        dySetMsg(false, m); toast(m)
+      })
+      return
+    }
     // 视频页路线（2026-11-07 修复）：上游 yt-dlp 抖音抽取器不会算 a_bogus 签名
     // （tiktok.py 源码 TODO 明写），裸请求 aweme/detail 必 403 误报 Fresh cookies；
     // 第三方解析 API 也已失联。改走自家已验证链路：打开视频页 → 嗅探捕获播放地址
@@ -1008,12 +1082,21 @@
         clearInterval(timer)
         if (page && page.captureClose) page.captureClose({ id: capId })
         capId = null
+        // 捕获流就地展示（2026-11-12 用户裁决：捕获结果归助手卡，不再堆顶部嗅探面板）
+        dyRenderStreams(hit.url, audio ? audio.url : '')
+        // 文案时序（2026-11-12 用户报障）：sniffDownload 要等整段下载+合并完才 resolve，
+        // 原把完成误报成「开始下载」——用户以为还要再点一次按钮。捕获命中即刻报
+        // 「正在下载」，resolve 后报「下载完成」；下载进度本体在底部下载栏实时可见
+        // （2026-11-12 修复：页面下载栏此前收不到 downloads:* 事件，进度从未显示）。
+        var paired = !!audio
+        dySetMsg(true, '已捕获' + (paired ? '音视频双流' : '视频流') + '，正在下载（进度见底部下载栏）')
+        btn.textContent = '下载中…'
         // 平台/Referer 显式声明（2026-11-11：捕获已与用户当前页解耦——在别的平台页面
         // 解析抖音链接时，下载仍必须走抖音分区 cookie + 抖音 referer）
-        bridge.sniffDownload({ url: hit.url, ...(audio ? { audioUrl: audio.url } : {}), filename: (r.desc || '抖音视频') + '.mp4', platformId: 'douyin', referer: r.videoPageUrl }).then(function (d) {
+        bridge.sniffDownload({ url: hit.url, ...(paired ? { audioUrl: audio.url } : {}), filename: (r.desc || '抖音视频') + '.mp4', platformId: 'douyin', referer: r.videoPageUrl }).then(function (d) {
           btn.disabled = false; btn.textContent = '下载视频'
           var ok = !!(d && d.success)
-          dySetMsg(ok, ok ? '已捕获' + (audio ? '音视频双流' : '视频流') + '，开始下载（进度见底部下载栏）' : ((d && d.error) || '下载发起失败'))
+          dySetMsg(ok, ok ? '下载完成，无水印 mp4 已存盘（底部下载栏点「打开目录」查看）' : ((d && d.error) || '下载发起失败'))
           if (!ok) toast((d && d.error) || '下载发起失败')
         }).catch(function (e) {
           btn.disabled = false; btn.textContent = '下载视频'

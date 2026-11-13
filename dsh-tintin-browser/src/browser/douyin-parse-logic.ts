@@ -115,3 +115,35 @@ export function buildDouyinVideoPageUrl(id: unknown): string | null {
   const v = String(id || '').trim()
   return /^\d{15,}$/.test(v) ? 'https://www.douyin.com/video/' + v : null
 }
+
+// ── 通用粘贴入口路由（2026-11-12 用户裁决「开通用粘贴入口」：链接按域名路由，
+//    引擎一套，不为新平台写专属代码；分平台只发生在「获取直链策略」层）──
+
+export type ShareTextRoute =
+  | { kind: 'douyin' }
+  | { kind: 'bilibili'; url: string }
+  | { kind: 'generic'; url: string }
+  | { kind: 'none' }
+
+/** 抖音信号判定：短链 / 视频页·note 页 id / 口令码 任一命中即走既有抖音链 */
+function looksLikeDouyin(text: string): boolean {
+  return !!(extractDouyinShareUrl(text) || extractDouyinVideoIdFromUrl(text) || extractDouyinPasscode(text))
+}
+
+/**
+ * 分享文本路由（纯函数，单测下沉）：
+ * - douyin：分享链接/口令/视频页 URL → 既有抖音链（302 探测→捕获下载）
+ * - bilibili：B站链接（含 b23.tv 短链）→ 指回扩展助手区（§16.32 唯一入口裁决，
+ *   不在通用卡并行开第二条 B站下载路）
+ * - generic：其余 http(s) 链接 → yt-dlp 通用链（youtube 等引擎现成支持）
+ * - none：无 URL（纯口令不匹配任何抖音信号时也归 none——既不是抖音也不是链接）
+ */
+export function routeShareText(text: unknown): ShareTextRoute {
+  const s = String(text || '')
+  if (looksLikeDouyin(s)) return { kind: 'douyin' }
+  const match = s.match(/https?:\/\/[^\s]+/i)
+  const url = match ? match[0] : ''
+  if (!url) return { kind: 'none' }
+  if (/bilibili\.com|b23\.tv/i.test(url)) return { kind: 'bilibili', url }
+  return { kind: 'generic', url }
+}

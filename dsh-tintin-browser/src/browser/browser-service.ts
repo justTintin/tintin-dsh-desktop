@@ -727,10 +727,18 @@ export function registerBrowserService(
   // 下载落盘根 = 默认工作区 materials（/tintin/media 白名单根内，产物可直接预览）
   // 下载总线出口：download-manager（视图/URL 下载）与 media-downloader（媒体下载器
   // 复活件：yt-dlp 主链路/直链/音视频合并）共用，页面底部下载栏统一渲染进度
+  // 页面载体必须逐面投递（2026-11-12 报障根因）：浏览器 UI 页是独立 renderer
+  // （内嵌=WebContentsView / 独立=browserWindow），宿主窗的 webContents.send 到不了
+  // 它——页面下载栏的 onDownloadEvent 自上架起一个事件都没收到过，「进度见底部
+  // 下载栏」全程空话（文件其实下完了，用户只看到一句开始下载）。
   const downloadEmit = (channel: 'downloads:progress' | 'downloads:done' | 'downloads:error', payload: Record<string, unknown>): void => {
     try {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
     } catch { /* 窗口已销毁 */ }
+    const page = pageHost()
+    try {
+      if (page && !page.webContents.isDestroyed()) page.webContents.send(channel, payload)
+    } catch { /* 页面未就绪 */ }
     downloadMirror().mirror(channel, payload)
   }
   downloadManager = createDownloadManager({

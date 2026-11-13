@@ -721,3 +721,11 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - Studio 顶栏多窗口/tabs 桩(单视图壳);应用内更新走 TinTin 自身通道;
 - 转写请求明细(calls)暂空(仅 ACP 事件日志);
 - 剪辑辅助/自动粗剪(§17 立项)在 M1 spike 前不排产——本节所列缺口的立项化解。
+
+## 16.37 浏览器域 1112 批:下载事件面投递+通用粘贴入口+宽度塌缩根治(2026-11-12)
+
+- **下载进度事件架构缝隙**:`downloadEmit` 原只发宿主 harness 主窗 renderer;浏览器页是独立 renderer(内嵌 WebContentsView/独立窗),页面底栏的 `onDownloadEvent` 自上架起零事件。修=browser-service `downloadEmit` 追加 `pageHost()` 面投递(main→页面事件必须逐 renderer 投递的教训)。
+- **通用粘贴入口(用户裁决「开通用粘贴入口」)**:解析卡升级「视频下载助手」全平台可见(B站页隐藏,已有助手);`routeShareText` 四路由(douyin/bilibili/generic/none)——YouTube 等走引擎 yt-dlp 模式(`probeYtdlpTitle` 预取命名),抖音走既有捕获链,B站指回助手区;引擎一套,分叉只在路由层。
+- **B站助手卡宽度塌缩根治(用户问「红框怎么来的」)**:内置扩展 shadow DOM 面板→2s 提取→右栏卡片;「未知大小」=扩展 `C()` 兜底文案、「的下载地址:」=扩展标题模板尾巴(展示层剥除)。塌缩根因=**解析期 `display:none` 的 flex 列容器(#biliExtList/#dyStreams)在 none→flex 翻转后被 Chromium 钉死 auto 宽=0**(Playwright 三方复现:原节点 0px/克隆 239px/`width:100%` 修复 239px;解析期即 flex 的 #sniffList 从未塌缩)。修=三容器显式 `width:100%` + B站下载按钮独立成行(用户裁决「下载占一行」)。
+- **下载栏归位右栏底部(用户裁决)**:#right 两区结构(rightScroll 滚动区+shelf 常驻底区),进度属扩展区不再横贯界面底部;全平台共享(抖音/B站/油管/网页同一条 downloads:* 总线)。
+- 配套:`external-child-reaper.js` 退出整树收割(§13 净场段)、隔离契约测试 `tintin-browser-page-isolation.test.ts`(入口矩阵/通道归属/宽度规则钉死)。

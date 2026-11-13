@@ -7,6 +7,7 @@ import {
   extractDouyinPasscode,
   extractDouyinShareUrl,
   extractDouyinVideoIdFromUrl,
+  routeShareText,
   validateDouyinParseResponse,
 } from '../src/browser/douyin-parse-logic.ts'
 
@@ -101,5 +102,34 @@ describe('validateDouyinParseResponse（dy.xs25.cn 响应契约）', () => {
       ok: false,
       reason: '解析结果缺少视频直链，无法下载',
     })
+  })
+})
+
+describe('routeShareText（2026-11-12 用户裁决「开通用粘贴入口」：链接按域名路由，引擎一套）', () => {
+  it('抖音信号优先：分享短链 / 视频页 URL / 口令文本 → douyin', () => {
+    expect(routeShareText('7.97 Z@j.Cu 09/09 UYz:/ 国行iphone')).toEqual({ kind: 'douyin' })
+    expect(routeShareText('https://v.douyin.com/UYz123/ 复制此链接')).toEqual({ kind: 'douyin' })
+    expect(routeShareText('https://www.douyin.com/video/7412345678901234567')).toEqual({ kind: 'douyin' })
+    expect(routeShareText('看这个 https://v.douyin.com/iAbcDef/ 顺便 https://youtu.be/x')).toEqual({ kind: 'douyin' })
+  })
+
+  it('B站链接（含 b23.tv 短链）→ bilibili：指回扩展助手区，不在通用卡并行开第二条下载路（§16.32）', () => {
+    expect(routeShareText('https://www.bilibili.com/video/BV1xx411c7mD')).toEqual({ kind: 'bilibili', url: 'https://www.bilibili.com/video/BV1xx411c7mD' })
+    expect(routeShareText('https://b23.tv/abc123')).toEqual({ kind: 'bilibili', url: 'https://b23.tv/abc123' })
+  })
+
+  it('其余 http(s) 链接 → generic（YouTube 等 yt-dlp 通用链）', () => {
+    expect(routeShareText('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toEqual({ kind: 'generic', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
+    expect(routeShareText('https://youtu.be/dQw4w9WgXcQ')).toEqual({ kind: 'generic', url: 'https://youtu.be/dQw4w9WgXcQ' })
+    expect(routeShareText('标题 https://example.com/watch/1 带噪声文本')).toEqual({ kind: 'generic', url: 'https://example.com/watch/1' })
+  })
+
+  it('无 URL 无抖音信号 → none', () => {
+    expect(routeShareText('随便一段话')).toEqual({ kind: 'none' })
+    expect(routeShareText('')).toEqual({ kind: 'none' })
+  })
+
+  it('口令样文本（码:/）即便不是真抖音码也归 douyin（既有解析链自会报错，不误入通用链）', () => {
+    expect(routeShareText('9.94 0pm 02/15 @C.Ut 8u:/ 历史上来历不明')).toEqual({ kind: 'douyin' })
   })
 })

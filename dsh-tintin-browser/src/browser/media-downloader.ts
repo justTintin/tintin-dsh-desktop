@@ -28,6 +28,7 @@ import {
   extractDouyinPasscode,
   extractDouyinShareUrl,
   extractDouyinVideoIdFromUrl,
+  routeShareText,
   validateDouyinParseResponse,
 } from './douyin-parse-logic.ts'
 import { detectPlatformFromUrl, PLATFORM_COOKIE_DOMAINS, PLATFORM_DEFS } from './platform-meta.ts'
@@ -327,6 +328,24 @@ export function createMediaDownloaderIpc(deps: MediaDownloaderDeps) {
     } catch { /* 探测失败（网络/超时）→ 调用方走兜底 */ }
     return null
   }
+  /** yt-dlp 预取视频标题（通用粘贴入口命名用；失败容忍——下载链仍可带 cookie 重试） */
+  async function probeYtdlpTitle(pageUrl: string): Promise<string | null> {
+    const ytdlpInfo = getYtdlpArgs(appLike)
+    if (!ytdlpInfo) return null
+    let buf = ''
+    await new Promise<void>((resolve) => {
+      const child = spawn(
+        ytdlpInfo.cmd,
+        [...ytdlpInfo.args, '--no-warnings', '--no-playlist', '--print', 'title', '--no-download', pageUrl],
+        { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 20000 },
+      )
+      child.stdout.on('data', (d: Buffer) => { buf += d.toString() })
+      child.on('close', () => resolve())
+      child.on('error', () => resolve())
+    })
+    const title = buf.split(/\r?\n/).map((s) => s.trim()).find(Boolean)
+    return title ? title.slice(0, 120) : null
+  }
   ipcMain.handle('browser:douyinParse', async (_e: unknown, shareText: unknown) => {
     const text = String(shareText || '')
     // 1) 分享文本里直接粘了视频页 / note 页 URL 的情况
@@ -353,11 +372,31 @@ export function createMediaDownloaderIpc(deps: MediaDownloaderDeps) {
       const desc = extractDouyinCaption(text) ?? undefined
       if (videoPageUrl) return { ok: true, videoPageUrl, videoId, ...(desc ? { desc } : {}) }
     }
-    // 4) 兜底：第三方解析 API（dy.xs25.cn，其后端常被风控，成功则返回直链）；
+    // 4.5) 通用粘贴入口（2026-11-12 用户裁决「开通用粘贴入口」）：非抖音链接按域名
+    //      路由——B站指回扩展助手区（§16.32 唯一入口裁决，不在通用卡并行开第二条
+    //      B站下载路）；其余 http(s) 交 yt-dlp 通用链（youtube 等引擎现成支持，
+    //      平台分区/cookie 由 detectPlatformFromUrl 归属，不为新平台写专属代码）。
+    //      标题预取只为命名，失败不阻断（下载链会带分区 cookie 重试）。
+    const route = routeShareText(text)
+    if (route.kind === 'bilibili') {
+      return { ok: false, reason: 'B站视频请用右侧「B站下载助手」区下载（打开播放页后由扩展解析，可选画质与音轨）' }
+    }
+    if (route.kind === 'generic') {
+      const title = await probeYtdlpTitle(route.url)
+      const platformId = detectPlatformFromUrl(route.url) ?? undefined
+      return {
+        ok: true,
+        generic: true,
+        videoPageUrl: route.url,
+        ...(platformId ? { platformId } : {}),
+        ...(title ? { desc: title } : {}),
+      }
+    }
+    // 5) 兜底：第三方解析 API（dy.xs25.cn，其后端常被风控，成功则返回直链）；
     //    链接与口令构造短链都可喂
     const shareUrl2 = shareUrl ?? passcodeUrl ?? extractDouyinShareUrl(text)
     if (!shareUrl2) {
-      return { ok: false, reason: '未找到有效的抖音分享链接或口令（App 内分享→复制链接，或粘贴含「码:/」的口令文本）' }
+      return { ok: false, reason: '未找到可解析的视频：支持视频站链接（YouTube 等）或抖音分享链接/口令（App 内分享→复制）' }
     }
     try {
       const res = await fetch(DOUYIN_PARSE_API + encodeURIComponent(shareUrl2), { signal: AbortSignal.timeout(20000) })
