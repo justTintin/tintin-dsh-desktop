@@ -37,8 +37,8 @@ export interface TemplateDef<P = Record<string, unknown>> {
 }
 
 const TEXT_LAYERS_COVER: LayerDef[] = [
-  { id: 'title', label: '主标题', type: 'text', fontSize: 88 },
   { id: 'subtitle', label: '副标题', type: 'text', fontSize: 34 },
+  { id: 'title', label: '主标题', type: 'text', fontSize: 88 },
 ]
 /* 节目封面无品牌条:原品牌条=写死的 T 徽标+「TINTIN DESKTOP」(PoC 遗留),2026-11-01 用户裁决删除 */
 const GRAPHIC_LAYERS_COVER: LayerDef[] = [
@@ -77,8 +77,8 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
-      { id: 'title', label: '主标题', type: 'text', fontSize: 76 },
       { id: 'subtitle', label: '副标题', type: 'text', fontSize: 28 },
+      { id: 'title', label: '主标题', type: 'text', fontSize: 76 },
       { id: 'features', label: '卖点清单', type: 'text', fontSize: 24 },
       { id: 'badge', label: '角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
@@ -92,8 +92,8 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
       { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
-      { id: 'title', label: '主标题', type: 'text', fontSize: 84 },
       { id: 'subtitle', label: '副标题', type: 'text', fontSize: 32 },
+      { id: 'title', label: '主标题', type: 'text', fontSize: 84 },
       { id: 'features', label: '卖点清单', type: 'text', fontSize: 27 },
       { id: 'badge', label: '角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
@@ -106,9 +106,9 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     defaultProps: { hookLines: [], subtitle: '', subTag: '', brand: '', environment: '', image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
+      { id: 'subtitle', label: '副标题', type: 'text', fontSize: 34 },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 110 },
       { id: 'titleRule', label: '标题装饰条(装饰)', type: 'graphic' },
-      { id: 'subtitle', label: '副标题', type: 'text', fontSize: 34 },
       { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
       { id: 'subTag', label: '栏目角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },
@@ -121,9 +121,9 @@ export const TEMPLATES: Record<string, TemplateDef> = {
     defaultProps: { hookLines: [], subtitle: '', subTag: '', brand: '', environment: '', image: '' },
     layerDefs: [
       { id: 'environment', label: '环境图', type: 'environment' },
+      { id: 'subtitle', label: '副标题', type: 'text', fontSize: 38 },
       { id: 'title', label: '主标题(钩子)', type: 'text', propsKey: 'hookLines', fontSize: 104 },
       { id: 'titleRule', label: '标题装饰条(装饰)', type: 'graphic' },
-      { id: 'subtitle', label: '副标题', type: 'text', fontSize: 38 },
       { id: 'product', label: '主体图', type: 'product', propsKey: 'image' },
       { id: 'subTag', label: '栏目角标(装饰)', type: 'graphic' },
       { id: 'brand', label: '品牌条(装饰)', type: 'graphic' },

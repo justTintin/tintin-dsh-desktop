@@ -37,7 +37,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
   "templateId": "video",
   "props": { "hookLines": ["0.2ms", "光轴鼠标"], "subTag": "开箱实测", "brand": "...", "image": "mouse.jpg", "styles": { "title": { "scale": 1.1, "color": "#facc15", "dx": 0, "dy": 0, "font": "KaiTi" } },
     "customLayers": [ { "id": "img-xxx", "image": "lib-m1-173.png", "x": 700, "y": 120, "width": 360, "opacity": 1 } ],
-    "layerOrder": ["environment", "grid", "product", "img-xxx", "title", "subtitle", "subTag", "brand"] },
+    "layerOrder": ["environment", "grid", "product", "img-xxx", "subtitle", "title", "subTag", "brand"] },
   "hiddenLayers": [],
   "origin": "agent",
   "updatedAt": 1730000000000
