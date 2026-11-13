@@ -6,19 +6,38 @@
 // 两个可执行:photocraft.exe(原生窗口,--control 起环回控制通道)、photocraft-cli.exe(无头 run/batch/mcp)。
 import net from 'node:net'
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { registerExternalChild } from 'dsh-tintin-shared/lib/external-child-reaper.js'
 
 const errText = (e) => (e instanceof Error ? e.message : String(e))
 
-/** 目录候选:env > 通道包 vendored > 用户 localprogram 便携版 */
+/** 用户 localprogram 便携版:按版本号降序取最新(2026-11-13 用户裁决「集成版本要升级」
+ *  ——硬编码 0.16.0 的回退路径会随上游发版过期;目录名 photocraft-<版本>-windows-x64-portable)。 */
+function localPortableCandidates(root = 'D:\\localprogram') {
+  let entries
+  try {
+    entries = readdirSync(root)
+  } catch {
+    return []
+  }
+  return entries
+    .filter((name) => /^photocraft-(\d+(?:\.\d+)*)-windows-x64-portable$/.test(name))
+    .sort((a, b) => {
+      const va = a.match(/^photocraft-([\d.]+)-/)?.[1] ?? '0'
+      const vb = b.match(/^photocraft-([\d.]+)-/)?.[1] ?? '0'
+      return va.localeCompare(vb, undefined, { numeric: true }) * -1
+    })
+    .map((name) => join(root, name))
+}
+
+/** 目录候选:env > 通道包 vendored > 用户 localprogram 便携版(版本降序) */
 export function resolvePhotocraftDir(env = process.env) {
   const candidates = [
     env.TINTIN_PHOTOCRAFT_DIR,
     join(env.TINTIN_RESOURCES_DIR ?? join(process.cwd(), 'dsh-plugin-desktop-tintin', 'tintin-resources'), 'photocraft'),
-    'D:\\localprogram\\photocraft-0.16.0-windows-x64-portable',
+    ...localPortableCandidates(),
   ].filter(Boolean)
   for (const dir of candidates) {
     if (existsSync(join(dir, 'photocraft-cli.exe')) || existsSync(join(dir, 'photocraft-cli'))) return dir

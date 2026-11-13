@@ -528,6 +528,14 @@ acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目�
 
 - 预览区顶条的 OrientationToggle(App.tsx)顺序改为 竖屏→横屏(默认激活项置左);双载荷已重打(win-unpacked+安装版 dist/editor 同步),bundle 内顺序串 grep 双确认。
 
+### 7.14 集成 PhotoCraft 升级 0.16.0→0.22.0(2026-11-13;用户报「打开 PhotoCraft 提示版本低」)
+
+- 定位:提示来自 PhotoCraft 应用自身的更新检查(集成代码无版本检查);vendored(通道包 tintin-resources/photocraft)与用户便携版(D:\localprogram)同为 **0.16.0(b1794c6e0, 2026-10-25)**,上游 storytold/photocraft 最新 **v0.22.0(5000240c6, 2026-11-09)**。
+- 升级路径:官方 release 资产 `photocraft-0.22.0-windows-x64-portable.zip`(135MB)。直连 github.com 下载被限(56 重置/KB 级龟速),改走 gh-proxy 镜像搬运字节,**sha256 钉死官方 digest**(d6e13cd7…,经 api.github.com release API 的资产 digest 字段直连获取——镜像只当运输,哈希可信)。
+- 三处落位:①vendored(tintin-resources/photocraft,git-ignore 的本地数据)整目录替换 187MB→274MB(新增 LXGW/南奈木/Noto CJK 等字体);②安装版 `resources/photocraft/`(extraResources 根级)替换——替换前优雅 taskkill 运行中的 photocraft(pid 75880,刚开无工作);③win-unpacked 重打。
+- lib/photocraft.js 同批:①**硬编码 0.16.0 回退路径改为 localprogram 版本扫描降序**(photocraft-<版本>-windows-x64-portable,numeric 降序取最新——回退候选永不过期);②修 `readFileSync` 未导入(connectControl 里 try/catch 吞 ReferenceError→控制通道恒报「令牌非法」的潜伏 bug)。
+- 解析链语义不变:env TINTIN_PHOTOCRAFT_DIR > vendored > localprogram 最新便携版;vendored 命中优先,装版/开发态一致拿 0.22.0。重启封面编辑器/PhotoCraft 后生效。
+
 ### 7.8 保人方案三修:渲染子进程化 + 白盘形态自适应 + 环境图吃真图(2026-11-12 晚三;用户四问「选保人方案为什么卡死/白背景和人混在一起/生成图为什么在项目文件夹/人物为什么用 product」)
 
 - **卡死根因(取证链)**:会话 zstd 解包还原保人 turn 全时间线——imitate_cover 人物档三连败(人脸相似度 0.482/0.389 低于 0.65 门)→模型转方案 B(复用旧抠图+旧背景写 props)→render_preview 三连挂:每次 ~304s 报 `Error: fetch failed`(undici 300s headers 超时形状)→模型无限重试=「仍在处理」卡死观感。深挖排除:同一 engine.mjs 裸 node 2.16s/裸 Electron 1.5s 渲完(排除引擎);运行包两份 engine 副本都带 90s 竞速超时;**挂起期间主进程事件循环存活**(initialize/tools/list 3-6ms 即答)且**无 chrome-headless-shell 进程**(排除 spawnSync 阻塞/渲染内部挂);外部复现 tools/call render_preview=304451ms HeadersTimeoutError。定案=**主进程内 `import('@remotion/renderer')`(引擎 90s 竞速 armed 之前的懒加载)在应用进程里永挂**,竞速从未 armed。修=**render_preview 改独立 node 子进程跑引擎既有 CLI**(dist/engine.mjs templateId @propsFile fileName 输出 JSON;ELECTRON_RUN_AS_NODE=1+process.execPath;异步 spawn 不阻塞循环;180s 超时 taskkill /T /F 杀树;@文件=纯 props 对象,wrapper 形态会报「hookLines 不能为空」实测)。取证教训:debug.log 的 puppeteer profile chromium 条目(photocraft spawnSync 所写)时间戳滞后,是红鲱鱼不可当时间线。
