@@ -312,15 +312,22 @@ export const useEditor = create<EditorState>()(
             }
           })
           merged.layerOrder = effectiveOrder(s)
-          // 文字/图片图层位移与槽位缩放按各自轴映射(sx 跟宽比、sy 跟高比)
+          // 文字位移(dx/dy)按各自轴映射(纯位置量,不变形);
+          // **槽位缩放(sx/sy,主体图/环境图)改统一缩放**(2026-11-13 用户二报「横屏人变形」):
+          //   槽位渲染=contain 适配+scale(sx,sy) 变换,sx/sy 各自轴映射(wr≈0.56/hr≈1.78)
+          //   会把均匀缩放拉成 2.4:1 非均匀=人被横向拉扁(110521 实拍 sx 3.081/sy 1.3)。
+          //   迁移=取几何均值 u=√(sx·sy) 双值同置(保视觉面积,保证纵横比),dx/dy 同前。
           const styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
           for (const id of Object.keys(styles)) {
             const st = styles[id]!
             const next2: TextStyleOverride & ImageLook = { ...st }
             if (typeof st.dx === 'number') next2.dx = Math.round(st.dx * wr)
             if (typeof st.dy === 'number') next2.dy = Math.round(st.dy * hr)
-            if (typeof st.sx === 'number') next2.sx = clampScale(st.sx * wr)
-            if (typeof st.sy === 'number') next2.sy = clampScale(st.sy * hr)
+            if (typeof st.sx === 'number' || typeof st.sy === 'number') {
+              const u = clampScale(Math.sqrt(Math.max(st.sx ?? 1, 0.01) * Math.max(st.sy ?? 1, 0.01)))
+              next2.sx = u
+              next2.sy = u
+            }
             styles[id] = next2
           }
           merged.styles = styles

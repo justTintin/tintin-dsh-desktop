@@ -37,7 +37,7 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
-import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, isAbsolute, join, resolve as resolvePath, sep } from 'node:path'
 import { MODEL_SAFE_RAW_BYTES, imageMetaText, modelTooLargeText, shrinkForModelRead } from './cover-image-resize.js'
 
@@ -551,6 +551,14 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     if (!result?.ok || !result.file || !existsSync(result.file)) {
       throw new Error(`渲染失败:${result?.error ?? '未知错误'}`)
     }
+    /* 回看产物不堆积(2026-11-13 用户报障「素材条四条相同」): 项目目录=素材条数据源,
+       每次 render_preview 的 preview-<ts>.png 都会变成一条素材——渲染成功后清掉上一批
+       preview-*.png(仅保留本次);回看图是审查用瞬态,不是资产。 */
+    try {
+      for (const entry of readdirSync(coverDir)) {
+        if (/^preview-\d+\.png$/.test(entry) && entry !== fileName) rmSync(join(coverDir, entry), { force: true })
+      }
+    } catch { /* 清理失败不影响预览本身 */ }
     const bytes = readFileSync(result.file)
     /* 预览同样过模型侧上限(1112 修复批): 大画布/复杂底图可能超 2.5MB, 超限不返回 image
        块(否则 harness base64 正则栈溢出), 改文字提示且明确"不得声称已完成"。 */

@@ -57,8 +57,9 @@ describe('setOrientation 比例迁移(方案1)', () => {
     const styles = s.props.styles as Record<string, { dx?: number; dy?: number; sx?: number; sy?: number }>
     expect(styles.title!.dx).toBe(Math.round(100 * 0.84375)) // 84
     expect(styles.title!.dy).toBe(50 * 2) // 100
-    expect(styles.title!.sx).toBe(1.013) // 1.2×0.84375=1.0125→clampScale 三位小数
-    expect(styles.title!.sy).toBe(2.4) // 1.2×2
+    // 槽位缩放统一化(1113 晚二裁决): u=√(sx·sy)=√1.44=1.2,双值同置=纵横比保证
+    expect(styles.title!.sx).toBe(1.2)
+    expect(styles.title!.sy).toBe(1.2)
     expect(styles.subtitle!.dy).toBe(-30 * 2)
     expect(s.userGuides.v).toEqual([Math.round(1200 * 0.84375)]) // 1013
     expect(s.userGuides.h).toEqual([1200, 1220]) // 两线映射后不撞线=都保留
