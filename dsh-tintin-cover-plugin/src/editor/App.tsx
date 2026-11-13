@@ -75,7 +75,7 @@ function OrientationToggle(): React.ReactElement {
   const current = getTemplate(templateId).orientation
   return (
     <div style={{ display: 'flex', gap: 6, marginBottom: 0, width: 170, flexShrink: 0 }}>
-      {([['landscape', '横屏'], ['portrait', '竖屏']] as const).map(([value, label]) => (
+      {([['portrait', '竖屏'], ['landscape', '横屏']] as const).map(([value, label]) => (
         <button
           key={value}
           onClick={() => setOrientation(value)}
