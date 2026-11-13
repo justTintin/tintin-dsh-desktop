@@ -41,7 +41,7 @@ import {
 
 const TAG = 'material-library'
 
-const tab = ref<'video' | 'image' | 'audio'>('video')
+const tab = ref<'video' | 'image' | 'audio' | 'online'>('video')
 /** 视频/图片 tab 对应 media_type（audio tab 不走图视域） */
 const mType = computed<'image' | 'video'>(() => (tab.value === 'video' ? 'video' : 'image'))
 
@@ -308,19 +308,181 @@ onMounted(() => {
   void ensureServerUrl().then(() => run(1))
   void loadDistinctOpts()
 })
+
+/* ── 在线搜索（2026-11-13 用户要求：对接服务端 /material/stock_search 聚合
+      Pexels/Pixabay；响应 {items[{thumb,url,width,height,duration_sec,author,provider}],page,provider}
+      无 total——到空页为止。下载走 server.downloadResult（服务端代取外网素材，与库页同通道）） ── */
+type OnlineItem = {
+  id?: string; type?: string; thumb?: string; url?: string
+  width?: number; height?: number; duration_sec?: number
+  author?: string; provider?: string
+}
+const oKw = ref('')
+const oKind = ref<'video' | 'image'>('video')
+const oItems = ref<OnlineItem[]>([])
+const oLoading = ref(false)
+const oError = ref('')
+const oPage = ref(1)
+const oHasMore = ref(true)
+const oPreview = ref<OnlineItem | null>(null)
+const oSelected = ref<Map<string, OnlineItem>>(new Map())
+const oSelectedCount = computed(() => oSelected.value.size)
+const oThumbFailed = ref<Record<string, boolean>>({})
+const oDlBusy = ref(false)
+const oDlNote = ref('')
+const ONLINE_PER = 30
+
+function oKeyOf(it: OnlineItem): string {
+  return String(it.url || it.id || '')
+}
+function oIsSelected(it: OnlineItem): boolean {
+  return oSelected.value.has(oKeyOf(it))
+}
+function oToggle(it: OnlineItem): void {
+  const k = oKeyOf(it)
+  if (!k) return
+  const next = new Map(oSelected.value)
+  if (next.has(k)) next.delete(k)
+  else next.set(k, it)
+  oSelected.value = next
+}
+function oSelectPageAll(): void {
+  const next = new Map(oSelected.value)
+  for (const it of oItems.value) next.set(oKeyOf(it), it)
+  oSelected.value = next
+}
+function oClearSelection(): void {
+  oSelected.value = new Map()
+}
+const oPreviewKind = computed<'video' | 'image'>(() => (String(oPreview.value?.type || oKind.value) === 'image' ? 'image' : 'video'))
+const oPreviewUrl = computed(() => String(oPreview.value?.url || ''))
+
+async function runOnline(p = 1): Promise<void> {
+  const q = oKw.value.trim()
+  if (!q || oLoading.value) return
+  const page = Math.max(1, p)
+  oLoading.value = true
+  oError.value = ''
+  oPreview.value = null
+  oThumbFailed.value = {}
+  try {
+    await ensureServerUrl()
+    const res = await fetch(`${serverUrl.value}/material/stock_search`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: q, kind: oKind.value, page, per: ONLINE_PER }),
+    })
+    if (!res.ok) throw new Error(`服务端返回 HTTP ${res.status}`)
+    const body = (await res.json()) as { items?: OnlineItem[]; page?: number }
+    const items = Array.isArray(body?.items) ? body.items : []
+    oPage.value = page
+    oItems.value = items
+    /* 到空页=没有更多（聚合服务不给 total）；整页满才亮下一页 */
+    oHasMore.value = items.length >= ONLINE_PER
+    if (page > 1 && !items.length) oPage.value = page - 1
+  } catch (e) {
+    oItems.value = []
+    oError.value = (e as Error)?.message || String(e)
+  } finally {
+    oLoading.value = false
+  }
+}
+
+function oSafeName(it: OnlineItem): string {
+  const raw = `${it.author || it.provider || 'stock'}_${it.id || oKeyOf(it).slice(-12)}`
+  return raw.replace(/[^\w-]/gu, '_').slice(0, 80)
+}
+async function oDownloadOne(it: OnlineItem, savePath: string): Promise<string> {
+  const url = String(it.url || '')
+  if (!url) return '素材地址缺失'
+  const res = await window.tintin.server.downloadResult(url, savePath)
+  if (res === null) return '下载通道不可达'
+  if (res && typeof res === 'object' && 'error' in (res as Record<string, unknown>)) {
+    return String((res as Record<string, unknown>).error || '下载失败')
+  }
+  return ''
+}
+/** 下载当前预览素材（saveFile 选保存路径，按类型给扩展名过滤器，同库页口径） */
+async function oDownloadPreview(): Promise<void> {
+  const it = oPreview.value
+  if (!it || oDlBusy.value) return
+  const isImage = oPreviewKind.value === 'image'
+  try {
+    const savePath = await window.tintin?.dialog?.saveFile?.({
+      title: '下载在线素材',
+      defaultPath: `${oSafeName(it)}.${isImage ? 'jpg' : 'mp4'}`,
+      filters: [isImage
+        ? { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'webp'] }
+        : { name: '视频文件', extensions: ['mp4'] }],
+    })
+    if (!savePath) return
+    oDlBusy.value = true
+    oDlNote.value = ''
+    const err = await oDownloadOne(it, savePath)
+    if (err) {
+      oDlNote.value = `下载失败：${err}`
+      notify('失败', `下载失败（${err}）`)
+    } else {
+      notify('成功', `已下载：${savePath}`)
+      oDlNote.value = `已下载：${savePath}`
+    }
+  } catch (e) {
+    oDlNote.value = `下载失败：${(e as Error)?.message || e}`
+  } finally {
+    oDlBusy.value = false
+  }
+}
+/** 批量下载所选（openDir 选目录一次，逐条落盘） */
+async function oDownloadSelected(): Promise<void> {
+  if (oDlBusy.value || !oSelectedCount.value) return
+  try {
+    const dir = await window.tintin?.dialog?.openDir?.({ title: '选择下载目录' })
+    if (!dir) return
+    oDlBusy.value = true
+    oDlNote.value = ''
+    const picked = [...oSelected.value.values()]
+    let ok = 0
+    const failed: string[] = []
+    for (const it of picked) {
+      const ext = (oPreviewKind.value === 'image' && it === oPreview.value) || it.type === 'image' ? 'jpg' : 'mp4'
+      const err = await oDownloadOne(it, joinDownloadPath(dir, `${oSafeName(it)}.${ext}`))
+      if (err) failed.push(`${it.author || it.id}（${err}）`)
+      else ok++
+    }
+    if (failed.length) {
+      notify('部分失败', `已下载 ${ok}/${picked.length}，失败：${failed.slice(0, 3).join('；')}${failed.length > 3 ? ' 等' : ''}`)
+      oDlNote.value = `已下载 ${ok}/${picked.length}，失败 ${failed.length} 个`
+    } else {
+      notify('成功', `已下载 ${ok} 个素材到 ${dir}`)
+      oDlNote.value = `已下载 ${ok}/${picked.length} 到 ${dir}`
+    }
+  } catch (e) {
+    oDlNote.value = `下载失败：${(e as Error)?.message || e}`
+  } finally {
+    oDlBusy.value = false
+  }
+}
+const oActionLabel = computed(() =>
+  oSelectedCount.value ? `下载所选（${oSelectedCount.value}）` : '下载该素材'
+)
+function oRunAction(): void {
+  if (oSelectedCount.value) void oDownloadSelected()
+  else void oDownloadPreview()
+}
 </script>
 
 <template>
   <section class="mlib">
-    <!-- 三 tab 占满一行平分（形态对齐「选择素材」弹窗的 luo-tab 分段） -->
+    <!-- 四 tab 占满一行平分（形态对齐「选择素材」弹窗的 luo-tab 分段；2026-11-13 加在线搜索） -->
     <div class="mlib-tabs">
       <button class="luo-tab" :class="{ active: tab === 'video' }" type="button" @click="tab = 'video'">视频</button>
       <button class="luo-tab" :class="{ active: tab === 'image' }" type="button" @click="tab = 'image'">图片</button>
       <button class="luo-tab" :class="{ active: tab === 'audio' }" type="button" @click="tab = 'audio'">音频</button>
+      <button class="luo-tab" :class="{ active: tab === 'online' }" type="button" @click="tab = 'online'">在线搜索</button>
     </div>
 
     <!-- ─── 视频/图片（同域不同 media_type） ─── -->
-    <div v-show="tab !== 'audio'" class="mlib-av">
+    <div v-show="tab === 'video' || tab === 'image'" class="mlib-av">
       <div class="mlib-filter">
         <input v-model="kw" class="mlib-input" placeholder="搜索文件名/关键字…" @keydown.enter="runFromFirst()" />
         <!-- 出图口径（仅图片 tab；2026-10-10 用户裁决：默认产品图=服务端 purpose=product 模式） -->
@@ -438,6 +600,102 @@ onMounted(() => {
       <AudioGen />
     </div>
 
+    <!-- ─── 在线搜索（2026-11-13 用户要求：对接服务端 /material/stock_search 聚合
+         Pexels/Pixabay 图库/视频库；选中/预览的素材下载到本机，与素材库页同通道） ─── -->
+    <div v-show="tab === 'online'" class="mlib-ol">
+      <div class="mlib-filter">
+        <input v-model="oKw" class="mlib-input" placeholder="在线搜索素材（Pexels / Pixabay，支持中文）…" @keydown.enter="runOnline(1)" />
+        <select v-model="oKind" class="mlib-input mlib-input--sm" title="素材类型" @change="runOnline(1)">
+          <option value="video">视频</option>
+          <option value="image">图片</option>
+        </select>
+        <button class="mlib-btn" :disabled="oLoading || !oKw.trim()" @click="runOnline(1)">搜索</button>
+      </div>
+
+      <div class="mlib-body">
+        <div class="mlib-grid-wrap">
+          <div v-if="!oKw.trim()" class="mlib-state">输入关键词后搜索（服务端聚合 Pexels / Pixabay 免费图库/视频库）。</div>
+          <div v-else-if="oLoading" class="mlib-state">搜索中…</div>
+          <div v-else-if="oError" class="mlib-state mlib-state--error">{{ oError }}</div>
+          <div v-else-if="!oItems.length" class="mlib-state">未找到匹配素材，换个关键词试试。</div>
+          <div v-else class="mlib-grid">
+            <button
+              v-for="it in oItems"
+              :key="oKeyOf(it) || undefined"
+              class="mlib-card"
+              :class="{ active: oPreview === it, checked: oIsSelected(it) }"
+              type="button"
+              :title="`${oKind === 'image' ? '图片' : '视频'} · 点击预览`"
+              @click="oPreview = it"
+            >
+              <img
+                v-if="it.thumb && !oThumbFailed[oKeyOf(it)]"
+                class="mlib-thumb"
+                :src="it.thumb"
+                loading="lazy"
+                alt=""
+                @error="oThumbFailed[oKeyOf(it)] = true"
+              />
+              <span v-else class="mlib-thumb mlib-thumb--ph">{{ oKind === 'image' ? '图片' : '视频' }}</span>
+              <span
+                class="mlib-check"
+                :class="{ on: oIsSelected(it) }"
+                role="checkbox"
+                :aria-checked="oIsSelected(it)"
+                title="选择（下载用）"
+                @click.stop="oToggle(it)"
+              >
+                <svg v-if="oIsSelected(it)" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </span>
+              <span class="mlib-card-main">{{ it.author || it.provider || '在线素材' }}</span>
+              <span class="mlib-card-sub">
+                {{ [it.duration_sec ? `${it.duration_sec}s` : '', it.width && it.height ? `${it.width}×${it.height}` : '', it.provider || ''].filter(Boolean).join(' · ') }}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="mlib-preview">
+          <div class="mlib-preview-box">
+            <video v-if="oPreview && oPreviewKind === 'video' && oPreviewUrl" :src="oPreviewUrl" controls muted class="mlib-preview-media" />
+            <img v-else-if="oPreview && oPreviewKind === 'image' && oPreviewUrl" :src="oPreviewUrl" class="mlib-preview-media" alt="素材预览" />
+            <div v-else class="mlib-state">点击卡片预览（视频/图片）</div>
+          </div>
+          <div v-if="oPreview" class="mlib-preview-info">
+            <span class="mlib-preview-name">{{ oPreview.author || oPreview.provider || '在线素材' }}</span>
+            <span class="mlib-preview-sub">
+              {{ [oPreview.duration_sec ? `${oPreview.duration_sec}s` : '', oPreview.width && oPreview.height ? `${oPreview.width}×${oPreview.height}` : '', oPreview.provider || ''].filter(Boolean).join(' · ') }}
+            </span>
+          </div>
+          <button class="mlib-btn mlib-btn--full" :disabled="oDlBusy || (!oSelectedCount && !oPreview)" :title="oSelectedCount ? '下载勾选的全部素材' : '下载当前预览素材'" @click="oRunAction()">
+            {{ oActionLabel }}
+          </button>
+          <div v-if="oDlNote" class="mlib-dl-note" :title="oDlNote">{{ oDlNote }}</div>
+        </div>
+      </div>
+
+      <!-- 底部：全选/取消全选 + 已选计数 + 页码（在线接口无总量，到空页为止） -->
+      <div class="mlib-pager">
+        <div class="mlib-pager-side">
+          <button class="mlib-btn mlib-btn--ghost" :disabled="!oItems.length" @click="oSelectPageAll()">全选本页</button>
+          <button class="mlib-btn mlib-btn--ghost" :disabled="!oSelectedCount" @click="oClearSelection()">取消全选</button>
+          <span class="mlib-pager-info">已选 {{ oSelectedCount }} 项（跨页保留）</span>
+        </div>
+        <div class="mlib-pager-side">
+          <span class="mlib-pager-info">第 {{ oPage }} 页</span>
+          <button class="mlib-btn mlib-btn--ghost" :disabled="oPage <= 1 || oLoading" @click="runOnline(oPage - 1)">上一页</button>
+          <button class="mlib-btn mlib-btn--ghost" :disabled="oLoading || !oHasMore" @click="runOnline(oPage + 1)">下一页</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─── 音频：原「音频生成」界面与功能原样内嵌（v-show 保持组件状态） ─── -->
+    <div v-show="tab === 'audio'" class="mlib-au">
+      <AudioGen />
+    </div>
+
     <p class="mlib-tip">视频/图片素材来自服务端素材库（下载到本机）；音频页即原音频生成（音频库 + AI 生成 BGM/音效）。素材为空时请先在服务端确认是否已入库。</p>
   </section>
 </template>
@@ -450,6 +708,10 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  /* 2026-11-13 用户裁决: 占满工具 pane（height:100% 型工具页, ToolTabPane 注释口径）——
+     分页/选择工具行钉到页底, 网格吃掉全部剩余高度（此前 320px/300px 预算留白=底部空条） */
+  height: 100%;
+  min-height: 0;
 }
 
 .mlib-tabs {
@@ -504,10 +766,12 @@ onMounted(() => {
 }
 .mlib-btn--ghost:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); filter: none; }
 
-.mlib-av { display: flex; flex-direction: column; gap: var(--space-3); }
+.mlib-av { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+/* 在线搜索 tab（2026-11-13）：同 mlib-av 的填充语义 */
+.mlib-ol { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 /* 页面形态高度预算：视图区 100vh −（返回条+tabs+过滤+分页+tip+留白 ≈ 300px）；
    min-height 保小窗口下网格/预览仍可用（超出部分由容器滚动） */
-.mlib-body { display: flex; gap: var(--space-3); height: calc(100vh - 300px); min-height: 420px; }
+.mlib-body { flex: 1 1 auto; min-height: 0; display: flex; gap: var(--space-3); }
 
 .mlib-grid-wrap { flex: 1 1 auto; min-width: 0; overflow-y: auto; }
 .mlib-grid {
