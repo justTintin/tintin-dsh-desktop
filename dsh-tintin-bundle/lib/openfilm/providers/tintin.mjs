@@ -17,7 +17,7 @@
  * (tracked); fetch-openfilm-runtime copies it here and registers it in index.mjs after
  * every runtime fetch — the vendored tree itself is not tracked.
  */
-import { billedBy, call, clamp, download, foundPictures, landing, madePicture, needed, notes, number, round, sleep, speechUpload, text, wavSeconds } from './common.mjs';
+import { billedBy, call, clamp, download, foundClips, foundPictures, landing, madePicture, needed, notes, number, round, sleep, speechUpload, text, wavSeconds } from './common.mjs';
 
 /** @typedef {import('./contract.mjs').Provider} Provider @typedef {import('./contract.mjs').Verb} Verb */
 
@@ -35,6 +35,7 @@ const MODELS = {
   image: [{ id: 'comfygen-image', name: 'ComfyGen 图片', spec: { ratios: ['9:16', '16:9', '1:1', '4:3'] } }],
   video: [{ id: 'comfygen-video', name: 'ComfyGen 视频', spec: { ratios: ['9:16', '16:9', '1:1'], seconds: [1, 10] } }],
   'image-search': [{ id: 'stock-images', name: 'Stock Images' }],
+  'video-search': [{ id: 'stock-videos', name: 'Stock Videos' }],
 };
 
 /** The picture ratios Studio asks for → the aspects create_image takes (9:16/16:9/1:1/4:3). */
@@ -92,7 +93,7 @@ export default {
   env: '',
   keysUrl: '',
   billingUrl: '',
-  verbs: ['voice', 'tts', 'asr', 'music', 'sfx', 'cutout', 'image', 'image-search', 'video'],
+  verbs: ['voice', 'tts', 'asr', 'music', 'sfx', 'cutout', 'image', 'image-search', 'video-search', 'video'],
   models: MODELS,
   /* 连接=服务端地址在（studio-runtime 注入 TINTIN_SERVER_URL）；无密钥。 */
   ready: () => Boolean(base()),
@@ -238,6 +239,32 @@ export default {
         return url ? [{ url }] : [];
       });
       return foundPictures({ service: NAME, provider: 'tintin', args, hits, notes: [] }, ctx);
+    }
+
+    /* 视频搜索(2026-11-13 用户问「服务端已提供视频搜索,客户端没对接」): 同一端点 kind=video,
+       服务端聚合 Pexels/Pixabay。items 带 width/height/duration_sec/author —— foundClips 的
+       hits 形状直接对上;--orientation 由服务端条目几何表达(上游 Pexels 是服务端参数,这里
+       无法透传,命中后按横竖匹配交给 Studio 的下载挑选)。 */
+    if (verb === 'video-search') {
+      const prompt = needed(args, 'prompt');
+      const per = clamp(Math.round(number(args.n) ?? 1) + 2, 1, 30);
+      const body = /** @type {any} */ (await (await call(NAME, `${base()}/material/stock_search`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ query: prompt, kind: 'video', per }),
+      }, ctx)).json());
+      const hits = (Array.isArray(body?.items) ? body.items : []).flatMap((/** @type {any} */ item) => {
+        const url = text(item?.url);
+        if (!url) return [];
+        return [{
+          url,
+          credit: item?.author ? `Video by ${text(item.author)} on ${text(item.provider) || 'stock'}` : null,
+          dur: Number(item?.duration_sec) > 0 ? Number(item.duration_sec) : null,
+          w: Number(item?.width) > 0 ? Number(item.width) : null,
+          h: Number(item?.height) > 0 ? Number(item.height) : null,
+        }];
+      });
+      return foundClips({ service: NAME, provider: 'tintin', args, hits, notes: [] }, ctx);
     }
 
     throw new Error(`${NAME} does not do ${verb}.`);
