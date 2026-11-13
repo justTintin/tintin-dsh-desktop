@@ -508,6 +508,16 @@ acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目�
 - 当日数据与载荷处置:110521 项目 props 已换序落盘(编辑器 2s 轮询即翻转);**安装版(AppData/Local/Programs/TinTin)同步两处**=dist 整目录换新(引擎渲染归一+面板 z)+`.remotion` 浏览器缓存补拷(7.9 同款缺口——热同步只拷代码不拷缓存,装版渲染不重启即恢复:子进程每次 spawn 现读缓存);win-unpacked 重打含两修复。
 - 教训:面板层序这类「换默认值」的改动,存档里写过显式值的存量项目永远看不到——改默认必须配「消费口归一」或明确声明不迁移的补偿操作(拖一次)。
 
+### 7.11 完成性门禁上移到 afterPack:安装包产物同保证(2026-11-13;用户裁决「打包应含全部功能并正确装到不同设备/为什么安装包会丢失修改」)
+
+7.9 的修复只补了 `--dir` 一条产链——**NSIS 安装包(package-nsis-local.mjs)是独立打包流**(自己直接跑 electron-builder `--win nsis`,只复用了版本戳),补拷步不在其中;已发布的 Setup 装到任何机器都缺渲染浏览器。且热同步只拷代码不拷数据资产,每次升级覆盖已装实例——「丢失修改」是结构性的:三个载荷产出方只有一处有门禁。
+
+- **修=完成性门禁上移到 electron-builder afterPack 钩子**(NSIS 压缩前、目录装配后,`--dir`/`--win nsis` 两流共用):新 `scripts/payload-complete.cjs`(补拷 staging 生产 node_modules 整树+双校验 exe/renderer,缺=抛错打包失败;stagingPlugins/distPlugins 可注入供测试)+`scripts/after-pack.cjs` 钩子壳;package-dir.mjs 与 package-nsis-local.mjs 都下发 `--config.afterPack`。原 package-dir.mjs 内联补拷块删除(避免双实现漂移)。
+- 门禁测试:package-dir.spec.ts 增 4 用例(缺缓存拒/缺 renderer 拒/整树拷贝双验/已完整跳拷),argv 断言随 afterPack 参数更新;4 门禁用例全绿(套内 2 红=10-21 起 `ELECTRON_BUILDER_COMPRESSION_LEVEL` 环境键的既有漂移,非本批引入)。
+- **重构事故清偿**:CJS 重构时拷贝/校验基准丢了 `node_modules` 段(拷到插件目录而非嵌套树)——新门禁单测第一次运行即拦下,修后绿。
+- **发布侧欠账**:已发布 release(1112-22:17)先于全部修复,装到新机器渲染必挂——需要用带钩子的 NSIS 流重打并重新发布(发布是外向动作,等用户裁决)。
+- 教训:完整性保证必须挂在「所有产链共用的那一环」(afterPack 是 electron-builder 的公共装配点),补在单条产链=对其它产链的静默豁免;排查深度敏感的工具(maxdepth)与「门禁跳过清单」是缺口高发区。
+
 ### 7.8 保人方案三修:渲染子进程化 + 白盘形态自适应 + 环境图吃真图(2026-11-12 晚三;用户四问「选保人方案为什么卡死/白背景和人混在一起/生成图为什么在项目文件夹/人物为什么用 product」)
 
 - **卡死根因(取证链)**:会话 zstd 解包还原保人 turn 全时间线——imitate_cover 人物档三连败(人脸相似度 0.482/0.389 低于 0.65 门)→模型转方案 B(复用旧抠图+旧背景写 props)→render_preview 三连挂:每次 ~304s 报 `Error: fetch failed`(undici 300s headers 超时形状)→模型无限重试=「仍在处理」卡死观感。深挖排除:同一 engine.mjs 裸 node 2.16s/裸 Electron 1.5s 渲完(排除引擎);运行包两份 engine 副本都带 90s 竞速超时;**挂起期间主进程事件循环存活**(initialize/tools/list 3-6ms 即答)且**无 chrome-headless-shell 进程**(排除 spawnSync 阻塞/渲染内部挂);外部复现 tools/call render_preview=304451ms HeadersTimeoutError。定案=**主进程内 `import('@remotion/renderer')`(引擎 90s 竞速 armed 之前的懒加载)在应用进程里永挂**,竞速从未 armed。修=**render_preview 改独立 node 子进程跑引擎既有 CLI**(dist/engine.mjs templateId @propsFile fileName 输出 JSON;ELECTRON_RUN_AS_NODE=1+process.execPath;异步 spawn 不阻塞循环;180s 超时 taskkill /T /F 杀树;@文件=纯 props 对象,wrapper 形态会报「hookLines 不能为空」实测)。取证教训:debug.log 的 puppeteer profile chromium 条目(photocraft spawnSync 所写)时间戳滞后,是红鲱鱼不可当时间线。

@@ -1,8 +1,8 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 // @ts-expect-error package-dir deliberately remains a directly executable ESM script.
 import { packageDirectory, UNSIGNED_DIRECTORY_BUILD_ARGS, unsignedDirectoryBuildEnvironment } from '../scripts/package-dir.mjs'
@@ -11,6 +11,8 @@ import { dshProductVersion } from '../src/dsh-product-version.ts'
 import { verifyBundledSkills } from '../src/packaged-filesystem-smoke.ts'
 
 const temporaryDirectories: string[] = []
+// 与 package-dir.mjs 同源解析:afterPack 钩子(封面载荷完成性,1113 用户裁决)随参数下发
+const scriptPackageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 
 afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) {
@@ -67,6 +69,7 @@ describe('unsigned directory packaging', () => {
         '/workspace/electron-builder.js',
         ...UNSIGNED_DIRECTORY_BUILD_ARGS,
         '--config.electronDist=/workspace/electron/dist',
+        `--config.afterPack=${join(scriptPackageRoot, 'scripts', 'after-pack.cjs')}`,
       ],
       {
         cwd: '/workspace/desktop',
@@ -169,5 +172,65 @@ describe('installed DSH product version', () => {
 
     const invalidVersion = fixture({ name: '@deepseek-ai/dsh', version: 'v0.1.2' })
     expect(() => dshProductVersion(invalidVersion.moduleUrl)).toThrow('not canonical')
+  })
+})
+
+describe('cover payload completion gate (afterPack, 1113 用户裁决)', () => {
+  const require = createRequire(import.meta.url)
+  // @ts-expect-error completion step is a CJS script shared with the electron-builder hook.
+  const { completeCoverPayload } = require('../scripts/payload-complete.cjs') as {
+    completeCoverPayload: (input: {
+      appOutDir: string
+      packageRoot: string
+      stagingPlugins?: string
+      distPlugins?: string
+    }) => { copied: boolean; pluginsDir: string }
+  }
+
+  function fixtures(): { staging: string; dest: string } {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-payload-complete-'))
+    temporaryDirectories.push(root)
+    const staging = join(root, 'staging')
+    const dest = join(root, 'app', 'resources', 'app', 'node_modules', 'dsh-tintin-cover-plugin')
+    const exe = join(staging, '.remotion', 'chrome-headless-shell', 'win64', 'chrome-headless-shell-win64', 'chrome-headless-shell.exe')
+    mkdirSync(dirname(exe), { recursive: true })
+    writeFileSync(exe, 'browser')
+    mkdirSync(join(staging, '@remotion', 'renderer'), { recursive: true })
+    writeFileSync(join(staging, '@remotion', 'renderer', 'package.json'), '{"name":"@remotion/renderer"}\n')
+    return { staging, dest }
+  }
+
+  it('refuses to build when staging lacks the browser cache', () => {
+    const { staging, dest } = fixtures()
+    rmSync(join(staging, '.remotion'), { recursive: true, force: true })
+    expect(() => completeCoverPayload({ appOutDir: dirname(dirname(dirname(dest))), packageRoot: '/unused', stagingPlugins: staging, distPlugins: dest }))
+      .toThrow('staging 缺 .remotion 浏览器缓存')
+  })
+
+  it('refuses to build when staging lacks @remotion/renderer', () => {
+    const { staging, dest } = fixtures()
+    rmSync(join(staging, '@remotion', 'renderer'), { recursive: true, force: true })
+    expect(() => completeCoverPayload({ appOutDir: dirname(dirname(dirname(dest))), packageRoot: '/unused', stagingPlugins: staging, distPlugins: dest }))
+      .toThrow('staging 缺 @remotion/renderer')
+  })
+
+  it('copies the whole staging tree and passes both checks', () => {
+    const { staging, dest } = fixtures()
+    const result = completeCoverPayload({ appOutDir: dirname(dirname(dirname(dest))), packageRoot: '/unused', stagingPlugins: staging, distPlugins: dest })
+    expect(result.copied).toBe(true)
+    expect(existsSync(join(dest, 'node_modules', '.remotion', 'chrome-headless-shell', 'win64', 'chrome-headless-shell-win64', 'chrome-headless-shell.exe'))).toBe(true)
+    expect(existsSync(join(dest, 'node_modules', '@remotion', 'renderer'))).toBe(true)
+  })
+
+  it('skips the copy when the payload is already complete', () => {
+    const { staging, dest } = fixtures()
+    completeCoverPayload({ appOutDir: dirname(dirname(dirname(dest))), packageRoot: '/unused', stagingPlugins: staging, distPlugins: dest })
+    const cp = vi.fn()
+    const result = completeCoverPayload({
+      appOutDir: dirname(dirname(dirname(dest))), packageRoot: '/unused', stagingPlugins: staging, distPlugins: dest,
+      cp: cp as unknown as typeof import('node:fs').cpSync,
+    })
+    expect(result.copied).toBe(false)
+    expect(cp).not.toHaveBeenCalled()
   })
 })

@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { cpSync, existsSync, readdirSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { electronBuilderEnvironment } from './electron-builder-environment.ts'
@@ -77,6 +77,9 @@ export function packageDirectory(options = {}) {
       ...UNSIGNED_DIRECTORY_BUILD_ARGS,
       ...versionStampArgs(options.env ?? process.env),
       `--config.electronDist=${configuredElectronDist}`,
+      // 封面载荷完成性(afterPack,2026-11-13 用户裁决):装配完成、产物落地前补拷
+      // 插件生产 node_modules 整树并双校验——与 NSIS 安装包同钩子,一处门禁全产物生效。
+      `--config.afterPack=${join(packageRoot, 'scripts', 'after-pack.cjs')}`,
     ],
     {
       cwd: options.cwd ?? packageRoot,
@@ -88,36 +91,6 @@ export function packageDirectory(options = {}) {
   if (result.error !== undefined) throw result.error
   if (result.status !== 0) {
     throw new Error(`electron-builder --dir exited with ${String(result.status)}`)
-  }
-
-  // 插件生产 node_modules 随载荷(2026-11-13 用户裁决「node_modules 每次打包都要打进去」):
-  // electron-builder 收集依赖时把每个包提升到 app 根级,给插件留**空的**嵌套 node_modules 壳,
-  // 无主目录(.remotion 浏览器缓存=非包下载缓存)永远不被收集——7.8 后渲染仍 180s 超时的根因
-  // (先窄修只拷 .remotion,1113 升级为整树)。staging 的 node_modules 正是为此而建:stage.mjs
-  // 按 lockfile npm install --omit=dev 的生产树(.remotion 283MB 占大头,整树仅 +41MB)。
-  // 整树入载荷=插件自包含(imports 优先嵌套版,不再依赖 yarn 提升结果),未来任何非包数据
-  // (模型/缓存)自动随包。拷完双校验——缺浏览器或缺渲染库宁可打包失败,不产出渲染必挂的包。
-  const distDir = join(packageRoot, 'dist')
-  const unpacked = existsSync(join(distDir, 'win-unpacked'))
-    ? join(distDir, 'win-unpacked')
-    : readdirSync(distDir).map((name) => join(distDir, name)).find((dir) => dir.endsWith('-unpacked') && existsSync(join(dir, 'resources', 'app')))
-  if (unpacked) {
-    const stagingModules = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules')
-    const exeRel = join('chrome-headless-shell', 'win64', 'chrome-headless-shell-win64', 'chrome-headless-shell.exe')
-    if (!existsSync(join(stagingModules, '.remotion', exeRel))) {
-      throw new Error('staging 缺 .remotion 浏览器缓存(渲染必需)——先跑 stage.mjs 并保留缓存,再打包')
-    }
-    if (!existsSync(join(stagingModules, '@remotion', 'renderer'))) {
-      throw new Error('staging 缺 @remotion/renderer(引擎渲染必需)——先跑 stage.mjs 重建生产 node_modules')
-    }
-    const dest = join(unpacked, 'resources', 'app', 'node_modules', 'dsh-tintin-cover-plugin')
-    cpSync(stagingModules, join(dest, 'node_modules'), { recursive: true })
-    if (!existsSync(join(dest, 'node_modules', '.remotion', exeRel))) {
-      throw new Error('载荷浏览器缓存拷贝后仍缺失——检查 dist 载荷目录权限')
-    }
-    if (!existsSync(join(dest, 'node_modules', '@remotion', 'renderer'))) {
-      throw new Error('载荷 @remotion/renderer 拷贝后仍缺失——检查 dist 载荷目录权限')
-    }
   }
 }
 

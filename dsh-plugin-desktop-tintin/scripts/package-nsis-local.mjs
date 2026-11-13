@@ -8,7 +8,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { electronBuilderEnvironment } from './electron-builder-environment.ts'
 import { withoutWindowsSigningSecrets } from './package-win.ts'
@@ -37,6 +37,10 @@ const args = [
   '--config.mac.notarize=false',
   ...versionStampArgs(process.env),
   `--config.electronDist=${electronDist}`,
+  // 封面载荷完成性(afterPack,2026-11-13 用户裁决「打包应含全部功能并正确装到不同设备」):
+  // NSIS 压缩前补拷插件生产 node_modules 整树+双校验——与 --dir 同钩子。此前 NSIS 流
+  // 没有这一步,发布的 Setup 装到任何机器都缺渲染浏览器(180s 超时)。
+  `--config.afterPack=${join(packageRoot, 'scripts', 'after-pack.cjs')}`,
 ]
 
 const result = spawnSync(process.execPath, args, { cwd: packageRoot, env, stdio: 'inherit' })
