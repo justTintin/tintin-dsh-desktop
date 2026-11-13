@@ -994,11 +994,6 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
         sendJson(res, 403, { error: 'Request rejected.' })
         return
       }
-      const cli = resolveCli()
-      if (!cli) {
-        sendJson(res, 500, { ok: false, error: '未找到 photocraft-cli——先在 PhotoCraft 引导里选择安装目录' })
-        return
-      }
       const name = decodeURIComponent(String(new URL(req.url, 'http://localhost').searchParams.get('name') || 'template.psd')).slice(-120)
       const engine = await loadEngine()
       const coverDir = await engine.resolveCoverDir()
@@ -1014,8 +1009,27 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
       try { writeFileSync(psdFile, Buffer.concat(chunks)) } catch (err) { sendJson(res, 500, { ok: false, error: 'PSD 落盘失败:' + (err instanceof Error ? err.message : String(err)) }); return }
       try {
         if (!existsSync(psdFile) || statSync(psdFile).size === 0) { sendJson(res, 400, { ok: false, error: 'PSD 文件为空' }); return }
-        const conv = cliConvert({ src: psdFile, out: pngFile })
-        if (!conv.ok) { sendJson(res, 500, { ok: false, error: `PSD 转 PNG 失败:${conv.stderr || 'exit ' + conv.code}` }); return }
+        /* PNG 生成不依赖 PhotoCraft(2026-11-13 用户质问「没集成就打不开 psd?」——PSD 是
+           标准格式): ①本机配置了 PhotoCraft→cli convert(Rust 渲染,字体/效果保真最优);
+           ②否则内置纯 JS 解析(ag-psd 读 Photoshop 存盘内嵌的合成位图 + psd-png 编码)。
+           两条都失败(如 PSD 未含合成位图)才如实报错。 */
+        let pngReady = false
+        if (resolveCli()) {
+          const conv = cliConvert({ src: psdFile, out: pngFile })
+          pngReady = conv.ok
+        }
+        if (!pngReady) {
+          const { readPsd } = await import('ag-psd')
+          const psd = readPsd(readFileSync(psdFile), { useImageData: true })
+          const img = psd.imageData
+          if (!img || !img.data || !img.width) {
+            sendJson(res, 500, { ok: false, error: 'PSD 内未含合成图像(Photoshop 存储需开启「最大兼容」),无法生成模板底图' })
+            return
+          }
+          const { encodeRgbaPng } = await import('./psd-png.js')
+          writeFileSync(pngFile, encodeRgbaPng(img.width, img.height, img.data))
+          pngReady = true
+        }
         const serverUrl = String(getServerUrl() || '').replace(/\/+$/, '')
         if (!serverUrl) { sendJson(res, 500, { ok: false, error: '服务端未配置' }); return }
         const form = new FormData()

@@ -78,6 +78,14 @@ export function cliRun({ newDoc, cmds = [], out, timeoutMs = 300_000, env = proc
   return { ok: r.status === 0, code: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }
 }
 
+/** 无头格式转换(0.22+ convert 命令):psd→png/jpg、pcraft↔各格式。 */
+export function cliConvert({ src, out, timeoutMs = 300_000, env = process.env }) {
+  const cli = resolveCli(env)
+  if (!cli) return { ok: false, stderr: '未找到 photocraft-cli(检查 TINTIN_PHOTOCRAFT_DIR)' }
+  const r = spawnSync(cli, ['convert', src, out], { encoding: 'utf8', timeout: timeoutMs, windowsHide: true })
+  return { ok: r.status === 0 && existsSync(out), code: r.status, stderr: (r.stderr ?? '').slice(-400) }
+}
+
 /** 启动 PhotoCraft 原生窗口(带环回控制通道 + token 文件);docPath=随启动打开的文档
  *  (2026-10-31 用户报障「打开后是空的」:GUI 接受文档路径参数,实测 document.inspect 可见全部图层);
  *  返回 {port, tokenFile} */
