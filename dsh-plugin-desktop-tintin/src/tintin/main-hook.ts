@@ -180,6 +180,35 @@ function ensureStudioView(window: BrowserWindow, url: string): WebContentsView {
   return view
 }
 
+/** 兼容壳标题条层的文档标识（CompatibilityShell 加载的 chrome 页文件名）。 */
+const TITLE_BAR_CHROME_DOCUMENT = 'compatibility-chrome.html'
+
+/**
+ * 把标题条 chrome 层重排回 contentView 顶层（2026-11-13 用户报障：视频剪辑/浏览器的
+ * 原生嵌入视图在 chrome 层之后挂载、z 序更高——点版本徽章时 chrome 弹层虽已展开却被
+ * 嵌入视图盖住，视觉上「点了没反应」）。嵌入视图 bounds 均在 36px 标题条之下，chrome
+ * 置顶不遮挡内容。按 chrome 页 URL 识别（raise 触发时机都在首帧加载完成后）；仅在新
+ * 挂载导致 z 序变化时顺带发 dismiss 收起可能卡住的展开态，纯重定位不打扰交互中的弹层。
+ */
+function raiseTitleBarChrome(window: BrowserWindow | null): void {
+  if (window === null || window.isDestroyed()) return
+  try {
+    const views = window.contentView.children
+    const chrome = views.find(view => {
+      try {
+        const contents = (view as WebContentsView).webContents
+        return contents !== undefined && !contents.isDestroyed()
+          && contents.getURL().includes(TITLE_BAR_CHROME_DOCUMENT)
+      } catch { return false }
+    })
+    if (chrome === undefined || views[views.length - 1] === chrome) return
+    window.contentView.removeChildView(chrome)
+    window.contentView.addChildView(chrome)
+    const contents = (chrome as WebContentsView).webContents
+    if (contents !== undefined && !contents.isDestroyed()) contents.send('dsh-desktop:chrome-dismiss')
+  } catch { /* 窗口销毁竞态：不影响嵌入视图本身 */ }
+}
+
 function showStudio(bounds: OpenFilmBounds): void {
   if (studioView === null || studioWindow === null || studioWindow.isDestroyed()) return
   const key = boundsKey(bounds)
@@ -187,6 +216,7 @@ function showStudio(bounds: OpenFilmBounds): void {
   if (!studioShown) {
     studioWindow.contentView.addChildView(studioView)
     studioShown = true
+    raiseTitleBarChrome(studioWindow)
   }
   studioBounds = key
   const rect = {
@@ -262,6 +292,9 @@ export function installTinTinMainHook(): void {
       // 页面桥（dshDesktopBrowser/tintinBrowserPage）由此接通——构建产物与本文件同目录
       registerBrowserService(window, {
         pagePreloadPath: join(dirname(fileURLToPath(import.meta.url)), 'browser-page-preload.cjs'),
+        // 内嵌态原生视图挂载后把标题条 chrome 层重排回顶层——否则点版本徽章时弹层
+        // 被嵌入视图盖住（2026-11-13 报障，与 Studio 的 showStudio 同修）。
+        onNativeViewMounted: () => raiseTitleBarChrome(window),
       })
     } catch (error) {
       console.error(
@@ -982,19 +1015,25 @@ const installedServerSkillVersion = (dir: string): string => {
     if (request.action === 'open') {
       const window = BrowserWindow.fromWebContents(event.sender)
       if (window === null) return { ok: false, error: 'window not found' }
-      return embedAttach(window)
+      const attached = embedAttach(window)
+      // 浏览器 UI 页/平台分区视图挂进 contentView 后，标题条 chrome 层需回到顶层，
+      // 否则点版本徽章时弹层被嵌入视图盖住（2026-11-13 报障，与 Studio 同修）。
+      if (attached.ok) raiseTitleBarChrome(window)
+      return attached
     }
     if (request.action === 'show') {
       if (!isBrowserBounds(request.bounds)) return { ok: false, error: 'invalid bounds' }
       const window = BrowserWindow.fromWebContents(event.sender)
       // 同一偏移问题：浏览器内嵌视图的 host rect 也是页面坐标（2026-10-20 与 Studio 同修）
       const offsetY = window === null ? 0 : pageOffsetY(window, event.sender)
-      return embedShow({
+      const shown = embedShow({
         x: request.bounds.x,
         y: request.bounds.y + offsetY,
         width: request.bounds.width,
         height: request.bounds.height,
       })
+      if (shown.ok) raiseTitleBarChrome(window)
+      return shown
     }
     if (request.action === 'hide') { embedHide(); return { ok: true } }
     if (request.action === 'close') { embedClose(); return { ok: true } }

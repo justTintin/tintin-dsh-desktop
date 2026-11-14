@@ -15,6 +15,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createSSRApp, defineComponent, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import App from '../src/App.vue'
+import ServerSettingsDialog from '../src/components/common/ServerSettingsDialog.vue'
 import ToolTabBar from '../src/components/ToolTabBar.vue'
 import ToolTabPane from '../src/components/ToolTabPane.vue'
 import { TOOL_TAB_CTX } from '../src/composables/useToolTabs'
@@ -120,5 +121,24 @@ describe('多 Tab 工作区·App.vue 关闭确认/满员弹层（v-if 由状态�
   it('导航页形态不含确认弹层', async () => {
     const html = await ssr(App)
     expect(html).not.toContain('modal-mask')
+  })
+})
+
+describe('服务设置（2026-11-14 用户裁决：媒体工具本面服务端地址分面独立）', () => {
+  it('导航页头部含齿轮入口（aria-label=服务设置）', async () => {
+    const html = await ssr(App)
+    expect(html).toContain('head-settings')
+    expect(html).toContain('aria-label="服务设置"')
+  })
+
+  it('弹层 visible=false 不渲染；visible=true 出双栏（左表单+右 MCP 清单，SSR 无桥调用）', async () => {
+    expect(await ssr(ServerSettingsDialog, { visible: false, surface: 'media' })).not.toContain('ssd-card')
+    const html = await ssr(ServerSettingsDialog, { visible: true, surface: 'media' })
+    expect(html).toContain('ssd-card')
+    expect(html).toContain('ssd-input')
+    expect(html).toContain('保存地址')
+    expect(html).toContain('获取 MCP 服务')
+    expect(html).toContain('发现的 MCP 服务')
+    expect(html).toContain('正在加载…')
   })
 })

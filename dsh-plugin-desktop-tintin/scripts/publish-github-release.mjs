@@ -4,6 +4,9 @@
  * 应用内「检查更新」走 GitHub Releases 清单（src/tintin/tintin-update-check.ts），
  * 本脚本是它的发布侧：版本号取自安装包文件名（TinTin-<版本>-x64-Setup.exe），
  * 与打包时的版本戳三处一致；同时生成并上传 SHA-256 旁挂资产供客户端硬校验。
+ * 资产上传走 curl 子进程（瞬时错误自动重试×3）；被打断的上传会留下占住资产名的
+ * 空壳资产，撞 422 already_exists 时加 --force 自动清理重传，自检还会比对资产
+ * 字节数与本地文件防 0 字节假上传。
  *
  * 用法：
  *   node dsh-plugin-desktop-tintin/scripts/publish-github-release.mjs [--file <Setup.exe>]
@@ -17,9 +20,11 @@
  *   TINTIN_GITHUB_TOKEN=ghp_xxx corepack yarn package:tintin:publish
  */
 
+import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { open, readdir, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -155,55 +160,128 @@ if (release === undefined) {
 }
 
 const uploadUrl = release.upload_url.replace(/\{\?[^}]*\}$/u, '')
-const assets = Array.isArray(release.assets) ? release.assets : []
-const wanted = [
+
+// 传输层走 curl 子进程而不是 Node fetch 流式 body：大资产长传输一旦被中断（网络
+// 复位、进程被杀），GitHub 会留下占住资产名的半截资产，后续重试全部撞 422
+// already_exists（2026-11-14 实测坑，且该资产常被定型成 0 字节的 uploaded 空壳）。
+// curl 实发 Content-Length、瞬时错误自动重试、进度条直落 stderr；token 经 stdin
+// 配置喂入，不落命令行与日志。
+const wanted = []
+for (const entry of [
   { path: installerPath, name: installerName },
   { path: sidecarPath, name: `${installerName}.sha256` },
-]
-for (const asset of wanted) {
-  for (const existing of assets.filter(entry => entry.name === asset.name)) {
-    if (!hasFlag('--force')) throw new Error(`资产 ${asset.name} 已存在——需要覆盖时加 --force`)
-    const removed = await fetch(`${api}/releases/assets/${String(existing.id)}`, { method: 'DELETE', headers })
-    if (!removed.ok && removed.status !== 204) {
-      throw new Error(`删除旧资产 ${asset.name} 失败：HTTP ${String(removed.status)}`)
-    }
-    console.log(`[publish] 已删除旧资产 ${asset.name}`)
-  }
-  const size = (await stat(asset.path)).size
-  const upload = await fetch(`${uploadUrl}?name=${encodeURIComponent(asset.name)}`, {
-    method: 'POST',
-    headers: { ...headers, 'Content-Type': 'application/octet-stream', 'Content-Length': String(size) },
-    duplex: 'half',
-    body: createReadStream(asset.path),
-  })
-  if (!upload.ok) {
-    throw new Error(`上传 ${asset.name} 失败：HTTP ${String(upload.status)} ${(await upload.text()).slice(0, 400)}`)
-  }
-  console.log(`[publish] 已上传 ${asset.name}（${(size / 1024 / 1024).toFixed(1)} MB）`)
+]) {
+  wanted.push({ ...entry, size: (await stat(entry.path)).size })
 }
 
+const deleteAssetById = async assetId => {
+  const removed = await fetch(`${api}/releases/assets/${String(assetId)}`, { method: 'DELETE', headers })
+  if (!removed.ok && removed.status !== 204) {
+    throw new Error(`删除资产失败（id ${String(assetId)}）：HTTP ${String(removed.status)}`)
+  }
+}
+
+const refreshAssets = async () => {
+  const fresh = await requestJson(`/releases/tags/${encodeURIComponent(tag)}`)
+  return Array.isArray(fresh.assets) ? fresh.assets : []
+}
+
+/** curl 一次性上传，返回 { status, body, exit }；进度条与错误直通终端（stderr）。 */
+function uploadAssetWithCurl(asset) {
+  const responsePath = join(tmpdir(), `tintin-upload-${String(process.pid)}-${String(Date.now())}.json`)
+  const config = [
+    `header = "Authorization: Bearer ${token}"`,
+    'header = "Content-Type: application/octet-stream"',
+    'header = "Expect:"',
+    `url = "${uploadUrl}?name=${encodeURIComponent(asset.name)}"`,
+    'request = "POST"',
+    // upload-file 从磁盘流式读出，不吃满进程内存（data-binary 会把整个文件读进内存）。
+    `upload-file = "${asset.path.replaceAll('\\', '/')}"`,
+    `output = "${responsePath.replaceAll('\\', '/')}"`,
+    'retry = 3',
+    'retry-delay = 5',
+    'max-time = 2700',
+  ].join('\n')
+  const result = spawnSync('curl', ['-K', '-', '-#', '-w', '%{http_code} %{size_upload}B %{time_total}s'], {
+    input: config,
+    encoding: 'utf8',
+    timeout: 3000_000,
+    stdio: ['pipe', 'pipe', 'inherit'],
+  })
+  const status = Number.parseInt((result.stdout ?? '').trim(), 10)
+  let body = ''
+  if (existsSync(responsePath)) {
+    body = readFileSync(responsePath, 'utf8')
+    rmSync(responsePath, { force: true })
+  }
+  return { status: Number.isNaN(status) ? 0 : status, body, exit: result.status }
+}
+
+const uploadOne = async asset => {
+  // 清单里已存在的同名旧资产：--force 删除，否则明确报错。
+  for (const stale of (await refreshAssets()).filter(entry => entry.name === asset.name)) {
+    if (!hasFlag('--force')) throw new Error(`资产 ${asset.name} 已存在——需要覆盖时加 --force`)
+    await deleteAssetById(stale.id)
+    console.log(`[publish] 已删除旧资产 ${asset.name}（id ${String(stale.id)}）`)
+  }
+  console.log(`[publish] 正在上传 ${asset.name}（${(asset.size / 1024 / 1024).toFixed(1)} MB，自动重试×3）…`)
+  let upload = uploadAssetWithCurl(asset)
+  // 半截占名资产常常不在清单里，只有上传时才撞 422 already_exists；--force 下按清单
+  // 清理后重传一次。没有 --force 时给出明确的处置指引。
+  if (upload.status === 422 && /already_exists/u.test(upload.body)) {
+    if (!hasFlag('--force')) {
+      throw new Error(`上传 ${asset.name} 被拒：422 already_exists——通常有先前中断上传留下的占名资产，加 --force 自动清理重传`)
+    }
+    const stale = (await refreshAssets()).find(entry => entry.name === asset.name)
+    if (stale === undefined) {
+      throw new Error(`上传 ${asset.name} 被拒：422 already_exists，且清单查不到占名资产——请到 release 页面人工处理后重跑`)
+    }
+    await deleteAssetById(stale.id)
+    console.log(`[publish] 已删除占名旧资产 ${asset.name}（id ${String(stale.id)}），重传`)
+    upload = uploadAssetWithCurl(asset)
+  }
+  if (upload.exit !== 0 || upload.status < 200 || upload.status >= 300) {
+    throw new Error(`上传 ${asset.name} 失败：curl exit ${String(upload.exit)} HTTP ${String(upload.status)}${upload.body.length > 0 ? ` ${upload.body.slice(0, 300)}` : ''}`)
+  }
+  console.log(`[publish] 已上传 ${asset.name}（${(asset.size / 1024 / 1024).toFixed(1)} MB）`)
+}
+for (const asset of wanted) await uploadOne(asset)
+
 // 发布后自检：回查清单确认 tag 与全部资产就绪，防「上传成功但 release 没建出/资产
-// 还在 processing」的假完成。资产状态短暂 started 时小退避重试。
+// 还在 processing」的假完成；同时比对资产字节数与本地文件，拦住中断留下的 0 字节
+// 空壳资产（--force 下就地删除重传，否则只能人工处置）。状态短暂 started 时小退避重试。
 const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
 let verified = null
 for (let attempt = 1; attempt <= 3; attempt += 1) {
   const check = await fetch(`${api}/releases/tags/${encodeURIComponent(tag)}`, { headers })
   if (check.ok) {
-    const release = await check.json()
-    const assets = Array.isArray(release.assets) ? release.assets : []
-    const missing = wanted.filter(asset => !assets.some(entry => entry.name === asset.name && entry.state === 'uploaded'))
-    if (missing.length === 0) {
-      verified = release
+    const payload = await check.json()
+    const assets = Array.isArray(payload.assets) ? payload.assets : []
+    const broken = assets.filter(entry => {
+      const local = wanted.find(asset => asset.name === entry.name)
+      return local !== undefined && (entry.state !== 'uploaded' || entry.size !== local.size)
+    })
+    const missing = wanted.filter(asset => !assets.some(entry => entry.name === asset.name))
+    if (missing.length === 0 && broken.length === 0) {
+      verified = payload
       break
     }
-    console.log(`[publish] 自检第 ${String(attempt)} 次：${missing.map(asset => asset.name).join('、')} 尚未就绪，等待重试`)
+    console.log(`[publish] 自检第 ${String(attempt)} 次：${
+      [...missing.map(asset => asset.name), ...broken.map(asset => `${asset.name}（state=${asset.state}/size=${String(asset.size)}B 与本地不符）`)].join('、')} 未就绪`)
+    if (hasFlag('--force')) {
+      for (const asset of broken) {
+        await deleteAssetById(asset.id)
+        console.log(`[publish] 自检发现空壳资产 ${asset.name}（id ${String(asset.id)}），已删除重传`)
+        await uploadOne(asset)
+      }
+    }
   } else {
     console.log(`[publish] 自检第 ${String(attempt)} 次：release ${tag} 查询 HTTP ${String(check.status)}`)
   }
   await sleep(5000)
 }
 if (verified === null) {
-  throw new Error(`发布后自检失败：release ${tag} 或其资产未在重试窗口内就绪——请到 GitHub 页面人工确认`)
+  throw new Error(`发布后自检失败：release ${tag} 或其资产未在重试窗口内就绪（或资产尺寸与本地不符）——请到 GitHub 页面人工确认`)
 }
 
 console.log(`[publish] 自检通过：release ${tag} 可见，${String(verified.assets.length)} 份资产就绪`)

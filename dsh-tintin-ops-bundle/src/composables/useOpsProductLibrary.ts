@@ -17,7 +17,7 @@
 // 导出：服务端无 /export 端点，未实装。
 // ═══════════════════════════════════════════════════════════════
 
-import { ref, onUnmounted } from 'vue'
+import { computed, ref, onUnmounted } from 'vue'
 import { getTintin } from './useSettingsConfig'
 import { API_PATHS } from '../types/apiPaths'
 import { extractTaskObj, mapTaskStatus } from './taskStatus'
@@ -39,6 +39,14 @@ import {
   type ProductSixViewEntry,
   type ProductTreeNode,
 } from './opsProductLibraryLogic'
+import {
+  filterFlat,
+  filterOptions,
+  flattenItems,
+  flattenTree,
+  pageSlice,
+  type ProductFlatEntry,
+} from './opsProductLibraryFlat'
 
 /** 轮询间隔（原版 time.sleep(2)）与挖掘上限（原版 10 分钟） */
 const POLL_MS = 2000
@@ -53,6 +61,18 @@ export function useOpsProductLibrary() {
   const searchHits = ref<{ id: string; label: string }[]>([])
   const treeLoading = ref(false)
   const treeError = ref('')
+
+  /* ── 扁平分页列表（2026-11-14 用户裁决：左栏参考 ERP 列表——过滤条件在搜索
+       之上、行分割线、客户端分页；数据源仍 /grouped 与 /search）。分类/品牌
+       过滤为纯客户端过滤，page 越界由 pageSlice 收敛 ── */
+  const flatAll = ref<ProductFlatEntry[]>([])
+  const flatCategory = ref('')
+  const flatBrand = ref('')
+  const flatPage = ref(1)
+  const flatPageSize = ref(20)
+  const flatOptions = computed(() => filterOptions(flatAll.value))
+  const filteredFlat = computed(() => filterFlat(flatAll.value, { category: flatCategory.value, brand: flatBrand.value }))
+  const pagedFlat = computed(() => pageSlice(filteredFlat.value, flatPage.value, flatPageSize.value))
 
   /* ── 表单状态 ── */
   const form = ref<Record<string, string>>({})
@@ -126,6 +146,7 @@ export function useOpsProductLibrary() {
         const items = extractItems(data)
         searchHits.value = items.map((it) => ({ id: String(it.id ?? ''), label: searchResultLabel(it) }))
         nodes.value = []
+        flatAll.value = flattenItems(items)
       } else {
         // 全量树：grouped（服务端 tree 缺失时渲染层降级建树，对齐 manager L333-344）
         const data = await callJson(() => t.server.get(`${base(mid)}/grouped`, {}))
@@ -134,10 +155,13 @@ export function useOpsProductLibrary() {
           : buildProductTree(extractItems(data))
         searchHits.value = []
         nodes.value = treeToNodes(tree)
+        flatAll.value = flattenTree(tree)
       }
+      flatPage.value = 1
     } catch (e) {
       nodes.value = []
       searchHits.value = []
+      flatAll.value = []
       treeError.value = (e as Error)?.message || String(e)
     } finally {
       treeLoading.value = false
@@ -645,6 +669,8 @@ export function useOpsProductLibrary() {
   return {
     // 树/搜索
     keyword, nodes, searchHits, treeLoading, treeError, loadTree, onKeywordInput,
+    // 扁平分页列表（2026-11-14 用户裁决：过滤在搜索之上+分割线+客户端分页）
+    flatAll, flatCategory, flatBrand, flatPage, flatPageSize, flatOptions, filteredFlat, pagedFlat,
     // 表单
     form, editingId, lockedFields, formStatus, saving, selectNode, clearForm, save, remove,
     // 同步
@@ -654,6 +680,7 @@ export function useOpsProductLibrary() {
     // 六视图
     sixViews, sixMissing, sixLoading, sixAssembling, sixUploading, sixStatus,
     allowWeb, allowAi, assembleSixViews, deleteSixView, uploadSixView, bindSixViewFromMaterial,
+    loadSixViews, // LRU discard 重建后的状态恢复用（2026-11-13 方案 B：快照恢复选中/表单，六视图从服务端回读）
     // Excel 导入
     importing, importStatus, importExcel, downloadImportTemplate,
   }

@@ -12,6 +12,8 @@ import type { Component } from 'vue'
 import { useHostDark } from './composables/hostTheme'
 // 多 Tab 工作区三件（本包副本；原件在媒体包，改动须两包同步）
 import ToolTabBar from './components/ToolTabBar.vue'
+// 服务设置弹层（2026-11-14 用户裁决：运营工具本面服务端地址独立配置）
+import ServerSettingsDialog from './components/common/ServerSettingsDialog.vue'
 import ToolTabPane from './components/ToolTabPane.vue'
 import { useToolTabs, TOOL_TAB_MAX, type ToolTab } from './composables/useToolTabs'
 // 产品资料（2026-09-25 用户裁决移植）：仓库同步/树/表单增删改/智能挖掘/全量挖掘
@@ -80,6 +82,8 @@ const capacityNotice = ref(false)
 // 关闭确认（一期从宽：仅任务运行中的 tab 拦截；ops 卡 busy 接线暂无——
 // 各卡运行态接入 useToolTabBusy 后自动生效）
 const closeAsk = ref<ToolTab | null>(null)
+// 服务设置弹层（2026-11-14 用户裁决：运营工具本面服务端地址独立配置）
+const showServerSettings = ref(false)
 
 /** 打开卡片 = 新开 tab 并切换 */
 function requestOpen(toolId: string): void {
@@ -136,8 +140,17 @@ const isDark = useHostDark()
     <!-- ═══ 卡片导航页（无 tab 底层视图；v-show 保 DOM） ═══ -->
     <div v-show="!activeTabId" class="page page-nav">
       <div class="head">
-        <div class="title">运营工具</div>
-        <div class="sub">智能问答系统 · 产品资料 · 我的知识库 · 视频评价预测 · 视频营销检测</div>
+        <div class="head-copy">
+          <div class="title">运营工具</div>
+          <div class="sub">智能问答系统 · 产品资料 · 我的知识库 · 视频评价预测 · 视频营销检测</div>
+        </div>
+        <!-- 服务设置（2026-11-14 用户裁决：本面服务端地址分面独立配置） -->
+        <button type="button" class="head-settings" title="服务设置" aria-label="服务设置" @click="showServerSettings = true">
+          <svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="10" cy="10" r="2.6" />
+            <path d="M16.2 12.4a1.4 1.4 0 0 0 .28 1.54l.05.05a1.7 1.7 0 1 1-2.4 2.4l-.05-.05a1.4 1.4 0 0 0-1.54-.28 1.4 1.4 0 0 0-.85 1.28v.14a1.7 1.7 0 1 1-3.4 0v-.07a1.4 1.4 0 0 0-.92-1.28 1.4 1.4 0 0 0-1.54.28l-.05.05a1.7 1.7 0 1 1-2.4-2.4l.05-.05a1.4 1.4 0 0 0 .28-1.54 1.4 1.4 0 0 0-1.28-.85H2.7a1.7 1.7 0 1 1 0-3.4h.07a1.4 1.4 0 0 0 1.28-.92 1.4 1.4 0 0 0-.28-1.54l-.05-.05a1.7 1.7 0 1 1 2.4-2.4l.05.05a1.4 1.4 0 0 0 1.54.28h.07a1.4 1.4 0 0 0 .85-1.28V2.7a1.7 1.7 0 1 1 3.4 0v.07a1.4 1.4 0 0 0 .85 1.28 1.4 1.4 0 0 0 1.54-.28l.05-.05a1.7 1.7 0 1 1 2.4 2.4l-.05.05a1.4 1.4 0 0 0-.28 1.54v.07a1.4 1.4 0 0 0 1.28.85h.14a1.7 1.7 0 1 1 0 3.4h-.07a1.4 1.4 0 0 0-1.28.85z" />
+          </svg>
+        </button>
       </div>
       <div v-for="g in GROUPS" :key="g.group" class="group-block">
         <div class="group-label">{{ g.group }}</div>
@@ -208,6 +221,9 @@ const isDark = useHostDark()
         </div>
       </div>
     </div>
+
+    <!-- ═══ 服务设置（2026-11-14 用户裁决：本面服务端地址分面独立配置） ═══ -->
+    <ServerSettingsDialog :visible="showServerSettings" surface="ops" @close="showServerSettings = false" />
   </div>
 </template>
 
@@ -253,9 +269,27 @@ const isDark = useHostDark()
   overflow: hidden;
 }
 
-.head { margin-bottom: var(--space-5); }
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
 .title { margin: 0 0 var(--space-1); font-size: 24px; font-weight: 700; line-height: 1.2; color: var(--foreground); }
 .sub { margin: 0; font-size: var(--font-size-body); color: var(--muted-foreground); }
+/* 服务设置入口（2026-11-14 用户裁决）：ghost 图标钮，形态对齐关闭钮族 */
+.head-settings {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.head-settings:hover {
+  color: var(--foreground);
+  background: var(--surface-container);
+}
 
 .group-block { margin-bottom: var(--space-6); }
 .group-block:last-child { margin-bottom: 0; }

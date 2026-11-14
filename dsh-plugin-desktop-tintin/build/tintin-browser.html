@@ -138,7 +138,7 @@
     .view { position: absolute; inset: 0; display: none; overflow: auto; padding: 16px; }
     .view.active { display: block; animation: view-in .28s var(--easing-out) backwards; }
     @keyframes view-in { from { opacity: 0; transform: translateY(6px); } }
-    #view-host { position: absolute; inset: 0; background: #fff; }
+    #view-host { position: absolute; inset: 0; background: var(--bg); }
     #hostTip { position: absolute; left: 10px; bottom: 8px; z-index: 2; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--ink) 72%, transparent); color: var(--surface); font-size: 11px; pointer-events: none; backdrop-filter: blur(4px); }
     .placeholder { padding: 48px 24px; text-align: center; color: var(--muted); font-size: 12px; line-height: 1.8; }
     .placeholder h3 { color: var(--ink); margin-bottom: 8px; }
@@ -148,9 +148,11 @@
     #right h4 { font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--muted); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px dashed var(--line); }
     /* ── 下载栏（右栏底部锚定，2026-11-12 用户裁决：不再横贯整个界面底部）── */
     #shelf { flex-shrink: 0; display: none; flex-direction: column; gap: 6px; padding: 8px 12px; background: var(--surface); border-top: 1px solid var(--line); max-height: 132px; overflow-y: auto; }
-    .dl { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--ink); }
-    .dl .name { flex: 0 1 auto; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .dl .track { flex: 1 1 auto; height: 5px; border-radius: 3px; background: rgba(127,127,127,.25); overflow: hidden; }
+    .dl { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 12px; color: var(--ink); }
+    .dl .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 进度条独占一行（2026-11-13 用户报障）：原行内三段布局在窄窗口下 track 被
+       name(42%)+meta(110px) 挤没——进度只剩文字。改两行式：信息行+全宽进度条。 */
+    .dl .track { flex: 1 1 100%; height: 5px; border-radius: 3px; background: rgba(127,127,127,.25); overflow: hidden; }
     .dl .fill { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width .3s var(--easing-out); }
     .dl.done .fill { background: var(--ok); } .dl.done .meta { color: var(--ok); }
     .dl.error .fill { background: var(--bad); } .dl.error .meta { color: var(--bad); }
@@ -647,7 +649,9 @@
     var bar = document.getElementById('tabbar')
     var list = document.getElementById('tbTabs')
     list.textContent = ''
-    if (!lastTabs.tabs.length) { bar.style.display = 'none'; return }
+    // tab 栏常驻（2026-11-13 用户裁决「像正常浏览器一样」）：空态也显示（+ 新建
+    // 可用）——原「空则隐藏」与 + 按钮同居一栏，永远建不出第一个标签（自锁）。
+    if (!lastTabs.tabs.length) { list.textContent = ''; bar.style.display = 'flex'; return }
     bar.style.display = 'flex'
     lastTabs.tabs.forEach(function (t) {
       var el = document.createElement('div')

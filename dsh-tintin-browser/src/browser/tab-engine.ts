@@ -37,11 +37,20 @@ export interface TabEngineDeps {
   sendUi: (payload: Record<string, unknown>) => void
   /** 导航态推送（宿主 pushPageState：地址栏/导航按钮数据源，2026-11-08 报障「标签页跳转地址栏空」补线） */
   pushState: () => void
+  /** 标签视图创建回调（宿主接平台扩展面——2026-11-13 用户报障：B站视频开在标签页时
+   *  下载助手空：扩展注入/console 捕获此前只接主平台视图，tab 视图从未接入） */
+  onTabViewCreated?: (platform: string, view: WebContentsView) => void
   log: (msg: string) => void
 }
 
+/** 标签引擎句柄：宿主（browser-service）导航中枢按平台打开/聚焦标签用。 */
+export interface TabEngineHandle {
+  /** 打开或聚焦该平台的标签（已有→聚焦保持现场；无→新建并载种子页）。 */
+  ensureTab(platform: string): { id: string } | null
+}
+
 /** 标签底色/主题（宿主 themedBackground 直传，避免本文件再依赖 nativeTheme） */
-export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => string): void {
+export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => string): TabEngineHandle {
   const { ipcMain, log } = deps
 
   function createTabView(platform: string): WebContentsView {
@@ -56,6 +65,9 @@ export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => s
       },
     })
     view.setBackgroundColor(themedBackground())
+    // 平台扩展面（宿主注入：B站下载助手等）。必须先于种子页 loadURL ——
+    // injectBilibiliHelper 在此登记 addScriptToEvaluateOnNewDocument，晚于首航就漏首屏
+    try { deps.onTabViewCreated?.(platform, view) } catch (err) { log(`tab view extension hook failed: ${err instanceof Error ? err.message : String(err)}`) }
     view.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:\/\//i.test(url)) {
         try { deps.recordIntent(view.webContents, url); view.webContents.loadURL(url).catch(() => { /* 页面自显示错误 */ }) } catch { /* 销毁竞态 */ }
@@ -136,23 +148,44 @@ export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => s
     deps.pushState()
   }
 
-  ipcMain.handle('browser:tabOpen', (_e, p: unknown) => {
-    const q = (p || {}) as { platform?: unknown }
-    const platform = String(q.platform || 'web')
-    if (!PLATFORM_DEFS[platform]) return { ok: false, error: `未知平台: ${platform}` }
+  /** 打开或聚焦该平台的标签（宿主导航中枢的 tab 化入口，2026-11-13 用户裁决
+   *  「像正常浏览器一样」：平台点击/收藏/嗅探等全部导航都落进标签池——
+   *  打开过的页面在顶部 tab 栏可见、可切、可关；已有标签聚焦保持现场）。 */
+  function ensureTab(platform: string): { id: string } | null {
+    if (!PLATFORM_DEFS[platform]) return null
+    const pool = deps.getPool()
+    const existing = pool.tabs.find((t) => t.platform === platform)
+    if (existing) {
+      const next = activateTab(pool, existing.id)
+      if (next !== pool) deps.setPool(next)
+      deps.focusPlatform(platform)
+      deps.attachActive()
+      pushTabs()
+      deps.pushState()
+      return { id: existing.id }
+    }
     const next = openTab(deps.getPool(), platform)
-    if (!next) return { ok: false, error: '标签已达上限（12）' }
+    if (!next) return null
     deps.setPool(next)
     const id = next.activeId!
     const view = createTabView(platform)
     deps.setTabView(id, view)
     deps.focusPlatform(platform)
     deps.attachActive()
-    deps.recordIntent(view.webContents, deps.seedUrl(platform))
-    view.webContents.loadURL(deps.seedUrl(platform)).catch(() => { /* 页面自显示错误 */ })
+    const seed = deps.seedUrl(platform)
+    deps.recordIntent(view.webContents, seed)
+    view.webContents.loadURL(seed).catch(() => { /* 页面自显示错误 */ })
     pushTabs()
     deps.pushState()
-    return { ok: true, tabId: id }
+    return { id }
+  }
+
+  ipcMain.handle('browser:tabOpen', (_e, p: unknown) => {
+    const q = (p || {}) as { platform?: unknown }
+    const platform = String(q.platform || 'web')
+    const r = ensureTab(platform)
+    if (!r) return { ok: false, error: r === null ? `未知平台: ${platform}` : '标签已达上限（12）' }
+    return { ok: true, tabId: r.id }
   })
   ipcMain.handle('browser:tabClose', (_e, p: unknown) => {
     const q = (p || {}) as { id?: unknown }
@@ -182,4 +215,6 @@ export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => s
     refocusTab(id)
     return { ok: true }
   })
+
+  return { ensureTab }
 }

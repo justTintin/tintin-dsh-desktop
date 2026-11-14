@@ -41,6 +41,8 @@ import LiveClip from './components/media-tools/LiveClip.vue'
 // 多 Tab 工作区三件（本包实现；运营包持同构副本）：
 import ToolTabBar from './components/ToolTabBar.vue'
 import ToolTabPane from './components/ToolTabPane.vue'
+// 服务设置弹层（2026-11-14 用户裁决：媒体工具本面服务端地址独立配置）
+import ServerSettingsDialog from './components/common/ServerSettingsDialog.vue'
 import { useToolTabs, TOOL_TAB_MAX, type ToolTab } from './composables/useToolTabs'
 // 「前往分镜」跨视图跳转（2026-09-27）：产品资料·文案面板写入 pendingStoryboard
 // 信号后自动打开分镜脚本创作卡
@@ -138,6 +140,8 @@ function toolMeta(toolId: string): { emoji: string; title: string } | null {
 const capacityNotice = ref(false)
 // 关闭确认（一期从宽：仅任务运行中的 tab 拦截，2026-11-12 用户裁决）
 const closeAsk = ref<ToolTab | null>(null)
+// 服务设置弹层（2026-11-14 用户裁决：媒体工具本面服务端地址独立配置）
+const showServerSettings = ref(false)
 
 /** 打开卡片 = 新开 tab 并切换（点击卡片/新开类信号走这里） */
 function requestOpen(toolId: string): void {
@@ -229,8 +233,17 @@ const isDark = useHostDark()
          同步 v-show 交换 + 纯 CSS 入场动画（page-in）：结构上无离开阶段，不可能卡死。 -->
     <div v-show="!activeTabId" class="page page-nav">
       <div class="head">
-        <div class="title">媒体工具</div>
-        <div class="sub">选择需要执行的 AI 生产能力</div>
+        <div class="head-copy">
+          <div class="title">媒体工具</div>
+          <div class="sub">选择需要执行的 AI 生产能力</div>
+        </div>
+        <!-- 服务设置（2026-11-14 用户裁决：本面服务端地址分面独立配置） -->
+        <button type="button" class="head-settings" title="服务设置" aria-label="服务设置" @click="showServerSettings = true">
+          <svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="10" cy="10" r="2.6" />
+            <path d="M16.2 12.4a1.4 1.4 0 0 0 .28 1.54l.05.05a1.7 1.7 0 1 1-2.4 2.4l-.05-.05a1.4 1.4 0 0 0-1.54-.28 1.4 1.4 0 0 0-.85 1.28v.14a1.7 1.7 0 1 1-3.4 0v-.07a1.4 1.4 0 0 0-.92-1.28 1.4 1.4 0 0 0-1.54.28l-.05.05a1.7 1.7 0 1 1-2.4-2.4l.05-.05a1.4 1.4 0 0 0 .28-1.54 1.4 1.4 0 0 0-1.28-.85H2.7a1.7 1.7 0 1 1 0-3.4h.07a1.4 1.4 0 0 0 1.28-.92 1.4 1.4 0 0 0-.28-1.54l-.05-.05a1.7 1.7 0 1 1 2.4-2.4l.05.05a1.4 1.4 0 0 0 1.54.28h.07a1.4 1.4 0 0 0 .85-1.28V2.7a1.7 1.7 0 1 1 3.4 0v.07a1.4 1.4 0 0 0 .85 1.28 1.4 1.4 0 0 0 1.54-.28l.05-.05a1.7 1.7 0 1 1 2.4 2.4l-.05.05a1.4 1.4 0 0 0-.28 1.54v.07a1.4 1.4 0 0 0 1.28.85h.14a1.7 1.7 0 1 1 0 3.4h-.07a1.4 1.4 0 0 0-1.28.85z" />
+          </svg>
+        </button>
       </div>
       <div v-for="g in GROUPS" :key="g.group" class="group-block">
         <div class="group-label">{{ g.group }}</div>
@@ -301,6 +314,9 @@ const isDark = useHostDark()
         </div>
       </div>
     </div>
+
+    <!-- ═══ 服务设置（2026-11-14 用户裁决：本面服务端地址分面独立配置） ═══ -->
+    <ServerSettingsDialog :visible="showServerSettings" surface="media" @close="showServerSettings = false" />
   </div>
 </template>
 
@@ -346,9 +362,27 @@ const isDark = useHostDark()
   overflow: hidden;
 }
 
-.head { margin-bottom: var(--space-5); }
+.head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
 .title { margin: 0 0 var(--space-1); font-size: 24px; font-weight: 700; line-height: 1.2; color: var(--foreground); }
 .sub { margin: 0; font-size: var(--font-size-body); color: var(--muted-foreground); }
+/* 服务设置入口（2026-11-14 用户裁决）：ghost 图标钮，形态对齐关闭钮族 */
+.head-settings {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.head-settings:hover {
+  color: var(--foreground);
+  background: var(--surface-container);
+}
 
 /* 分组（2026-09-24 对齐原 MediaTools 分组 Launcher） */
 .group-block { margin-bottom: var(--space-6); }

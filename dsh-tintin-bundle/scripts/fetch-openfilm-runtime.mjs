@@ -25,7 +25,7 @@
 // Pinned versions keep installers reproducible; bump deliberately. Overrides:
 // TINTIN_NODE_VERSION, TINTIN_OPENFILM_VERSION. Mirrors fall back to npmmirror
 // when the primary host is unreachable (1012/1015 阻断先例).
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -117,7 +117,21 @@ if (!existsSync(npmCli)) {
   }
 }
 
-// 2b. TinTin 一等 provider（2026-11-09 用户裁决：TinTin 服务=内置连接服务，不借 OpenAI 外皮）：
+// 2b. skills 整目录补拷（2026-11-13 用户报障「明明已装却判运行时未安装」）：npm 包
+// 产物不含 skills/（仓库工作区 openfilm 才带，~2MB 七个技能）——skills 抽屉与
+// openfilm:skills 的 runtimeOk 探测都要它。npm install 重置 openfilm 包，因此与
+// tintin provider 同款「每次 fetch 后重拷」（幂等，含 install 跳过时）。
+const wsSkills = join(repoRoot, 'node_modules', 'openfilm', 'skills')
+const skillsDst = join(openfilmDir, 'node_modules', 'openfilm', 'skills')
+if (existsSync(wsSkills)) {
+  rmSync(skillsDst, { recursive: true, force: true })
+  cpSync(wsSkills, skillsDst, { recursive: true })
+  console.log(`openfilm skills vendored (${readdirSync(skillsDst).length} entries)`)
+} else {
+  console.warn(`workspace skills missing at ${wsSkills} — 跳过补拷（运行时首跑下载兜底不受影响）`)
+}
+
+// 2c. TinTin 一等 provider（2026-11-09 用户裁决：TinTin 服务=内置连接服务，不借 OpenAI 外皮）：
 // 源文件在 dsh-tintin-bundle/lib/openfilm/providers/tintin.mjs（tracked）；npm install 重置整个
 // openfilm 包，因此每次 fetch 后重拷并重挂 index.mjs（幂等，含 install 跳过时）。
 const tintinSrc = join(repoRoot, 'dsh-tintin-bundle', 'lib', 'openfilm', 'providers', 'tintin.mjs')

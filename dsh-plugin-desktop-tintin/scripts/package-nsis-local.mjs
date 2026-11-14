@@ -7,6 +7,8 @@
  * packaging goes through here and relies on artifact verification instead.
  */
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { closeSync, openSync, readdirSync, readSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,3 +50,30 @@ if (result.error !== undefined) throw result.error
 if (result.status !== 0) {
   throw new Error(`electron-builder --win nsis exited with ${String(result.status)}`)
 }
+
+// SHA-256 旁挂（2026-11-14 用户裁决：不管走哪个入口，只要产出安装包就有检验文件）。
+// 本脚本是全部 NSIS 打包路径的收口（一键链 release-tintin / Release-Builder 各模式 /
+// 手工直跑都经此），在此生成一次即可；sha256sum 格式（<摘要>  <文件名>）与
+// publish-github-release.mjs 再生成的逐字节一致，发布环节失败时可直接手动上传兜底。
+const distDir = join(packageRoot, 'dist')
+const setupName = readdirSync(distDir)
+  .filter((name) => /^TinTin-.+-x64-Setup\.exe$/u.test(name))
+  .map((name) => ({ name, mtimeMs: statSync(join(distDir, name)).mtimeMs }))
+  .sort((left, right) => right.mtimeMs - left.mtimeMs)[0]?.name
+if (setupName === undefined) {
+  throw new Error('NSIS 成功但 dist/ 下没有 TinTin-*-x64-Setup.exe——产物异常，中止')
+}
+const digest = createHash('sha256')
+const sidecarHandle = openSync(join(distDir, setupName), 'r')
+try {
+  const chunk = Buffer.alloc(1024 * 1024)
+  while (true) {
+    const bytesRead = readSync(sidecarHandle, chunk, 0, chunk.byteLength, null)
+    if (bytesRead === 0) break
+    digest.update(bytesRead === chunk.byteLength ? chunk : chunk.subarray(0, bytesRead))
+  }
+} finally {
+  closeSync(sidecarHandle)
+}
+writeFileSync(join(distDir, `${setupName}.sha256`), `${digest.digest('hex')}  ${setupName}\n`, 'utf8')
+console.log(`[package-nsis] 已生成 SHA-256 旁挂：dist/${setupName}.sha256`)

@@ -208,7 +208,6 @@ export function useCopywritingMontage() {
   //    预算/扩缩重试/终结标点/平台指引）。保留：选择产品（product_desc 必填）、平台下拉
   //    （→platform 结构化直传，字典 GET /copywriting/platforms）。文案仍为页面级草稿
   //    （localStorage 只存 copy）══
-  const scriptLsKey = (k: string): string => `copywriting-montage.script.${k}`
   // 投放平台（2026-10-03 用户裁决：场景后平台下拉，默认抖音）——字典/默认值均来自
   // 服务端 GET /copywriting/platforms；选中名随请求 platform 直传（指引由服务端织入）
   interface PlatformItem { name: string; guide: string }
@@ -250,20 +249,15 @@ export function useCopywritingMontage() {
   // 生成提示词（2026-11-05 用户裁决：无产品时按输入提示词生成文案；有产品时产品优先，
   // 提示词忽略。随本地设置持久化，重启保留）
   const copyPrompt = ref('')
-  // localStorage 恢复：显式判 null 为未设置才回退默认
-  const lsGet = (k: string): string | null => {
-    try { return localStorage.getItem(scriptLsKey(k)) } catch { return null }
-  }
-  // 2026-11-05 用户裁决：视频文案进来默认空——历史草稿不再持久化/回填（旧裁决
-  // 「文案随本地设置保存」随之废止）；提示词输入保留持久化
-  const savedPrompt = lsGet('prompt')
-  if (savedPrompt !== null) copyPrompt.value = savedPrompt
-  function persistScript(): void {
-    try {
-      localStorage.setItem(scriptLsKey('prompt'), copyPrompt.value)
-    } catch { /* 隐私模式等写入失败静默 */ }
-  }
-  watch([copyPrompt], persistScript)
+  // 提示词不再持久化/恢复（2026-11-13 用户裁决「每次新打开文案混剪，方案二的提示
+  // 就是样本的；其它的时候才是用户已经输入的」）：新实例 copyPrompt 为空，由
+  // Step1Panel 的平台样本预填（watch immediate）填入当前平台详细样本；同实例存续
+  // 期间用户输入原样保留（切 tab/切平台不覆盖——预填只在空或仍为样本时刷新）。
+  // 2026-11-05 裁决「提示词输入保留持久化」随之废止。
+  /** 最后编辑的生成来源（2026-11-13 用户裁决「方案二的结果和方案一的结果是单独的」
+   *  根治）：原生成分流 `desc || prompt` 产品恒优先——方案一选过产品后切方案二输入
+   *  提示词，服务端拿到的仍是旧产品描述（结果混源）。改为记录最后一次编辑的表达，
+   *  生成按它分流：改过提示词→按提示词；重选/改产品→按产品。 */
   /** 进入文案混剪模块默认空态（2026-11-05 用户裁决：视频文案进来默认空；
    *  同日追加裁定：上次会话的分镜标签不残留——「不是这次选择的应该没有」。
    *  分镜列表整体清空：文案框/分镜区/标签行全部回到本次会话的空白起点，
@@ -334,8 +328,12 @@ export function useCopywritingMontage() {
     }
     manualCopyBusy.value = true
     try {
+      // 来源组装（2026-11-13 用户裁决定稿）：只选一种 → 以该方案为准；两个都有 →
+      // 产品描述与提示词混合交模型按语义理解（提示词里换型号/比较两个产品都没问题）。
+      // 绝无「残留产品」：产品选择不持久化，只作用于当前流程（本会话实选）。
+      const merged = [desc, prompt].filter(Boolean).join('\n')
       const resp = await window.tintin.server.post(API_PATHS.copywriting.voiceover, {
-        product_desc: desc || prompt,
+        product_desc: merged,
         platform: scriptPlatform.value,
       })
       const parsed = voiceoverCandidatesFromResponse(resp)

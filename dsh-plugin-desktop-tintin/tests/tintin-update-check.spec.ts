@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   compareTintinVersions,
   checkForTintinDesktopUpdate,
+  parseTintinReleaseFeed,
   parseTintinReleaseVersion,
   resolveTintinInstallerRelease,
   selectTintinInstallerRelease,
+  TINTIN_RELEASES_ATOM_ENDPOINT,
   TINTIN_RELEASES_ENDPOINT,
 } from '../src/tintin/tintin-update-check.ts'
 import type { UpdateRequest } from '../src/update-checker.ts'
@@ -33,21 +35,37 @@ function releaseEntry(
   }
 }
 
-/** Route a fake request by URL: the listing plus any sidecar digest bodies. */
+/** Route a fake request by URL: the listing, the Atom feed, and sidecar bodies. */
 function listingRequest(
   releases: readonly unknown[],
   sidecars: Readonly<Record<string, string>> = {},
   status = 200,
+  options: { apiStatus?: number; atomFeed?: string; atomStatus?: number } = {},
 ): UpdateRequest {
   return async (url: string) => {
     if (url === TINTIN_RELEASES_ENDPOINT) {
+      if (options.apiStatus !== undefined) return new Response('nope', { status: options.apiStatus })
       if (status !== 200) return new Response('nope', { status })
       return Response.json(releases)
+    }
+    if (url === TINTIN_RELEASES_ATOM_ENDPOINT) {
+      if (options.atomStatus !== undefined) return new Response('nope', { status: options.atomStatus })
+      if (options.atomFeed === undefined) return new Response('no feed', { status: 404 })
+      return new Response(options.atomFeed, { status: 200 })
     }
     const body = sidecars[url]
     if (body === undefined) return new Response('missing', { status: 404 })
     return new Response(body, { status: 200 })
   }
+}
+
+function atomFeed(...tags: readonly string[]): string {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<feed xmlns="http://www.w3.org/2005/Atom">',
+    ...tags.map(tag => `<entry><id>tag:github.com,2008:Repository/1395953060/${tag}</id></entry>`),
+    '</feed>',
+  ].join('\n')
 }
 
 describe('tintin release version parsing', () => {
@@ -111,8 +129,8 @@ describe('release selection', () => {
       releaseEntry('v0.2.2-rc.1-20261112-2217'),
     ])
     expect(release?.version).toBe('0.2.2-rc.1-20261113-0930')
-    expect(release?.asset.name).toBe('TinTin-0.2.2-rc.1-20261113-0930-x64-Setup.exe')
-    expect(release?.asset.url).toBe(assetUrl('v0.2.2-rc.1-20261113-0930', 'TinTin-0.2.2-rc.1-20261113-0930-x64-Setup.exe'))
+    expect(release?.asset?.name).toBe('TinTin-0.2.2-rc.1-20261113-0930-x64-Setup.exe')
+    expect(release?.asset?.url).toBe(assetUrl('v0.2.2-rc.1-20261113-0930', 'TinTin-0.2.2-rc.1-20261113-0930-x64-Setup.exe'))
   })
 
   it('skips drafts, non-installer releases, and unparseable tags', () => {
@@ -128,7 +146,7 @@ describe('release selection', () => {
     const withHeader = selectTintinInstallerRelease([
       releaseEntry('v0.2.2-rc.1-20261112-2217', { assets: [installerAsset('v0.2.2-rc.1-20261112-2217', { digest: `sha256:${INSTALLER_DIGEST}` })] }),
     ])
-    expect(withHeader?.asset.sha256).toBe(INSTALLER_DIGEST)
+    expect(withHeader?.asset?.sha256).toBe(INSTALLER_DIGEST)
     expect(withHeader?.digestSidecar).toBeUndefined()
 
     const sidecarName = 'TinTin-0.2.2-rc.1-20261112-2217-x64-Setup.exe.sha256'
@@ -137,7 +155,7 @@ describe('release selection', () => {
         assets: [installerAsset('v0.2.2-rc.1-20261112-2217'), { name: sidecarName, browser_download_url: assetUrl('v0.2.2-rc.1-20261112-2217', sidecarName), size: 76 }],
       }),
     ])
-    expect(withSidecar?.asset.sha256).toBeUndefined()
+    expect(withSidecar?.asset?.sha256).toBeUndefined()
     expect(withSidecar?.digestSidecar?.name).toBe(sidecarName)
   })
 
@@ -150,9 +168,82 @@ describe('release selection', () => {
         ],
       }),
     ])
-    expect(release?.asset.name).toBe('TinTin-0.2.2-rc.1-20261112-2217-x64-Setup.exe')
+    expect(release?.asset?.name).toBe('TinTin-0.2.2-rc.1-20261112-2217-x64-Setup.exe')
     expect(selectTintinInstallerRelease('garbage')).toBeUndefined()
     expect(selectTintinInstallerRelease([{ tag_name: 'v0.2.2-rc.1-20261112-2217' }])).toBeUndefined()
+  })
+})
+
+describe('releases Atom feed parsing', () => {
+  it('extracts tintin-parseable tags newest first and skips everything else', () => {
+    expect(parseTintinReleaseFeed(atomFeed('v0.2.2-rc.1-20261113-1056', 'notes-only', 'v0.2.2-rc.1-20261112-2217', 'v0.2.2-rc.1-20261113-1056')))
+      .toEqual(['v0.2.2-rc.1-20261113-1056', 'v0.2.2-rc.1-20261112-2217'])
+    expect(parseTintinReleaseFeed('no entries at all')).toEqual([])
+  })
+})
+
+describe('atom rate-limit fallback', () => {
+  const CURRENT = '0.2.2-rc.1-20261113-1056'
+  const OLDER = atomFeed('v0.2.2-rc.1-20261112-2217')
+
+  it('answers up-to-date from the Atom feed when the API is rate-limited', async () => {
+    const result = await checkForTintinDesktopUpdate({
+      currentVersion: CURRENT,
+      channel: 'tintin',
+      request: listingRequest([], {}, 200, { apiStatus: 403, atomFeed: OLDER }),
+    })
+    expect(result).toEqual({
+      status: 'up-to-date',
+      currentVersion: CURRENT,
+      latestVersion: '0.2.2-rc.1-20261112-2217',
+    })
+  })
+
+  it('reports an available update without digests when only the feed is reachable', async () => {
+    const result = await checkForTintinDesktopUpdate({
+      currentVersion: '0.2.2-rc.1-20261111-1100',
+      channel: 'tintin',
+      request: listingRequest([], {}, 200, { apiStatus: 403, atomFeed: OLDER }),
+    })
+    expect(result).toEqual({
+      status: 'update-available',
+      currentVersion: '0.2.2-rc.1-20261111-1100',
+      latestVersion: '0.2.2-rc.1-20261112-2217',
+    })
+  })
+
+  it('fails only when both the API and the feed are unreachable', async () => {
+    expect(await checkForTintinDesktopUpdate({
+      currentVersion: CURRENT,
+      channel: 'tintin',
+      request: listingRequest([], {}, 200, { apiStatus: 403, atomStatus: 500 }),
+    })).toBeNull()
+    const failing: UpdateRequest = async () => { throw new Error('offline') }
+    expect(await checkForTintinDesktopUpdate({ currentVersion: CURRENT, channel: 'tintin', request: failing })).toBeNull()
+  })
+
+  it('resolves a download asset from the tag and the artifact-name contract', async () => {
+    const sidecarUrl = 'https://github.com/justTintin/tintin-dsh-desktop/releases/download/v0.2.2-rc.1-20261112-2217/TinTin-0.2.2-rc.1-20261112-2217-x64-Setup.exe.sha256'
+    const resolved = await resolveTintinInstallerRelease(
+      '0.2.2-rc.1-20261112-2217',
+      listingRequest([], { [sidecarUrl]: 'c'.repeat(64) }, 200, { apiStatus: 403, atomFeed: OLDER }),
+    )
+    expect(resolved).toEqual({
+      asset: {
+        name: 'TinTin-0.2.2-rc.1-20261112-2217-x64-Setup.exe',
+        url: sidecarUrl.replace(/\.sha256$/u, ''),
+        size: 0,
+      },
+      sha256: 'c'.repeat(64),
+    })
+  })
+
+  it('rejects versions the feed does not contain', async () => {
+    const resolved = await resolveTintinInstallerRelease(
+      '0.2.9-rc.1-20261112-2217',
+      listingRequest([], {}, 200, { apiStatus: 403, atomFeed: OLDER }),
+    )
+    expect(resolved).toBeNull()
   })
 })
 
@@ -225,7 +316,10 @@ describe('channel update check', () => {
     expect(await checkForTintinDesktopUpdate({
       currentVersion: CURRENT,
       channel: 'tintin',
-      request: async () => new Response('not json', { status: 200 }),
+      // Both paths must fail: the API serves garbage and the feed is absent.
+      request: async url => url === TINTIN_RELEASES_ATOM_ENDPOINT
+        ? new Response('no feed', { status: 404 })
+        : new Response('not json', { status: 200 }),
     })).toBeNull()
     // Unstamped development versions are valid; only non-SemVer inputs fail.
     expect(await checkForTintinDesktopUpdate({ currentVersion: 'dev', channel: 'tintin', request: listingRequest([]) })).toBeNull()

@@ -6,6 +6,7 @@
       "dshDesktopActions",
       "__DSH_DIRECTORY_PICKER__",
       "dshDesktopSaveFilePicker",
+      "dshDesktopFolderPicker",
       "dshDesktopOpenFilm",
       "dshDesktopBrowserView",
       "dshDesktop",

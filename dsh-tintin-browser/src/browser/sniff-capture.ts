@@ -31,6 +31,18 @@ export function parseCaptureRequest(payload: unknown): CaptureParseResult {
   return { ok: true, request: { platform, url, autoplay: p.autoplay === true } }
 }
 
+/** 嗅探下载文件名（纯函数，单测下沉）：消毒 → 尾部扩展名保全 → 120 截断。
+ *  2026-11-13 用户报障：长标题分享的 desc 超 117 字时，旧 `slice(0,120)` 把
+ *  「标题 + '.mp4'」的尾部扩展名一并砍掉 → 下载产物无扩展名（资源管理器显示
+ *  类型=文件）。截断只作用于主干，扩展名永远保留；全空回落 fallback。 */
+export function resolveSniffFilename(raw: unknown, fallback: string): string {
+  const sanitized = String(raw ?? '').replace(/[\\/:*?"<>|]/g, '_').trim()
+  const extMatch = sanitized.match(/\.[a-z0-9]{1,8}$/i)
+  const ext = extMatch ? extMatch[0] : ''
+  const base = ext ? sanitized.slice(0, sanitized.length - ext.length) : sanitized
+  return (base.slice(0, 120) + ext) || fallback
+}
+
 /** 后台标签无人看就不播放 → 媒体流不发 → 捕获空转；注入静音起播+点播放键 */
 const AUTOPLAY_SCRIPT = `(function(){var n=0;var t=setInterval(function(){var v=document.querySelector('video');if(v){try{v.muted=true;v.play()}catch(e){}}var b=document.querySelector('xg-start,.xgplayer-start,xg-icon[class*=play],div[aria-label*=播放],[class*=playBtn],[class*=play-btn]');if(b){try{b.click()}catch(e){}}if(++n>10)clearInterval(t)},800)})()`
 
@@ -99,8 +111,9 @@ export function registerSniffCapture(deps: SniffCaptureDeps): void {
     if (!/^https?:\/\/.*/.test(url)) return { success: false, error: '非法媒体地址' }
     const audioUrl = String(p.audioUrl || '').trim() // 伴生音频流（2026-11-08 配对下载：双流+FFmpeg 合并）
     const tail = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'media.mp4').slice(0, 120) || 'media.mp4'
-    // 显式文件名（2026-11-07：解析链捕获下载按标题命名，URL 尾段是 CDN 哈希名）
-    const filename = String(p.filename || '').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 120)
+    // 显式文件名（2026-11-07：解析链捕获下载按标题命名，URL 尾段是 CDN 哈希名；
+    // 2026-11-13 扩展名保全——长标题截断不再砍掉尾部 .mp4）
+    const filename = resolveSniffFilename(p.filename, tail)
     // 平台归属优先取调用方声明（2026-11-11：捕获会话与用户当前平台解耦——在 B站
     // 页面解析抖音链接时，cookie 分区与 referer 仍必须走抖音）
     const requested = String(p.platformId || '')

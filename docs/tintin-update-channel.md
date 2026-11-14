@@ -49,8 +49,13 @@ corepack yarn package:tintin:release --dry-run        # 只看计划与预期 ta
 
 链式脚本（`scripts/release-tintin.mjs`）的关键点：**版本戳一次定值**——`DSH_VERSION_STAMP`
 未设置时取启动时刻 `YYYYMMDD-HHmm` 下发给打包与 NSIS 两步，应用内版本、Setup 文件名、
-发布 tag 三处一致是构造保证；任一步失败即中止，绝不带旧产物发版；发布后自检内置在
-publish 脚本末尾（回查清单确认 tag 可见、两份资产 `state=uploaded`，未就绪重试三次）。
+发布 tag 三处一致是构造保证；任一步失败即中止，绝不带旧产物发版；**SHA-256 旁挂在 NSIS
+打包脚本收口生成**（2026-11-14 用户裁决：不管走哪个入口——一键链/Release-Builder 各模式/
+手工直跑——只要产出 Setup 就有校验文件；`package-nsis-local.mjs` NSIS 成功即写
+`.sha256`，Release-Builder 归档时随 Setup 一并拷入 `releases\*-dir`）；发布环节若失败，
+Setup 与 `.sha256` 已就绪，可直接手动传到 GitHub Release 页面兜底；发布后自检内置在
+publish 脚本末尾（回查清单确认 tag 可见、两份资产 `state=uploaded` 且**字节数与本地文件
+一致**，未就绪重试三次）。
 
 外部 Release Builder（`D:\Project\TinTin_DSH_Release_Builder`，编排壳：媒体资源补齐、
 构建互斥锁、产物校验、`releases\` 归档）已接入同一发布脚本：双击菜单选
@@ -73,6 +78,12 @@ TINTIN_GITHUB_TOKEN=ghp_xxx corepack yarn package:tintin:publish
 3. 创建（或 `--force` 复用）release，tag = `v<版本>`，上传 Setup + sha256 两份资产；
 4. 发布后自检（见上）。
 
+资产上传走 **curl 子进程**而非 Node fetch 流式 body：大资产长传输被中断后 GitHub 会在
+服务端留下**占住资产名的半截资产**（常被定型成 0 字节的 `uploaded` 空壳），后续重试全部
+撞 `422 already_exists`——这是「上传一直没成功」的直接元凶。脚本处置：瞬时错误自动重试
+×3（进度条直落 stderr）；撞 422 或自检发现空壳时，加 `--force` 即自动删除占名资产重传，
+不带 `--force` 则给出明确处置指引。token 经 curl 的 stdin 配置喂入，不落命令行与日志。
+
 token 来源：`TINTIN_GITHUB_TOKEN` → `GITHUB_TOKEN`/`GH_TOKEN` → git 凭据管理器
 （push 已缓存的同一份 PAT；仅进程内使用）。
 
@@ -94,6 +105,19 @@ token 来源：`TINTIN_GITHUB_TOKEN` → `GITHUB_TOKEN`/`GH_TOKEN` → git 凭�
 
 ## 已知边界
 
+- **API 限流与 Atom 回退（2026-11-13）**：GitHub REST API 匿名限额 60 次/小时/**每个出口
+  IP**——系统代理（PAC）用户走机场共享出口时经常被耗尽（实测 `403 rate limit exceeded,
+  remaining: 0`），表现为「未能获取更新信息」。检查器已内置回退：API 失败自动改读
+  `github.com/<repo>/releases.atom`（主站路径，不走 API 限流池，同代理路径实测 200）；
+  Atom 不含资产，下载端用 tag + 产物名约定（`TinTin-<版本>-x64-Setup.exe`）构造下载与
+  `.sha256` 地址，SHA-256 硬校验不变。每次检查会打点 `tintin-update-check` 事件到
+  `logs/dsh-*.log`（含 API 状态与限流余量、回退命中、双路失败原因）。
+- **检查请求超时**：设置页「检查更新」的 POST 同步等待检查完成（默认 15s 超时），
+  网络挂起期间按钮无进行中反馈、期间重复点击被去重——看起来像「点了没反应」。
+  超时可用 Host 配置 `desktop-updates.requestTimeoutMs` 调小；「立即响应+弹窗承载结果」
+  的改法涉及共享路由（需三包同步），暂未实施。
+- **失败弹窗带原因**：版本请求传输失败时，弹窗 detail 直接附上真实报错
+  （如代理连接失败）；403 等非传输失败查日志 `tintin-update-check` 事件。
 - **升级下载体积**：更新为全量下载完整 Setup（NSIS 无差分）。2026-11-13 方案 A 瘦包已落地：
   安装包不再内置 `playwright-browsers`（690MB chromium），应用首跑按需下载到通道 home
   （`src/tintin/film-browsers.ts`：旧安装 resources 副本优先沿用 → 开发 staging → 首跑下载，

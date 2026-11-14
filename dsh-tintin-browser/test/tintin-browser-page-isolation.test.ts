@@ -15,6 +15,8 @@ const pageHtml = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '../../dsh-plugin-desktop-tintin/build/tintin-browser.html'),
   'utf8',
 )
+const readSrc = (rel: string): string =>
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), rel), 'utf8')
 
 describe('页面右栏平台隔离矩阵（2026-11-12 用户裁决）', () => {
   it('嗅探面板仅对 B站/抖音隐藏，其余平台保留诊断展示', () => {
@@ -130,5 +132,38 @@ describe('主进程嗅探下载通道平台归属（sniff-capture.ts）', () => 
     expect(r.success).toBe(true)
     expect(received[0]!['platformId']).toBe('bilibili')
     expect(received[0]!['referer']).toBe('https://space.bilibili.com/curr')
+  })
+})
+
+describe('B站扩展接入标签视图（2026-11-13 用户报障：视频开在标签页时助手区空）', () => {
+  const tabEngine = readSrc('../src/browser/tab-engine.ts')
+  const browserService = readSrc('../src/browser/browser-service.ts')
+
+  it('tab-engine 暴露 onTabViewCreated 接缝并在创建视图时触发（先于种子页导航）', () => {
+    expect(tabEngine).toContain('onTabViewCreated?:')
+    expect(tabEngine).toContain('deps.onTabViewCreated?.(platform, view)')
+    // 注入必须先于种子页 loadURL —— addScriptToEvaluateOnNewDocument 晚登记漏首屏
+    const seamIdx = tabEngine.indexOf('deps.onTabViewCreated?.(platform, view)')
+    const seedLoadIdx = tabEngine.indexOf('deps.seedUrl(platform)')
+    expect(seedLoadIdx).toBeGreaterThan(-1)
+    expect(seamIdx).toBeLessThan(seedLoadIdx)
+  })
+
+  it('宿主把 B站扩展注入+console 捕获接进 onTabViewCreated', () => {
+    const seamIdx = browserService.indexOf('onTabViewCreated: (platform, view)')
+    expect(seamIdx).toBeGreaterThan(-1)
+    const block = browserService.slice(seamIdx, browserService.indexOf('log: ctxLog,', seamIdx))
+    expect(block).toContain("platform !== 'bilibili'")
+    expect(block).toContain('injectBilibiliHelper(view.webContents, extPath, sess)')
+    expect(block).toContain('attachBiliDlConsoleCapture(view.webContents')
+  })
+
+  it('宿主轮询唯一且跟随活跃 B站内容面（活跃标签优先，回落主平台视图）', () => {
+    // 旧的单视图轮询已移除（挂在 ensureBrowserView 创建处、只用标签页时不存在）
+    expect(browserService).not.toContain('getWebContents: () => (view.webContents.isDestroyed()')
+    const pollIdx = browserService.indexOf('startBiliExtPolling({')
+    expect(pollIdx).toBeGreaterThan(-1)
+    expect(browserService.slice(pollIdx, pollIdx + 900)).toContain("activeTab?.platform === 'bilibili'")
+    expect(browserService.slice(pollIdx, pollIdx + 900)).toContain("browserViews.get('bilibili')")
   })
 })

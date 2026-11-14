@@ -3,11 +3,15 @@
 // 依赖:@remotion/bundler + @remotion/renderer(renderStill;Chromium 随包已裁决——
 // renderer 会在首次调用时定位/下载 headless shell,打包核验纳入 check 链)。
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { writePsd } from 'ag-psd'
 import { getTemplate, listTemplates, normalizeTitleOrder, validateProps } from './registry.ts'
+// 导出 PSD 的像素来源(2026-11-14):renderStill PNG → 纯 JS 解码成 RGBA → ag-psd writePsd
+import { decodeRgbaPng } from '../lib/psd-png.js'
 
 // 面导出(cover-plugin-route.js 经 dist/engine.mjs 动态加载);目录/渲染函数在下方声明处导出
 export { listTemplates }
@@ -246,6 +250,112 @@ export function resolveBundledBrowser(): string | null {
   return null
 }
 
+/** 渲染准备(2026-11-14 导出批从 renderCover 抽出的公共段;renderCover 与导出编码同口径):
+ *  校验后的 props → inputProps(旧相对序迁移)→ serveUrl(预构建 bundle 优先,缺省现场
+ *  bundle 进程内缓存)→ 包内浏览器定位(缺失回退 ensureBrowser)→ 运行时新图同步进
+ *  staticFile 根(2026-11-10「render_preview 无法读取新图片」修复,191 行注释的补齐)。 */
+interface RenderPrep {
+  serveUrl: string
+  inputProps: Record<string, unknown>
+  bundledBrowser: string | null
+}
+
+async function prepareRender(tpl: ReturnType<typeof getTemplate>, validated: Record<string, unknown>, outDir: string): Promise<RenderPrep> {
+  const inputProps: Record<string, unknown> = { ...validated }
+  // 存档旧相对序迁移(2026-11-13 用户裁决「主标题在副标题上面」):渲染与编辑器装载同口径
+  inputProps.layerOrder = normalizeTitleOrder(inputProps.layerOrder)
+  // serveUrl 解析:优先预构建 bundle(打包链产物,免运行时 webpack 与 bundler 依赖);
+  // 无预构建时(dev)现场 bundle 并进程内缓存(按入口 mtime)。
+  const prebuilt = join(pluginRoot, 'dist', 'remotion-bundle')
+  let serveUrl: string
+  if (existsSync(join(prebuilt, 'index.html'))) {
+    serveUrl = prebuilt
+  } else {
+    const { bundle } = await import('@remotion/bundler')
+    const key = bundleKey()
+    if (!cachedBundle || cachedBundle.key !== key) {
+      const bundled = await bundle({
+        entryPoint,
+        onProgress: () => { /* 打包进度(编辑器接订阅点) */ },
+        webpackOverride: (config) => config,
+      })
+      cachedBundle = { serveUrl: bundled, key }
+    }
+    serveUrl = cachedBundle.serveUrl
+  }
+  // 浏览器钉死(2026-10-29 裁决):优先包内缓存(cwd 无关,传 browserExecutable 即跳过下载判定);
+  // 缺失才回退 ensureBrowser 的 cwd 口径(老行为,开发态)。
+  const bundled = resolveBundledBrowser()
+  if (!bundled) {
+    // 缺缓存=Remotion 静默联网下载(150MB;受限网络=挂到渲染超时)。2026-11-12 三轮渲染
+    // 超时根因:electron-builder 丢插件 node_modules/.remotion。warn 进 stderr(render 子
+    // 进程的 stderr 已截尾进超时错误,智能体可直接转述死因)。
+    console.warn('[cover-engine] 包内 chrome-headless-shell 缺失,回退 ensureBrowser 联网下载(打包载荷应随插件 node_modules 带 .remotion 缓存)')
+    const { ensureBrowser } = await import('@remotion/renderer')
+    await ensureBrowser()
+  }
+
+  // 运行时新图进渲染 staticFile 根(2026-11-10 用户报障「render_preview 无法读取新图片」):
+  // staticFile 只认 serveUrl 的 public/(=打包时快照),项目目录里 text-remove/matting/AI 生成的
+  // 新图不在其中 → localhost:3000/public/... 404。渲染前按 props 引用清单,从项目目录→public/
+  // 依序找到源复制进 serveUrl/public(幂等,同名校验内容尺寸一致才跳过)。191 行的「同步」
+  // 注释此前从未有实现——本段即其补齐。
+  {
+    const layers = Array.isArray(inputProps.customLayers) ? (inputProps.customLayers as Array<{ image?: unknown }>) : []
+    const wanted = [inputProps.bgImage, inputProps.environment, inputProps.image, ...layers.map((l) => l.image)]
+      .filter((n): n is string => typeof n === 'string' && n !== '' && !/^(https?:|data:)/i.test(n))
+      .map((n) => n.replace(/^public\//, ''))
+    const servePublic = join(serveUrl, 'public')
+    mkdirSync(servePublic, { recursive: true })
+    for (const name of [...new Set(wanted)]) {
+      const dest = join(servePublic, name)
+      const sources = [join(outDir, name), join(publicDir, name)]
+      const src = sources.find((c) => existsSync(c))
+      if (!src) continue
+      if (existsSync(dest)) {
+        try {
+          if (statSync(dest).size === statSync(src).size) continue // 已同图(幂等)
+        } catch { /* stat 失败则覆盖 */ }
+      }
+      try {
+        copyFileSync(src, dest)
+      } catch { /* 单图复制失败不阻断渲染(错误会以图片加载失败呈现,可读) */ }
+    }
+  }
+  return { serveUrl, inputProps, bundledBrowser: bundled }
+}
+
+/** 产物伴随件(与旧 renderCover 逐字节同行为):<产物>.json = props 快照(可复现)+
+ *  素材来源(§七 provenance);public 静态件随图归档(素材可复现;尽力而为,不阻断出图)。 */
+function writeExportCompanions(tpl: ReturnType<typeof getTemplate>, validated: Record<string, unknown>, outFile: string, outDir: string): void {
+  try {
+    const provenanceFile = join(pluginRoot, 'cover-assets.json')
+    let records: Array<{ name: string }> = []
+    if (existsSync(provenanceFile)) {
+      const data = JSON.parse(readFileSync(provenanceFile, 'utf8')) as { records?: Array<{ name: string }> }
+      records = Array.isArray(data?.records) ? data.records : []
+    }
+    const usedNames = [validated.image, validated.bgImage].filter((n): n is string => typeof n === 'string' && !!n)
+    const assets = records.filter((r) => usedNames.includes(r.name))
+    writeFileSync(`${outFile}.json`, `${JSON.stringify({
+      template: tpl.id,
+      props: validated,
+      assets,
+      exportedAt: new Date().toISOString(),
+    }, null, 2)}\n`, 'utf8')
+  } catch { /* 侧车失败不影响成品 */ }
+  if (existsSync(publicDir)) {
+    try {
+      for (const f of readdirSync(publicDir)) {
+        const src = join(publicDir, f)
+        if (existsSync(src) && f === String(validated.image ?? validated.bgImage ?? '')) {
+          copyFileSync(src, join(outDir, f))
+        }
+      }
+    } catch { /* 归档失败不影响成品 */ }
+  }
+}
+
 export async function renderCover(input: RenderCoverInput): Promise<RenderCoverResult> {
   try {
     const check = validateProps(input.templateId, input.props ?? {})
@@ -257,121 +367,250 @@ export async function renderCover(input: RenderCoverInput): Promise<RenderCoverR
     const fileName = input.fileName?.replace(/[\\/:*?"<>|]/g, '_') || `cover-${tpl.id}-${Date.now()}.png`
     const outFile = join(outDir, fileName)
 
-    // 静态资源(public/)同步进输出目录旁的 bundle 静态根:staticFile 只认 bundle 的 public/
-    const { ensureBrowser, renderStill, selectComposition } = await import('@remotion/renderer')
-
-    const inputProps = { ...check.value }
-    // 存档旧相对序迁移(2026-11-13 用户裁决「主标题在副标题上面」):渲染与编辑器装载同口径
-    inputProps.layerOrder = normalizeTitleOrder(inputProps.layerOrder)
-    // serveUrl 解析:优先预构建 bundle(打包链产物,免运行时 webpack 与 bundler 依赖);
-    // 无预构建时(dev)现场 bundle 并进程内缓存(按入口 mtime)。
-    const prebuilt = join(pluginRoot, 'dist', 'remotion-bundle')
-    let serveUrl: string
-    if (existsSync(join(prebuilt, 'index.html'))) {
-      serveUrl = prebuilt
-    } else {
-      const { bundle } = await import('@remotion/bundler')
-      const key = bundleKey()
-      if (!cachedBundle || cachedBundle.key !== key) {
-        const bundled = await bundle({
-          entryPoint,
-          onProgress: () => { /* 打包进度(编辑器接订阅点) */ },
-          webpackOverride: (config) => config,
-        })
-        cachedBundle = { serveUrl: bundled, key }
-      }
-      serveUrl = cachedBundle.serveUrl
-    }
-    // 浏览器钉死(2026-10-29 裁决):优先包内缓存(cwd 无关,传 browserExecutable 即跳过下载判定);
-    // 缺失才回退 ensureBrowser 的 cwd 口径(老行为,开发态)。
-    const bundled = resolveBundledBrowser()
-    if (!bundled) {
-      // 缺缓存=Remotion 静默联网下载(150MB;受限网络=挂到渲染超时)。2026-11-12 三轮渲染
-      // 超时根因:electron-builder 丢插件 node_modules/.remotion。warn 进 stderr(render 子
-      // 进程的 stderr 已截尾进超时错误,智能体可直接转述死因)。
-      console.warn('[cover-engine] 包内 chrome-headless-shell 缺失,回退 ensureBrowser 联网下载(打包载荷应随插件 node_modules 带 .remotion 缓存)')
-      await ensureBrowser()
-    }
-
-    // 运行时新图进渲染 staticFile 根(2026-11-10 用户报障「render_preview 无法读取新图片」):
-    // staticFile 只认 serveUrl 的 public/(=打包时快照),项目目录里 text-remove/matting/AI 生成的
-    // 新图不在其中 → localhost:3000/public/... 404。渲染前按 props 引用清单,从项目目录→public/
-    // 依序找到源复制进 serveUrl/public(幂等,同名校验内容尺寸一致才跳过)。191 行的「同步」
-    // 注释此前从未有实现——本段即其补齐。
-    {
-      const { copyFileSync, statSync } = await import('node:fs')
-      const layers = Array.isArray(inputProps.customLayers) ? (inputProps.customLayers as Array<{ image?: unknown }>) : []
-      const wanted = [inputProps.bgImage, inputProps.environment, inputProps.image, ...layers.map((l) => l.image)]
-        .filter((n): n is string => typeof n === 'string' && n !== '' && !/^(https?:|data:)/i.test(n))
-        .map((n) => n.replace(/^public\//, ''))
-      const servePublic = join(serveUrl, 'public')
-      mkdirSync(servePublic, { recursive: true })
-      for (const name of [...new Set(wanted)]) {
-        const dest = join(servePublic, name)
-        const sources = [join(outDir, name), join(publicDir, name)]
-        const src = sources.find((c) => existsSync(c))
-        if (!src) continue
-        if (existsSync(dest)) {
-          try {
-            if (statSync(dest).size === statSync(src).size) continue // 已同图(幂等)
-          } catch { /* stat 失败则覆盖 */ }
-        }
-        try {
-          copyFileSync(src, dest)
-        } catch { /* 单图复制失败不阻断渲染(错误会以图片加载失败呈现,可读) */ }
-      }
-    }
+    const prep = await prepareRender(tpl, check.value, outDir)
 
     // 文档流:selectComposition({serveUrl, id, inputProps}) → renderStill({composition, ...})
     // (selectComposition 的入参字段是 id;实测 4.0.539 对象形态 composition 会丢 props)
     // 全程套总超时:任何环节(下载/启动/渲染)卡死都转为可读错误响应,不再永挂。
     await withRenderTimeout((async () => {
+      const { selectComposition, renderStill } = await import('@remotion/renderer')
       const composition = await selectComposition({
-        serveUrl,
+        serveUrl: prep.serveUrl,
         id: tpl.id,
-        inputProps,
-        browserExecutable: bundled ?? undefined,
+        inputProps: prep.inputProps,
+        browserExecutable: prep.bundledBrowser ?? undefined,
       })
       await renderStill({
         composition,
-        serveUrl,
-        inputProps,
+        serveUrl: prep.serveUrl,
+        inputProps: prep.inputProps,
         frame: 0,
         output: outFile,
-        browserExecutable: bundled ?? undefined,
+        browserExecutable: prep.bundledBrowser ?? undefined,
       })
     })())
-    // 导出侧车:<产物>.json = props 快照(可复现)+ 素材来源(§七 provenance;
-    // bundle 侧 cover-assets.json 由上传/AI 生成通道写入,此处只读摘取)
-    try {
-      const provenanceFile = join(pluginRoot, 'cover-assets.json')
-      let records: Array<{ name: string }> = []
-      if (existsSync(provenanceFile)) {
-        const data = JSON.parse((await import('node:fs')).readFileSync(provenanceFile, 'utf8')) as { records?: Array<{ name: string }> }
-        records = Array.isArray(data?.records) ? data.records : []
-      }
-      const usedNames = [check.value.image, check.value.bgImage].filter((n): n is string => typeof n === 'string' && !!n)
-      const assets = records.filter((r) => usedNames.includes(r.name))
-      ;(await import('node:fs')).writeFileSync(`${outFile}.json`, `${JSON.stringify({
-        template: tpl.id,
-        props: check.value,
-        assets,
-        exportedAt: new Date().toISOString(),
-      }, null, 2)}\n`, 'utf8')
-    } catch { /* 侧车失败不影响成品 */ }
-    if (existsSync(publicDir)) {
-      // public 静态件随图归档(素材可复现;尽力而为,不阻断出图)
-      try {
-        const { readdirSync, copyFileSync: cp } = await import('node:fs')
-        for (const f of readdirSync(publicDir)) {
-          const src = join(publicDir, f)
-          if (existsSync(src) && f === String(check.value.image ?? check.value.bgImage ?? '')) {
-            cp(src, join(outDir, f))
-          }
-        }
-      } catch { /* 归档失败不影响成品 */ }
-    }
+    writeExportCompanions(tpl, check.value, outFile, outDir)
     return { ok: true, file: outFile }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? `${err.message}` : String(err) }
+  }
+}
+
+// ── 导出中心(2026-11-14 封面导出批;交互对齐视频剪辑 ExportCenter 图片页):
+//    弹窗打开即按横/竖屏各编码一次(PNG=预览+字节、JPEG=renderStill 直出、PSD=PNG 像素
+//    经 ag-psd writePsd 生成拍平单层);产物按内容键缓存,点击导出命中缓存直接落盘,
+//    过期(15 分钟)按需重编。三格式都在编辑期算好,卡片上的文件大小是精确值而非估算。
+
+export const COVER_EXPORT_FORMATS = ['jpg', 'png', 'psd'] as const
+export type CoverExportFormat = (typeof COVER_EXPORT_FORMATS)[number]
+const EXPORT_EXT: Record<CoverExportFormat, string> = { jpg: 'jpg', png: 'png', psd: 'psd' }
+export const COVER_EXPORT_VARIANTS = ['landscape', 'portrait'] as const
+export type CoverExportVariant = (typeof COVER_EXPORT_VARIANTS)[number]
+
+/** 横/竖屏 → 模板 id(与编辑器旧导出 targets 的 family+variant 完全同口径) */
+export function coverExportTemplateId(family: string, variant: CoverExportVariant): string {
+  return family + (variant === 'portrait' ? '-portrait' : '')
+}
+
+const EXPORT_TTL_MS = 15 * 60_000
+const EXPORT_CACHE_MAX = 24
+const exportCache = new Map<string, { buffer: Buffer; at: number }>()
+
+function exportCachePrune(): void {
+  const now = Date.now()
+  for (const [k, v] of exportCache) if (now - v.at > EXPORT_TTL_MS) exportCache.delete(k)
+  while (exportCache.size > EXPORT_CACHE_MAX) {
+    const oldest = [...exportCache.entries()].sort((a, b) => a[1].at - b[1].at)[0]
+    if (!oldest) break
+    exportCache.delete(oldest[0])
+  }
+}
+
+function exportCachePut(key: string, buffer: Buffer): void {
+  exportCachePrune()
+  exportCache.set(key, { buffer, at: Date.now() })
+}
+
+function exportCacheGet(key: string): Buffer | null {
+  const hit = exportCache.get(key)
+  if (!hit) return null
+  hit.at = Date.now()
+  return hit.buffer
+}
+
+/** 渲染一张静帧进内存(不落盘);命中缓存零渲染。PNG/JPEG 都走 renderStill 的 buffer 档。 */
+async function renderExportStill(
+  templateId: string, prep: RenderPrep, tpl: ReturnType<typeof getTemplate>,
+  variant: CoverExportVariant, format: 'png' | 'jpg',
+): Promise<Buffer> {
+  const key = createHash('sha256')
+    .update(JSON.stringify({ templateId, props: prep.inputProps, variant, format }))
+    .digest('hex')
+  const hit = exportCacheGet(key)
+  if (hit) return hit
+  const buffer = await withRenderTimeout((async () => {
+    const { selectComposition, renderStill } = await import('@remotion/renderer')
+    const composition = await selectComposition({
+      serveUrl: prep.serveUrl,
+      id: tpl.id,
+      inputProps: prep.inputProps,
+      browserExecutable: prep.bundledBrowser ?? undefined,
+    })
+    const still = await renderStill({
+      composition,
+      serveUrl: prep.serveUrl,
+      inputProps: prep.inputProps,
+      frame: 0,
+      imageFormat: format === 'jpg' ? 'jpeg' : 'png',
+      ...(format === 'jpg' ? { jpegQuality: 92 } : {}),
+      browserExecutable: prep.bundledBrowser ?? undefined,
+    })
+    if (!still.buffer) throw new Error('渲染未返回图像数据')
+    return still.buffer
+  })())
+  exportCachePut(key, buffer)
+  return buffer
+}
+
+/** PNG 像素 → 拍平单层 PSD(键=PNG 内容哈希,同图免重算)。 */
+async function psdFromPng(png: Buffer): Promise<Buffer> {
+  const key = `${createHash('sha256').update(png).digest('hex')}:psd`
+  const hit = exportCacheGet(key)
+  if (hit) return hit
+  const { width, height, data } = decodeRgbaPng(png)
+  const pixels = { width, height, data }
+  const buffer = Buffer.from(writePsd({
+    width,
+    height,
+    imageData: pixels,
+    children: [{ name: '封面', opacity: 1, blendMode: 'normal', imageData: pixels }],
+  }))
+  exportCachePut(key, buffer)
+  return buffer
+}
+
+export interface CoverExportEncodeInput {
+  templateId: string
+  props?: Record<string, unknown>
+  hiddenLayers?: string[]
+  variants?: string[]
+}
+
+export interface CoverExportItem {
+  variant: CoverExportVariant
+  format: CoverExportFormat
+  size: number
+  width: number
+  height: number
+}
+
+export interface CoverExportEncodeResult {
+  ok: boolean
+  /** 默认导出目录 = 当前封面项目目录(图片路径;导出弹窗路径 chip 的缺省值) */
+  dir?: string
+  /** 每变体一张 PNG 预览(data URL;弹窗左栏直接展示) */
+  previews?: Record<string, string>
+  items?: CoverExportItem[]
+  error?: string
+}
+
+/** 弹窗编码:逐变体 PNG(预览+字节)→ JPEG → PSD,全部进缓存;每张渲染各自套总超时,
+ *  失败即整体报错(编辑器把错误文字亮在结果行)。 */
+export async function encodeCoverExports(input: CoverExportEncodeInput): Promise<CoverExportEncodeResult> {
+  try {
+    const family = getTemplate(input.templateId).family
+    const wanted = (Array.isArray(input.variants) ? input.variants : [])
+      .filter((v): v is CoverExportVariant => (COVER_EXPORT_VARIANTS as readonly string[]).includes(v))
+    if (!wanted.length) return { ok: false, error: '未选择导出尺寸' }
+    const outDir = resolveCoverDir()
+    mkdirSync(outDir, { recursive: true })
+    const previews: Record<string, string> = {}
+    const items: CoverExportItem[] = []
+    for (const variant of wanted) {
+      const tid = coverExportTemplateId(family, variant)
+      const check = validateProps(tid, input.props ?? {})
+      if (!check.ok) return { ok: false, error: check.error }
+      const tplV = getTemplate(tid)
+      const prep = await prepareRender(tplV, check.value, outDir)
+      const png = await renderExportStill(tid, prep, tplV, variant, 'png')
+      const jpg = await renderExportStill(tid, prep, tplV, variant, 'jpg')
+      const psd = await psdFromPng(png)
+      const { width, height } = decodeRgbaPng(png)
+      previews[variant] = `data:image/png;base64,${png.toString('base64')}`
+      items.push(
+        { variant, format: 'png', size: png.length, width, height },
+        { variant, format: 'jpg', size: jpg.length, width, height },
+        { variant, format: 'psd', size: psd.length, width, height },
+      )
+    }
+    return { ok: true, dir: outDir, previews, items }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? `${err.message}` : String(err) }
+  }
+}
+
+export interface CoverExportWriteInput {
+  templateId: string
+  props?: Record<string, unknown>
+  hiddenLayers?: string[]
+  /** 目标目录(弹窗路径 chip 选定;非法/不存在回退项目目录,与 render 同口径) */
+  outDir?: string
+  /** 文件名主体(缺省=模板族;非法字符清洗) */
+  baseName?: string
+  files?: Array<{ variant?: unknown; format?: unknown; fileName?: unknown }>
+}
+
+export interface CoverExportWriteResult {
+  ok: boolean
+  results?: Array<{ variant: string; format: string; ok: boolean; file?: string; error?: string }>
+  error?: string
+}
+
+/** 导出落盘:逐文件取缓存(过期重编)写入所选目录;伴随件(props 快照+素材归档)与
+ *  renderCover 同行为。逐文件独立 try:一张失败不拖垮其余,结果逐条回给 UI。 */
+export async function writeCoverExports(input: CoverExportWriteInput): Promise<CoverExportWriteResult> {
+  try {
+    const family = getTemplate(input.templateId).family
+    const files = Array.isArray(input.files) ? input.files : []
+    if (!files.length) return { ok: false, error: '未选择导出内容' }
+    const outDir = input.outDir && existsSync(input.outDir) && statSync(input.outDir).isDirectory()
+      ? input.outDir
+      : resolveCoverDir()
+    mkdirSync(outDir, { recursive: true })
+    const cleanBase = (typeof input.baseName === 'string' ? input.baseName : '').replace(/[\\/:*?"<>|]/g, '_').trim() || family
+    const results: NonNullable<CoverExportWriteResult['results']> = []
+    for (const f of files) {
+      const variant = (COVER_EXPORT_VARIANTS as readonly string[]).includes(String(f.variant))
+        ? f.variant as CoverExportVariant
+        : null
+      const format = (COVER_EXPORT_FORMATS as readonly string[]).includes(String(f.format))
+        ? f.format as CoverExportFormat
+        : null
+      if (!variant || !format) {
+        results.push({ variant: String(f.variant ?? '?'), format: String(f.format ?? '?'), ok: false, error: '未知尺寸/格式' })
+        continue
+      }
+      try {
+        const tid = coverExportTemplateId(family, variant)
+        const check = validateProps(tid, input.props ?? {})
+        if (!check.ok) throw new Error(check.error)
+        const tplV = getTemplate(tid)
+        const prep = await prepareRender(tplV, check.value, outDir)
+        const buffer = format === 'psd'
+          ? await psdFromPng(await renderExportStill(tid, prep, tplV, variant, 'png'))
+          : await renderExportStill(tid, prep, tplV, variant, format)
+        const rawName = typeof f.fileName === 'string' && f.fileName.trim()
+          ? f.fileName.trim()
+          : `${cleanBase}-${variant}.${EXPORT_EXT[format]}`
+        const outFile = join(outDir, rawName.replace(/[\\/:*?"<>|]/g, '_'))
+        writeFileSync(outFile, buffer)
+        writeExportCompanions(tplV, check.value, outFile, outDir)
+        results.push({ variant, format, ok: true, file: outFile })
+      } catch (e) {
+        results.push({ variant: String(f.variant ?? '?'), format: String(f.format ?? '?'), ok: false, error: e instanceof Error ? e.message : String(e) })
+      }
+    }
+    return { ok: results.every((r) => r.ok), results }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? `${err.message}` : String(err) }
   }

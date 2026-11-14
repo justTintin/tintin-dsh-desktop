@@ -729,3 +729,9 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - **B站助手卡宽度塌缩根治(用户问「红框怎么来的」)**:内置扩展 shadow DOM 面板→2s 提取→右栏卡片;「未知大小」=扩展 `C()` 兜底文案、「的下载地址:」=扩展标题模板尾巴(展示层剥除)。塌缩根因=**解析期 `display:none` 的 flex 列容器(#biliExtList/#dyStreams)在 none→flex 翻转后被 Chromium 钉死 auto 宽=0**(Playwright 三方复现:原节点 0px/克隆 239px/`width:100%` 修复 239px;解析期即 flex 的 #sniffList 从未塌缩)。修=三容器显式 `width:100%` + B站下载按钮独立成行(用户裁决「下载占一行」)。
 - **下载栏归位右栏底部(用户裁决)**:#right 两区结构(rightScroll 滚动区+shelf 常驻底区),进度属扩展区不再横贯界面底部;全平台共享(抖音/B站/油管/网页同一条 downloads:* 总线)。
 - 配套:`external-child-reaper.js` 退出整树收割(§13 净场段)、隔离契约测试 `tintin-browser-page-isolation.test.ts`(入口矩阵/通道归属/宽度规则钉死)。
+
+## 16.38 标题条版本徽章 z 序修复+更新通道真凶 403(2026-11-13)
+
+- **「视频剪辑/浏览器视图下点版本徽章没反应」z 序根因**:标题条(含版本徽章)是独立 chrome 层 WebContentsView(compatibility-shell 构造时第二个 addChildView);视频剪辑 studio 视图与浏览器嵌入视图(embedPageView/平台分区视图)都是进入视图时才挂载——Electron contentView 后添加者在更高 z 序。点徽章时 chrome 层其实收到点击并展开弹层(expanded→bounds 全窗),但弹层被 z 序更高的嵌入视图盖住=视觉「没反应」。嵌入 bounds 均在 36px 标题条之下(pageOffsetY 修正),标题条本身可见,只差弹层被盖。
+- **修=raiseTitleBarChrome(main-hook)**:嵌入视图挂载后把 chrome 层 removeChildView+addChildView 重排回顶层,顺带 send `dsh-desktop:chrome-dismiss` 收起可能卡住的展开态(仅 z 序实际变化时发,纯重定位不打扰交互中弹层)。三个触发点:showStudio 挂载后、BROWSER_VIEW_CHANNEL open/show 返回后、browser-service `onNativeViewMounted` 钩子(新 options 字段——embed 态平台视图经 `tintin-browser-page:bounds` IPC 的 layoutBrowserWindow 挂载,不经过 BROWSER_VIEW_CHANNEL,必须由 browser-service 内部回调)。chrome 层按 URL 含 `compatibility-chrome.html` 识别(raise 时机都在首帧加载后;不加镜像文件依赖,electron-shell-generation 不动)。
+- **「未能获取更新信息」真凶=GitHub API 403 限流(日志打点实锤)**:本机 PAC 把 github 流量路由到机场共享出口 IP,匿名 60/h/每 IP 被共享池耗尽(走代理实测 remaining:0,直连 58/60)。修=检查器 Atom 回退(api 失败→`releases.atom`,主站路径不走 API 限流池,同代理路径实测 200;Atom 无资产→下载端按 tag+产物名约定构造 URL,sha256 硬校验不变)+失败弹窗 detail 附传输真实报错。main-hook 本批新增 raiseTitleBarChrome 3 触发点+film-browsers 首跑下载接线,行数基线同步 1008→1047。

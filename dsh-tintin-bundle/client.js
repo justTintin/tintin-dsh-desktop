@@ -37,22 +37,33 @@ const tintinClient = (() => {
 
       // ── 左侧「插件」区入口（2026-09-28 用户裁决：撤顶部 Tab 栏；入口行克隆插件面板行同层注入）──
       let entryButtons = []
+      // 原生行定位：文字查找为主（0.2.1 侧栏 aria 化后 includes 兜底），收起态（缩进）
+      // 侧栏只剩图标无文字 → 回退注入时打的 data-tintin-orig-* 标记（React 重建节点
+      // 会丢标记，sidebarMo 每轮重打，见 injectEntries）。
+      let cachedActiveCls = null
+      function panelRow(label, mark) {
+        const byText = [...document.querySelectorAll('button')].find(
+          (b) => b.textContent.trim() === label && b.closest('[data-pane="sidebar"], [class*="sidebarCol"]'),
+        )
+        return byText ?? document.querySelector(`[data-tintin-${mark}]`)
+      }
       function paintEntries() {
         // 激活态沿用原生 panelActive 类：行上没有时按同模块前缀推导（panelRow → panelActive）
-        const row = [...document.querySelectorAll('button')].find(
-          (b) => b.textContent.trim() === '插件' && b.closest('[data-pane="sidebar"], [class*="sidebarCol"]'),
-        )
+        const row = panelRow('插件', 'orig-row')
         let activeCls = null
         if (row) {
           const rowCls = [...row.classList].find((c) => c.endsWith('panelRow'))
           if (rowCls) activeCls = rowCls.replace(/panelRow$/, 'panelActive')
         }
+        // 收起态（缩进）行定位/类推导都可能失手——沿用最近一次展开态推导的激活类继续
+        // 涂装（2026-11-13 用户报障「缩进时图标选中焦点与界面不统一」：收起后 React
+        // 重建侧栏恢复原生默认高亮，涂装却因找不到行而停摆=亮着的行≠当前视图）。
+        if (activeCls) cachedActiveCls = activeCls
+        else activeCls = cachedActiveCls
         // 插件与 tab 单焦点联动（2026-10-16 用户裁决）：tab 激活时熄灭插件行——React
         // 重渲染会重点亮，由 sidebarMo 的 paintEntries 重摘（toggle 幂等无回环）。
         // 自动化任务行同管（2026-10-19 报障：原生日程行不受摘除，切 tab 后双行同亮）。
-        const sched = [...document.querySelectorAll('button')].find(
-          (b) => b.textContent.trim() === '自动化任务' && b.closest('[data-pane="sidebar"], [class*="sidebarCol"]'),
-        )
+        const sched = panelRow('自动化任务', 'orig-sched')
         if (row && activeCls && activeId !== 'workbench') row.classList.toggle(activeCls, false)
         if (sched && activeCls && activeId !== 'workbench') sched.classList.toggle(activeCls, false)
         for (const [id, b] of entryButtons) {
@@ -72,10 +83,14 @@ const tintinClient = (() => {
           (b) => b.textContent.trim() === '插件' && b.closest('[data-pane="sidebar"], [class*="sidebarCol"]'),
         )
         if (!row) return false
+        // 原生行打标记：收起态（缩进）无文字时 paintEntries 靠它定位（幂等重打——
+        // React 重建节点会丢标记，sidebarMo 每轮重跑本函数补上）
+        row.setAttribute('data-tintin-orig-row', '1')
         // 自动化任务行移到插件行下（2026-10-19 用户裁决；原生日程行，幂等守卫防 sidebarMo 循环）
         const sched = [...document.querySelectorAll('button')].find(
           (b) => b.textContent.trim() === '自动化任务' && b.closest('[data-pane="sidebar"], [class*="sidebarCol"]'),
         )
+        if (sched) sched.setAttribute('data-tintin-orig-sched', '1')
         if (sched && sched !== row && sched.previousElementSibling !== row) row.insertAdjacentElement('afterend', sched)
         const host = row.parentElement
         if (!host || host.querySelector('[data-tintin-entry]')) return true
@@ -316,12 +331,19 @@ const tintinClient = (() => {
     // 让未桥调用按通道名响亮失败（铁律 7）；宿主白名单逐通道增长。
     function installTintinBridge() {
       if (window.tintin && window.tintin.__dshPolyfill) return // idempotent
+      // ── 分面调用面（2026-11-14 用户裁决：素材创作/运营/媒体三面服务端地址分面
+      // 独立）── activeCallScope 由 forSurface 的 wrapper 在同步调用段置位/复位；
+      // call()/XHR/sse fetch 都在该同步段发起，此刻读取安全。白名单与 server-proxy.js
+      // TINTIN_SURFACES 同步；宿主只认白名单面值，其余忽略（落全局解析链）。
+      const TINTIN_SURFACES = ['creation', 'ops', 'media']
+      let activeCallScope = null
+      const scopeHeaders = () => (activeCallScope ? { 'x-tintin-scope': activeCallScope } : {})
       const call = (channel, payload) =>
         // 通道名（server:get）的冒号是路径的一部分，不编码——host 按
         // /tintin/ipc/server:get 匹配（encodeURIComponent 会把 : 编成 %3A 失配）。
         fetch(`/tintin/ipc/${channel}`, {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...scopeHeaders() },
           body: JSON.stringify(payload ?? {}),
         }).then(async (r) => {
           const j = await r.json().catch(() => ({}))
@@ -363,6 +385,8 @@ const tintinClient = (() => {
         const upstreamMethod = method === 'PUT' ? 'PUT' : 'POST'
         const methodQs = upstreamMethod === 'PUT' ? '&method=PUT' : ''
         xhr.open('POST', `/tintin/upload?path=${encodeURIComponent(path)}${methodQs}`)
+        // 分面调用面（2026-11-14）：multipart 上传同样携带 x-tintin-scope
+        for (const [hk, hv] of Object.entries(scopeHeaders())) xhr.setRequestHeader(hk, hv)
         if (typeof onProgress === 'function') {
           xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total) }
         }
@@ -393,7 +417,7 @@ const tintinClient = (() => {
             try {
               const resp = await fetch(`/tintin/sse?path=${encodeURIComponent(path)}`, {
                 signal: ctrl.signal,
-                headers: { Accept: 'text/event-stream' },
+                headers: { Accept: 'text/event-stream', ...scopeHeaders() },
               })
               if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
               const reader = resp.body.getReader()
@@ -803,6 +827,18 @@ const tintinClient = (() => {
           // 导出到视频剪辑项目（2026-10-21）：让 Studio 打开指定项目并置为最近项目
           openProject: (payload) => call('openfilm:openProject', { args: [payload] }).then((r) => { if (r?.error) throw new Error(r.error); return r }),
         }),
+      }
+      // forSurface(scope) — 分面桥句柄（2026-11-14 用户裁决：三面服务端地址分面
+      // 独立）：每个命名空间的函数成员在「本次调用期间」置 activeCallScope（同步
+      // 段），请求即携带 x-tintin-scope 头，宿主按面解析地址（ALS 见 index.js 三个
+      // IPC 入口包装）；非函数成员（__dshPolyfill 探测等）透传，未知面抛错。白名单
+      // 与 server-proxy.js TINTIN_SURFACES 同步。
+      window.tintin.forSurface = (scope) => {
+        if (!TINTIN_SURFACES.includes(scope)) throw new Error(`Unknown tintin surface: ${scope}`)
+        const wrap = (v) => typeof v === 'function'
+          ? (...args) => { const prev = activeCallScope; activeCallScope = scope; try { return v(...args) } finally { activeCallScope = prev } }
+          : (v && typeof v === 'object' ? new Proxy(v, { get: (t, p) => (typeof p === 'string' && p !== 'then' ? wrap(t[p]) : t[p]) }) : v)
+        return new Proxy(window.tintin, { get: (t, p) => (typeof p === 'string' && p !== 'then' ? wrap(t[p]) : t[p]) })
       }
       console.info('[tintin] window.tintin polyfill installed')
     }

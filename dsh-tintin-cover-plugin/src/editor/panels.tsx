@@ -341,117 +341,460 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
   )
 }
 
-/** 桌面保存桥(主窗 preload 暴露;编辑器是主窗同源 iframe,优先本窗、回退父窗)。
- *  桥缺失(异常宿主)返回 null,调用方回退默认 cover 目录,导出功能不受阻。 */
-type SavePicker = { pick(params?: { title?: string; defaultPath?: string; filters?: Array<{ name: string; extensions: Array<string> }> }): Promise<string | null> }
-function resolveSavePicker(): SavePicker | null {
-  const self = window as unknown as { dshDesktopSaveFilePicker?: SavePicker }
-  const parent = window.parent !== window ? (window.parent as unknown as { dshDesktopSaveFilePicker?: SavePicker }) : null
-  return self.dshDesktopSaveFilePicker ?? parent?.dshDesktopSaveFilePicker ?? null
+/** 桌面目录桥(2026-11-14 导出批;OpenFilm `openfilm:native:pick-folder` 同款语义的
+ *  Desktop 版):`dshDesktopFolderPicker.pick({title, defaultPath})` → 绝对目录或 null。
+ *  优先本窗、回退父窗;缺失/异常=手输路径回退(ExportCenter folderDraft 同款)。 */
+type FolderPicker = { pick(params?: { title?: string; defaultPath?: string }): Promise<string | null> }
+function resolveFolderPicker(): FolderPicker | null {
+  const self = window as unknown as { dshDesktopFolderPicker?: FolderPicker }
+  const parent = window.parent !== window ? (window.parent as unknown as { dshDesktopFolderPicker?: FolderPicker }) : null
+  return self.dshDesktopFolderPicker ?? parent?.dshDesktopFolderPicker ?? null
 }
 
 /** 绝对路径 → 基名(目录截断展示避免状态行爆长) */
 const dirNameOf = (p: string): string => p.slice(Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/')) + 1)
 
-/** 导出选项模态(2026-10-27 裁决:点击导出弹出,勾选格式,默认全选横竖屏) */
-function ExportModal({ onClose }: { onClose: () => void }): React.ReactElement {
+/** 字节数 → 人话(视频剪辑 export-jobs formatBytes 同款口径) */
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '—'
+  const kb = n / 1024
+  if (kb < 1023.5) return `${Math.max(1, Math.round(kb))} KB`
+  const mb = n / (1024 * 1024)
+  if (mb < 1023.5) return `${mb.toFixed(mb < 10 ? 1 : 0)} MB`
+  return `${(n / (1024 ** 3)).toFixed(2)} GB`
+}
+
+/** 导出模态自用样式(旋转加载圈;inline style 无法表达 keyframes,一次性注入) */
+let exportStyleInjected = false
+function ensureExportStyle(): void {
+  if (exportStyleInjected || typeof document === 'undefined') return
+  exportStyleInjected = true
+  const s = document.createElement('style')
+  s.textContent = [
+    '@keyframes tintin-exp-rotate{to{transform:rotate(360deg)}}',
+    '.tintin-exp-spin{animation:tintin-exp-rotate .9s linear infinite}',
+  ].join('\n')
+  document.head.append(s)
+}
+
+/* 导出弹窗小组件(逐件照搬视频剪辑 ExportCenter 的同名件,尺寸/间距/圆角同值,
+   token 用封面编辑器同源变量) */
+
+function ExpField({ label, children }: { label: string; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '0.04em', color: 'var(--text-muted)' }}>{label}</span>
+      {children}
+    </div>
+  )
+}
+
+function ExpOptionCard({ on, title, size, desc, onClick }: {
+  on: boolean; title: string; size?: string; desc: string; onClick: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, borderRadius: 12,
+        border: `1px solid ${on ? 'var(--border-strong)' : 'var(--border)'}`, background: on ? 'var(--bg-pressed)' : 'transparent',
+        padding: '10px 12px', textAlign: 'left', cursor: 'pointer', transition: 'border-color .12s, background .12s',
+      }}
+    >
+      <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, width: '100%' }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)' }}>{title}</span>
+        {size ? <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)', fontVariantNumeric: 'tabular-nums' }}>{size}</span> : null}
+      </span>
+      <span style={{ fontSize: 11, lineHeight: 1.4, color: 'var(--text-muted)' }}>{desc}</span>
+    </button>
+  )
+}
+
+const ICON_FOLDER = (
+  <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.9a2 2 0 0 1 1.69.9l.8 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+  </svg>
+)
+const ICON_CHEVRON = (
+  <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+)
+const ICON_SPIN = (
+  <svg className="tintin-exp-spin" width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+  </svg>
+)
+
+type ExportVariantKey = 'landscape' | 'portrait'
+type ExportFormatKey = 'jpg' | 'png' | 'psd'
+const EXPORT_EXT: Record<ExportFormatKey, string> = { jpg: 'jpg', png: 'png', psd: 'psd' }
+/** 上次所选目录(与视频剪辑 ExportCenter 同款:浏览器侧记忆,下次回来) */
+const EXPORT_DIR_STORE_KEY = 'tintin-cover.exportDir.v1'
+
+/** 导出选项模态(2026-11-14 重构:复制视频剪辑 ExportCenter 图片页结构再改——左预览区/
+   右格式列/底部路径条;格式 JPG/PNG/PSD,卡片上的文件大小=编辑期精确编码值;
+   目录默认=封面项目目录(图片路径),点击 chip 弹原生「选择导出的保存位置」) */
+function ExportModal({ project, onClose }: { project: string; onClose: () => void }): React.ReactElement {
+  ensureExportStyle()
   const templateId = useEditor((s) => s.templateId)
   const props = useEditor((s) => s.props)
   const hiddenLayers = useEditor((s) => s.hiddenLayers)
   const family = getTemplate(templateId).family
-  const [targets, setTargets] = React.useState([
-    { key: 'landscape', label: '横屏', size: '1280×720', checked: true, variant: '' },
-    { key: 'portrait', label: '竖屏', size: '1080×1440', checked: true, variant: '-portrait' },
-  ])
-  const [results, setResults] = React.useState<Array<{ ok: boolean; text: string; file?: string }>>([])
-  const [busy, setBusy] = React.useState(false)
+  /* 打开瞬间的载荷快照:弹窗盖住画布,编辑不动,编码/落盘共用同一份(props 进缓存键) */
+  const payload = React.useRef({ templateId, props, hiddenLayers })
 
-  const toggle = (key: string): void => {
+  const [targets, setTargets] = React.useState([
+    { key: 'landscape' as ExportVariantKey, label: '横屏', size: '1280×720', checked: true },
+    { key: 'portrait' as ExportVariantKey, label: '竖屏', size: '1080×1440', checked: true },
+  ])
+  const [formats, setFormats] = React.useState([
+    { key: 'jpg' as ExportFormatKey, label: 'JPG', hint: '体积小，适合直接分享', checked: false },
+    { key: 'png' as ExportFormatKey, label: 'PNG', hint: '无损，通用', checked: true },
+    { key: 'psd' as ExportFormatKey, label: 'PSD', hint: 'PS 可打开（拍平单层）', checked: false },
+  ])
+  /* 编码产物:每变体 PNG 预览 + 每格式的精确字节数(尺寸/宽高由渲染结果回填) */
+  const [preview, setPreview] = React.useState<Partial<Record<ExportVariantKey, string>>>({})
+  const [dims, setDims] = React.useState<Partial<Record<ExportVariantKey, string>>>({})
+  const [sizeOf, setSizeOf] = React.useState<Partial<Record<ExportVariantKey, Partial<Record<ExportFormatKey, number>>>>>({})
+  const [encoding, setEncoding] = React.useState(true)
+  const [encodeErr, setEncodeErr] = React.useState('')
+  /* 目录:默认=项目目录(图片路径);上次选过的目录优先(localStorage,视频剪辑同款);
+     chip 点击=原生「选择导出的保存位置」;无桥=手输回退(folderDraft) */
+  const [dir, setDir] = React.useState('')
+  const [dirDefault, setDirDefault] = React.useState('')
+  const [picking, setPicking] = React.useState(false)
+  const [folderDraft, setFolderDraft] = React.useState<string | null>(null)
+  const [baseName, setBaseName] = React.useState(project || family)
+  const [exporting, setExporting] = React.useState(false)
+  const [results, setResults] = React.useState<Array<{ ok: boolean; text: string; file?: string }>>([])
+
+  /** 单变体编码(PNG=预览+字节 → JPEG → PSD),结果就地并入状态;两变体并行请求,
+   *  谁先渲染完谁的预览先亮(整弹窗等待≈单变体耗时,非两倍) */
+  const encodeVariant = async (variant: ExportVariantKey): Promise<void> => {
+    const r = await fetch('/tintin/ipc/cover/export-encode', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...payload.current, variants: [variant] }),
+    }).then((x) => x.json()) as {
+      ok?: boolean; error?: string; previews?: Record<string, string>
+      items?: Array<{ variant: ExportVariantKey; format: ExportFormatKey; size: number; width: number; height: number }>
+    }
+    if (!r?.ok) throw new Error(r?.error || '编码失败')
+    const pv = (r.previews ?? {})[variant]
+    if (pv) setPreview((p) => ({ ...p, [variant]: pv }))
+    const byFormat: Partial<Record<ExportFormatKey, number>> = {}
+    for (const it of r.items ?? []) {
+      byFormat[it.format] = it.size
+      setDims((d) => ({ ...d, [it.variant]: `${it.width}×${it.height}` }))
+    }
+    setSizeOf((s) => ({ ...s, [variant]: byFormat }))
+  }
+  const encodeAll = async (): Promise<void> => {
+    setEncoding(true)
+    setEncodeErr('')
+    const errs: string[] = []
+    await Promise.all((['landscape', 'portrait'] as ExportVariantKey[]).map(async (v) => {
+      try { await encodeVariant(v) } catch (e) { errs.push(`${v === 'landscape' ? '横屏' : '竖屏'}: ${e instanceof Error ? e.message : String(e)}`) }
+    }))
+    if (errs.length) setEncodeErr(errs.join('；'))
+    setEncoding(false)
+  }
+
+  React.useEffect(() => {
+    /* 首帧先读上次目录(chip 立即有名字),再取默认项目目录兜底;随后开编码 */
+    let saved = ''
+    try { saved = localStorage.getItem(EXPORT_DIR_STORE_KEY) ?? '' } catch { /* 私窗=跳过 */ }
+    if (saved) setDir(saved)
+    void (async () => {
+      try {
+        const r = await fetch('/tintin/ipc/cover/export-dir').then((x) => x.json()) as { ok?: boolean; dir?: string }
+        if (r?.ok && r.dir) {
+          setDirDefault(r.dir)
+          if (!saved) setDir(r.dir)
+        }
+      } catch { /* 默认目录拿不到=chip 空着,可选/手输 */ }
+    })()
+    void encodeAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const toggleVariant = (key: string): void => {
     setTargets((ts) => ts.map((t) => (t.key === key ? { ...t, checked: !t.checked } : t)))
   }
-
-  /** 保存桥契约(2026-10-29 方案 1 用户裁决):每张先弹原生「另存为」选位置,选完才渲染、
-   *  直接写入选的位置;取消=跳过该张继续下一张;桥缺失回退默认 cover 目录。 */
-  const doExport = async (): Promise<void> => {
-    const selected = targets.filter((t) => t.checked)
-    if (!selected.length) return
-    setBusy(true)
-    setResults([])
-    const picker = resolveSavePicker()
-    if (!picker) setResults((prev) => [...prev, { ok: false, text: '－ 未检测到桌面保存桥,回退默认 cover 目录' }])
-    for (const t of selected) {
-      const tid = family + t.variant
-      try {
-        let fileName = `${family}-${t.key}.png`
-        let outDir: string | undefined
-        if (picker) {
-          const picked = await picker.pick({
-            title: `导出封面 · ${t.label}`,
-            defaultPath: fileName,
-            filters: [{ name: 'PNG 图片', extensions: ['png'] }],
-          })
-          if (!picked) {
-            setResults((prev) => [...prev, { ok: false, text: `－ ${t.label}: 已跳过(未选保存位置)` }])
-            continue
-          }
-          const sep = Math.max(picked.lastIndexOf('\\'), picked.lastIndexOf('/'))
-          outDir = sep > 0 ? picked.slice(0, sep) : undefined
-          fileName = sep > 0 ? picked.slice(sep + 1) : picked
-        }
-        const r = await fetch('/tintin/ipc/cover/render', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ templateId: tid, props, hiddenLayers, fileName, outDir }),
-        }).then((resp) => resp.json())
-        setResults((prev) => [...prev, { ok: !!r.ok, file: r.ok ? String(r.file ?? '') : undefined, text: r.ok ? `✓ ${t.label} ${t.size} → ${r.file}` : `✗ ${t.label}: ${r.error || '?'}` }])
-      } catch (e) {
-        setResults((prev) => [...prev, { ok: false, text: `✗ ${t.label}: ${String(e)}` }])
-      }
-    }
-    setBusy(false)
+  const toggleFormat = (key: string): void => {
+    setFormats((fs) => fs.map((f) => (f.key === key ? { ...f, checked: !f.checked } : f)))
   }
 
+  const selectedVariants = targets.filter((t) => t.checked)
+  const selectedFormats = formats.filter((f) => f.checked)
+  /** 某格式在已勾选变体上的合计字节(编码完成后是精确值) */
+  const sizeFor = (format: ExportFormatKey): number | null => {
+    let total = 0
+    for (const t of selectedVariants) {
+      const v = sizeOf[t.key]?.[format]
+      if (typeof v !== 'number') return null
+      total += v
+    }
+    return total
+  }
+  const fileCount = selectedVariants.length * selectedFormats.length
+  const cleanBase = baseName.replace(/[\\/:*?"<>|]/g, '_').trim() || family
+  const emptyReason = !selectedVariants.length || !selectedFormats.length
+    ? '请至少选择一个尺寸和一个格式。'
+    : !dir ? '请先选择保存位置。' : ''
+
+  /** chip 点击=原生「选择导出的保存位置」(OpenFilm changeFolder 同流程);桥缺失/异常=手输回退 */
+  const changeFolder = async (): Promise<void> => {
+    if (picking) return
+    const picker = resolveFolderPicker()
+    if (!picker) { setFolderDraft(dir || dirDefault); return }
+    setPicking(true)
+    try {
+      const picked = await picker.pick({ title: '选择导出的保存位置', defaultPath: dir || dirDefault || undefined })
+      if (picked) {
+        setDir(picked)
+        try { localStorage.setItem(EXPORT_DIR_STORE_KEY, picked) } catch { /* 私窗=不记忆 */ }
+      }
+    } catch {
+      setFolderDraft(dir || dirDefault)
+    } finally {
+      setPicking(false)
+    }
+  }
+  const commitFolder = (): void => {
+    if (folderDraft == null) return
+    const next = folderDraft.trim()
+    if (next) {
+      setDir(next)
+      try { localStorage.setItem(EXPORT_DIR_STORE_KEY, next) } catch { /* 不记忆 */ }
+    }
+    setFolderDraft(null)
+  }
+
+  /** 导出落盘:编码期产物按内容键缓存,命中直接写盘(秒出);过期按需重编。
+   *  每文件独立结果行,失败不拖垮其余。 */
+  const doExport = async (): Promise<void> => {
+    if (exporting || emptyReason) return
+    setExporting(true)
+    setResults([])
+    try {
+      const files = selectedVariants.flatMap((t) => selectedFormats.map((f) => ({
+        variant: t.key,
+        format: f.key,
+        fileName: `${cleanBase}-${t.key}.${EXPORT_EXT[f.key]}`,
+      })))
+      const r = await fetch('/tintin/ipc/cover/export-write', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ...payload.current, outDir: dir, baseName: cleanBase, files }),
+      }).then((x) => x.json()) as { ok?: boolean; results?: Array<{ variant: string; format: string; ok: boolean; file?: string; error?: string }> }
+      const label = (v: string): string => targets.find((t) => t.key === v)?.label ?? v
+      const rows = (r?.results ?? []).map((it) => ({
+        ok: it.ok,
+        file: it.ok ? it.file : undefined,
+        text: it.ok
+          ? `✓ ${label(it.variant)} ${it.format.toUpperCase()} → ${it.file}`
+          : `✗ ${label(it.variant)} ${it.format.toUpperCase()}: ${it.error || '?'}`,
+      }))
+      setResults(rows)
+    } catch (e) {
+      setResults([{ ok: false, text: `✗ ${e instanceof Error ? e.message : String(e)}` }])
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const totalBytes = selectedFormats.reduce((sum, f) => sum + (sizeFor(f.key) ?? 0), 0)
+  const sizesReady = selectedFormats.every((f) => sizeFor(f.key) !== null)
+
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      onClick={onClose}>
-      <div style={{ width: 380, background: 'var(--bg-raised)', borderRadius: 'var(--radius-lg)', padding: 24, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}
-        onClick={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text)', marginBottom: 16 }}>导出封面</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
-          {targets.map((t) => (
-            <label key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
-              <input type="checkbox" checked={t.checked} onChange={() => toggle(t.key)} style={{ accentColor: 'var(--accent)', width: 16, height: 16 }} />
-              <span style={{ color: 'var(--text)', fontWeight: 600 }}>{t.label}</span>
-              <span style={{ color: 'var(--text-faint)', fontSize: 11, marginLeft: 'auto' }}>{t.size}</span>
-            </label>
-          ))}
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+      onClick={() => { if (!exporting) onClose() }}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="导出封面"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(960px, 94vw)', height: 'min(640px, 90vh)', display: 'flex', flexDirection: 'column',
+          minWidth: 0, minHeight: 0, overflow: 'hidden', borderRadius: 16, border: '1px solid var(--border)',
+          background: 'var(--bg-raised)', boxShadow: 'var(--shadow-lg)',
+        }}
+      >
+        {/* 头部:标题+描述+关闭(ExportCenter 头部同构) */}
+        <div style={{ display: 'flex', flexShrink: 0, alignItems: 'flex-start', gap: 8, padding: '16px 20px 4px' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>导出封面</h3>
+            <p style={{ margin: '2px 0 0', fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)' }}>把当前封面保存为独立图片文件，支持 JPG / PNG / PSD。</p>
+          </div>
+          <button
+            type="button"
+            aria-label="关闭"
+            onClick={() => { if (!exporting) onClose() }}
+            style={{ alignSelf: 'flex-start', borderRadius: 8, border: 0, background: 'transparent', padding: 4, color: 'var(--text-muted)', cursor: 'pointer' }}
+          >
+            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+          </button>
         </div>
-        <button
-          disabled={busy}
-          onClick={() => void doExport()}
-          style={{
-            width: '100%', padding: '10px 0', borderRadius: 8, border: 0, cursor: busy ? 'default' : 'pointer',
-            background: busy ? 'var(--bg-pressed)' : 'var(--primary)', color: 'var(--on-primary)', fontSize: 14, fontWeight: 700,
-          }}
-        >{busy ? '渲染中…' : `导出 ${targets.filter((t) => t.checked).length} 张 PNG`}</button>
-        {results.length ? (
-          <div style={{ marginTop: 12, fontSize: 12 }}>
-            {results.map((r, i) => (
-              <div key={i} style={{ color: r.ok ? 'var(--ok)' : 'var(--err)', wordBreak: 'break-all', userSelect: 'text', marginBottom: 4 }}>{r.text}</div>
-            ))}
+
+        {/* 主体:左=预览区 / 右=尺寸+格式列(ExportCenter 图片页 grid 同款) */}
+        <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden auto', padding: '12px 20px 16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 272px', gap: 24, minHeight: 0 }}>
+            {/* 左:预览区(勾选的横/竖屏逐张渲染;渲染中=占位) */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: 12, padding: 14 }}>
+              {targets.filter((t) => t.checked).map((t) => (
+                <figure key={t.key} style={{ margin: 0, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center', minWidth: 0 }}>
+                  {preview[t.key] ? (
+                    <img src={preview[t.key]} alt={`${t.label} 预览`} style={{ maxWidth: '100%', maxHeight: 200, objectFit: 'contain', borderRadius: 8, boxShadow: '0 12px 32px rgba(0,0,0,0.45)' }} />
+                  ) : (
+                    <div style={{ width: '100%', height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 8, border: '1px dashed var(--border-strong)', color: 'var(--text-faint)', fontSize: 12 }}>
+                      {encodeErr ? '—' : <>{ICON_SPIN} 渲染中…</>}
+                    </div>
+                  )}
+                  <figcaption style={{ fontSize: 11, color: 'var(--text-faint)', fontVariantNumeric: 'tabular-nums' }}>
+                    {t.label}{dims[t.key] ? ` · ${dims[t.key]}` : ` · ${t.size}`}
+                  </figcaption>
+                </figure>
+              ))}
+              {!targets.some((t) => t.checked) ? (
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-faint)', fontSize: 12 }}>勾选左侧尺寸后出预览</div>
+              ) : null}
+              {encodeErr ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12 }}>
+                  <span style={{ color: 'var(--err)', wordBreak: 'break-all' }}>✗ {encodeErr}</span>
+                  <button
+                    onClick={() => { void encodeAll() }}
+                    style={{ ...ghostBtn, width: 'auto', padding: '4px 12px', fontSize: 11 }}
+                  >重新编码</button>
+                </div>
+              ) : null}
+            </div>
+
+            {/* 右:尺寸 + 格式(含每格式精确文件大小) */}
+            <div style={{ display: 'flex', minWidth: 0, flexDirection: 'column', gap: 20 }}>
+              <ExpField label="尺寸">
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {targets.map((t) => (
+                    <ExpOptionCard
+                      key={t.key}
+                      on={t.checked}
+                      title={t.label}
+                      desc={t.size}
+                      onClick={() => toggleVariant(t.key)}
+                    />
+                  ))}
+                </div>
+              </ExpField>
+              <ExpField label="格式">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                  {formats.map((f) => {
+                    const bytes = sizeFor(f.key)
+                    return (
+                      <ExpOptionCard
+                        key={f.key}
+                        on={f.checked}
+                        title={f.label}
+                        size={bytes !== null ? formatBytes(bytes) : '…'}
+                        desc={f.hint}
+                        onClick={() => toggleFormat(f.key)}
+                      />
+                    )
+                  })}
+                </div>
+              </ExpField>
+              <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>
+                大小按当前画布精确编码得出；PSD 为拍平单层，逐图层精修仍走 PhotoCraft 底稿。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* 底部:路径 chip + 文件名 + 汇总 + 导出(ExportCenter 底栏同构) */}
+        <div style={{ display: 'flex', flexShrink: 0, flexWrap: 'wrap', alignItems: 'center', columnGap: 20, rowGap: 12, borderTop: '1px solid var(--border)', padding: '14px 20px' }}>
+          <div style={{ display: 'flex', flex: '1 1 280px', maxWidth: 560, minWidth: 0, alignItems: 'center', gap: 8 }}>
+            {folderDraft != null ? (
+              <input
+                autoFocus
+                value={folderDraft}
+                spellCheck={false}
+                aria-label="保存到"
+                onChange={(e) => setFolderDraft(e.target.value)}
+                onFocus={(e) => e.currentTarget.select()}
+                onBlur={commitFolder}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); commitFolder() }
+                  if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setFolderDraft(null) }
+                }}
+                style={{ height: 40, minWidth: 0, flex: 1, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-panel)', padding: '0 12px', fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text)', outline: 'none' }}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => void changeFolder()}
+                disabled={picking}
+                title={dir || '选择导出的保存位置'}
+                aria-label={`保存到: ${dir || '—'}`}
+                style={{ display: 'flex', height: 40, minWidth: 0, maxWidth: '45%', flexShrink: 0, alignItems: 'center', gap: 8, borderRadius: 8, border: '1px solid var(--border)', paddingLeft: 12, paddingRight: 10, fontSize: 13, color: 'var(--text)', outline: 'none', cursor: 'pointer', background: 'transparent', transition: 'border-color .12s' }}
+              >
+                {picking ? <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>{ICON_SPIN}</span> : <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>{ICON_FOLDER}</span>}
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir ? dirNameOf(dir) : '选择位置'}</span>
+                <span style={{ color: 'var(--text-faint)', display: 'inline-flex', flexShrink: 0 }}>{ICON_CHEVRON}</span>
+              </button>
+            )}
+            <input
+              value={baseName}
+              spellCheck={false}
+              placeholder={family}
+              aria-label="名称"
+              title="导出文件名（自动加尺寸与格式后缀）"
+              onChange={(e) => setBaseName(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !emptyReason) { e.preventDefault(); void doExport() } }}
+              style={{ height: 40, minWidth: 0, flex: 1, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-field)', padding: '0 12px', fontSize: 13, color: 'var(--text)', outline: 'none', transition: 'border-color .12s' }}
+            />
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', minWidth: 0, alignItems: 'center', gap: 16 }}>
+            {/* 打开目录(2026-11-14 用户裁决:预览区结果块撤除,入口移到底栏「已导出」左边;
+                几何=导出钮同款 40px/圆角 12,ghost 描边不抢主钮) */}
             {results.some((r) => r.ok) ? (
               <button
+                type="button"
                 onClick={() => {
                   const firstOk = results.find((r) => r.ok && r.file)
                   void fetch('/tintin/ipc/cover/reveal', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(firstOk?.file ? { dir: firstOk.file.slice(0, firstOk.file.length - dirNameOf(firstOk.file).length - 1) } : {}) }).catch(() => {})
                 }}
-                style={{ ...ghostBtn, width: 'auto', padding: '4px 12px', fontSize: 11, marginTop: 4 }}
-              >📂 打开目录</button>
+                style={{ display: 'flex', height: 40, flexShrink: 0, alignItems: 'center', gap: 8, borderRadius: 12, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', padding: '0 16px', fontSize: 13, cursor: 'pointer', transition: 'border-color .12s' }}
+              >
+                <span style={{ color: 'var(--text-muted)', display: 'inline-flex' }}>{ICON_FOLDER}</span>
+                打开目录
+              </button>
             ) : null}
+            <div style={{ minWidth: 0, textAlign: 'right', fontSize: 12, lineHeight: 1.4 }}>
+              {results.length ? (
+                <span style={{ color: results.every((r) => r.ok) ? 'var(--ok)' : 'var(--err)' }}>
+                  {results.every((r) => r.ok) ? `已导出 ${results.filter((r) => r.ok).length} 个文件` : '部分失败，详见预览区'}
+                </span>
+              ) : emptyReason ? (
+                <span style={{ color: 'var(--text-faint)' }}>{emptyReason}</span>
+              ) : (
+                <span style={{ color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                  {fileCount} 个文件{sizesReady && totalBytes > 0 ? ` · 共 ${formatBytes(totalBytes)}` : encoding ? ' · 编码中…' : ''}
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => void doExport()}
+              disabled={Boolean(emptyReason) || exporting}
+              style={{ display: 'flex', height: 40, flexShrink: 0, alignItems: 'center', gap: 8, borderRadius: 12, border: 0, background: 'var(--primary)', color: 'var(--on-primary)', padding: '0 24px', fontSize: 13.5, fontWeight: 500, cursor: emptyReason || exporting ? 'default' : 'pointer', opacity: emptyReason || exporting ? 0.4 : 1 }}
+            >
+              {exporting ? <span style={{ display: 'inline-flex', color: 'var(--on-primary)' }}>{ICON_SPIN}</span> : null}
+              {exporting ? '正在导出…' : fileCount > 1 ? `导出 ${fileCount} 个文件` : '导出'}
+            </button>
           </div>
-        ) : null}
-        <div style={{ marginTop: 16, textAlign: 'right' }}>
-          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid #444', borderRadius: 6, color: 'var(--text-faint)', fontSize: 12, padding: '5px 16px', cursor: 'pointer' }}>关闭</button>
         </div>
       </div>
     </div>

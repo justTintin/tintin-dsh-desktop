@@ -109,7 +109,7 @@ describe('Desktop renderer preload bridges', () => {
     // 本用例与对账 gate（verify-bridge-surface.mjs）共用同一份单一事实源。
     const { readFileSync } = await import('node:fs')
     const manifest = JSON.parse(
-      readFileSync(new URL('../../../scripts/bridge-surface.json', import.meta.url), 'utf8'),
+      readFileSync(new URL('../../scripts/bridge-surface.json', import.meta.url), 'utf8'),
     ) as { exposure: { preload: string[] } }
     expect([...electron.exposed.keys()].sort()).toEqual([...manifest.exposure.preload].sort())
   })

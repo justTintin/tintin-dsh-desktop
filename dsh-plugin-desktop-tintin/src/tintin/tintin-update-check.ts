@@ -18,14 +18,32 @@ export const TINTIN_RELEASES_REPO = process.env.TINTIN_UPDATE_REPO ?? 'justTinti
 /** Releases listing returning the newest TinTin installers, newest release first. */
 export const TINTIN_RELEASES_ENDPOINT = `https://api.github.com/repos/${TINTIN_RELEASES_REPO}/releases?per_page=20`
 
+/**
+ * GitHub Releases Atom feed (github.com main site, not the REST API). It does
+ * not share the API's per-IP anonymous rate limit, so it stays reachable when
+ * the API returns 403 `rate limit exceeded` — which is exactly what happens
+ * behind shared proxy exit addresses (2026-11-13 实测: 应用走 PAC 代理时 API 恒 403,
+ * 同一代理路径下 atom 200). The feed carries no assets, so the download path
+ * reconstructs asset URLs from the release tag and the artifact-name contract.
+ */
+export const TINTIN_RELEASES_ATOM_ENDPOINT = `https://github.com/${TINTIN_RELEASES_REPO}/releases.atom`
+
 /** User agent that GitHub's REST API requires on every request. */
 export const TINTIN_RELEASE_USER_AGENT = 'tintin-dsh-desktop-updates'
 
 /** Maximum accepted releases-listing body bytes. */
 export const MAX_RELEASES_RESPONSE_BYTES = 4 * 1024 * 1024
 
+/** Maximum accepted releases Atom feed body bytes. */
+export const MAX_RELEASES_ATOM_BYTES = 512 * 1024
+
 /** Maximum accepted sidecar digest body bytes. */
 export const MAX_DIGEST_RESPONSE_BYTES = 4 * 1024
+
+/** installer asset name per the electron-builder `artifactName` contract. */
+export function tintinInstallerAssetName(version: string): string {
+  return `TinTin-${version}-x64-Setup.exe`
+}
 
 /**
  * One parsed TinTin release identity. TinTin versions append a build stamp to
@@ -60,23 +78,26 @@ export interface TintinReleaseAsset {
 export interface TintinInstallerRelease {
   /** Parsed release version (the tag without its leading `v`). */
   readonly version: string
-  /** Windows installer asset attached to this release. */
-  readonly asset: TintinReleaseAsset
+  /** Windows installer asset attached to this release; absent on the Atom path. */
+  readonly asset?: TintinReleaseAsset
   /** Sidecar asset carrying a hex digest when the API did not publish one. */
   readonly digestSidecar?: TintinReleaseAsset
 }
 
+/** How the newest release was discovered. */
+export type TintinReleaseSource = 'api' | 'atom'
+
 /** Trailing `-YYYYMMDD[-.]HHmm` stamp accepted on TinTin release tags. */
 const TINTIN_STAMP_PATTERN = /-([0-9]{8})[.\-]([0-9]{3,4})$/u
+
+/** Asset hosts that GitHub release downloads resolve against. */
+const TINTIN_ASSET_HOSTS = new Set(['github.com', 'objects.githubusercontent.com'])
 
 /* 铁律 3:检查更新的每个失败分支必须打点(2026-11-13 实测教训——失败分支静默,
    用户弹「未能获取更新信息」时日志查无证据)。developer:false 无条件落盘。 */
 function logCheck(event: string, fields: Record<string, string | number | boolean | null | undefined> = {}, level: 'info' | 'error' = 'info'): void {
   diagnosticLog({ source: 'tintin-update-check', event, level, developer: false, fields })
 }
-
-/** Asset hosts that GitHub release downloads resolve against. */
-const TINTIN_ASSET_HOSTS = new Set(['github.com', 'objects.githubusercontent.com'])
 
 /**
  * Parse one TinTin release tag or installed version.
@@ -114,6 +135,27 @@ export function compareTintinVersions(left: string, right: string): number | nul
 }
 
 /**
+ * Extract release tags from one Releases Atom feed, newest first. Only tags
+ * that parse as TinTin versions survive; everything else (notes-only tags,
+ * malformed entries) is skipped.
+ * @param xml - raw Atom feed body.
+ * @returns ordered tag list (leading `v` preserved), possibly empty.
+ */
+export function parseTintinReleaseFeed(xml: string): string[] {
+  const tags: string[] = []
+  const pattern = /<id>tag:github\.com,2008:Repository\/[0-9]+\/([^<]+)<\/id>/gu
+  for (const match of xml.matchAll(pattern)) {
+    const tag = match[1]!
+      .replace(/&amp;/gu, '&')
+      .replace(/&lt;/gu, '<')
+      .replace(/&gt;/gu, '>')
+      .replace(/&quot;/gu, '"')
+    if (parseTintinReleaseVersion(tag) !== null && !tags.includes(tag)) tags.push(tag)
+  }
+  return tags
+}
+
+/**
  * Select the newest release that carries a Windows installer from a parsed
  * releases listing. Drafts and releases without a parseable tag are skipped;
  * prerelease flags are not filtered, because every TinTin build ships as one.
@@ -139,12 +181,82 @@ export function selectTintinInstallerRelease(releases: unknown): TintinInstaller
   return undefined
 }
 
+interface RequestedReleases {
+  readonly source: TintinReleaseSource
+  /** Newest installer release; on the Atom path it carries no asset. */
+  readonly release?: TintinInstallerRelease
+}
+
 /**
- * Check the TinTin GitHub Releases listing for an installer newer than the
- * installed version. The channel grammar of the shared version service does
- * not accept TinTin build stamps, which is why this channel queries GitHub.
+ * Request the newest installer release: the REST listing first, the Atom feed
+ * as the rate-limit fallback. API failures are expected behind shared proxy
+ * exits (anonymous 60/h per IP); the Atom path keeps checks working there.
+ */
+async function requestNewestTintinRelease(
+  request: UpdateRequest,
+  signal?: AbortSignal,
+): Promise<RequestedReleases | null> {
+  const init: RequestInit = {
+    method: 'GET',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': TINTIN_RELEASE_USER_AGENT,
+    },
+    cache: 'no-store',
+    redirect: 'error',
+    ...(signal === undefined ? {} : { signal }),
+  }
+  try {
+    const response = await request(TINTIN_RELEASES_ENDPOINT, init)
+    if (response.status === 200) {
+      const listing = JSON.parse(await readLimitedBody(response, MAX_RELEASES_RESPONSE_BYTES))
+      const release = selectTintinInstallerRelease(listing)
+      if (release !== undefined) return { source: 'api', release }
+      // A listing without any installer release means nothing is published yet.
+      return { source: 'api' }
+    }
+    const rateLimit = response.headers.get('x-ratelimit-remaining')
+    logCheck('api-status', { status: response.status, rateLimitRemaining: rateLimit }, 'error')
+  } catch (cause) {
+    logCheck('api-request-failed', {
+      error: cause instanceof Error ? cause.message : String(cause),
+    }, 'error')
+  }
+
+  // Rate-limit or transport fallback: the Atom feed shares no API quota.
+  try {
+    const response = await request(TINTIN_RELEASES_ATOM_ENDPOINT, {
+      ...init,
+      headers: { ...init.headers, Accept: 'application/atom+xml' },
+    })
+    if (response.status !== 200) {
+      logCheck('atom-status', { status: response.status }, 'error')
+      return null
+    }
+    const tags = parseTintinReleaseFeed(await readLimitedBody(response, MAX_RELEASES_ATOM_BYTES))
+    const tag = tags[0]
+    const parsed = tag === undefined ? null : parseTintinReleaseVersion(tag)
+    if (parsed === null) {
+      logCheck('atom-no-tintin-release')
+      return { source: 'atom' }
+    }
+    logCheck('atom-fallback-hit', { tag })
+    return { source: 'atom', release: { version: parsed.version } }
+  } catch (cause) {
+    logCheck('atom-request-failed', {
+      error: cause instanceof Error ? cause.message : String(cause),
+    }, 'error')
+    return null
+  }
+}
+
+/**
+ * Check the TinTin GitHub Releases for an installer newer than the installed
+ * version. The shared version service does not serve the tintin channel, so
+ * this channel queries GitHub; when the REST API is rate-limited (403 behind
+ * shared proxy exits) the Atom feed keeps the check alive.
  * @param options - installed version, caller-owned signal, and optional request adapter.
- * @returns a successful comparison, or null when any request or validation step fails.
+ * @returns a successful comparison, or null when every request path failed.
  */
 export async function checkForTintinDesktopUpdate(
   options: UpdateCheckOptions,
@@ -157,35 +269,12 @@ export async function checkForTintinDesktopUpdate(
 
   const request = options.request ?? defaultTintinRequest
   logCheck('check-start', { currentVersion: current.version })
-  let payload: unknown
-  try {
-    const response = await request(TINTIN_RELEASES_ENDPOINT, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': TINTIN_RELEASE_USER_AGENT,
-      },
-      cache: 'no-store',
-      redirect: 'error',
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-    })
-    if (response.status !== 200) {
-      logCheck('http-status', { status: response.status }, 'error')
-      return null
-    }
-    payload = JSON.parse(await readLimitedBody(response, MAX_RELEASES_RESPONSE_BYTES))
-  } catch (cause) {
-    logCheck('request-failed', {
-      error: cause instanceof Error ? cause.message : String(cause),
-    }, 'error')
+  const requested = await requestNewestTintinRelease(request, options.signal)
+  if (requested === null) {
+    logCheck('check-failed', { reason: 'api-and-atom-unavailable' }, 'error')
     return null
   }
-  if (!Array.isArray(payload)) {
-    logCheck('payload-not-a-listing', { type: typeof payload }, 'error')
-    return null
-  }
-
-  const release = selectTintinInstallerRelease(payload)
+  const release = requested.release
   if (release === undefined) {
     // Nothing published yet: the installed build is the newest known release.
     logCheck('no-installable-release')
@@ -199,12 +288,20 @@ export async function checkForTintinDesktopUpdate(
   }
   const updateAvailable = comparison > 0 || (options.allowDowngrade === true && comparison !== 0)
   if (!updateAvailable) {
-    logCheck('check-done', { status: 'up-to-date', latestVersion: release.version })
+    logCheck('check-done', { status: 'up-to-date', latestVersion: release.version, via: requested.source })
     return { status: 'up-to-date', currentVersion: current.version, latestVersion: release.version }
   }
 
-  const sha256 = await resolveTintinInstallerSha256(release, request, options.signal)
-  logCheck('check-done', { status: 'update-available', latestVersion: release.version, digest: sha256 !== undefined })
+  // The Atom path carries no assets, so the digest resolves at download time.
+  const sha256 = release.asset === undefined
+    ? undefined
+    : await resolveTintinInstallerSha256(release, request, options.signal)
+  logCheck('check-done', {
+    status: 'update-available',
+    latestVersion: release.version,
+    via: requested.source,
+    digest: sha256 !== undefined,
+  })
   return {
     status: 'update-available',
     currentVersion: current.version,
@@ -214,13 +311,14 @@ export async function checkForTintinDesktopUpdate(
 }
 
 /**
- * Resolve the installer release matching one exact version, re-querying the
- * releases listing. The download path resolves independently because the
- * Host-to-Electron bridge does not forward the checker's digest payload.
+ * Resolve the installer of one exact TinTin version: the REST listing first;
+ * when it is unavailable, the Atom feed confirms the release exists and the
+ * asset URLs are reconstructed from the artifact-name contract
+ * (`TinTin-<version>-x64-Setup.exe` beside its `.sha256` sidecar).
  * @param version - release version to resolve (the tag without its leading `v`).
  * @param request - fetch-compatible request adapter.
  * @param signal - caller-owned cancellation signal.
- * @returns the matching installer release with its digest, or null when unavailable.
+ * @returns the asset identity and digest, or null when every path failed.
  */
 export async function resolveTintinInstallerRelease(
   version: string,
@@ -229,27 +327,79 @@ export async function resolveTintinInstallerRelease(
 ): Promise<{ readonly asset: TintinReleaseAsset; readonly sha256?: string } | null> {
   const target = parseTintinReleaseVersion(version)
   if (target === null) return null
-  let payload: unknown
+  const init: RequestInit = {
+    method: 'GET',
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': TINTIN_RELEASE_USER_AGENT,
+    },
+    cache: 'no-store',
+    redirect: 'error',
+    ...(signal === undefined ? {} : { signal }),
+  }
   try {
-    const response = await request(TINTIN_RELEASES_ENDPOINT, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': TINTIN_RELEASE_USER_AGENT,
-      },
-      cache: 'no-store',
-      redirect: 'error',
-      ...(signal === undefined ? {} : { signal }),
+    const response = await request(TINTIN_RELEASES_ENDPOINT, init)
+    if (response.status === 200) {
+      const listing = JSON.parse(await readLimitedBody(response, MAX_RELEASES_RESPONSE_BYTES))
+      const release = selectTintinInstallerRelease(listing)
+      if (release !== undefined && release.version === target.version) {
+        // API-selected releases always carry an asset; guard for typing only.
+        if (release.asset === undefined) return null
+        const sha256 = await resolveTintinInstallerSha256(release, request, signal)
+        return { asset: release.asset, ...(sha256 === undefined ? {} : { sha256 }) }
+      }
+      if (release !== undefined) logCheck('resolve-version-mismatch', { release: release.version, requested: version }, 'error')
+      return null
+    }
+    logCheck('resolve-api-status', { status: response.status }, 'error')
+  } catch (cause) {
+    logCheck('resolve-api-failed', {
+      error: cause instanceof Error ? cause.message : String(cause),
+    }, 'error')
+  }
+
+  // Atom fallback: confirm the tag exists, then reconstruct the asset URLs.
+  try {
+    const response = await request(TINTIN_RELEASES_ATOM_ENDPOINT, {
+      ...init,
+      headers: { ...init.headers, Accept: 'application/atom+xml' },
     })
-    if (response.status !== 200) return null
-    payload = JSON.parse(await readLimitedBody(response, MAX_RELEASES_RESPONSE_BYTES))
-  } catch {
+    if (response.status !== 200) {
+      logCheck('resolve-atom-status', { status: response.status }, 'error')
+      return null
+    }
+    const tags = parseTintinReleaseFeed(await readLimitedBody(response, MAX_RELEASES_ATOM_BYTES))
+    if (!tags.includes(`v${target.version}`)) {
+      logCheck('resolve-atom-tag-missing', { requested: version }, 'error')
+      return null
+    }
+    const asset = reconstructedAsset(target.version)
+    if (asset === undefined) {
+      logCheck('resolve-asset-url-rejected', { requested: version }, 'error')
+      return null
+    }
+    logCheck('resolve-atom-hit', { requested: version })
+    const sha256 = await resolveReconstructedSha256(asset, request, signal)
+    return { asset, ...(sha256 === undefined ? {} : { sha256 }) }
+  } catch (cause) {
+    logCheck('resolve-atom-failed', {
+      error: cause instanceof Error ? cause.message : String(cause),
+    }, 'error')
     return null
   }
-  const release = selectTintinInstallerRelease(payload)
-  if (release === undefined || release.version !== target.version) return null
-  const sha256 = await resolveTintinInstallerSha256(release, request, signal)
-  return { asset: release.asset, ...(sha256 === undefined ? {} : { sha256 }) }
+}
+
+/** Reconstructed installer asset per the artifact-name contract, or undefined when the URL fails the host checks. */
+function reconstructedAsset(version: string): TintinReleaseAsset | undefined {
+  const name = tintinInstallerAssetName(version)
+  let url: URL
+  try {
+    url = new URL(`https://github.com/${TINTIN_RELEASES_REPO}/releases/download/v${version}/${name}`)
+  } catch {
+    return undefined
+  }
+  if (!isTintinAssetUrl(url.toString())) return undefined
+  return { name, url: url.toString(), size: 0 }
 }
 
 /**
@@ -265,7 +415,7 @@ export async function resolveTintinInstallerSha256(
   request: UpdateRequest,
   signal?: AbortSignal,
 ): Promise<string | undefined> {
-  if (release.asset.sha256 !== undefined) return release.asset.sha256
+  if (release.asset !== undefined && release.asset.sha256 !== undefined) return release.asset.sha256
   const sidecar = release.digestSidecar
   if (sidecar === undefined) return undefined
   try {
@@ -292,6 +442,19 @@ export async function resolveTintinInstallerSha256(
     }, 'error')
     return undefined
   }
+}
+
+/** Same digest resolution for a reconstructed (Atom-path) asset. */
+async function resolveReconstructedSha256(
+  asset: TintinReleaseAsset,
+  request: UpdateRequest,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  return resolveTintinInstallerSha256({
+    version: '',
+    asset,
+    digestSidecar: { name: `${asset.name}.sha256`, url: `${asset.url}.sha256`, size: 0 },
+  }, request, signal)
 }
 
 function selectInstallerAsset(assets: readonly unknown[]): TintinReleaseAsset | undefined {

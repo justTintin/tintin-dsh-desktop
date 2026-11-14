@@ -554,6 +554,33 @@ acedd29fb4 的五族模板换位只对**新建**项目生效——既有项目�
 
 PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑母版随模板走,下载即可在 PhotoCraft/Photoshop 续修)。PSD 未含合成位图(存储未开「最大兼容」)时如实报错提示开启。**测试**:psd-png.test.ts 编码器往返(签名/IEND/逐行逐像素解回),183/183。**教训:lib/photocraft.js 旧文件里 `readFileSync` 未导入的同类潜伏雷,本次连同 `\l` 转义死候选一并清掉;外部工具依赖一律配「纯内置兜底」,否则可选依赖变硬依赖。**
 
+### 7.20 导出中心:JPG/PNG/PSD 三格式+视频剪辑同款弹窗(2026-11-14;用户持截图质问「导出怎么没有 PSD,要加另存为,改成视频剪辑里那样的布局」)
+
+用户三图定稿:旧导出弹窗(勾选横竖屏+逐张另存为)废弃,改成视频剪辑(OpenFilm ExportCenter 图片页)的结构——左=图片预览区、右=格式卡(JPG/PNG/PSD+每格式文件大小)、底=路径 chip+文件名+导出按钮;点 chip 弹原生「选择导出的保存位置」,默认路径=封面项目目录(图片路径)。
+
+- **实现方式=先复制再改(用户明令)**:弹窗骨架/OptionCard/底栏 chip(文件夹图标+目录名+ChevronDown)/folderDraft 手输回退,逐件照搬 `openfilm-shell-src/openfilm/studio/ui/src/components/export/ExportCenter.tsx`,token 用封面编辑器同源 CSS 变量(两套 token 本就同源);原生目录选择=照抄 `openfilm:native:pick-folder` 处理器语义(title/defaultPath+openDirectory/createDirectory),Desktop 侧新增 preload 桥 `dshDesktopFolderPicker`(新契约 `pick-folder-contract.ts`+`electron-shell-generation.ts` 处理器,与 save-file-picker 同 sender 校验)。
+- **格式管线(engine.ts 新导出面)**:`encodeCoverExports` 弹窗打开即按变体编码——PNG=renderStill buffer 档(预览+字节)、JPEG=imageFormat:'jpeg'+jpegQuality 92(renderStill 直出,注意 png 时不能带 jpegQuality 否则 Remotion 校验报错)、PSD=PNG 像素经 `lib/psd-png.js` 新增 `decodeRgbaPng`(纯内置 inflate+反滤波,支持 8-bit 0/2/4/6 色型/滤波 0-4,其余显式报错)→ag-psd `writePsd` 拍平单层(层名「封面」)。`writeCoverExports` 导出落盘:产物按内容键 sha256 缓存(TTL 15min/上限 24),命中直接写盘(实测 6 文件 54ms),过期按需重编;伴随件(props 快照+素材归档)与 renderCover 同行为。**文件大小是编辑期精确编码值,非估算**。
+- **新路由(cover-plugin-route.js)**:GET `export-dir`(默认目录=resolveCoverDir 即图片路径)、POST `export-encode`/`export-write`(mutationAllowed 门禁+hiddenLayers 合并与 render 同口径)。
+- **PSD 为拍平单层**(UI 卡片注明):逐图层精修仍走 PhotoCraft 底稿(.pcraft)路线;分层 PSD(每图层单独渲染再装配)成本高未做,用户提出再立项。
+- **弹窗等待优化**:两变体并行请求(每变体 PNG→JPEG→PSD 串行、两变体间并行),谁先渲完谁的预览先亮;实测 2 变体×3 格式编码 17.6s→并行后≈单变体耗时。
+- 桥面纪律:新桥登记 `scripts/bridge-surface.json`(verify-bridge-surface 抓到的);顺手修 preload.spec 快照用例的相对路径深度(`../../../`→`../../`,此前永远 ENOENT=快照从未真跑过)。
+- 验证:psd-png 5 用例(回环/滤波 0-4 fixture/RGB/灰度/拒绝形态);真机渲染冒烟(PNG 933KB/JPG 103KB/PSD 3.9MB,SOI+8BPS+PSD 头逐字节核验+useRawData 读回层名);封面插件 187/187;desktop-tintin 三 tsconfig(native-ui/tests-client 全绿,tests 2 红=HEAD 既有漂移);check:tintin 全绿(150 锚+载荷新鲜);桥面 gate OK;热刷安装真身(shell 5 文件+封面载荷 5 处)。
+- **教训:renderStill 的 `output` 省略即返回 buffer(内存直出零落盘),配 jpegQuality 只对 jpeg 合法;ag-psd writePsd 纯 imageData 即可在 Node 跑通(无需 initializeCanvas),读回校验用 `useRawData:true` 绕 canvas;安装真身的热刷对象=resources/app/lib 整链(tintin-main→main-<hash>→electron-runtime-<hash>→preload.cjs,哈希名联动)而非单文件。**
+
+### 7.21 模板管理入口挪到顶栏图标位(2026-11-14;用户质问「要求技能管理图标左边加模板管理图标和入口,怎么没有了」)
+
+7.18 把入口做成画布设置条上的「▦ 模板管理」文本钮(撤销/重做旁边)——位置不符合用户要求(技能管理图标左边)。修=入口统一:右栏图标位新增 [模板管理] 图标钮(lucide layout-template,与会话面板同款 16px),置于技能管理图标左边(终序=模板管理→技能管理→服务设置→导出);画布设置条的文本钮与 onOpenTemplates 透传撤除。验证:src tsc 零错;187/187;check:tintin 绿;client.js 热刷真身(重启生效)。
+
+### 7.22 会话底栏重排:技能管理+模板管理+工作模式注入(2026-11-14;用户裁定「底栏最右=模式选择注入,技能管理旁边是模板管理,里面可以导入 PSD」+选项裁定「底栏重排+模式=完整/基础工作模式」)
+
+7.21 把模板管理入口放进了编辑器顶栏——用户指出真正的位置语义在**会话底栏**(composer 工具行),本批重排:
+
+- **底栏终序**:+附件 → 在线素材 → 选择产品 → **技能管理**(新常驻钮,四宫格图标,点击=编辑器技能弹窗,复用 tintin-cover:skills-open 通道;0.3.0 composer 重绘后 ▦ 通道不稳的常驻直达由此承接) → **模板管理**(layout-template 图标,点击=编辑器模板管理弹窗——服务端模板列表/渲染预览/**上传 PSD 建模板**,经 tintin-cover:templates-open) → **工作模式注入**(sliders-horizontal 图标,最右)。
+- **工作模式选择注入**:完整/基础二选一小菜单(sliders 图标弹出);选中把模式指令贴进会话输入框——完整=全工具链按需选用;**基础=只做文字与排版快改,不生成新图/不抠图/不去字/不渲染回看**(SKILL.md 交互节同步语义);上次选择记 localStorage 仅作菜单勾选回显。待裁决已久的「两种工作模式(完整/基础,flag 走 tintin/config.json)」以**注入指令**形态落地(flag 方案未采用)。
+- **能力合并不丢失**:原「注入版式面板」(1113 批)撤除,其注入能力并入模板管理弹窗——每行新增「注入版式」钮,经 chat iframe 的 tintin-cover:inject-text 把版式参数贴进输入框(编辑器→chat 单向 postMessage,chat 页只认 event.source===parent)。
+- **顶栏回退**:7.21 加在编辑器顶栏的模板管理图标撤除(入口统一到会话底栏);模板管理弹窗仍由编辑器承载(PSD 导入走 pc/psd-import)。
+- 验证:src/chat-shell 双 tsc 零错;187/187;check:tintin 绿;chat-shell 构建标记 2026-11-14-b;client.js+chat-shell/dist+SKILL.md 热刷真身(重启/新会话生效,SKILL.md 新会话生效)。
+
 ### 7.16 环境图层属性面板掉进装饰文案分支(2026-11-13 晚;用户报「点环境图出的是改名字,不该是图片操作吗」)
 
 - 根因:layers-panel.tsx 属性分支只认 `type==='product' || key==='bgImage'` 走图片编辑;7.8 起 video 族环境图键换 `environment`(layerDefs 无 propsKey→键=layer.id),字符串文件名值掉进「装饰层文案」通用分支——用户点环境图看到的是文件名文本框+文案提示,而非图片操作(换图/AI 生成底图/缩放)。
@@ -594,3 +621,20 @@ PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑�
 - **修 3(engine.ts)**:缓存缺失回退 ensureBrowser 前向 stderr 告警一行(经修 2 直达超时错误,智能体可转述)。
 - 教训:门禁 verify-cover-payload 第 31 行显式跳过 node_modules/.remotion(staging↔工作区比对口径,本身正确)→「载荷缺货」从未有任何人检查;find 排查深度(-maxdepth 4/5)会把 6-8 层深的 exe 误判为缺失,结论前必须用精确路径 `test -f` 复核(本批即被 maxdepth 假阴性骗过一次)。
 - 验证:插件全量 177 用例绿;package:dir 全链重建(含补拷步)EXIT=0;载荷 exe 精确路径核验;doc 本节同批。
+
+### 7.23 底栏回归注入选择器:技能/模板管理入口撤到编辑器顶栏(2026-11-14;用户裁决「下面的图标点击都是用来选择并注入到上下文的,不是直接弹出管理」「技能管理旁边是模板管理」裁决废止)
+
+- **底栏撤两钮**:chat-shell 的 composer 底栏「技能管理」(cover-chat-skills.ts fab)与「模板管理」(cover-chat-templates.ts fab)删除——底栏只留注入选择器语义(+附件/在线素材/选择产品/工作模式注入)。技能桥层保留(官方 ▦/菜单 showExamples 事件仍转译打开技能弹窗);模板注入通道保留(tintin-cover:inject-text,弹窗「注入版式」仍回注会话输入框)。
+- **模板管理入口上顶栏**:编辑器顶栏新增「模板管理」图标(技能管理图标左边),直接打开 TemplateManagerModal——不经 postMessage。
+- **模板管理弹窗=视频剪辑技能管理弹窗同款形态**(1200×800 大居中/头部标题+✕/tab 行右「＋上传 PSD 建模板」+搜索/行卡片=▦ 图标+名称+品类·参数·画幅徽标+版式参数描述(2 行钳制)/详情展开(行内渲染预览图,id·品类·画幅字段)/注入版式(primary)/删除(danger)/底部状态行)。封面模板全在服务端(无本地安装语义)故单列表「服务端模板(N)」;数据/操作端点不变(tpl-list/tpl-preview/tpl-delete/psd-import)。
+- **工作模式注入(sliders 图标,底栏最右)保留**——它本身就是注入语义(选中把完整/基础模式指令贴进会话输入框),符合「底栏=注入」新口径;§7.22 的「技能管理+模板管理在底栏」部分由本条废止。
+
+### 7.24 工作模式整体废除 + 模板进 @ 引用分组(2026-11-14;用户澄清「没有工作模式的说法,不知道从哪里知道的」+「点击模板列表就像选择产品,选择后把模板注入上下文;或 @ 引用时模板像技能一样做成模板分组放技能后面」)
+
+- **工作模式废除**:§7.22 的「完整/基础工作模式注入」整体删除(cover-chat-mode.ts 删档,main import 摘除,localStorage key 遗留无害)——该需求来源存疑,用户明确否认。SKILL.md 若有残留模式语义以本条为准。
+- **模板注入双路**:①模板管理弹窗(顶栏入口)行点击=注入版式(同选择产品语义;行内按钮 stopPropagation);②@ 引用菜单加「封面模板」分组(产品分组之后)——vendored 三文件按 tintin-products 先例镜像(prompt-text.ts 'template' kind+template: 前缀+activatedTemplateNames;PromptPill LayoutTemplate 图标;app-bridge.ts templates?{search,texts} 契约;App.tsx tintinTemplates state+分组+发送展开),cover-chat-bridge.ts 实现 templates 成员(tpl-list→search/texts,texts 文本=注入版式同款块)。film shell 无 app.templates=分组不渲染(共享源构建隔离,互不感知)。
+
+### 7.25 导出弹窗:预览区结果块撤除,打开目录移到底栏(2026-11-14;用户裁决「红框上的删除,导出成功左边的红框里增加打开目录按钮,要和右边样式一样」)
+
+- 预览区底部「✓ 路径行+📂 打开目录」结果块整体撤除(导出反馈由底栏「已导出 N 个文件」汇总承担;encodeErr+重新编码保留)。
+- 底栏「已导出」左边新增「📂 打开目录」钮:导出成功后出现(reveal 首个成功文件的目录),几何=导出钮同款(40px 高/圆角 12),ghost 描边不抢主钮。

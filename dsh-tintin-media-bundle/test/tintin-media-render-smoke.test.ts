@@ -95,12 +95,16 @@ describe('CopywritingStep1Panel 渲染冒烟（1105 批一改版）', () => {
     expect(html).toContain('scheme-hint--danger')
     // 平台=通用设置：位于生成按钮之前
     expect(html.indexOf('>平台<')).toBeLessThan(html.indexOf('AI生成口播文案'))
-    expect(html).toContain('输入提示词，如：无线电竞鼠标，主打低延迟与长续航')
+    // 占位=按平台动态的详细样本（2026-11-13 用户需求）：默认平台抖音 → 详细范例占位
+    expect(html).toContain('的抖音信息流带货文案')
     expect(html).toContain('AI生成口播文案')
-    // 输入框=两行（2026-11-05 二改：gen-textarea/rows=2）；顺序：AI 按钮在输入框之后
+    // 输入框=四行（2026-11-13 用户裁决：默认预填按平台的详细提示词样本，rows 扩到 4）；
+    // 顺序：样本内容与「平台样本」按钮都在 AI 按钮之前
     expect(html).toContain('gen-textarea')
-    expect(html).toContain('rows="2"')
-    expect(html.indexOf('输入提示词，如：无线电竞鼠标，主打低延迟与长续航')).toBeLessThan(html.indexOf('AI生成口播文案'))
+    expect(html).toContain('rows="4"')
+    expect(html).toContain('前 3 秒强钩子开场')
+    expect(html).toContain('📝 平台样本')
+    expect(html.indexOf('前 3 秒强钩子开场')).toBeLessThan(html.indexOf('AI生成口播文案'))
     // 产品与提示词皆空 → AI 按钮禁用（TButton 透传 disabled 属性）
     expect(html).toContain('disabled')
   })

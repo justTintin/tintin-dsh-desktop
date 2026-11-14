@@ -12,7 +12,7 @@
 
 import React from 'react';
 import {
-  AudioLines, Blocks, Brackets, Captions, Clapperboard, Clock3, Crop, Film, Loader2, Mic, MousePointer2, Music, Package, Paperclip,
+  AudioLines, Blocks, Brackets, Captions, Clapperboard, Clock3, Crop, Film, LayoutTemplate, Loader2, Mic, MousePointer2, Music, Package, Paperclip,
   Quote, Rows3, Shapes, SquareDashed, Video, Waves,
 } from 'lucide-react';
 import {
@@ -46,6 +46,9 @@ export const PILL_ICON: Record<PromptReferenceKind, React.ComponentType<{ size?:
   /* TinTin(2026-11-09 用户裁决): a product of the server's library, referenced for its
      selling points and specs - a tag on the goods. */
   product: Package,
+  /* TinTin replay (2026-11-14 用户裁决「@ 引用加模板分组」): a cover template of the
+     server's /templates shelf, referenced for its layout params - the frame it is. */
+  template: LayoutTemplate,
   /* An example film (another film, not this one): a clapperboard. */
   example: Clapperboard,
   /* A voice of the library, to speak a voice-over in: a sound's lines, not a clip's microphone. */

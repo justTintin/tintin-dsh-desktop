@@ -54,6 +54,29 @@ export function createServerUrlResolver({ readConfig, readTintinStore, readAiCon
 }
 
 /**
+ * Per-surface server URLs（2026-11-14 用户裁决：素材创作/运营工具/媒体工具三面
+ * 各自独立配置服务端地址）。弹窗经 config:merge 把 `<surface>.serverUrl` 写进
+ * tintin/config.json 顶层段；空/缺省回落全局解析链。调用面随请求头
+ * x-tintin-scope 进入宿主 AsyncLocalStorage（tintin-bundle/index.js 三个 IPC
+ * 入口包装），本清单与 dsh-tintin-bundle/client.js 的白名单字面量须同步。
+ */
+export const TINTIN_SURFACES = ['creation', 'ops', 'media']
+
+/** Pure core of the scope-aware resolution (宿主 getServerUrl 包装的内芯):
+ * the per-surface store section wins only with a non-empty string; anything
+ * else (absent segment, empty string, non-string placeholder) falls back to
+ * the global chain. Never throws. */
+export function resolveScopedServerUrl(store, scope, baseResolve) {
+  if (typeof scope === 'string' && scope) {
+    try {
+      const u = store?.[scope]?.serverUrl
+      if (typeof u === 'string' && u.trim()) return u.trim().replace(/\/+$/, '')
+    } catch { /* fall through to the global chain */ }
+  }
+  return baseResolve()
+}
+
+/**
  * /output media URL rewrite (SRC fixOutputUrl, L99-106): responses from
  * generation endpoints may carry a hard-coded old server address; the file
  * actually lives on the current server, so the client rebuilds the /output/
@@ -90,7 +113,10 @@ export function makeFixGenUrls(fixOutputUrl) {
 export const API_ENDPOINTS = {
   // capabilities：服务端从未实现（声明即 404 陷阱），2026-09-25 移除；
   // 首启探测实际依赖 check + llm.models
-  health: { check: '/health/check' },
+  // 2026-11-14 实测（192.168.111.31:8000）：服务端健康检查已迁 /health（带 GPU/模型
+  // 队列状态），旧 /health/check 404；首启向导 /tintin/setup/probe 同口径已用 /health。
+  // MCP 货架另有 server_health 工具（同状态语义）。
+  health: { check: '/health' },
   stats: { workbench: '/stats/workbench' },
   llm: { chatCompletions: '/llm/chat/completions', adjustCopywriting: '/script/adjust-copywriting', list: '/script/list', models: '/v1/models' },
   copywriting: { voiceover: '/copywriting/voiceover' },

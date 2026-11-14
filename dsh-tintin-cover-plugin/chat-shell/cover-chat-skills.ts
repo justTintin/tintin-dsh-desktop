@@ -1,9 +1,8 @@
 /**
- * 封面技能管理入口(2026-10-30 用户裁决二次修订:形态=编辑器上的大居中弹窗,
- * 即视频剪辑 Skill 弹窗同款——不再是聊天列里的右下小面板)。
- * 本文件只剩转发职责:桥层(cover-chat-bridge showExamples,▦ 按钮)派发的
- * tintin-cover:skills-open 窗口事件在此转译为 parent postMessage,
- * 由编辑器(App.tsx)监听后打开整幅技能管理弹窗(skills-modal.tsx)。
+ * 封面技能管理事件桥(2026-11-14 用户裁决:composer 底栏=注入选择器专用——技能/模板
+ * 的「管理」图标从底栏撤除,管理入口=编辑器顶栏图标(App.tsx)。本文件只剩桥层职责:
+ * 桥层(cover-chat-bridge showExamples,官方 ▦/菜单入口)派发的 tintin-cover:skills-open
+ * 窗口事件转译为 parent postMessage,由编辑器(App.tsx)监听后打开技能管理弹窗。)
  */
 
 window.addEventListener('tintin-cover:skills-open', () => {

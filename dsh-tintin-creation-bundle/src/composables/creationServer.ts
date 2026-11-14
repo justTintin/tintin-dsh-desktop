@@ -1,13 +1,19 @@
 // ═══════════════════════════════════════════════════════════════
 // creationServer — 创作包的服务端桥与产品库访问（独立域）
-// 与媒体包 useWorkbenchPickers/useSettingsConfig 同口径：window.tintin
-// 桥直调、URL 只在本层拼装（IRON-06）、错误转用户可读文案。
+// 与媒体包 useWorkbenchPickers/useSettingsConfig 同口径：桥直调（经
+// getTintin 分面句柄）、URL 只在本层拼装（IRON-06）、错误转用户可读文案。
 // ═══════════════════════════════════════════════════════════════
 
 import { subjectProductFromItem, type CreationSubjectProduct } from './creationStudioLogic'
+// 本地绑定名避开 __tintinSurface：构建期 tintinSurfacePlugin 会按文件内容注入
+// 同名 import（本文件含裸全局字面量时），重名即 rollup 重复声明。
+import { __tintinSurface as surfaceTintin } from '../tintinBridge'
 
+// 分面桥句柄（2026-11-14 用户裁决：三面服务端地址分面独立）——真实 polyfill 的
+// forSurface 在场时返回 creation 面句柄（服务端请求携带 x-tintin-scope 头，宿主
+// 按面解析地址），旧 polyfill/单测桩回落原始全局。
 export function getTintin(): any {
-  return (window as any).tintin
+  return surfaceTintin()
 }
 
 export type PickerItem = Record<string, unknown>
@@ -62,10 +68,12 @@ export async function fetchProductDetail(id: string): Promise<PickerItem> {
 }
 
 /** 服务端直连基址（六视图相对 URL → 可直连绝对地址；样本试听 2026-09-07
- *  同款裁决）：经 env.serverPing，预览环境无 env 桥 → 空串（不改写）。 */
+ *  同款裁决）：经 env.serverPing，预览环境无 env 桥 → 空串（不改写）。
+ *  2026-11-14 起走 getTintin 分面句柄：基址随本面服务端地址解析（回显 url 即
+ *  本面地址），不再裸读 window 全局。 */
 export async function resolveServerBase(): Promise<string> {
   try {
-    return String((await (window as unknown as { tintin?: { env?: { serverPing?: () => Promise<{ url?: unknown }> } } }).tintin?.env?.serverPing?.())?.url || '').replace(/\/$/, '')
+    return String((await getTintin()?.env?.serverPing?.())?.url || '').replace(/\/$/, '')
   } catch { return '' }
 }
 

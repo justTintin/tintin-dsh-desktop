@@ -32,6 +32,10 @@ export interface DesktopNativeCopy {
   readonly installerUnavailable: string
   readonly updateDownloadedTitle: string
   readonly updateReady: (version: string) => string
+  // 下载开始提示（2026-11-13 用户报障「下载没有显示进度」：1GB 静默下载零反馈——
+  // 开始通知 + 任务栏进度条；进度本体走 BrowserWindow.setProgressBar，无文案）
+  readonly updateDownloadingTitle: string
+  readonly updateDownloadingBody: (version: string) => string
   readonly macInstallInstructions: string
   readonly windowsInstallQuestion: string
   readonly restartAndInstall: string
@@ -111,6 +115,8 @@ const COPY: Record<DesktopLocale, DesktopNativeCopy> = {
     installerUnavailable: 'This version cannot download installers from within the app.',
     updateDownloadedTitle: 'DSH Desktop Update Downloaded',
     updateReady: version => `DSH Desktop ${version} is ready to install.`,
+    updateDownloadingTitle: 'Downloading Update',
+    updateDownloadingBody: version => `TinTin Desktop ${version} is downloading. Progress is shown on the taskbar.`,
     macInstallInstructions: 'The disk image has opened. Replace DSH Desktop in Applications, then reopen it.',
     windowsInstallQuestion: 'Restart DSH Desktop and run the installer now?',
     restartAndInstall: 'Restart and Install',
@@ -188,6 +194,8 @@ const COPY: Record<DesktopLocale, DesktopNativeCopy> = {
     installerUnavailable: '当前版本不支持在应用内下载安装包。',
     updateDownloadedTitle: 'DSH Desktop 更新已下载',
     updateReady: version => `DSH Desktop ${version} 已可安装。`,
+    updateDownloadingTitle: '正在下载更新',
+    updateDownloadingBody: version => `TinTin Desktop ${version} 正在下载，进度见任务栏。`,
     macInstallInstructions: '磁盘映像已打开。请替换“应用程序”中的 DSH Desktop，然后重新打开。',
     windowsInstallQuestion: '现在重启 DSH Desktop 并运行安装程序？',
     restartAndInstall: '重启并安装',

@@ -5,6 +5,7 @@
 // (V5 local file write, V6 external process, V7 job channel) and stay minimal
 // on purpose; WP-1 replaces them with the real seam handlers.
 import { spawn } from 'node:child_process'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdirSync, writeFileSync, readdirSync, statSync, existsSync, readFileSync, copyFileSync, rmSync, createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -23,6 +24,8 @@ import {
   isExpectedOfflineError,
   resolveEndpoint,
   API_ENDPOINTS,
+  resolveScopedServerUrl,
+  TINTIN_SURFACES,
 } from 'dsh-tintin-shared/lib/server-proxy.js'
 // 请求信任闸(isLoopback/hasForwardedAddress/isTrustedRequest)是宿主公共设施,
 // 封面插件同用——住在 dsh-tintin-shared(2026-10-31 抽共享包裁决),此处再导出保根面。
@@ -315,7 +318,19 @@ export async function apply(ctx, config) {
   const readAiConfig = aiConfigPath
     ? () => { try { return existsSync(aiConfigPath) ? JSON.parse(readFileSync(aiConfigPath, 'utf8')) : null } catch { return null } }
     : null
-  const getServerUrl = createServerUrlResolver({
+  // ── 分面服务端地址（2026-11-14 用户裁决：素材创作/运营/媒体三面各自独立配置）──
+  // IPC 三入口（/tintin/ipc、/tintin/upload、/tintin/sse）按请求头 x-tintin-scope
+  // 把调用面放进 AsyncLocalStorage；本包装每次调用先读面值，命中 tintin/config.json
+  // 顶层 <surface>.serverUrl（非空字符串才用）即用之，否则落全局解析链。ALS 之外
+  // 的消费方（agent 工具组、openfilm 同步、封面插件自有 resolver、fire-and-forget
+  // 定时器）拿不到面值，语义与原先完全一致（恒全局）。
+  const tintinScope = new AsyncLocalStorage()
+  // 请求头 → 白名单面值（非法/缺失一律 null=全局链）。
+  const readRequestScope = (req) => {
+    const v = req.headers['x-tintin-scope']
+    return typeof v === 'string' && TINTIN_SURFACES.includes(v) ? v : null
+  }
+  const baseServerUrl = createServerUrlResolver({
     // 类型守卫：schemastery 对 volatile 字段缺值时可能编译出空对象占位，
     // 真值判断会放行 "[object Object]" 进解析链（2026-09-28 实测 Invalid URL 根因）。
     readConfig: (key) => {
@@ -326,6 +341,12 @@ export async function apply(ctx, config) {
     readTintinStore: () => readTintinConfigStore(process.env.DSH_HOME),
     readAiConfig,
   })
+  // 无面值时零开销直落全局链（不重复读 store 文件）。
+  const getServerUrl = () => {
+    const scope = tintinScope.getStore()
+    if (!scope) return baseServerUrl()
+    return resolveScopedServerUrl(readTintinConfigStore(process.env.DSH_HOME), scope, baseServerUrl)
+  }
 
   // ── OpenFilm 服务端驱动接缝（2026-10-18 用户裁决：A 方案 + 侧栏独立窗口）──
   // 同步随包技能与 `tintin` 自定义服务（实现见 lib/openfilm/plugin.js）；失败只
@@ -828,19 +849,25 @@ export async function apply(ctx, config) {
           try { console.log(`[bridge] ${channel}${hint} -> ${outcome} ${Date.now() - started}ms`) } catch { /* 追踪不得影响分发 */ }
         }
         try {
-          // Native channel first: the polyfill forwards unknown window.tintin
-          // members as {args:[...]} positional payloads. P0 progress note:
-          // long-running channels (final:mix / voice:cloneBatch / dubVideos)
-          // block until the final result — jobId-based progress is follow-up.
-          if (nativeChannels[channel]) {
-            const result = await tintinBridge.callNative(channel, payload?.args)
+          // 分面调用面（2026-11-14）：请求头 x-tintin-scope（白名单内）决定本次
+          // 分发的 AsyncLocalStorage 面值——native/server 两路 handler 内所有
+          // getServerUrl()/httpRequest 消费点沿 await 链自动按面解析。null=全局。
+          const scope = readRequestScope(req)
+          await tintinScope.run(scope, async () => {
+            // Native channel first: the polyfill forwards unknown window.tintin
+            // members as {args:[...]} positional payloads. P0 progress note:
+            // long-running channels (final:mix / voice:cloneBatch / dubVideos)
+            // block until the final result — jobId-based progress is follow-up.
+            if (nativeChannels[channel]) {
+              const result = await tintinBridge.callNative(channel, payload?.args)
+              trace('ok')
+              sendJson(res, 200, { result })
+              return
+            }
+            const result = await tintinBridge.callServer(channel, payload)
             trace('ok')
             sendJson(res, 200, { result })
-            return
-          }
-          const result = await tintinBridge.callServer(channel, payload)
-          trace('ok')
-          sendJson(res, 200, { result })
+          })
         } catch (error) {
           const code = error?.code === 'unknown-channel' ? 404 : (error?.status ?? 502)
           trace(`failed ${code}`)
@@ -872,10 +899,12 @@ export async function apply(ctx, config) {
         for await (const c of req) chunks.push(c)
         const body = Buffer.concat(chunks)
         try {
-          const result = await httpRequest(upstreamMethod, targetPath, {
+          // 分面调用面（2026-11-14）：multipart 上传按请求头面值解析服务端地址。
+          const scope = readRequestScope(req)
+          const result = await tintinScope.run(scope, () => httpRequest(upstreamMethod, targetPath, {
             body,
             headers: req.headers['content-type'] ? { 'Content-Type': req.headers['content-type'] } : {},
-          })
+          }))
           sendJson(res, 200, { result: result.data })
         } catch (error) {
           ctx.logger.warn('tintin-bundle: upload %s failed: %s', targetPath, error?.message ?? error)
@@ -904,7 +933,9 @@ export async function apply(ctx, config) {
         }
         let upstream
         try {
-          upstream = await openSseStream(targetPath)
+          // 分面调用面（2026-11-14）：SSE 透传按请求头面值解析服务端地址。
+          const scope = readRequestScope(req)
+          upstream = await tintinScope.run(scope, () => openSseStream(targetPath))
         } catch (error) {
           ctx.logger.warn('tintin-bundle: sse %s failed: %s', targetPath, error?.message ?? error)
           sendJson(res, error?.status ?? 502, { error: error?.message ?? String(error) })

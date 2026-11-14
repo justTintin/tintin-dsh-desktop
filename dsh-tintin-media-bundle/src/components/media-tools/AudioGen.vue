@@ -256,11 +256,15 @@ onMounted(() => {
 <style scoped>
 .audio-gen {
   width: 100%;
-  height: 100%;
+  /* 2026-11-14 用户裁决：吃满 .mlib-au（flex 子项），滚动收进列表区与右栏，
+     搜索栏/翻页/播放条钉死不随整页漂（原 height:100% + align-items:start
+     让右栏内容把整页撑出滚动条） */
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(360px, 6fr) 4fr; /* 2026-09-05 用户裁决：左右 6:4 */
   gap: var(--space-4);
-  align-items: start;
+  align-items: stretch;
 }
 
 /* ── 左栏：音频列表 ── */
@@ -269,10 +273,12 @@ onMounted(() => {
   flex-direction: column;
   /* 2026-09-05 用户裁决：一屏 20 条——gap/padding 收紧（12/8），纵向开销让给列表区 */
   gap: var(--space-2);
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  padding: var(--space-3);
+  min-height: 0;
+  /* 2026-11-14 用户裁决：左边外框不需要——去左栏卡片底/框/圆角/内衬，列表平铺 */
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
 }
 .list-search { display: flex; align-items: center; gap: var(--space-2); }
 .list-search .text-input { flex: 1 1 auto; }
@@ -283,13 +289,11 @@ onMounted(() => {
 .list-rows {
   display: flex;
   flex-direction: column;
-  min-height: 240px;
-  /* 2026-09-05 三次裁决：默认高度 600px（小窗口按视口收缩，270px = 非列表纵向开销）；
-     行高与过滤栏同源 token（--size-input-height = 34px） */
-  height: min(600px, calc(100vh - 270px));
+  /* 2026-11-14 用户裁决：列表吃掉左栏全部剩余高度（原 600px 定高+内框废除），
+     滚动只发生在列表区；小窗口给地板高度防压没 */
+  flex: 1 1 auto;
+  min-height: 120px;
   overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
 }
 .list-state {
   padding: var(--space-6) var(--space-4);
@@ -390,8 +394,9 @@ select.row-kind.kind--voice:hover, select.row-kind.kind--none:hover { border-col
 /* 删除按钮：hover 红色警示（2026-09-05 用户裁决新增） */
 .row-act--danger:hover { color: var(--destructive, #ef4444); }
 
-/* 2026-09-05 用户裁决（纠正）：统计+提示独占一行；换页/播放条/每页设置单独一行 */
-.list-page { display: flex; flex-direction: column; gap: 4px; }
+/* 2026-09-05 用户裁决（纠正）：统计+提示独占一行；换页/播放条/每页设置单独一行
+   2026-11-14 用户裁决：翻页+试听播放条钉在左栏底部（列表 flex 吃满后自然沉底） */
+.list-page { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; }
 .page-stat {
   min-width: 0;
   font-size: 12px;
@@ -420,6 +425,9 @@ select.row-kind.kind--voice:hover, select.row-kind.kind--none:hover { border-col
   flex-direction: column;
   gap: var(--space-4);
   min-width: 0;
+  /* 2026-11-14 用户裁决：右栏超高时自己滚，不再把整页撑出滚动条 */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* 分组框（对照原 QGroupBox；占满整行） */

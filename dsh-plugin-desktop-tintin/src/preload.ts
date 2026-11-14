@@ -5,6 +5,7 @@ import { SETUP_ONBOARDING_CHANNEL } from './setup-onboarding-bridge.ts'
 import { DESKTOP_HOST_PATHS_BRIDGE } from './file-path-bridge-contract.ts'
 import { DESKTOP_NATIVE_DIRECTORY_PICKER_CHANNEL } from './directory-picker-contract.ts'
 import { DESKTOP_SAVE_FILE_PICKER_CHANNEL, type DesktopSaveFilePickerRequest } from './save-file-picker-contract.ts'
+import { DESKTOP_PICK_FOLDER_CHANNEL, type DesktopPickFolderRequest } from './pick-folder-contract.ts'
 import type { DesktopOpenFilmBridge, OpenFilmBounds, OpenFilmSelection, OpenFilmStudioRef } from './openfilm-view-contract.ts'
 import type { BrowserViewBounds, DesktopBrowserViewBridge } from './browser-view-contract.ts'
 import {
@@ -54,6 +55,13 @@ contextBridge.exposeInMainWorld('__DSH_DIRECTORY_PICKER__', Object.freeze({
 contextBridge.exposeInMainWorld('dshDesktopSaveFilePicker', Object.freeze({
   pick: (params?: DesktopSaveFilePickerRequest): Promise<string | null> =>
     ipcRenderer.invoke(DESKTOP_SAVE_FILE_PICKER_CHANNEL, params ?? {}),
+}))
+// Native directory dialog (OpenFilm Studio 同款,2026-11-14 封面导出批): consumed as
+// `window.dshDesktopFolderPicker.pick(params)` → absolute directory or null. The cover
+// editor's export bottom bar is the first consumer; same main-frame sender checks apply.
+contextBridge.exposeInMainWorld('dshDesktopFolderPicker', Object.freeze({
+  pick: (params?: DesktopPickFolderRequest): Promise<string | null> =>
+    ipcRenderer.invoke(DESKTOP_PICK_FOLDER_CHANNEL, params ?? {}),
 }))
 // Native OpenFilm Studio view (TinTin channel, B 方案): a WebContentsView over the
 // stage area; the renderer drives its lifecycle and receives Studio's selection/refs.

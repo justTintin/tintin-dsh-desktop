@@ -11,6 +11,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useHostDark } from './composables/hostTheme'
 import { TinIcon } from './components/tinIcons'
+// 服务设置弹层（2026-11-14 用户裁决：素材创作本面服务端地址独立配置；三包字节副本）
+import ServerSettingsDialog from './components/ServerSettingsDialog.vue'
 // 服务端桥与产品库访问：创作包独立域（creationServer），URL 拼装只在本层
 import {
   fetchProducts,
@@ -97,6 +99,8 @@ import CreationSubjectCard from './components/CreationSubjectCard.vue'
    +监听。缺了 .tintin-media-scope 令牌作用域，--card/--border 等全部未定义，
    输入会话卡片会整体透明——2026-10-16 用户报障「没有输入框」的根因之一。 */
 const isDark = useHostDark()
+// 服务设置弹层（2026-11-14 用户裁决：素材创作本面服务端地址独立配置）
+const showServerSettings = ref(false)
 /** 即梦同款交互（2026-10-30 用户纠偏）：点击下拉外部/ESC 一律收起。
  *  排除域=菜单本体与各触发容器（工具行/后端 pill/参数 pill/口播选项/市场） */
 function onDocPointerDown(e: PointerEvent): void {
@@ -664,6 +668,10 @@ function resetAllSkills(): void {
   <!-- tintin-media-scope：搬运的 tokens/global css 的作用域根（同 App/OpsApp）；
        独立视图也必须挂这层，否则设计令牌全部失效 -->
   <div class="tintin-media-scope studio" :class="{ dark: isDark }">
+    <!-- 服务设置（2026-11-14 用户裁决：本面服务端地址分面独立配置；右上角 ghost 图标钮） -->
+    <button type="button" class="toolbar-item studio-settings" title="服务设置" aria-label="服务设置" @click="showServerSettings = true">
+      <TinIcon icon="gear" />
+    </button>
     <!-- 生成/画布 pill（即梦同款居中切换） -->
     <div class="greet">
       <div class="greet-title">你好，今天想要创作什么?</div>
@@ -890,13 +898,18 @@ function resetAllSkills(): void {
       @reset="resetAllSkills"
       @close="marketOpen = false"
     />
+
+    <!-- 服务设置弹层（2026-11-14 用户裁决：素材创作本面服务端地址独立配置） -->
+    <ServerSettingsDialog :visible="showServerSettings" surface="creation" @close="showServerSettings = false" />
   </div>
 </template>
 
 <style scoped>
 /* 形态对照即梦真身（2026-10-16 CDP 提取 + 截图基准）：暗色大卡片输入会话、
    占位符内 / 和 @ 高亮、底部工具行、芯片行带 New/Hot 徽标；颜色走主题 tokens。 */
-.studio { max-width: min(96%, 1360px); margin: 0 auto; padding: var(--space-6) 0 var(--space-8); }
+.studio { position: relative; max-width: min(96%, 1360px); margin: 0 auto; padding: var(--space-6) 0 var(--space-8); }
+/* 服务设置入口（2026-11-14 用户裁决）：绝对定位右上角，形态=toolbar ghost 钮 */
+.studio-settings { position: absolute; top: var(--space-6); right: 0; }
 .greet { text-align: center; margin-bottom: var(--space-5); }
 .greet-title { font-size: 26px; font-weight: 700; color: var(--foreground); }
 .greet-tabs { margin-top: var(--space-4); display: inline-flex; gap: 4px; background: var(--surface); border-radius: 999px; padding: 4px; }

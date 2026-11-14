@@ -110,7 +110,9 @@ if (!onlyPublish) {
   console.log('[release] 跳过打包（--only-publish）')
 }
 
-// 2) NSIS Setup（同版本戳，保证文件名与应用内版本一致）。
+// 2) NSIS Setup（同版本戳，保证文件名与应用内版本一致）。SHA-256 旁挂由
+// package-nsis-local.mjs 在 NSIS 收口生成（2026-11-14 用户裁决：所有打包入口
+// 只要产出 Setup 必带校验文件），此处不再重复。
 if (!onlyPublish) {
   run('NSIS Setup', process.execPath, [nsisScript], { timeout: 60 * 60_000 })
 }

@@ -24,7 +24,7 @@
 
 - `/tintin/cover/api/acp/*`：会话生命周期（start/prompt/steer/cancel/running/ack）+ 事件流（events SSE）+ 聊天存取（chat-*）+ 技能（skills*）+ 素材/文件（files/asset*/library*/describe-paths）+ 产品（products*）+ **模板（templates）**
 - `/tintin/cover/api/pc/*`（`cover-photocraft-routes.js`）：PhotoCraft 域——launch（未装返回结构化 notInstalled）/config+save-config（安装目录持久化 `<DSH_HOME>/tintin/config.json` `photocraft.dir`）/tpl-list、tpl-preview（**PNG 字节直出**）、tpl-delete/psd-import/inspect、screenshot、execute、export
-- `/tintin/cover/api/*` 其余：项目（projects/delete-asset）、上传（upload/upload-image/chat-attachment/chat-ref-image）、生成（background/gen-product→服务端）、matting、server-config+MCP 发现、reveal、fonts
+- `/tintin/cover/api/*` 其余：项目（projects/delete-asset）、上传（upload/upload-image/chat-attachment/chat-ref-image）、生成（background/gen-product→服务端）、matting、server-config+MCP 发现、reveal、fonts、导出中心（export-dir/export-encode/export-write，2026-11-14：三格式编码+缓存落盘）
 - `/tintin/cover/api/tools-mcp`：本地工具 MCP（streamable-http）
 
 ### 本地 MCP 工具（`mcp__cover-tools__*`，会话智能体唯一看图/落盘通道）

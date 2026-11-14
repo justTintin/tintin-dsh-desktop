@@ -14,7 +14,7 @@
 // 选中语义：图视逐项 emit('pick')（容器 addCtxMaterial 入素材池，按
 // material_id 去重）；音频 emit('pick-audio')（容器 addCtxAudio：infoOnly
 // 信息胶囊不入池）。数据获取在 useWorkbenchPickers（组件零 URL 拼装，IRON-06）。
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import TDialog from '@/components/common/TDialog.vue'
 import {
   fetchMaterialGrid,
@@ -62,6 +62,17 @@ async function ensureServerUrl(): Promise<void> {
 
 /* ── 图视域（关键字/品牌/型号/分类过滤 + 卡片网格 + 预览；tab 即 media_type） ── */
 const kw = ref('')
+/** 主搜索框引用：点「搜索」按钮后焦点会移到按钮（HTML 语义），把焦点还回来——
+ *  否则用户接着打字进不了框（2026-11-13 用户报障「光标丢失无法输入」）。 */
+const kwInput = ref<HTMLInputElement | null>(null)
+const aKwInput = ref<HTMLInputElement | null>(null)
+function refocusSearchInput(input: HTMLInputElement | null | undefined): void {
+  void nextTick(() => { try { input?.focus() } catch { /* 已卸载竞态 */ } })
+}
+function runFromButton() {
+  runFromFirst()
+  refocusSearchInput(kwInput.value)
+}
 const brand = ref('')
 const model = ref('')
 const category = ref('')
@@ -313,14 +324,14 @@ watch(
       <!-- ─── Tab1/Tab2 图片/视频（同域不同 media_type） ─── -->
       <div v-show="tab !== 'audio'" class="mtd-av">
         <div class="mtd-filter">
-          <input v-model="kw" class="mtd-input" placeholder="搜索文件名/关键字…" @keydown.enter="runFromFirst()" />
+          <input ref="kwInput" v-model="kw" class="mtd-input" placeholder="搜索文件名/关键字…" @keydown.enter="runFromFirst()" />
           <input v-model="brand" class="mtd-input mtd-input--sm" list="mtd-brand-opts" placeholder="品牌过滤…" @keydown.enter="runFromFirst()" />
           <input v-model="model" class="mtd-input mtd-input--sm" list="mtd-model-opts" placeholder="型号过滤…" @keydown.enter="runFromFirst()" />
           <input v-model="category" class="mtd-input mtd-input--sm" list="mtd-category-opts" placeholder="分类过滤…" @keydown.enter="runFromFirst()" />
           <datalist id="mtd-brand-opts"><option v-for="o in brandOpts" :key="o" :value="o" /></datalist>
           <datalist id="mtd-model-opts"><option v-for="o in modelOpts" :key="o" :value="o" /></datalist>
           <datalist id="mtd-category-opts"><option v-for="o in categoryOpts" :key="o" :value="o" /></datalist>
-          <button class="mtd-btn" :disabled="loading" @click="runFromFirst()">搜索</button>
+          <button class="mtd-btn" :disabled="loading" @click="runFromButton()">搜索</button>
         </div>
 
         <div class="mtd-av-body">
@@ -416,12 +427,12 @@ watch(
       <!-- ─── Tab3 音频 ─── -->
       <div v-show="tab === 'audio'" class="mtd-au">
         <div class="mtd-filter">
-          <input v-model="aKw" class="mtd-input" placeholder="搜索音频名称/关键字…" @keydown.enter="runAudio()" />
+          <input ref="aKwInput" v-model="aKw" class="mtd-input" placeholder="搜索音频名称/关键字…" @keydown.enter="runAudio()" />
           <select v-model="aCat" class="mtd-input mtd-input--sm" @change="runAudio()">
             <option value="">全部分类</option>
             <option v-for="c in cats" :key="c" :value="c">{{ c }}</option>
           </select>
-          <button class="mtd-btn" :disabled="aLoading" @click="runAudio()">搜索</button>
+          <button class="mtd-btn" :disabled="aLoading" @click="runAudio(); refocusSearchInput(aKwInput)">搜索</button>
         </div>
 
         <div class="mtd-au-list">

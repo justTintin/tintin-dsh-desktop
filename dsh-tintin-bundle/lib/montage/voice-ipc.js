@@ -301,12 +301,16 @@ function createMontageVoiceApi({ httpRequest, isExpectedOfflineError, getServerU
       } catch (err) {
         const status = err && err.status
         const connReset = isExpectedOfflineError(err)
-        if (status !== 503 && !connReset) {
-          // 确定性错误直接抛（原版非 503 ApiError 直接 raise）
+        // 500 一律重试（2026-11-13 用户裁决，扩至全部克隆引擎）：VoxCPM2/IndexTTS/
+        // Qwen3 的模型重载、CUDA 崩溃恢复、显存暂紧都以 500 呈现且措辞各异（关键词
+        // 白名单追不全）——服务端回 500 即「本次生成未成」，重试 2 次可熬过恢复期；
+        // 真正的服务端代码错误重试 2 次同样失败，最终报错信息不变。其余 4xx 仍按
+        // 确定性错误直接抛（原版口径）。
+        if (status !== 503 && status !== 500 && !connReset) {
           throw new Error(`TTS 请求失败 HTTP ${status || '—'}: ${formatHttpErr(err)}`)
         }
         if (attempt < maxAttempts) {
-          // 连接中断 → 等恢复（20s）；503 繁忙 → 等 15s；均带 /health 轮询
+          // 连接中断 → 等恢复（20s）；503/500 → 等 15s；均带 /health 轮询
           await waitForServerRecovery(apiUrl, connReset ? 20.0 : 15.0)
           await sleep(2000)
           continue

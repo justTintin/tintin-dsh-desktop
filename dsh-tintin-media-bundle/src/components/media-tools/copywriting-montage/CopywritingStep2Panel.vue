@@ -121,7 +121,6 @@ const libMsg = ref('')
 //  确认后只分割未完成的素材））──
 const srcDlg = ref(false)
 const hasSelected = ref(false)
-const srcStopConfirm = ref(false)
 // 2026-09-23 用户裁决：素材列表可折叠——标题行箭头收起/展开「已选择的原始视频素材」
 // 列表与计数行，为弹窗内分割参数/进度区省出高度；仅内存态，重开弹窗自动展开
 const srcListCollapsed = ref(false)
@@ -193,12 +192,8 @@ function poolIsDup(r: { clipLocalPath?: string }): boolean {
   return !!h && poolHashDup.value.has(h)
 }
 function openSrcDlg(): void {
-  if (splitBusy.value) { srcStopConfirm.value = true; return }
-  srcDlg.value = true
-}
-function confirmStopAndReselect(): void {
-  requestStopSplit()
-  srcStopConfirm.value = false
+  // 2026-11-13 用户裁决：分割进行中直接打开正常窗口——停止入口在窗口内的「停止分割」
+  // 按钮，不再用「分割进行中」确认框挡住整个弹窗。
   srcDlg.value = true
 }
 const pendingSplit = computed(() => srcVideos.value.some((v) => splitStatusOf(v) !== 'done'))
@@ -687,29 +682,6 @@ function scoreClass(score: number | undefined): string {
           </ul>
           <div v-if="srcVideos.length && !srcListCollapsed" class="video-count-footer">选择视频共 {{ srcVideos.length }} 行</div>
 
-          <!-- 分割参数行 + 行内右对齐「开始智能镜头分割」
-               （2026-09-23 用户裁决：分割阈值输入框删除——分割结果由智能匹配直采，
-               无需人工调敏感度；编排层仍以默认 50 传服务端 montageSplit，行为不变） -->
-          <div class="row">
-            <label class="param-label">最小镜头(秒):</label>
-            <input v-model.number="minSceneLen" type="number" step="0.1" min="0.1" max="60" class="input w80" />
-            <label class="param-label" title="无法分割的视频，自动挑出多长的片段">分镜头时长(秒):</label>
-            <input v-model.number="imageDuration" type="number" min="1" max="30"
-              title="无法分割的视频，自动挑出多长的片段" class="input w80" />
-            <!-- 分割模式（2026-11-05 用户裁定）：默认快速=服务端 fast_mode 智能分割切片即返
-                 （逐镜分析后台补齐，不等待）；正常=原模式（分割+逐镜分析同步等待）。
-                 下拉=全应用统一 TSelect（2026-11-05 用户裁定：与其他下拉样式一致） -->
-            <TSelect v-model="splitMode" class="w90" :options="SPLIT_MODE_OPTIONS"
-              title="快速模式=服务端智能分割、切片即返（逐镜分析后台补齐，不等待）；正常模式=上传服务端分割+逐镜分析（等待返回）" />
-            <span class="spacer"></span>
-            <TButton label="开始智能镜头分割" icon="cut" :loading="splitBusy" @click="void runSplit()" />
-            <!-- 2026-09-22 用户裁决：停止分割（当前素材完成后停止，已完成素材保留可断点续分） -->
-            <TButton label="停止分割" variant="secondary" :disabled="!splitBusy" title="停止智能镜头分割：当前素材完成后停止，已完成素材保留（列表淡绿标识）" @click="requestStopSplit" />
-          </div>
-          <progress v-if="splitBusy" class="vd-progress split-progress" :value="splitProgress" max="100" />
-          <div v-if="splitMsg" class="hint">{{ splitMsg }}</div>
-          <div v-if="splitError" class="error-msg">⚠ {{ splitError }}（修正后重按「开始智能镜头分割」重试）</div>
-
           <!-- 已分割镜头表（2026-09-22 用户裁决：暂时不显示——分割结果由智能匹配直接消费，
                无需人工浏览勾选；恢复显示时把 splitTableVisible 改回 true 即可） -->
           <template v-if="splitTableVisible">
@@ -813,6 +785,31 @@ function scoreClass(score: number | undefined): string {
           <div v-if="libMsg" class="hint">{{ libMsg }}</div>
         </template>
         <div v-else class="src-placeholder muted">「{{ sourceTab }}」素材来源暂不支持，当前仅支持本地上传</div>
+
+        <!-- 分割工具行=左栏底部钉底一行（2026-11-13 用户裁决二次纠偏：「最小镜头到分割
+             放到底部一行」指左栏自己的底部（选择池是独立栏有自己的按钮区）——列表
+             flex 吃满左栏剩余空间，工具行钉底不挤列表；仅本地上传 tab 显示 -->
+        <div v-if="sourceTab === '本地上传'" class="split-toolbar">
+          <div class="split-toolbar-row">
+            <label class="param-label">最小镜头(秒):</label>
+            <input v-model.number="minSceneLen" type="number" step="0.1" min="0.1" max="60" class="input w80" />
+            <label class="param-label" title="无法分割的视频，自动挑出多长的片段">分镜头时长(秒):</label>
+            <input v-model.number="imageDuration" type="number" min="1" max="30"
+              title="无法分割的视频，自动挑出多长的片段" class="input w80" />
+            <!-- 分割模式（2026-11-05 用户裁定）：默认快速=服务端 fast_mode 智能分割切片即返
+                 （逐镜分析后台补齐，不等待）；正常=原模式（分割+逐镜分析同步等待）。
+                 下拉=全应用统一 TSelect（2026-11-05 用户裁定：与其他下拉样式一致） -->
+            <TSelect v-model="splitMode" class="w90" :options="SPLIT_MODE_OPTIONS"
+              title="快速模式=服务端智能分割、切片即返（逐镜分析后台补齐，不等待）；正常模式=上传服务端分割+逐镜分析（等待返回）" />
+            <span class="spacer"></span>
+            <TButton label="开始智能镜头分割" icon="cut" :loading="splitBusy" @click="void runSplit()" />
+            <!-- 2026-09-22 用户裁决：停止分割（当前素材完成后停止，已完成素材保留可断点续分） -->
+            <TButton label="停止分割" variant="secondary" :disabled="!splitBusy" title="停止智能镜头分割：当前素材完成后停止，已完成素材保留（列表淡绿标识）" @click="requestStopSplit" />
+          </div>
+          <progress v-if="splitBusy" class="vd-progress split-progress" :value="splitProgress" max="100" />
+          <div v-if="splitMsg" class="hint">{{ splitMsg }}</div>
+          <div v-if="splitError" class="error-msg">⚠ {{ splitError }}（修正后重按「开始智能镜头分割」重试）</div>
+        </div>
         </div><!-- /srcdlg-left -->
 
         <!-- 右栏：选择池（智能匹配的输入；来源=本地上传分割产物 + 素材库加入 + AI 生成确认） -->
@@ -873,16 +870,6 @@ function scoreClass(score: number | undefined): string {
 
       <!-- 停止确认弹窗（分割进行中重选：先停止当前分割，已完成素材保留） -->
       <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
-        <div v-if="srcStopConfirm" class="modal-mask" @click.self="srcStopConfirm = false">
-          <div class="modal">
-            <span class="modal-title">分割进行中</span>
-            <div class="srcdlg-confirm">当前智能镜头分割尚未完成。确定停止当前分割并重新选择素材？已完成的素材会保留（淡绿标识），确认后只分割未完成的素材。</div>
-            <div class="modal-actions">
-              <TButton label="取消" plain @click="srcStopConfirm = false" />
-              <TButton label="停止并重新选择" @click="confirmStopAndReselect" />
-            </div>
-          </div>
-        </div>
       </div></teleport>
 
       <!-- 匹配目标选择弹窗（2026-09-23 用户裁决：匹配前先勾选要匹配到哪些分镜脚本，
@@ -1317,6 +1304,10 @@ function scoreClass(score: number | undefined): string {
 /* 弹窗级 footer：绝对定位悬浮右下角（2026-11-06 用户裁定修正——整行 footer 曾把
    左列截短留出空白栏；现左右两列占满全高，按钮只盖选择池底部一角，左列到底） */
 .srcdlg-foot { position: absolute; right: 20px; bottom: 14px; z-index: 5; }
+/* 分割工具行=左栏底部钉底一行（2026-11-13 用户裁决二次纠偏）：左栏 column flex 的
+   末位子项——列表 flex:1 吃满上方，工具行钉在左栏底部（不含右栏选择池） */
+.split-toolbar { flex: none; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 10px; }
+.split-toolbar-row { display: flex; align-items: center; gap: 10px; }
 /* 逐素材分割状态行底色（2026-09-22 用户裁决：done=淡绿、splitting=淡黄、failed=淡红、未分割无底色） */
 .split-status-row.split-done { background: rgba(46, 204, 113, 0.14); }
 .split-status-row.split-splitting { background: rgba(241, 196, 15, 0.14); }

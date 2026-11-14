@@ -68,8 +68,11 @@ export function useCopywritingMontageStep4Openfilm(deps: CopywritingStep4Openfil
         return
       }
       const r = await (window.tintin as any).openfilm.skills()
-      if (Array.isArray(r?.native) && r.native.length > 0) { filmPlugin.value = { state: 'ok', reason: '' }; return }
-      filmPlugin.value = { state: 'missing', reason: 'OpenFilm 运行时未安装：请重装 TinTin 安装包' }
+      // 判定=vendored 运行时本体在位（runtimeOk，宿主按 node+CLI 探测）；skills 抽屉
+      // 空只是展示损失不再判「未安装」（2026-11-13 用户报障「明明已装却判未安装」：
+      // 0.3.2 包 skills 目录缺失导致 native 恒空，导出能力与抽屉无关）
+      if (r?.runtimeOk === true) { filmPlugin.value = { state: 'ok', reason: '' }; return }
+      filmPlugin.value = { state: 'missing', reason: '视频剪辑运行时未安装：请重装 TinTin 安装包' }
     } catch (error) {
       filmPlugin.value = { state: 'missing', reason: `视频剪辑插件不可用：${errText(error)}` }
     }

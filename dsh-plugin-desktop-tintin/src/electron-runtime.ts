@@ -2,6 +2,7 @@
 
 import {
   app,
+  BrowserWindow,
   dialog,
   nativeTheme,
   net,
@@ -203,6 +204,8 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private scheduled: DesktopShellSpec | undefined
   private mountTask: Promise<void> | undefined
   private quitting = false
+  /** 最近一次更新版本请求的传输失败原因(代理/网络);失败弹窗的 detail 附带它。 */
+  private lastUpdateTransportFailure = ''
   private readonly trayItems = new Map<symbol, DesktopTrayItem>()
   private terminalSpec: DesktopTerminalSpec | undefined
   private diagnosticExport: Promise<void> | undefined
@@ -244,12 +247,15 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
       get statePath() { return join(app.getPath('userData'), 'updates', 'state.json') },
       ...(installationId === undefined ? {} : { installationId }),
       /* 版本请求走主进程 Chromium 网络栈(系统代理/安全软件都会在这里生效);
-         传输失败必须留痕(铁律 3),否则用户弹「未能获取更新信息」时查无证据。 */
+         传输失败必须留痕(铁律 3),并把最近一次原因带给失败弹窗。 */
       request: async (url, init) => {
         try {
-          return await net.fetch(url, init)
+          const response = await net.fetch(url, init)
+          this.lastUpdateTransportFailure = ''
+          return response
         } catch (cause) {
-          this.logError(`dsh-plugin-desktop: update version request to ${String(url)} failed: ${cause instanceof Error ? cause.message : String(cause)}`)
+          this.lastUpdateTransportFailure = cause instanceof Error ? cause.message : String(cause)
+          this.logError(`dsh-plugin-desktop: update version request to ${String(url)} failed: ${this.lastUpdateTransportFailure}`)
           throw cause
         }
       },
@@ -842,11 +848,14 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
   private async showManualUpdateCheckResult(result: UpdateCheckResult | null): Promise<void> {
     const copy = desktopNativeCopy(this.currentLocale)
     if (result === null) {
+      // 失败原因直达用户(2026-11-13 用户问「为什么获取不到」——403 限流/代理失败
+      // 此前只落日志,detail 静态文案让用户无从判断;传输失败时附上真实报错)。
+      const reason = this.lastUpdateTransportFailure
       await this.showUpdateMessageBox({
         type: 'warning',
         title: copy.updateCheckFailedTitle,
         message: copy.updateCheckFailedMessage,
-        detail: copy.tryAgainLater,
+        detail: reason === '' ? copy.tryAgainLater : `${copy.tryAgainLater}\n\n${reason}`,
         buttons: [copy.ok],
         defaultId: 0,
         noLink: true,
@@ -978,37 +987,55 @@ export class ElectronDesktopRuntime implements DesktopRuntime {
     if (destination.canceled || destination.filePath === undefined) return
     signal.throwIfAborted()
     const expectedSha256 = installerSha256?.win32 ?? release.sha256
-    const artifactPath = await downloadTintinUpdateArtifact({
-      platform: 'win32',
-      url: release.url,
-      destinationPath: destination.filePath,
-      request: requestDesktopArtifact,
-      signal,
-      ...(expectedSha256 === undefined ? {} : { expectedSha256 }),
-    })
-    signal.throwIfAborted()
+    // 下载进度（2026-11-13 用户报障「下载没有在客户端上显示进度」）：安装包上 GB，
+    // 静默下载期间用户零反馈。主窗任务栏进度条（Windows 标准，最小化也可见）+
+    // 开始系统通知；进度回调 400ms 节流，结束（完成/取消/失败）一律清除。
+    let progressWindow: BrowserWindow | undefined
+    try { progressWindow = BrowserWindow.getAllWindows().find(w => !w.isDestroyed()); progressWindow?.setProgressBar?.(0) } catch { /* 测试/无窗环境 */ }
+    let lastProgressAt = 0
     try {
-      await recordDesktopUpdateArtifact(app.getPath('userData'), { platform: 'win32', version, path: artifactPath })
-    } catch (cause) {
-      this.logError(`dsh-plugin-desktop: failed to remember update installer for cleanup: ${cause instanceof Error ? cause.message : String(cause)}`)
+      try { this.showNotification({ title: copy.updateDownloadingTitle, body: copy.updateDownloadingBody(version) }) } catch { /* 通知失败不阻断下载 */ }
+      const artifactPath = await downloadTintinUpdateArtifact({
+        platform: 'win32',
+        url: release.url,
+        destinationPath: destination.filePath,
+        request: requestDesktopArtifact,
+        signal,
+        ...(expectedSha256 === undefined ? {} : { expectedSha256 }),
+        onProgress: (received, total) => {
+          const now = Date.now()
+          if (now - lastProgressAt < 400) return
+          lastProgressAt = now
+          // total 缺失（无 content-length）时保持置位值不再推进——本版本
+          // setProgressBar 只收 number，无 indeterminate 形态。
+          if (total === undefined || total <= 0) return
+          try { progressWindow?.setProgressBar?.(Math.min(1, received / total)) } catch { /* 窗口销毁竞态 */ }
+        },
+      })
+      signal.throwIfAborted()
+      try { await recordDesktopUpdateArtifact(app.getPath('userData'), { platform: 'win32', version, path: artifactPath }) } catch (cause) {
+        this.logError(`dsh-plugin-desktop: failed to remember update installer for cleanup: ${cause instanceof Error ? cause.message : String(cause)}`)
+      }
+      const install = await this.showUpdateMessageBox({
+        type: 'info',
+        title: copy.updateDownloadedTitle,
+        message: copy.updateReady(version),
+        detail: copy.windowsInstallQuestion,
+        buttons: [copy.restartAndInstall, copy.later],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+      })
+      if (install.response !== 0) return
+      const spec = this.scheduled
+      if (spec === undefined) throw new Error('dsh-plugin-desktop: no active shell can exit for update installation')
+      signal.throwIfAborted()
+      await this.launchWindowsUpdateInstaller(artifactPath)
+      this.quitting = true
+      spec.requestQuit(0)
+    } finally {
+      try { progressWindow?.setProgressBar?.(-1) } catch { /* 窗口销毁竞态 */ }
     }
-    const install = await this.showUpdateMessageBox({
-      type: 'info',
-      title: copy.updateDownloadedTitle,
-      message: copy.updateReady(version),
-      detail: copy.windowsInstallQuestion,
-      buttons: [copy.restartAndInstall, copy.later],
-      defaultId: 1,
-      cancelId: 1,
-      noLink: true,
-    })
-    if (install.response !== 0) return
-    const spec = this.scheduled
-    if (spec === undefined) throw new Error('dsh-plugin-desktop: no active shell can exit for update installation')
-    signal.throwIfAborted()
-    await this.launchWindowsUpdateInstaller(artifactPath)
-    this.quitting = true
-    spec.requestQuit(0)
   }
 
   private async chooseUpdateDestination(

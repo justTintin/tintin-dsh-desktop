@@ -558,18 +558,18 @@ function oRunAction(): void {
           </div>
           <div v-if="preview" class="mlib-preview-info">
             <span class="mlib-preview-name">{{ mainText(preview) }}</span>
-            <span v-if="subText(preview)" class="mlib-preview-sub">{{ subText(preview) }}</span>
-            <!-- 素材 ID / 文件 Hash（点击复制，同「选择素材」弹窗口径） -->
+            <span v-if="subText(preview)" class="mlib-preview-sub" :title="subText(preview)">{{ subText(preview) }}</span>
+            <!-- 素材 ID / 文件 Hash（点击复制，同「选择素材」弹窗口径；单行省略后全文靠悬浮 title） -->
             <span
               v-if="materialMetaId(preview)"
               class="mlib-preview-meta"
-              title="素材 ID（点击复制）"
+              :title="`素材 ID：${materialMetaId(preview)}（点击复制）`"
               @click="copyMetaText(materialMetaId(preview))"
             >ID：{{ materialMetaId(preview) }}</span>
             <span
               v-if="materialMetaHash(preview)"
               class="mlib-preview-meta mlib-preview-meta--hash"
-              title="文件 Hash（点击复制）"
+              :title="`文件 Hash：${materialMetaHash(preview)}（点击复制）`"
               @click="copyMetaText(materialMetaHash(preview))"
             >Hash：{{ materialMetaHash(preview) }}</span>
           </div>
@@ -689,11 +689,6 @@ function oRunAction(): void {
           <button class="mlib-btn mlib-btn--ghost" :disabled="oLoading || !oHasMore" @click="runOnline(oPage + 1)">下一页</button>
         </div>
       </div>
-    </div>
-
-    <!-- ─── 音频：原「音频生成」界面与功能原样内嵌（v-show 保持组件状态） ─── -->
-    <div v-show="tab === 'audio'" class="mlib-au">
-      <AudioGen />
     </div>
 
     <p class="mlib-tip">视频/图片素材来自服务端素材库（下载到本机）；音频页即原音频生成（音频库 + AI 生成 BGM/音效）。素材为空时请先在服务端确认是否已入库。</p>
@@ -864,6 +859,10 @@ function oRunAction(): void {
 
 .mlib-preview {
   flex: 0 0 300px;
+  /* 预览列宽度恒定的关键：杀掉 flex 自动最小宽（min-width:auto 时，媒体内在宽度
+     参与 min-content 且不认百分比上限——1920 宽的素材会把列撑到近千像素、把左侧
+     网格挤扁；不同分辨率点一下抖一下，2026-11-14 用户报障根因） */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -871,6 +870,7 @@ function oRunAction(): void {
 .mlib-preview-box {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -879,8 +879,11 @@ function oRunAction(): void {
   background: var(--surface-container);
   overflow: hidden;
 }
-.mlib-preview-media { max-width: 100%; max-height: 100%; }
-.mlib-preview-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* 媒体永远填满固定预览盒、按比例留边：内在尺寸零参与布局
+   （2026-11-14 用户裁决：预览区固定大小，图片/视频/在线搜索同口径） */
+.mlib-preview-media { width: 100%; height: 100%; object-fit: contain; }
+/* 定高：预览盒高度不随选中项的行数（sub 有无/路径换行/芯片行数）变化 */
+.mlib-preview-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 0 0 80px; overflow: hidden; }
 .mlib-preview-name {
   font-size: 12px;
   color: var(--foreground);
@@ -888,11 +891,19 @@ function oRunAction(): void {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mlib-preview-sub { font-size: 11px; color: var(--muted-foreground); }
+.mlib-preview-sub {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  /* 来源路径可能很长：单行省略，全文悬浮看（配合信息区定高防抖） */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* 预览元信息（ID/Hash）：可点击复制（同弹窗口径） */
 .mlib-preview-meta {
   align-self: flex-start;
+  max-width: 100%;
   padding: 1px 6px;
   font-size: 11px;
   color: var(--muted-foreground);
@@ -900,6 +911,10 @@ function oRunAction(): void {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--duration-fast);
+  /* 芯片单行省略（Hash 已有同款）：信息区定高不因芯片换行而抖 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mlib-preview-meta:hover { color: var(--primary); border-color: var(--primary); }
 .mlib-preview-meta--hash {
@@ -937,8 +952,9 @@ function oRunAction(): void {
 }
 .mlib-state--error { color: var(--destructive, #e5484d); }
 
-/* 音频域：AudioGen 自带布局（左右 6:4），容器只做占位 */
-.mlib-au { display: flex; flex-direction: column; }
+/* 音频域：AudioGen 自带布局（左右 6:4）。2026-11-14 用户裁决：占满工具 pane
+   （同 mlib-av/mlib-ol 钉底口径）——滚动收进列表区，搜索栏/翻页/播放条不随整页漂 */
+.mlib-au { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 
 .mlib-tip { font-size: 12px; color: var(--muted-foreground); }
 

@@ -118,6 +118,15 @@ interface AppBridge {
     /** What the agent reads for each named product: its specs and selling points, as one block. */
     texts(names: string[]): Promise<Array<{ name: string; text: string }>>;
   };
+  /** TinTin replay (2026-11-14 用户裁决「@ 引用加模板分组,像技能一样」): the server's cover
+      templates (/templates type=cover), for @ references. Optional - only the cover shell
+      provides it; a draft restored elsewhere loses its label. */
+  templates?: {
+    /** The shelf's cover templates (a search, empty = all): id, name, and what it is. */
+    search(q: string): Promise<Array<{ id: string; name: string; description: string }>>;
+    /** What the agent reads for each named template: its layout params, as one block. */
+    texts(names: string[]): Promise<Array<{ name: string; text: string }>>;
+  };
   /** Settings → Developer: `logs`, each turn shows its full log; `changes`, what it changed in the files, under its reply */
   developer: { get(): Promise<DeveloperPrefs>; onChange(listener: (prefs: DeveloperPrefs) => void): () => void };
 }

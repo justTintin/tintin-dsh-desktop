@@ -580,6 +580,47 @@ const coverBridge: AppBridgeContract & Record<string, unknown> = {
     discard: async (): Promise<null> => null,
     reveal: async (): Promise<null> => null,
   },
+  /* TinTin replay (2026-11-14 用户裁决「@ 引用加模板分组,像技能一样」): 服务端封面模板
+     (/templates type=cover)进 @ 菜单——search=货架清单(name 键位), texts=按名取版式块
+     (【封面模板】+画幅+版式参数,与编辑器模板管理弹窗「注入版式」同文本)。 */
+  templates: {
+    search: async (q: string) => {
+      const r = await fetch('/tintin/ipc/cover/pc/tpl-list').then((x) => x.json()).catch(() => null);
+      const rows = Array.isArray(r?.templates) ? (r.templates as Array<Record<string, unknown>>) : [];
+      return rows
+        .map((t) => {
+          const name = String(t.name ?? t.id ?? '');
+          const params = Array.isArray(t.params) ? (t.params as Array<Record<string, unknown>>) : [];
+          const canvas = t.canvas as { width?: unknown; height?: unknown } | undefined;
+          return {
+            id: name,
+            name,
+            description: [String(t.category ?? '') || '未归类', params.length ? `${params.length} 参数` : '', canvas && Number(canvas.width) > 0 ? `${Number(canvas.width)}×${Number(canvas.height)}` : ''].filter(Boolean).join(' · '),
+          };
+        })
+        .filter((t) => !q.trim() || t.name.toLowerCase().includes(q.trim().toLowerCase()));
+    },
+    texts: async (names: string[]) => {
+      const r = await fetch('/tintin/ipc/cover/pc/tpl-list').then((x) => x.json()).catch(() => null);
+      const rows = Array.isArray(r?.templates) ? (r.templates as Array<Record<string, unknown>>) : [];
+      return names.map((name) => {
+        const t = rows.find((x) => String(x.name ?? x.id ?? '') === name);
+        if (!t) return { name, text: '' };
+        const lines: string[] = [`【封面模板】${String(t.name ?? name)}（模板 id：${String(t.id ?? '')}）`]
+        const canvas = t.canvas as { width?: unknown; height?: unknown } | undefined
+        if (canvas && Number(canvas.width) > 0 && Number(canvas.height) > 0) lines.push(`画幅：${Number(canvas.width)}×${Number(canvas.height)}`)
+        const params = Array.isArray(t.params) ? (t.params as Array<Record<string, unknown>>) : []
+        if (params.length) {
+          lines.push('版式参数（按此风格模仿）：' + params
+            .map((p) => `${String(p.label ?? p.name ?? '')}=${String(p.default ?? '')}`)
+            .filter((s) => s.split('=')[1]?.trim())
+            .join('；'))
+        }
+        lines.push('说明：这是服务端封面模板（/templates 体系），请按上述版式风格快速生成/模仿封面。')
+        return { name, text: lines.join('\n') }
+      })
+    },
+  },
   developer: { get: async (): Promise<{ logs: boolean; changes: boolean }> => ({ logs: false, changes: false }), onChange: noopStop },
 };
 

@@ -30,7 +30,7 @@ import { browserCookiesDir, collectPlatformCookies, migrateDefaultSessionCookies
 import { registerSettingsIpc } from './settings-store.ts'
 import { registerHistoryBookmarkIpc } from './history-bookmark.ts'
 import { attachContextMenu } from './context-menu.ts'
-import { registerTabEngine } from './tab-engine.ts'
+import { registerTabEngine, type TabEngineHandle } from './tab-engine.ts'
 import { createPageDownloadMirror } from './page-downloads.ts'
 import { createThemeSync } from './theme-sync.ts'
 import type { TabPoolState } from './tab-model.ts'
@@ -125,6 +125,8 @@ void loopback
 // 浏览器窗口页面（build/tintin-browser.html，2026-09-28 用户裁决：整体按原客户端
 // 实现——页面承载工具条/左栏/右栏/下载栏，原生视图按页面宿主矩形覆盖）
 let pageHostRect: { x: number; y: number; width: number; height: number } | null = null
+/** 内嵌态原生视图挂载后的宿主回调（main-hook 注入的标题条置顶，见 registerBrowserService options）。 */
+let onNativeViewMounted: (() => void) | null = null
 // 媒体嗅探（SRC webview 注入方案的壳侧等价；按平台分区缓冲，页面拉取；
 // 数据面 IPC 与后台捕获窗口在 sniff-capture.ts）
 
@@ -249,6 +251,7 @@ function layoutBrowserWindow(): void {
     try { win.contentView.addChildView(view) } catch { /* 已挂载 */ }
     // 挂载点统一恢复出声（与 detachPlatformView 的摘下静音配对）
     try { view.webContents.audioMuted = false } catch { /* 销毁竞态 */ }
+    try { onNativeViewMounted?.() } catch { /* 宿主回调异常不阻断挂载 */ }
     return
   }
   const win = browserWindow
@@ -333,7 +336,7 @@ function ensureBrowserView(platform: string): WebContentsView {
     onNavEvent()
     // B站下载助手：随包扩展注入（SRC viewpool platformId==='bilibili' 分支同口径；
     // 装了插件 → B站下载交给插件，无需嗅探）。view 挂分区后此 session 即 view 所用 session
-    if (platform === 'bilibili' && currentPlatform === 'bilibili' && bilibiliHelperInstalled()) {
+    if (platform === 'bilibili' && bilibiliHelperInstalled()) {
       const extPath = findBilibiliHelperDir()
       const sess = session.fromPartition(PLATFORM_DEFS.bilibili!.partition)
       if (extPath && sess) injectBilibiliHelper(view.webContents, extPath, sess)
@@ -342,16 +345,10 @@ function ensureBrowserView(platform: string): WebContentsView {
   view.webContents.on('did-navigate-in-page', onNavEvent)
   view.webContents.on('did-start-loading', () => pushPageState())
   view.webContents.on('did-stop-loading', () => pushPageState())
-  // B站扩展下载链接捕获（2026-10-26 复活，SRC viewpool L237-254/L371-396）：
-  // console-message 推送捕获（冗余通道）+ 2s 主动轮询 shadow DOM（主通道）。
-  // 轮询在 wc 销毁时自停；页面非 B站域名时该轮跳过。
+  // B站扩展下载链接 console 捕获（2026-10-26 复活，SRC viewpool L237-254 冗余通道；
+  // 主动轮询已升级为宿主级「跟随活跃 B站内容面」，见 registerTabEngine 之后的宿主轮询）
   if (platform === 'bilibili') {
     attachBiliDlConsoleCapture(view.webContents, (pl) => downloadMirror().pushBiliExtDl(pl))
-    startBiliExtPolling({
-      getWebContents: () => (view.webContents.isDestroyed() ? null : view.webContents),
-      push: (pl) => downloadMirror().pushBiliExtDl(pl),
-      log: (msg) => ctxLog(msg),
-    })
   }
   // 分区存量救援：分区空而默认 session 有该平台登录（分区事故期间落的）→ 迁回
   void migrateDefaultSessionCookies(platform, ctxLog)
@@ -385,37 +382,29 @@ function attachToWindow(): void {
   pushPageState()
 }
 
-/** 激活平台视图（ensure + 挂主窗 + 切其余平台下幕），不导航 —— 平台行/地址栏直达共用的
- *  「切到该站」本体。2026-11-04 限制清除批（用户裁决）：独立窗形态缺宿主时先 ensure。 */
-function activatePlatformView(platform: string): { ok: boolean; error?: string } {
-  if (!platformOf(platform)) return { ok: false, error: `未知平台: ${platform}` }
-  if (!embedActive && (!browserWindow || browserWindow.isDestroyed()) && mainWindowRef && !mainWindowRef.isDestroyed()) {
-    ensureBrowserWindow(mainWindowRef)
-  }
-  currentPlatform = platform
-  ensureBrowserView(platform)
-  attachToWindow()
-  return { ok: true }
-}
+/** 标签引擎句柄（registerTabEngine 返回；导航中枢的 tab 化入口）。 */
+let tabEnsure: TabEngineHandle['ensureTab'] | null = null
 
-/** 导航到平台：收藏语义 —— 跨平台点击=导航到该站首页（点收藏去那个站）；同平台重复
- *  点击保持现场（2026-11-04 裁决：防种子页回跳丢现场）；fxg 抖店重入保持现场永不重载
- *  （仅自动上架驱动，重载会打断在途任务；首次进入仍载种子页）。
- *  ⚠️ 保持现场判定必须在 activatePlatformView **之前**：它会立刻翻转 currentPlatform
- *  （2026-11-08 事故：判定放在翻转之后恒真 → 跨平台永不导航，视图停在 about:blank
- *  白屏、网址栏为空）。 */
+/** 导航到平台（2026-11-13 用户裁决「像正常浏览器一样」·tab 化根治）：一切导航
+ *  （平台行/收藏/回环门面/嗅探下载/种子页）都落到标签池——该平台已有标签则聚焦
+ *  保持现场（跨平台切换互不重载，原「同平台保持现场/fxg 永不重载」语义由标签
+ *  本体天然承担），无则新建标签并载种子页。打开过的页面全部在顶部 tab 栏可见、
+ *  可切、可关。 */
 function navigateTo(platform: string, targetUrl?: string): { ok: boolean; error?: string } {
   const def = platformOf(platform)
   if (!def) return { ok: false, error: `未知平台: ${platform}` }
-  const keepState = currentPlatform === platform || (platform === 'fxg' && browserViews.has(platform))
-  const activated = activatePlatformView(platform)
-  if (!activated.ok) return activated
-  const url = targetUrl ?? (keepState ? undefined : def.seedUrl)
-  if (!url) return { ok: true }
-  const view = activeView()
-  if (view) {
-    recordNavIntent(view.webContents, url)
-    void view.webContents.loadURL(url).catch(() => {})
+  // 非 embed 形态首次进入保独立窗存在（原语义）
+  if (!embedActive && (!browserWindow || browserWindow.isDestroyed()) && mainWindowRef && !mainWindowRef.isDestroyed()) {
+    ensureBrowserWindow(mainWindowRef)
+  }
+  const ensured = tabEnsure?.(platform)
+  if (!ensured) return { ok: false, error: '标签创建失败（已达上限或平台未知）' }
+  if (targetUrl) {
+    const view = tabViews.get(ensured.id)
+    if (view && !view.webContents.isDestroyed()) {
+      recordNavIntent(view.webContents, targetUrl)
+      void view.webContents.loadURL(targetUrl).catch(() => {})
+    }
   }
   return { ok: true }
 }
@@ -551,7 +540,14 @@ export function embedShow(bounds: EmbedRect): { ok: boolean; error?: string } {
     && embedOuterRect.x === nextRect.x && embedOuterRect.y === nextRect.y
     && embedOuterRect.width === nextRect.width && embedOuterRect.height === nextRect.height
   embedOuterRect = nextRect
-  if (!wasActive) { try { win.contentView.addChildView(embedPageView) } catch { /* 已挂载 */ } }
+  if (!wasActive) {
+    try { win.contentView.addChildView(embedPageView) } catch { /* 已挂载 */ }
+    try { onNativeViewMounted?.() } catch { /* 宿主回调异常不阻断挂载 */ }
+    // 默认落点（2026-11-13 用户裁决「默认进入应该有默认地址」）：首次进入且从未激活
+    // 过任何平台视图 → 导航网页浏览器种子页（此前只有白占位+空地址栏）。重入
+    // （KeepAlive，平台视图已有现场）不重播种子——挂回由 layoutBrowserWindow 统一处理。
+    if (tabPool.tabs.length === 0) navigateTo('web') // 首次种子（tab 化后按标签池判，2026-11-13）
+  }
   if (!unchanged) embedPageView.setBounds(embedOuterRect)
   layoutBrowserWindow()
   pushPageState()
@@ -584,10 +580,15 @@ export function embedClose(): void {
 
 export function registerBrowserService(
   mainWindow: BrowserWindow,
-  options: { pagePreloadPath?: string } = {},
+  options: {
+    pagePreloadPath?: string
+    /** 内嵌态原生视图（UI 页/平台分区）挂进主窗后的宿主回调——标题条 chrome 层重排回顶层用（2026-11-13 报障：弹层被嵌入视图盖住）。 */
+    onNativeViewMounted?: () => void
+  } = {},
 ): void {
   mainWindowRef = mainWindow
   pagePreloadPath = options.pagePreloadPath ?? null
+  onNativeViewMounted = options.onNativeViewMounted ?? null
   // App 深链吞掉注册（进程内一次；registerBrowserService 只在首窗创建时进一次）
   registerDeepLinkSwallow(ctxLog)
   probeWebTheme() // 主题初始化+导航探针（web 层真值，2026-11-08 白底修复 §16.23）
@@ -883,8 +884,9 @@ export function registerBrowserService(
   ipcMain.handle('browser:open', (_e, platform: unknown) => openPlatform(String(platform || '')))
 
   // ── 标签页（2026-11-08 第二批 #2）：引擎在 tab-engine.ts（千行付账提取），
-  // 池状态归宿主（tabPool/tabViews/currentPlatform），依赖注入回写 ──
-  registerTabEngine({
+  // 池状态归宿主（tabPool/tabViews/currentPlatform），依赖注入回写；
+  // 2026-11-13 起引擎句柄（ensureTab）回接导航中枢 navigateTo（tab 化根治）──
+  tabEnsure = registerTabEngine({
     ipcMain,
     getPool: () => tabPool,
     setPool: (next) => { tabPool = next },
@@ -905,8 +907,41 @@ export function registerBrowserService(
     clearIntent: (wc) => { pendingNavUrl.delete(wc.id) },
     sendUi: (payload) => sendUi(payload),
     pushState: () => pushPageState(),
+    // 平台扩展面接缝（2026-11-13 用户报障：B站视频开在标签页时下载助手空）：
+    // 标签视图创建即注入 B站下载助手扩展 + 挂 console 捕获——原实现只接主平台
+    // 视图，tab 视图既无扩展也无捕获，助手区永远空。
+    onTabViewCreated: (platform, view) => {
+      if (platform !== 'bilibili' || !bilibiliHelperInstalled()) return
+      const extPath = findBilibiliHelperDir()
+      const sess = session.fromPartition(PLATFORM_DEFS.bilibili!.partition)
+      if (extPath && sess) {
+        injectBilibiliHelper(view.webContents, extPath, sess)
+        attachBiliDlConsoleCapture(view.webContents, (pl) => downloadMirror().pushBiliExtDl(pl))
+      }
+    },
     log: ctxLog,
-  }, themedBackground)
+  }, themedBackground).ensureTab
+
+  // B站扩展下载轮询（主通道，宿主级单实例）：跟随「活跃的 B站内容面」——活跃标签
+  // 是 B站 → 轮询该标签视图；否则轮询主平台视图；两处皆无 → 本轮跳过。
+  // （2026-11-13 用户报障：原实现挂在主平台视图创建处，用户只用标签页时轮询根本
+  //  不存在；注入侧由上面 onTabViewCreated 与主视图 did-navigate 两处覆盖。）
+  if (bilibiliHelperInstalled()) {
+    startBiliExtPolling({
+      getWebContents: () => {
+        const pool = tabPool
+        const activeTab = pool.activeId ? pool.tabs.find((t) => t.id === pool.activeId) : undefined
+        if (activeTab?.platform === 'bilibili') {
+          const tv = tabViews.get(activeTab.id)
+          if (tv && !tv.webContents.isDestroyed()) return tv.webContents
+        }
+        const main = browserViews.get('bilibili')
+        return main && !main.webContents.isDestroyed() ? main.webContents : null
+      },
+      push: (pl) => downloadMirror().pushBiliExtDl(pl),
+      log: (msg) => ctxLog(msg),
+    })
+  }
 
   // 历史/书签（2026-11-08 第二批 #3/#4）：标签 did-navigate 与地址栏星标共用
   registerHistoryBookmarkIpc(ipcMain)

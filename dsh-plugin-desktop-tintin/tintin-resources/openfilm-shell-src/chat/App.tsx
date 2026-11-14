@@ -22,7 +22,7 @@ import { AgentPermissionCard } from '@/components/AgentPermissionCard';
 import { LocalAgentQuestionCard } from '@/components/TurnQuestionCard';
 import { Tooltip } from '@/components/Tooltip';
 import { StickToBottomContext, useStickToBottom, useTailSpacer } from '@/components/useStickToBottom';
-import { PromptEditor, PromptPill, PromptPillHoverContext, PromptPillRevealContext, activatedProductNames, activatedSkillIds, fileReferenceId, fileReferencePath, productReferenceId, promptReferenceToken, resolvePromptReferences, skillReferenceId, skillReferencePackage, splitPromptReferenceText, type MentionProvider, type PromptEditorHandle, type PromptEditorState, type PromptPillHover, type PromptReference } from '@/components/prompt-editor';
+import { PromptEditor, PromptPill, PromptPillHoverContext, PromptPillRevealContext, activatedProductNames, activatedSkillIds, activatedTemplateNames, fileReferenceId, fileReferencePath, productReferenceId, promptReferenceToken, resolvePromptReferences, skillReferenceId, skillReferencePackage, splitPromptReferenceText, templateReferenceId, type MentionProvider, type PromptEditorHandle, type PromptEditorState, type PromptPillHover, type PromptReference } from '@/components/prompt-editor';
 import { filesFromTransfer, transferHasFiles } from '@/lib/composer-attachments';
 import { PROMPT_PICTURES_MAX, attachedPictures, attachmentBlocker, formatFileSize, turnAttachments, useDesktopAttachments } from '@/lib/desktop-attachments';
 import { attachmentPill, attachmentsInText, attachmentWords, isAttachmentPill, projectFilePath, sentPill } from '@/lib/attachment-pills';
@@ -374,9 +374,24 @@ function ChatPane({ project, banners, selection, assetsOpen, assetsOverlay }: { 
     setProductRefs((list) => (list.some((p) => p.id === pill.id) ? list : [...list, pill]));
     return pill;
   }, []);
+  /* TinTin replay (2026-11-14 用户裁决「@ 引用加模板分组,像技能一样」): the server's cover
+     templates, fed once like the products; the pill's id carries the template's name
+     (texts 直取版式), label=名称, 重启后草稿里未知 pill 仅丢显示 */
+  const [templateRefs, setTemplateRefs] = React.useState<PromptReference[]>([]);
+  const [tintinTemplates, setTintinTemplates] = React.useState<Array<{ id: string; name: string; description: string }>>([]);
+  React.useEffect(() => {
+    let live = true;
+    void app.templates?.search('').then((items) => { if (live) setTintinTemplates(items); }, () => {});
+    return () => { live = false };
+  }, []);
+  const templatePill = React.useCallback((tpl: { id: string; name: string; description: string }): PromptReference => {
+    const pill: PromptReference = { id: templateReferenceId(tpl.name), kind: 'template', label: tpl.name };
+    setTemplateRefs((list) => (list.some((p) => p.id === pill.id) ? list : [...list, pill]));
+    return pill;
+  }, []);
   const composerPills = React.useMemo(
-    () => [...[...studioRefs.entries()].map(([id, ref]) => refPill(id, ref)), ...fileRefs, ...skillRefs, ...productRefs, ...composerFiles.files.map(attachmentPill)],
-    [studioRefs, fileRefs, skillRefs, productRefs, composerFiles.files],
+    () => [...[...studioRefs.entries()].map(([id, ref]) => refPill(id, ref)), ...fileRefs, ...skillRefs, ...productRefs, ...templateRefs, ...composerFiles.files.map(attachmentPill)],
+    [studioRefs, fileRefs, skillRefs, productRefs, templateRefs, composerFiles.files],
   );
   /** files brought in (dropped, pasted, picked with +): pills where they were let go, or at the caret */
   const attachFiles = (files: File[], point?: { x: number; y: number }) => {
@@ -564,8 +579,23 @@ function ChatPane({ project, banners, selection, assetsOpen, assetsOverlay }: { 
           select: () => productPill(product),
         })),
       }] : []),
+      /* TinTin replay (2026-11-14 用户裁决「@ 引用加模板分组,放到技能后面」): the server's
+         cover templates - their pills carry the layout params the agent reads */
+      ...(app.templates ? [{
+        id: 'tintin-templates',
+        groupLabel: '封面模板',
+        limit: Infinity,
+        items: tintinTemplates.map((tpl) => ({
+          id: templateReferenceId(tpl.name),
+          kind: 'template' as const,
+          label: tpl.name,
+          ...(tpl.description ? { detail: tpl.description, describes: true } : {}),
+          keywords: [tpl.name],
+          select: () => templatePill(tpl),
+        })),
+      }] : []),
     ];
-  }, [selection, mentionFiles, nameableSkills, tintinProducts, productPill, skillWords, skillPill, t, takeStudioRefs]);
+  }, [selection, mentionFiles, nameableSkills, tintinProducts, tintinTemplates, productPill, templatePill, skillWords, skillPill, t, takeStudioRefs]);
   const onComposerChange = React.useCallback((state: PromptEditorState) => {
     setFollowUp(state.text);
     setFollowUpRefs(state.references);
@@ -926,6 +956,7 @@ function ChatPane({ project, banners, selection, assetsOpen, assetsOverlay }: { 
     setFileRefs([]);
     setSkillRefs([]);
     setProductRefs([]);
+    setTemplateRefs([]);
     const files = composerFiles.take(attached.map((f) => f.id));
     const id = makeLocalAgentTurnId();
     const refs = used.filter(Boolean);
@@ -936,15 +967,18 @@ function ChatPane({ project, banners, selection, assetsOpen, assetsOverlay }: { 
     /* TinTin(2026-11-09): each named product pill becomes its context block, as a skill's SKILL.md does */
     const productNames = activatedProductNames(followUpRefs);
     const productTexts = productNames.length ? (app.products?.texts(productNames).catch(() => []) ?? Promise.resolve([])) : Promise.resolve([]);
+    /* TinTin replay (2026-11-14 用户裁决「@ 引用加模板分组」): each named template pill becomes its layout block, as a product's specs do */
+    const templateNames = activatedTemplateNames(followUpRefs);
+    const templateTexts = templateNames.length ? (app.templates?.texts(templateNames).catch(() => []) ?? Promise.resolve([])) : Promise.resolve([]);
     /* an example pointed at: its folder fetched now if it is not yet (the turn waits, as it waits for its reply) */
     const withFolders = Promise.all(refs.map(async (ref) => (ref.kind === 'example' && !ref.folder
       ? { ...ref, folder: await app.exampleFolder?.(ref.id).catch(() => undefined) } : ref)));
     /* the pictures sent: the references' first, then the files brought in, in the order of their pills, while there is
        room (the rest by their path) */
     /* what the person changed while the agent last worked that Studio kept over its writes, said with this message */
-    const prepared = withFolders.then((ready) => Promise.all([referencePictures(ready, { project: project.path, turnId: id }), skillTexts, productTexts, keptNote(project.id, sessionId)])
-      .then(async ([{ pictures, images }, skills, products, kept]) => ({
-        text: instruction + studioReferencesText(ready, { stage, pictures }) + kept.text + undoneNote(sessionId) + skills.map((s) => `\n\n${s.text}`).join('') + products.map((s) => `\n\n${s.text}`).join(''),
+    const prepared = withFolders.then((ready) => Promise.all([referencePictures(ready, { project: project.path, turnId: id }), skillTexts, productTexts, templateTexts, keptNote(project.id, sessionId)])
+      .then(async ([{ pictures, images }, skills, products, templates, kept]) => ({
+        text: instruction + studioReferencesText(ready, { stage, pictures }) + kept.text + undoneNote(sessionId) + skills.map((s) => `\n\n${s.text}`).join('') + products.map((s) => `\n\n${s.text}`).join('') + templates.map((s) => `\n\n${s.text}`).join(''),
         images: [...images, ...await attachedPictures(files, PROMPT_PICTURES_MAX - images.length)],
         skills: skills.map((s) => s.name),
         said: kept.said,

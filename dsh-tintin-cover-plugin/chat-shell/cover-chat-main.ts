@@ -14,6 +14,8 @@ import '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat
 import { mountChat } from '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/mount';
 
 // 构建标记(2026-10-29 用户排障:实例混合态鉴别——F12 控制台可见)
-console.log('[cover-chat] build 2026-10-30-a (skills manager on ▦ button)')
+// 2026-11-14 用户裁决:工作模式整体废除(「没有工作模式的说法」),底栏回归注入选择器
+// (+附件/在线素材/选择产品);模板管理入口=编辑器顶栏;模板进 @ 引用(技能后分组)。
+console.log('[cover-chat] build 2026-11-14-c (bar: inject-pickers only; templates in @ menu)')
 
 void mountChat(document.getElementById('root')!);

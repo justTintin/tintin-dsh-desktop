@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createSSRApp, defineComponent, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import OpsApp from '../src/OpsApp.vue'
+import ServerSettingsDialog from '../src/components/common/ServerSettingsDialog.vue'
 
 // 3 个工具面板 mock 为空壳（同媒体包冒烟口径；产品资料渲染面由
 // tintin-ops-product-library-logic/upload 既有链路覆盖）
@@ -33,5 +34,24 @@ describe('多 Tab 工作区·OpsApp.vue 渲染面', () => {
     expect(html).toContain('display:none')
     expect(html).not.toContain('tool-tab-pane')
     expect(html).not.toContain('modal-mask')
+  })
+})
+
+describe('服务设置（2026-11-14 用户裁决：运营工具本面服务端地址分面独立）', () => {
+  it('导航页头部含齿轮入口（aria-label=服务设置）', async () => {
+    const html = await ssr(OpsApp)
+    expect(html).toContain('head-settings')
+    expect(html).toContain('aria-label="服务设置"')
+  })
+
+  it('弹层 visible=false 不渲染；visible=true 出双栏（左表单+右 MCP 清单，SSR 无桥调用）', async () => {
+    expect(await ssr(ServerSettingsDialog, { visible: false, surface: 'ops' })).not.toContain('ssd-card')
+    const html = await ssr(ServerSettingsDialog, { visible: true, surface: 'ops' })
+    expect(html).toContain('ssd-card')
+    expect(html).toContain('ssd-input')
+    expect(html).toContain('保存地址')
+    expect(html).toContain('获取 MCP 服务')
+    expect(html).toContain('发现的 MCP 服务')
+    expect(html).toContain('正在加载…')
   })
 })

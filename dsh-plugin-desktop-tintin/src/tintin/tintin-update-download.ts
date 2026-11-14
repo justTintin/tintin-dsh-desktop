@@ -32,6 +32,8 @@ export interface TintinDownloadOptions {
    * a digest still installs.
    */
   readonly expectedSha256?: string
+  /** 下载进度回调（每块落盘后触发；total 缺失时为 undefined）——任务栏进度条数据源。 */
+  readonly onProgress?: (received: number, total: number | undefined) => void
 }
 
 interface TintinDownloadPaths {
@@ -125,7 +127,11 @@ export async function downloadTintinUpdateArtifact(options: TintinDownloadOption
 
   let failure: unknown
   try {
-    await writeResponseBody(paths.temporary, response.body, options.signal)
+    const declared = Number(response.headers.get('content-length'))
+    const total = Number.isFinite(declared) && declared > 0 ? declared : undefined
+    await writeResponseBody(paths.temporary, response.body, options.signal, (received) => {
+      options.onProgress?.(received, total)
+    })
     options.signal?.throwIfAborted()
     await assertWindowsInstaller(paths.temporary)
     if (expectedSha256 !== undefined) {

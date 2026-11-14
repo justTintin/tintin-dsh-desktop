@@ -28,6 +28,7 @@ import {
 } from './launch-workspace-contract.ts'
 import { DESKTOP_RENDERER_ACTION_CHANNEL } from './renderer-actions-contract.ts'
 import { DESKTOP_NATIVE_DIRECTORY_PICKER_CHANNEL } from './directory-picker-contract.ts'
+import { DESKTOP_PICK_FOLDER_CHANNEL, type DesktopPickFolderRequest } from './pick-folder-contract.ts'
 import { DESKTOP_SAVE_FILE_PICKER_CHANNEL, type DesktopSaveFilePickerRequest } from './save-file-picker-contract.ts'
 import { createDesktopRendererActionDispatcher } from './renderer-actions-dispatch.ts'
 import type { DesktopNotification, DesktopShellSpec } from './runtime.ts'
@@ -404,6 +405,27 @@ export class ElectronShellGeneration {
       const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
       const ret = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
       return ret.canceled || !ret.filePath ? null : ret.filePath
+    })
+
+    // Native directory dialog (2026-11-14 封面导出批;OpenFilm 的 openfilm:native:pick-folder
+    // 同款语义:title/defaultPath + openDirectory/createDirectory,取消=null)。与 save-file
+    // picker 同一组 sender 校验,只服务主窗口主框架。
+    renderer.ipc.handle(DESKTOP_PICK_FOLDER_CHANNEL, async (event, params: unknown) => {
+      if (this.released || event.sender !== renderer
+        || event.senderFrame === null || event.senderFrame !== renderer.mainFrame
+        || !sameOriginFrame(event.senderFrame.url, origin)) {
+        throw new Error('dsh-plugin-desktop: untrusted pick-folder sender')
+      }
+      const p = (params && typeof params === 'object' && !Array.isArray(params)
+        ? params : {}) as DesktopPickFolderRequest
+      const options: Electron.OpenDialogOptions = {
+        title: typeof p.title === 'string' && p.title ? p.title : '选择文件夹',
+        properties: ['openDirectory', 'createDirectory'],
+      }
+      if (typeof p.defaultPath === 'string' && p.defaultPath) options.defaultPath = p.defaultPath
+      const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+      const ret = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+      return ret.canceled || !ret.filePaths.length ? null : ret.filePaths[0]!
     })
 
     renderer.ipc.handle(SETUP_ONBOARDING_CHANNEL, async (event, request: unknown) => {

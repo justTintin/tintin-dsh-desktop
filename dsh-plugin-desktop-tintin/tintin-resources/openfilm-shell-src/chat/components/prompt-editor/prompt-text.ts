@@ -45,6 +45,9 @@ export interface PromptReference extends StoredPromptReference {
 export type PromptReferenceKind =
   | 'element' | 'region' | 'time' | 'range' | 'track' | 'subtitle' | 'showcase' | 'file' | 'card' | 'skill' | 'example' | 'voice'
   | 'product'
+  /* TinTin replay (2026-11-14 用户裁决「@ 引用加模板分组,像技能一样」): a cover template
+     of the server's /templates shelf, referenced for its layout params */
+  | 'template'
   | 'clipMg' | 'clipVideo' | 'clipVoice' | 'clipSfx' | 'clipMusic' | 'clipCaption';
 
 /* The id prefix of a file reference, followed by the workspace-relative path, which is
@@ -107,6 +110,37 @@ export function productReferenceId(productName: string): string {
 export function productReferenceName(id: string): string | null {
   if (!id.startsWith(PRODUCT_REFERENCE_PREFIX)) return null;
   return id.slice(PRODUCT_REFERENCE_PREFIX.length) || null;
+}
+
+/* TinTin replay (2026-11-14 用户裁决「@ 引用加模板分组」): the id prefix of a cover
+   template reference, followed by the template's name — as with products, the name is
+   all the reference holds, so the host resolves the layout text at send. */
+const TEMPLATE_REFERENCE_PREFIX = 'template:';
+
+export function templateReferenceId(templateName: string): string {
+  return `${TEMPLATE_REFERENCE_PREFIX}${templateName}`;
+}
+
+/** Null if not a template reference (or the name is empty). */
+export function templateReferenceName(id: string): string | null {
+  if (!id.startsWith(TEMPLATE_REFERENCE_PREFIX)) return null;
+  return id.slice(TEMPLATE_REFERENCE_PREFIX.length) || null;
+}
+
+/** The TinTin cover templates this message names, deduplicated, in order. */
+export function activatedTemplateNames(
+  references: readonly { id: string }[] | undefined,
+): string[] {
+  if (!references?.length) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const ref of references) {
+    const name = templateReferenceName(ref.id);
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out;
 }
 
 /** The TinTin products this message names, deduplicated, in order. */

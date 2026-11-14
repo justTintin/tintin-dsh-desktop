@@ -45,6 +45,8 @@ export const TOOL_TAB_KEEP_ALIVE = 8 // 保活上限：超限 LRU discard（2026
 /** 任务型卡向所属 tab 上报运行态的通道（ToolTabPane provide；
     卡组件 inject 后 inc/dec 成对上报，无 tab 环境 fallback 到 noop） */
 export interface ToolTabCtx {
+  /** 本卡所属 tab 实例 id（卡片按它键控会话快照，discard 重建后恢复状态） */
+  tabId: string
   busyInc(): void
   busyDec(): void
   /** 后台任务完成：tab 状态点闪烁 */
@@ -52,7 +54,7 @@ export interface ToolTabCtx {
 }
 export const TOOL_TAB_CTX: InjectionKey<ToolTabCtx> = Symbol('tintinToolTabCtx')
 /** 无 tab 环境兜底（卡组件直接挂载/测试等） */
-export const NOOP_TOOL_TAB_CTX: ToolTabCtx = { busyInc() {}, busyDec() {}, notifyDone() {} }
+export const NOOP_TOOL_TAB_CTX: ToolTabCtx = { tabId: '', busyInc() {}, busyDec() {}, notifyDone() {} }
 
 export interface ToolTabsModel {
   tabs: Ref<ToolTab[]>

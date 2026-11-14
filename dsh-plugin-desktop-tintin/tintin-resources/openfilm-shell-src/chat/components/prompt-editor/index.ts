@@ -17,6 +17,7 @@ export {
 export {
   activatedProductNames,
   activatedSkillIds,
+  activatedTemplateNames,
   collectPromptReferences,
   fileReferenceId,
   fileReferencePath,
@@ -27,6 +28,7 @@ export {
   skillReferencePackage,
   splitPromptReferenceText,
   stripPromptReferenceTokens,
+  templateReferenceId,
   type PromptReference,
   type PromptReferenceKind,
   type PromptTextSegment,

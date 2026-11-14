@@ -10,13 +10,15 @@
 // opsProductLibraryLogic（纯函数，有单测）；本组件只绘制 + 事件转发。
 // ═══════════════════════════════════════════════════════════════
 
-import { computed, onMounted, ref } from 'vue'
+import { computed, inject, onMounted, ref, watch } from 'vue'
 import {
   BASIC_FIELDS,
   PRODUCT_FIELDS,
   productSixViewSlots,
 } from '@/composables/opsProductLibraryLogic'
 import { useOpsProductLibrary } from '@/composables/useOpsProductLibrary'
+import { TOOL_TAB_CTX, NOOP_TOOL_TAB_CTX, useToolTabBusy } from '@/composables/useToolTabs'
+import { loadTabSession, saveTabSession } from '@/composables/tabSessionState'
 import OtCopywritingPanel from './OtCopywritingPanel.vue'
 import OtPickMaterialDialog from './OtPickMaterialDialog.vue'
 
@@ -92,23 +94,87 @@ function onDownloadTemplate(): void {
   void P.downloadImportTemplate(serverUrl.value)
 }
 
-/* ── 大类折叠（2026-09-04 用户裁决：平铺过长，默认全折叠，点击展开/收起） ── */
-const collapsedCats = ref<Set<string>>(new Set())
-function toggleCat(label: string): void {
-  const next = new Set(collapsedCats.value)
-  if (next.has(label)) next.delete(label)
-  else next.add(label)
-  collapsedCats.value = next
+/* ── 大类折叠已随扁平分页列表退役（2026-11-14 用户裁决：品类/品牌折叠树由
+   分类/品牌下拉过滤替代，见左栏 flat-filters/flat-pager） ── */
+
+/* ── 过滤下拉=可输入组合框（2026-11-14 用户裁决「选择下拉框也是可以输入的」）：
+   输入即过滤（子串，直接落到 flatCategory/flatBrand），候选=当前数据派生；
+   点选/Enter 提交并收起，Esc/失焦还原为当前过滤值 ── */
+const catDraft = ref('')
+const brandDraft = ref('')
+const comboOpen = ref<'' | 'cat' | 'brand'>('')
+function comboOptions(kind: 'cat' | 'brand'): string[] {
+  const all = kind === 'cat' ? P.flatOptions.value.categories : P.flatOptions.value.brands
+  const draft = (kind === 'cat' ? catDraft.value : brandDraft.value).trim().toLowerCase()
+  if (!draft) return all
+  return all.filter((v) => v.toLowerCase().includes(draft))
 }
-/** 大类产品总数（各品牌叶子数求和，折叠时提示规模） */
-function catCount(cat: { children: Array<{ children: unknown[] }> }): number {
-  return cat.children.reduce((n, b) => n + b.children.length, 0)
+function pickCombo(kind: 'cat' | 'brand', v: string): void {
+  if (kind === 'cat') { P.flatCategory.value = v; catDraft.value = v }
+  else { P.flatBrand.value = v; brandDraft.value = v }
+  P.flatPage.value = 1
+  comboOpen.value = ''
+}
+function closeCombo(kind: 'cat' | 'brand'): void {
+  if (kind === 'cat') catDraft.value = P.flatCategory.value
+  else brandDraft.value = P.flatBrand.value
+  comboOpen.value = ''
 }
 
 /** 表单字段双列渲染（基本资料 11 字段；locked 只读，对齐 _apply_field_locks） */
 const basicRows = BASIC_FIELDS
 
+/* ── LRU discard 会话快照（2026-11-13 用户裁决根治·方案 B）：多 Tab 保活
+   上限 8，超限时最久未激活的 tab 被卸载、切回重建=全部 ref 重置。本卡把
+   交互状态（搜索关键字/选中产品/表单含未保存修改/只读锁/状态文字）按 tab
+   实例键控留内存快照，重建时恢复；六视图从服务端回读（loadSixViews）。
+   快照随输入即写（内存 Map，零成本）；tab 关闭不清——条目数百字节级，
+   应用退出即清。 ── */
+const tabCtx = inject(TOOL_TAB_CTX, NOOP_TOOL_TAB_CTX)
+const sessionKey = `product-library:${tabCtx.tabId || 'standalone'}`
+interface ProductLibrarySnapshot {
+  keyword: string
+  editingId: string | null
+  form: Record<string, string>
+  lockedFields: Record<string, boolean>
+  formStatus: string
+}
+function persistSnapshot(): void {
+  saveTabSession<ProductLibrarySnapshot>(sessionKey, {
+    keyword: P.keyword.value,
+    editingId: P.editingId.value,
+    form: { ...P.form.value },
+    lockedFields: { ...P.lockedFields.value },
+    formStatus: P.formStatus.value,
+  })
+}
+// 快照写入：关键字/选中/表单（deep）任一变化即写（JSON 串比对 = 廉价 deep watch）
+watch(
+  () => JSON.stringify([P.keyword.value, P.editingId.value, P.form.value]),
+  () => { persistSnapshot() },
+)
+
+/* ── 任务态 busy 上报（方案 B 落地后收窄）：交互状态已由会话快照根治恢复，
+   busy 只保留既有「任务运行中」语义（不被 LRU 中止 + 关 tab 确认），
+   与媒体包 7 卡同款口径。 ── */
+useToolTabBusy(() => {
+  if (P.syncing.value || P.mining.value || P.bulkMining.value
+    || !!P.sixUploading.value || P.sixAssembling.value || P.importing.value) return true
+  return false
+})
+
 onMounted(() => {
+  // LRU discard 重建恢复：先回放快照（关键字→loadTree 用它，搜索结果与丢失前
+  // 一致；表单=本地未保存修改优先于服务端详情），六视图再从服务端回读。
+  const saved = loadTabSession<ProductLibrarySnapshot>(sessionKey)
+  if (saved) {
+    P.keyword.value = saved.keyword
+    P.form.value = { ...saved.form }
+    P.editingId.value = saved.editingId
+    P.lockedFields.value = { ...saved.lockedFields }
+    P.formStatus.value = saved.formStatus || '已恢复上次编辑状态。'
+    if (saved.editingId) void P.loadSixViews(saved.editingId)
+  }
   void P.loadTree()
   void (window as unknown as { tintin?: { env?: { serverPing?: () => Promise<{ url?: unknown }> } } })
     .tintin?.env?.serverPing?.().then((p) => { serverUrl.value = String(p?.url || '') }).catch(() => { serverUrl.value = '' })
@@ -148,57 +214,95 @@ function onDelete() {
     </div>
 
     <div class="opl-main">
-      <!-- ═══ 左卡：搜索 + 树 ═══ -->
+      <!-- ═══ 左卡：过滤 + 搜索 + 扁平分页列表（2026-11-14 用户裁决：参考 ERP 列表
+           ——过滤条件在搜索之上、行分割线、客户端分页；原品类/品牌折叠树由
+           分类/品牌下拉过滤替代，数据源 /grouped 与 /search 不变） ═══ -->
       <div class="opl-left">
         <div class="card-title">产品库</div>
-        <input
-          class="input search"
-          type="text"
-          placeholder="搜索 品牌 / 型号 / 编码 / 条码 ..."
-          :value="P.keyword.value"
-          @input="P.onKeywordInput(($event.target as HTMLInputElement).value)"
-        />
+        <div class="flat-filters">
+          <!-- 过滤下拉=可输入组合框(2026-11-14 用户裁决「选择下拉框也是可以输入的」):
+               输入即过滤(子串), 选项=当前数据派生候选; 点选/Enter 提交, Esc 还原 -->
+          <div class="combo">
+            <input
+              class="input"
+              :value="catDraft"
+              placeholder="全部分类"
+              title="按品类过滤（可输入）"
+              @focus="catDraft = P.flatCategory.value; comboOpen = 'cat'"
+              @input="catDraft = ($event.target as HTMLInputElement).value; P.flatCategory.value = catDraft.trim(); P.flatPage.value = 1; comboOpen = 'cat'"
+              @keydown.enter.prevent="pickCombo('cat', catDraft.trim())"
+              @keydown.esc.prevent="closeCombo('cat')"
+              @blur="closeCombo('cat')"
+            />
+            <div v-if="comboOpen === 'cat' && comboOptions('cat').length" class="combo-list custom-scroll">
+              <div class="combo-opt" :class="{ active: !P.flatCategory.value }" @mousedown.prevent="pickCombo('cat', '')">全部分类</div>
+              <div v-for="c in comboOptions('cat')" :key="c" class="combo-opt" :class="{ active: P.flatCategory.value === c }" @mousedown.prevent="pickCombo('cat', c)">{{ c }}</div>
+            </div>
+          </div>
+          <div class="combo">
+            <input
+              class="input"
+              :value="brandDraft"
+              placeholder="全部品牌"
+              title="按品牌过滤（可输入）"
+              @focus="brandDraft = P.flatBrand.value; comboOpen = 'brand'"
+              @input="brandDraft = ($event.target as HTMLInputElement).value; P.flatBrand.value = brandDraft.trim(); P.flatPage.value = 1; comboOpen = 'brand'"
+              @keydown.enter.prevent="pickCombo('brand', brandDraft.trim())"
+              @keydown.esc.prevent="closeCombo('brand')"
+              @blur="closeCombo('brand')"
+            />
+            <div v-if="comboOpen === 'brand' && comboOptions('brand').length" class="combo-list custom-scroll">
+              <div class="combo-opt" :class="{ active: !P.flatBrand.value }" @mousedown.prevent="pickCombo('brand', '')">全部品牌</div>
+              <div v-for="b in comboOptions('brand')" :key="b" class="combo-opt" :class="{ active: P.flatBrand.value === b }" @mousedown.prevent="pickCombo('brand', b)">{{ b }}</div>
+            </div>
+          </div>
+        </div>
+        <div class="flat-search">
+          <input
+            class="input search"
+            type="text"
+            placeholder="搜索 型号 / 货号 / 编码 / 条码 ..."
+            :value="P.keyword.value"
+            @input="P.onKeywordInput(($event.target as HTMLInputElement).value)"
+            @keydown.enter="P.loadTree()"
+          />
+          <button class="btn" :disabled="P.treeLoading.value" title="按当前关键字与过滤条件查询" @click="P.loadTree()">查询</button>
+        </div>
         <div class="tree custom-scroll">
           <template v-if="P.treeLoading.value">加载中…</template>
           <template v-else-if="P.treeError.value">加载失败：{{ P.treeError.value }}</template>
-          <template v-else-if="P.keyword.value.trim()">
-            <!-- 搜索结果平铺（对齐原 search 分支） -->
-            <div v-if="!P.searchHits.value.length" class="tree-empty">无匹配产品</div>
-            <button
-              v-for="hit in P.searchHits.value"
-              :key="hit.id"
-              class="tree-leaf"
-              :class="{ active: P.editingId.value === hit.id }"
-              @click="P.selectNode(hit.id)"
-            >{{ hit.label }}</button>
-          </template>
-          <template v-else-if="!P.nodes.value.length">暂无产品，请先「从仓库同步」</template>
+          <template v-else-if="!P.filteredFlat.value.length">暂无产品，请先「从仓库同步」或调整过滤条件</template>
           <template v-else>
-            <div v-for="cat in P.nodes.value" :key="cat.label" class="tree-cat">
-              <button
-                class="tree-cat-label"
-                type="button"
-                :title="collapsedCats.has(cat.label) ? '展开' : '收起'"
-                @click="toggleCat(cat.label)"
-              >
-                <span class="tree-cat-arrow" :class="{ collapsed: collapsedCats.has(cat.label) }">▾</span>
-                {{ cat.label }}
-                <span class="tree-cat-count">{{ catCount(cat) }}</span>
-              </button>
-              <template v-if="!collapsedCats.has(cat.label)">
-                <div v-for="brand in cat.children" :key="brand.label" class="tree-brand">
-                  <div class="tree-brand-label">{{ brand.label }}</div>
-                  <button
-                    v-for="leaf in brand.children"
-                    :key="leaf.id ?? leaf.label"
-                    class="tree-leaf"
-                    :class="{ active: P.editingId.value === leaf.id }"
-                    @click="P.selectNode(leaf.id ?? '')"
-                  >{{ leaf.label }}</button>
-                </div>
-              </template>
-            </div>
+            <button
+              v-for="row in P.pagedFlat.value.rows"
+              :key="row.id || row.label"
+              class="flat-row"
+              :class="{ active: P.editingId.value === row.id }"
+              type="button"
+              :title="`${row.category} / ${row.brand}\n货号: ${row.goodsNo || '—'}\n可用库存: ${row.availableNum || '—'}`"
+              @click="P.selectNode(row.id)"
+            >
+              <span class="flat-name">{{ row.label }}</span>
+              <span class="flat-stock" :class="{ 'flat-stock--zero': row.availableNum === '0' }">{{ row.availableNum || '—' }}</span>
+            </button>
           </template>
+        </div>
+        <div class="flat-pager">
+          <span class="page-info">共 {{ P.pagedFlat.value.total }} 条</span>
+          <button class="btn page-btn" :disabled="P.pagedFlat.value.page <= 1 || P.treeLoading.value" @click="P.flatPage.value--">上一页</button>
+          <span class="page-info">第 {{ P.pagedFlat.value.page }} / {{ P.pagedFlat.value.totalPages }} 页</span>
+          <button class="btn page-btn" :disabled="P.pagedFlat.value.page >= P.pagedFlat.value.totalPages || P.treeLoading.value" @click="P.flatPage.value++">下一页</button>
+          <label class="page-info">每页:</label>
+          <input
+            v-model.number="P.flatPageSize.value"
+            class="input page-size"
+            type="number"
+            min="10"
+            max="200"
+            step="10"
+            :disabled="P.treeLoading.value"
+            @change="P.flatPage.value = 1"
+          />
         </div>
         <!-- 2026-09-05 用户裁决：删除「新增型号（清空表单）」——与右侧操作栏「清空」按钮
              重复（同为 P.clearForm），且仅清空表单不创建数据，无独立价值 -->
@@ -364,7 +468,8 @@ function onDelete() {
 .input.readonly { opacity: 0.6; cursor: not-allowed; }
 
 /* 顶条 */
-.opl-toolbar { display: flex; align-items: center; gap: var(--space-3); }
+/* 2026-11-14 用户裁决：工具条与上方 tab 栏保持一定间距（gap 只管子项之间，管不到顶边） */
+.opl-toolbar { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-2); }
 .toolbar-status {
   flex: 1; min-width: 0; font-size: 12px; color: var(--muted-foreground);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -383,34 +488,55 @@ function onDelete() {
 .card-title-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .card-tip { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted-foreground); }
 
-/* 树 */
-.tree { flex: 1; min-height: 160px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+/* ── 扁平分页列表（2026-11-14 用户裁决：参考 ERP 列表——过滤在搜索之上、
+      行分割线、客户端分页；替代原品类/品牌折叠树） ── */
+.flat-filters { display: flex; gap: var(--space-2); }
+.flat-filters .input { flex: 1 1 0; min-width: 0; }
+/* 可输入组合框（2026-11-14 用户裁决）：输入即过滤，候选浮层随焦点开合 */
+.combo { position: relative; flex: 1 1 0; min-width: 0; }
+.combo .input { width: 100%; }
+.combo-list {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+  max-height: 220px; overflow-y: auto;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+}
+.combo-opt { padding: 6px 10px; font-size: 12px; color: var(--foreground); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.combo-opt:hover { background: var(--surface-container); }
+.combo-opt.active { color: var(--primary); font-weight: 700; }
+.flat-search { display: flex; gap: var(--space-2); }
+.flat-search .input { flex: 1 1 auto; }
+.tree { flex: 1; min-height: 160px; overflow-y: auto; display: flex; flex-direction: column; }
 .tree-empty { font-size: 12px; color: var(--muted-foreground); padding: var(--space-2); }
-.tree-cat-label {
-  display: flex; align-items: center; gap: 6px; width: 100%;
-  font-size: 13px; font-weight: 700; color: var(--foreground);
-  padding: var(--space-1) 4px; border: none; background: transparent;
-  cursor: pointer; text-align: left; border-radius: var(--radius-sm);
-  font-family: inherit;
+.flat-row {
+  display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  flex: 0 0 auto; height: 34px; padding: 0 var(--space-2);
+  border: none; border-bottom: 1px solid var(--border);
+  background: transparent; color: var(--foreground);
+  font-size: 12px; text-align: left; cursor: pointer;
+  transition: background var(--duration-fast);
 }
-.tree-cat-label:hover { background: var(--surface-container); }
-.tree-cat-arrow {
-  font-size: 10px; color: var(--muted-foreground);
-  transition: transform var(--duration-fast);
+.flat-row:last-child { border-bottom: none; }
+.flat-row:hover { background: var(--surface-container); }
+.flat-row:hover .flat-name { color: var(--primary); }
+.flat-row.active {
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
-.tree-cat-arrow.collapsed { transform: rotate(-90deg); }
-.tree-cat-count {
-  margin-left: auto; font-size: 11px; font-weight: 500;
-  color: var(--muted-foreground);
+.flat-name {
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; font-weight: 600;
+  transition: color var(--duration-fast);
 }
-.tree-brand-label { font-size: 12px; font-weight: 600; color: var(--muted-foreground); padding: 2px 4px 2px 18px; }
-.tree-leaf {
-  text-align: left; border: none; background: transparent; cursor: pointer;
-  font-size: 13px; color: var(--foreground); padding: 4px 4px 4px 34px;
-  border-radius: var(--radius-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.flat-stock {
+  flex: 0 0 auto; min-width: 44px; text-align: right;
+  color: var(--muted-foreground); font-variant-numeric: tabular-nums;
 }
-.tree-leaf:hover { background: var(--surface-container); }
-.tree-leaf.active { background: var(--primary); color: var(--primary-foreground); }
+.flat-stock--zero { color: var(--error, #EF4444); }
+.flat-pager { flex-shrink: 0; display: flex; align-items: center; gap: var(--space-2); }
+.page-info { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
+.page-btn { height: 28px; padding: 0 10px; font-size: 12px; }
+.page-size { width: 64px; }
 
 /* 右侧布局 */
 .opl-right { display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; overflow-y: auto; }

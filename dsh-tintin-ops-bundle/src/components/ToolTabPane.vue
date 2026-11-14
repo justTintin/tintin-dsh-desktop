@@ -49,6 +49,7 @@ watch(() => props.discarded, () => { crashed.value = null })
 // busy 通道：任务型卡 inject 上报；直接维护 tab.busy/doneAt（tab 对象
 // 即模型层数组元素，响应式，tab 栏/LRU/关闭确认零转换消费）
 const ctx: ToolTabCtx = {
+  tabId: props.tab.id,
   busyInc() { props.tab.busy += 1 },
   busyDec() { if (props.tab.busy > 0) props.tab.busy -= 1 },
   notifyDone() { props.tab.doneAt = Date.now() },

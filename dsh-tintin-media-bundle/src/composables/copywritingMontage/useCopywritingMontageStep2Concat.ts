@@ -746,25 +746,10 @@ export function useCopywritingMontageStep2Concat(ctx: MontageStep2Context) {
   // ── 口播文案（2026-09-13 改调 POST /copywriting/voiceover：产品信息弹窗 → 逐条
   //    传 product_desc + duration_s，服务端自持 prompt 按时长控字数；客户端不再拼 prompt）──
   const sharedProductInfo = ref({ brand: '', product: '', model: '', extra: '', keywords: [] as string[] })
-  // 持久化（2026-09-30 用户裁决：第一步选的产品重启后保留——此前纯内存，重启即丢，
-  // 导出草稿名兜底「混剪」、生成提示词的产品上下文全失；键挂 script.* 与第一步页面态同族）
-  const PRODUCT_LS_KEY = 'copywriting-montage.script.product'
-  try {
-    const raw = localStorage.getItem(PRODUCT_LS_KEY)
-    if (raw) {
-      const p = JSON.parse(raw) as Record<string, unknown>
-      sharedProductInfo.value = {
-        brand: String(p.brand || ''),
-        product: String(p.product || ''),
-        model: String(p.model || ''),
-        extra: String(p.extra || ''),
-        keywords: Array.isArray(p.keywords) ? (p.keywords as unknown[]).map((k) => String(k)) : [],
-      }
-    }
-  } catch { /* 缓存损坏忽略，走空产品态 */ }
-  watch(sharedProductInfo, (v) => {
-    try { localStorage.setItem(PRODUCT_LS_KEY, JSON.stringify(v)) } catch { /* 隐私模式等写入失败静默 */ }
-  }, { deep: true })
+  // 产品选择不再持久化（2026-11-13 用户裁决「选择的产品只在当前的文案混剪流程中起
+  // 作用，生成方案时判断的是当前会话的实选，不是持久化的残留」）：2026-09-30 的
+  // 「重启后保留」裁决废止——残留的旧产品会让方案二（提示词）生成时被 `desc || prompt`
+  // 的产品优先分流静默顶掉。实例存续期间（切 tab/切步骡）照常保留，LRU 重建/重开=空。
   const productDlg = ref<{
     show: boolean; target: 'all' | number
     brand: string; product: string; model: string; extra: string; keywords: string[]

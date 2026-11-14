@@ -242,6 +242,71 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     },
   })
 
+  // ── 导出中心(2026-11-14 封面导出批;交互对齐视频剪辑 ExportCenter 图片页)──
+  //   GET  /tintin/cover/api/export-dir    → {dir} 默认导出目录=当前封面项目目录(图片路径)
+  //   POST /tintin/cover/api/export-encode → 按横/竖屏编码 PNG(预览)+JPEG+PSD,返回精确字节大小
+  //   POST /tintin/cover/api/export-write  → 命中编码缓存直接落盘(过期按需重编),伴随件与 render 同行为
+  const disposeExportDir = registeringWebServer.register({
+    kind: 'exact',
+    path: '/tintin/cover/api/export-dir',
+    handler: async (_req, res) => {
+      try {
+        const engine = await loadEngine()
+        sendJson(res, 200, { ok: true, dir: engine.resolveCoverDir() })
+      } catch (err) {
+        sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  })
+
+  const coverExportBody = async (req, res, run) => {
+    if (req.method !== 'POST' || !(await mutationAllowed(req))) {
+      sendJson(res, 403, { error: 'Request rejected.' })
+      return
+    }
+    let body = ''
+    req.on('data', (c) => { body += c })
+    req.on('end', async () => {
+      try {
+        const p = JSON.parse(body || '{}')
+        const engine = await loadEngine()
+        // 图层显隐与 props 分开存放,与 render 路由同口径合并后再校验
+        const props = { ...(p.props && typeof p.props === 'object' ? p.props : {}) }
+        if (Array.isArray(p.hiddenLayers)) props.hiddenLayers = p.hiddenLayers
+        const result = await run(engine, p, props)
+        sendJson(res, result.ok ? 200 : 500, result)
+      } catch (err) {
+        sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    })
+  }
+
+  const disposeExportEncode = registeringWebServer.register({
+    kind: 'exact',
+    path: '/tintin/cover/api/export-encode',
+    handler: async (req, res) => {
+      await coverExportBody(req, res, (engine, p, props) => engine.encodeCoverExports({
+        templateId: String(p.templateId || ''),
+        props,
+        variants: Array.isArray(p.variants) ? p.variants : [],
+      }))
+    },
+  })
+
+  const disposeExportWrite = registeringWebServer.register({
+    kind: 'exact',
+    path: '/tintin/cover/api/export-write',
+    handler: async (req, res) => {
+      await coverExportBody(req, res, (engine, p, props) => engine.writeCoverExports({
+        templateId: String(p.templateId || ''),
+        props,
+        outDir: typeof p.outDir === 'string' ? p.outDir : undefined,
+        baseName: typeof p.baseName === 'string' ? p.baseName : undefined,
+        files: Array.isArray(p.files) ? p.files : [],
+      }))
+    },
+  })
+
   // ── 封面技能管理(2026-10-30 用户裁决:会话框 ▦ 打开封面自己的技能管理)──
   // 清单=服务端注册表(GET /skills,经注入的 httpRequest/getServerUrl)+已安装装位
   // (<渠道主目录>/cover-skills 扫描,与 cover-acp-routes 的 / 菜单双目录解析同源——装完菜单
@@ -904,6 +969,9 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     disposeFonts()
     disposeEditorIpc()
     disposeRender()
+    disposeExportDir()
+    disposeExportEncode()
+    disposeExportWrite()
     disposeUpload()
     disposeUploadUrl()
     disposeMatting()

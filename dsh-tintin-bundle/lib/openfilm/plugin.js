@@ -221,7 +221,10 @@ export function createOpenfilmChannels({ sync, httpRequest, compatUrl }) {
             })
           } catch { server = [] }
         }
-        return { native, server }
+        // runtimeOk 供客户端可用性探测（2026-11-13 用户报障「明明已装却判未安装」）：
+        // vendored 运行时本体（node+CLI）在即算已安装——skills 抽屉空（0.3.2 包结构
+        // 变化等）只是展示损失，不再作为「运行时未安装」的判据。
+        return { native, server, runtimeOk: !!runtime }
       } catch (error) {
         return { error: error instanceof Error ? error.message : String(error) }
       }
