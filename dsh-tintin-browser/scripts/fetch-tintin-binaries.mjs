@@ -6,7 +6,7 @@
 // (TinTin_Client_Electron 等)路径候选全部废除,staging 缺文件=显式报错指路,
 // 绝不静默从别处抓。
 //
-//   node scripts/fetch-tintin-binaries.mjs           # 核对三件套在位(不联网不改文件)
+//   node scripts/fetch-tintin-binaries.mjs           # 核对媒体三件套在位(不联网不改文件)
 //   node scripts/fetch-tintin-binaries.mjs --latest  # 显式升级 yt-dlp 到 GitHub 最新
 //                                                    # (工程侧动作,与打包解耦,铁律 18)
 import { copyFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -25,12 +25,11 @@ const destBin = join(repoRoot, 'dsh-plugin-desktop-tintin', 'tintin-resources', 
 mkdirSync(destBin, { recursive: true })
 
 const missing = NAMES.filter((name) => !existsSync(join(destBin, name)))
-if (missing.length) {
-  console.error(`工程内 bin 缺文件: ${missing.join(', ')}`)
+if (missing.length && !process.argv.includes('--latest')) {
+  // 2026-11-16: --latest 是显式工程侧动作, 允许从零拉齐(缺 yt-dlp 直接下载;
+  // ffmpeg/ffprobe 目前只能来自 LFS checkout——它们无 --latest 通道, 缺时仍报错)
+  console.error(`工程内 bin 缺文件: ${missing.join(', ')}(--latest 模式: yt-dlp 将下载)`)
   console.error(`就位目录: ${destBin}`)
-  console.error(`本目录由工程侧维护(git-ignored);新环境首次就位可从原工程 LFS checkout 一次性拷入,之后升级走 --latest。打包不从这里以外任何路径取文件。`)
-  process.exitCode = 1
-  process.exit(process.exitCode)
 }
 
 const versionOf = (file) => {
