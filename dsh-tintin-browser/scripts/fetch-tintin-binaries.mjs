@@ -69,7 +69,6 @@ if (!wantLatestYtdlp) {
   const current = existingVersion()
   if (current) {
     ytdlpHandled = true
-    copied++
     console.log(`yt-dlp.exe pinned at ${current} (staging kept; run with --latest to upgrade)`)
   }
 }
@@ -112,6 +111,7 @@ if (!downloaded && !ytdlpHandled) {
     process.exitCode = 1
   }
 } else {
+  // downloaded(显式 --latest 成功)或 ytdlpHandled(pinned 保留)——yt-dlp 已就位
   copied++
 }
 
