@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { electronBuilderEnvironment } from './electron-builder-environment.ts'
@@ -13,6 +13,25 @@ const require = createRequire(import.meta.url)
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const builderCli = require.resolve('electron-builder/cli.js')
 const electronDist = resolve(dirname(require.resolve('electron/package.json')), 'dist')
+
+/** lite 包预处理(2026-11-16 用户裁决: 双包交付——full 全量/lite 最小+装后联网补齐)。
+ *  DSH_PACKAGE_LITE=1 时: 从 staging 剔除 bin 三件套与 .remotion 浏览器缓存
+ *  (安装后由 resources/download-binaries.ps1 与 Remotion ensureBrowser 联网补齐),
+ *  并放 .tintin-lite 标记(installer.nsh 据此决定装后下载段)。
+ *  注意: staging 是打包输入,不是产物——剔除只影响本次包,重打 full 前先补齐 staging。 */
+function applyLitePackage() {
+  if (process.env.DSH_PACKAGE_LITE !== '1') return
+  const stagingBin = join(packageRoot, 'tintin-resources', 'bin')
+  const removed = []
+  for (const name of ['ffmpeg.exe', 'ffprobe.exe', 'yt-dlp.exe']) {
+    const f = join(stagingBin, name)
+    if (existsSync(f)) { rmSync(f, { force: true }); removed.push(name) }
+  }
+  const remotion = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '.remotion')
+  if (existsSync(remotion)) { rmSync(remotion, { recursive: true, force: true }); removed.push('.remotion') }
+  writeFileSync(join(packageRoot, 'tintin-resources', 'cover-plugin', '.tintin-lite'), 'lite package: media binaries download after install; .remotion auto-downloads on first render\n')
+  process.stdout.write(`[lite] staging 剔除: ${removed.join(', ') || '(已缺)'} + 放置 .tintin-lite 标记\n`)
+}
 
 /** Electron Builder overrides that make the directory build unconditionally unsigned. */
 export const UNSIGNED_DIRECTORY_BUILD_ARGS = Object.freeze([
@@ -66,6 +85,7 @@ export function versionStampArgs(env = process.env, now = new Date()) {
  * }} [options]
  */
 export function packageDirectory(options = {}) {
+  applyLitePackage()
   const run = options.run ?? spawnSync
   const nodeExecutable = options.nodeExecutable ?? process.execPath
   const electronBuilderCli = options.electronBuilderCli ?? builderCli

@@ -29,6 +29,24 @@ const env = electronBuilderEnvironment({
   CSC_IDENTITY_AUTO_DISCOVERY: 'false',
 })
 
+// lite 包预处理(2026-11-16 用户裁决: 双包交付——full 全量/lite 最小+装后联网补齐)。
+// --lite 旗标或 DSH_PACKAGE_LITE=1 时: 剔除 staging 的 bin 三件套与 .remotion,
+// 放 .tintin-lite 标记; installer.nsh 据此在装后调用 download-binaries.ps1 联网补齐,
+// .remotion 由 Remotion ensureBrowser 首渲染自动下载。NSIS 阶段(extraResources 收集)
+// 在剔除后执行,lite 包自然缺这些大件。full 包不含此步,staging 原样进包。
+if (process.argv.includes('--lite') || process.env.DSH_PACKAGE_LITE === '1') {
+  const { existsSync: ex, rmSync: rm, writeFileSync: wf } = await import('node:fs')
+  const removed = []
+  for (const name of ['ffmpeg.exe', 'ffprobe.exe', 'yt-dlp.exe']) {
+    const f = join(packageRoot, 'tintin-resources', 'bin', name)
+    if (ex(f)) { rm(f, { force: true }); removed.push(name) }
+  }
+  const remotion = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '.remotion')
+  if (ex(remotion)) { rm(remotion, { recursive: true, force: true }); removed.push('.remotion') }
+  wf(join(packageRoot, 'tintin-resources', 'cover-plugin', '.tintin-lite'), 'lite package: media binaries download after install; .remotion auto-downloads on first render\n')
+  process.stdout.write(`[lite] staging 剔除: ${removed.join(', ') || '(已缺)'} + 放置 .tintin-lite 标记\n`)
+}
+
 const args = [
   builderCli,
   '--win', 'nsis',

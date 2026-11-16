@@ -88,3 +88,18 @@ Var pid
     ${EndIf}
   SectionEnd
 !macroend
+
+; ── lite 包装后补齐(2026-11-16 用户裁决: 最小包装后联网下载缺失大件)──
+; 打包链在 lite 包里放置 .tintin-lite 标记与 download-binaries.ps1; full 包无标记, 整段跳过。
+!macro customInstall
+  IfFileExists "$INSTDIR\.tintin-lite" 0 dsh_lite_skip
+    DetailPrint "下载媒体组件(yt-dlp / ffmpeg / ffprobe)..."
+    nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\download-binaries.ps1"'
+    Pop $R0
+    ${if} $R0 != 0
+      DetailPrint "媒体组件下载失败——可在安装目录手动运行 resources\download-binaries.ps1 重试"
+    ${else}
+      DetailPrint "媒体组件就位"
+    ${endIf}
+  dsh_lite_skip:
+!macroend

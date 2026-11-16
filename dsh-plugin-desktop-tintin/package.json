@@ -499,6 +499,10 @@
       "icon": "build/app-icon.ico",
       "asar": false,
       "extraResources": [
+      {
+        "from": "scripts/download-binaries.ps1",
+        "to": "download-binaries.ps1"
+      },
         {
           "from": ".desktop-build/runtime",
           "to": "runtime"
@@ -571,8 +575,16 @@
     },
     "extraResources": [
       {
+        "from": "scripts/download-binaries.ps1",
+        "to": "download-binaries.ps1"
+      },
+      {
         "from": "build/extractors",
         "to": "extractors"
+      },
+      {
+        "from": "scripts/download-binaries.ps1",
+        "to": "download-binaries.ps1"
       },
       {
         "from": "build/tintin-browser.html",

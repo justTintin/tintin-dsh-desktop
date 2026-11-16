@@ -130,6 +130,18 @@ function getYtdlpArgs(appLike: AppLike): { cmd: string; args: string[] } | null 
       }
     } catch { /* 内置 exe 损坏 → 降级后续候选 */ }
   }
+  // lite 包(2026-11-16 用户裁决): resources/bin 缺 yt-dlp → 后台拉起装后补齐脚本
+  // (幂等: 已在的跳过; 完成后下次下载即走内置 exe)。不阻塞本次失败返回。
+  if (appLike.isPackaged && process.resourcesPath) {
+    const ps1 = join(process.resourcesPath, 'download-binaries.ps1')
+    const binDir = join(process.resourcesPath, 'bin')
+    if (existsSync(ps1) && !existsSync(join(binDir, 'yt-dlp.exe'))) {
+      try {
+        const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1], { detached: true, stdio: 'ignore', windowsHide: true })
+        child.unref()
+      } catch { /* 补齐失败静默; 用户可手动运行脚本 */ }
+    }
+  }
   try {
     execSync('yt-dlp --version', { stdio: 'pipe', timeout: 5000 })
     return { cmd: 'yt-dlp', args: [] }
