@@ -358,8 +358,11 @@ watch(
   <!-- 2026-08-31 用户裁决：弹窗 80% 主界面，vw/vh 随窗口缩放 -->
   <TDialog :visible="visible" :title="props.title || '选择素材'" width="80vw" :show-footer="false" @close="emit('close')">
     <div class="mtd">
-      <!-- 2026-09-04 用户裁决：三 tab 改用全局 luo-tab 分段切换样式（同工作台顶栏） -->
-      <div class="mtd-tabs">
+      <!-- 2026-09-04 用户裁决：三 tab 改用全局 luo-tab 分段切换样式（同工作台顶栏）。
+           2026-11-15 用户指图批（「图片 tab 空间占得比较大」）：imageOnly（六视图选图）
+           只剩一个选项，「三 tab 平分整行」退化成整行宽横幅+上下留白≈80px 非内容区——
+           单 tab 时整条隐藏（标题与底注已说明内容类型）；多 tab（视频/音频）不散发。 -->
+      <div v-if="!props.imageOnly" class="mtd-tabs">
         <button class="luo-tab" :class="{ active: tab === 'image' }" type="button" @click="tab = 'image'">图片</button>
         <button v-if="!props.imageOnly" class="luo-tab" :class="{ active: tab === 'video' }" type="button" @click="tab = 'video'">视频</button>
         <button v-if="!props.imageOnly" class="luo-tab" :class="{ active: tab === 'audio' }" type="button" @click="tab = 'audio'">音频</button>
@@ -544,7 +547,12 @@ watch(
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  height: calc(80vh - 140px);
+  /* 2026-11-15 用户裁决：整窗加高显示四行素材行——11-14 缩略图行加高（4/3）后 80vh 只
+     装得下三行；不是加标题/tab，是整窗加高（TDialog body 上限 100vh-48 装得下，不出现
+     外层滚动；vh 随窗口缩放，窗口更矮时行数自适应变少）。
+     同批二调：imageOnly 隐藏 tab 条（-44px）后 .mtd 等量回收，网格行数与裁决态严格一致
+     （不多出半行），整窗比 95vh 首版再矮 44px。 */
+  height: calc(95vh - 184px);
 }
 
 .mtd-tabs {

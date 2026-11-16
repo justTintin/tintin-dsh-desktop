@@ -14,6 +14,7 @@ import { useHostDark } from './composables/hostTheme'
 import ToolTabBar from './components/ToolTabBar.vue'
 // 服务设置弹层（2026-11-14 用户裁决：运营工具本面服务端地址独立配置）
 import ServerSettingsDialog from './components/common/ServerSettingsDialog.vue'
+import KbQaSettingsDialog from './components/common/KbQaSettingsDialog.vue'
 import ToolTabPane from './components/ToolTabPane.vue'
 import { useToolTabs, TOOL_TAB_MAX, type ToolTab } from './composables/useToolTabs'
 // 产品资料（2026-09-25 用户裁决移植）：仓库同步/树/表单增删改/智能挖掘/全量挖掘
@@ -84,6 +85,8 @@ const capacityNotice = ref(false)
 const closeAsk = ref<ToolTab | null>(null)
 // 服务设置弹层（2026-11-14 用户裁决：运营工具本面服务端地址独立配置）
 const showServerSettings = ref(false)
+/* 问答系统地址设置(2026-11-15 用户裁决:kb-qa 卡右上角齿轮) */
+const showQaSettings = ref(false)
 
 /** 打开卡片 = 新开 tab 并切换 */
 function requestOpen(toolId: string): void {
@@ -155,17 +158,37 @@ const isDark = useHostDark()
       <div v-for="g in GROUPS" :key="g.group" class="group-block">
         <div class="group-label">{{ g.group }}</div>
         <div class="grid">
-          <button
+          <component
+            :is="t.id === 'kb-qa' ? 'div' : 'button'"
             v-for="t in g.tools"
             :key="t.id"
-            type="button"
+            :type="t.id === 'kb-qa' ? undefined : 'button'"
             class="tool-card"
             :class="{ 'is-disabled': t.disabled }"
             :style="{ '--card-accent': t.accent }"
-            :disabled="t.disabled"
-            @click="openTool(t)"
+            :disabled="t.disabled || undefined"
+            :tabindex="t.id === 'kb-qa' ? 0 : undefined"
+            :role="t.id === 'kb-qa' ? 'button' : undefined"
+            @click="t.id === 'kb-qa' ? openTool(t) : undefined"
+            @keydown.enter="t.id === 'kb-qa' ? openTool(t) : undefined"
           >
           <span v-if="t.disabled" class="badge">建设中</span>
+          <!-- 问答地址设置(2026-11-15 用户裁决:问答系统卡右上角加设置,地址可配置)——
+               卡是 button 不能嵌 button,故 kb-qa 卡渲染为 div[role=button],齿轮
+               @click.stop 独立弹地址设置;其余卡保持原生 button 不散发 -->
+          <button
+            v-if="t.id === 'kb-qa'"
+            type="button"
+            class="card-settings"
+            title="问答系统地址设置"
+            aria-label="问答系统地址设置"
+            @click.stop="showQaSettings = true"
+          >
+            <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="10" cy="10" r="2.6" />
+              <path d="M16.2 12.4a1.4 1.4 0 0 0 .28 1.54l.05.05a1.7 1.7 0 1 1-2.4 2.4l-.05-.05a1.4 1.4 0 0 0-1.54-.28 1.4 1.4 0 0 0-.85 1.28v.14a1.7 1.7 0 1 1-3.4 0v-.07a1.4 1.4 0 0 0-.92-1.28 1.4 1.4 0 0 0-1.54.28l-.05.05a1.7 1.7 0 1 1-2.4-2.4l.05-.05a1.4 1.4 0 0 0 .28-1.54 1.4 1.4 0 0 0-1.28-.85H2.7a1.7 1.7 0 1 1 0-3.4h.07a1.4 1.4 0 0 0 1.28-.92 1.4 1.4 0 0 0-.28-1.54l-.05-.05a1.7 1.7 0 1 1 2.4-2.4l.05.05a1.4 1.4 0 0 0 1.54.28h.07a1.4 1.4 0 0 0 .85-1.28V2.7a1.7 1.7 0 1 1 3.4 0v.07a1.4 1.4 0 0 0 .85 1.28 1.4 1.4 0 0 0 1.54-.28l.05-.05a1.7 1.7 0 1 1 2.4 2.4l-.05.05a1.4 1.4 0 0 0-.28 1.54v.07a1.4 1.4 0 0 0 1.28.85h.14a1.7 1.7 0 1 1 0 3.4h-.07a1.4 1.4 0 0 0-1.28.85z" />
+            </svg>
+          </button>
           <div class="card-top">
             <div class="icon"><span>{{ t.emoji }}</span></div>
             <div class="card-title">{{ t.title }}</div>
@@ -179,10 +202,14 @@ const isDark = useHostDark()
               </svg>
             </span>
           </div>
-        </button>
+        </component>
         </div>
       </div>
     </div>
+
+    <!-- 问答系统地址设置(2026-11-15 用户裁决):kb-qa 卡右上角齿轮打开;地址存
+         tintin/config.json ops.kbQaUrl,空=自动推导 -->
+    <KbQaSettingsDialog :visible="showQaSettings" @close="showQaSettings = false" />
 
     <!-- ═══ tab 内容区：每 tab 一个 pane（全部挂载 v-show 切换；LRU 超限卸载
          实例切回重建；关闭 tab 即销毁） ═══ -->
@@ -366,8 +393,25 @@ const isDark = useHostDark()
 .tool-card.is-disabled { cursor: not-allowed; }
 .tool-card.is-disabled .icon { filter: grayscale(0.6); opacity: 0.75; }
 .tool-card.is-disabled:hover { transform: none; box-shadow: none; }
-.badge {
+/* 问答地址设置钮(2026-11-15 用户裁决:kb-qa 卡右上角;同 .badge 右上锚,hover 提亮) */
+.card-settings {
   position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.card-settings:hover { color: var(--foreground); background: var(--interactive-hover); }
+.badge {  position: absolute;
   top: var(--space-3);
   right: var(--space-3);
   font-size: 11px;

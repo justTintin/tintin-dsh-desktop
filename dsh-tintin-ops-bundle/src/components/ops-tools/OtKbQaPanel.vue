@@ -7,6 +7,9 @@
 // http://<server-host>:<port>/static/kb-app/index.html#/data-record/index
 // （8787 实测 307 → 该页 200 HTML）。服务端地址经 env.serverPing 取回，
 // 与 OtProductLibrary 同口径；iframe 无 CSP 限制（宿主 chrome 无 frame-src）。
+// 2026-11-15 用户裁决（问答卡右上角加设置）：**地址可配置**——tintin/config.json
+// 顶层 ops.kbQaUrl（KbQaSettingsDialog 写入，与 ops.serverUrl 同库同法）；
+// 非空=固定用配置地址（kb 挪端口/部署其它机器场景），空=回落上述自动推导。
 // 分层（IRON-06）：本组件只编排取址 + 绘制 iframe，无业务逻辑。
 // ═══════════════════════════════════════════════════════════════
 import { onMounted, ref } from 'vue'
@@ -15,11 +18,25 @@ const loading = ref(true)
 const error = ref('')
 const kbUrl = ref('')
 
+/** 配置地址（tintin/config.json ops.kbQaUrl）；无桥/无值=空（回落自动推导）。 */
+async function configuredKbUrl(): Promise<string> {
+  try {
+    const doc = await (window as unknown as {
+      tintin?: { config?: { get?: () => Promise<{ value?: unknown }> } }
+    }).tintin?.config?.get?.()
+    const v = (doc?.value as Record<string, Record<string, unknown>> | undefined)?.ops?.kbQaUrl
+    return typeof v === 'string' && /^https?:\/\//i.test(v.trim()) ? v.trim().replace(/\/$/, '') : ''
+  } catch { return '' }
+}
+
 async function loadKbUrl(): Promise<void> {
   loading.value = true
   error.value = ''
   kbUrl.value = ''
   try {
+    // 配置优先(2026-11-15 用户裁决):ops.kbQaUrl 非空直接用,跳过 status 探测
+    const configured = await configuredKbUrl()
+    if (configured) { kbUrl.value = configured; return }
     const t = (window as unknown as {
       tintin?: {
         env?: { serverPing?: () => Promise<{ url?: unknown }> }

@@ -17,6 +17,7 @@
 
 import { ref, onUnmounted } from 'vue'
 import { getTintin } from './useSettingsConfig'
+import { productFeaturesText, productSellingPointsText } from './opsProductLibraryLogic'
 // 跨包：分镜草案经窗口总线发往媒体包（pendingStoryboard ref 归媒体包）
 const setPendingStoryboard = (draft: unknown) => { (window as any).__tintinBus?.emit('tintin:storyboard-pending', draft) }
 import {
@@ -155,12 +156,14 @@ export function useOpsCopywriting() {
     features.value = ''
     sellingPoints.value = ''
     if (!id) return
-    // 优先本地缓存直取（原客户端 _on_product_selected → self.kb.get 口径）
+    // 优先本地缓存直取（原客户端 _on_product_selected → self.kb.get 口径）。
+    // 2026-11-15 参数统一 JSON：回填经解析层转可读文本（JSON=「key：value」/逐条一行；
+    // 保存回服务端的是这里的内容，LLM prompt 与用户所见一致）
     const local = productEntries.value.find((it) => String(it.id) === id)
     if (local) {
       currentProduct.value = local
-      features.value = String(local.features ?? '')
-      sellingPoints.value = String(local.selling_points ?? '')
+      features.value = productFeaturesText(local.features)
+      sellingPoints.value = productSellingPointsText(local.selling_points)
       status.value = ''
       return
     }
@@ -174,8 +177,8 @@ export function useOpsCopywriting() {
       const item = (data && typeof data === 'object' && 'item' in data ? data.item : data) as Record<string, unknown> | null
       if (!item) { status.value = `未找到产品（id=${id}）。`; return }
       currentProduct.value = item
-      features.value = String(item.features ?? '')
-      sellingPoints.value = String(item.selling_points ?? '')
+      features.value = productFeaturesText(item.features)
+      sellingPoints.value = productSellingPointsText(item.selling_points)
       status.value = ''
     } catch (e) {
       status.value = `读取产品失败：${(e as Error)?.message || e}`

@@ -237,6 +237,58 @@ export function summarizeImportResult(r: unknown): string {
   return parts.length ? `导入完成：${parts.join('，')}` : '导入完成。'
 }
 
+/** ── 产品参数 JSON 解析层（2026-11-15 用户裁决：服务端返回的产品资料参数全部统一
+ *  为 JSON——features=[{key,value}...]、selling_points=[string...]（均为字符串化 JSON
+ *  存于 ProductItem 字段）；客户端消费一律从本层解析起步，显示/文案/回填不再见原始 JSON）── */
+
+export interface ProductFeaturePair { key: string; value: string }
+
+/** 性能参数 JSON 解析：接受对象数组或其字符串化形态；shape 不符（手填文本/旧
+ *  markdown）返回 null，调用方回落原文展示/透传——绝不猜测、不静默造数据 */
+export function parseFeaturesJson(raw: unknown): ProductFeaturePair[] | null {
+  let v: unknown = raw
+  if (typeof v === 'string') {
+    const t = v.trim()
+    if (!t.startsWith('[')) return null
+    try { v = JSON.parse(t) } catch { return null }
+  }
+  if (!Array.isArray(v)) return null
+  const out: ProductFeaturePair[] = []
+  for (const it of v) {
+    const key = String((it as Record<string, unknown>)?.key ?? '').trim()
+    const value = String((it as Record<string, unknown>)?.value ?? '').trim()
+    if (key || value) out.push({ key, value })
+  }
+  return out.length ? out : null
+}
+
+/** 核心卖点 JSON 解析：字符串数组或其字符串化形态；shape 不符返回 null */
+export function parseSellingPointsJson(raw: unknown): string[] | null {
+  let v: unknown = raw
+  if (typeof v === 'string') {
+    const t = v.trim()
+    if (!t.startsWith('[')) return null
+    try { v = JSON.parse(t) } catch { return null }
+  }
+  if (!Array.isArray(v)) return null
+  const out = v.map((it) => String(it ?? '').trim()).filter(Boolean)
+  return out.length ? out : null
+}
+
+/** 性能参数 → 可读文本（JSON=「key：value」逐行；非 JSON=旧 markdown/手填文本剥
+ *  标记原样）。消费面：文案 prompt/混剪回填/textarea 编辑态回显 */
+export function productFeaturesText(raw: unknown): string {
+  const pairs = parseFeaturesJson(raw)
+  if (pairs) return pairs.map((p) => (p.value ? p.key + '：' + p.value : p.key)).join('\n')
+  return markdownListLines(raw).join('\n')
+}
+
+/** 核心卖点 → 可读文本（JSON=逐条一行；非 JSON 剥 markdown 标记原样） */
+export function productSellingPointsText(raw: unknown): string {
+  const points = parseSellingPointsJson(raw)
+  if (points) return points.join('\n')
+  return markdownListLines(raw).join('\n')
+}
 /** 单行 markdown 剥离（去列表符/加粗/残余标记；firstMarkdownLine 与 markdownListLines 共用） */function stripMarkdownLine(line: string): string {
   return line
     .replace(/^[-*•]+\s*/, '')          // 去列表符（- / * / •）
@@ -249,6 +301,11 @@ export function summarizeImportResult(r: unknown): string {
  *  服务端 features（性能参数）/ selling_points（核心卖点）均为多行 markdown 列表
  *  （- **标题**：描述），剥列表符/** 加粗/残余标记，超长截断加省略号） */
 export function firstMarkdownLine(raw: unknown, maxLen = 48): string {
+  // JSON 统一契约（2026-11-15）：性能参数取首对「key：value」，卖点取首条
+  const pairs = parseFeaturesJson(raw)
+  if (pairs) return (pairs[0].value ? pairs[0].key + '：' + pairs[0].value : pairs[0].key).slice(0, maxLen)
+  const points = parseSellingPointsJson(raw)
+  if (points) return points[0].slice(0, maxLen)
   const line = String(raw ?? '')
     .split('\n')
     .map((l) => l.trim())
@@ -263,6 +320,11 @@ export function firstMarkdownLine(raw: unknown, maxLen = 48): string {
  *  仅切换右侧预览，右侧展示选中产品性能参数/核心卖点全文；同 firstMarkdownLine
  *  剥离口径但不截断；空数据/纯空行 → 空数组） */
 export function markdownListLines(raw: unknown): string[] {
+  // JSON 统一契约（2026-11-15）：参数=「key：value」逐行，卖点=逐条一行
+  const pairs = parseFeaturesJson(raw)
+  if (pairs) return pairs.map((p) => (p.value ? p.key + '：' + p.value : p.key))
+  const points = parseSellingPointsJson(raw)
+  if (points) return points
   return String(raw ?? '')
     .split('\n')
     .map((l) => stripMarkdownLine(l.trim()))

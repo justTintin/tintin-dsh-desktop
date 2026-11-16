@@ -7,7 +7,10 @@
 //   · 极限词检测（extreme_words.py 全表移植 + check_extreme_words 口径）
 // 风格化条目（知识库）暂缺（2026-08-31 知识库批次暂停），styleText 参数
 //   保留可选位；本版不提供风格化选择 UI。
+// 产品参数 JSON 解析（2026-11-15 统一契约）：自产品资料纯函数层引入，
+//   prompt 前把 JSON 参数解析成可读文本（纯函数层互引，无环）。
 // ═══════════════════════════════════════════════════════════════
+import { productFeaturesText, productSellingPointsText } from './opsProductLibraryLogic'
 
 /* ── 生成设置选项（对齐原 combo 可选项） ─────────────────────── */
 
@@ -81,7 +84,10 @@ export function buildProductBasicLine(record: ProductBasicRecord | null | undefi
   return parts.join('  ')
 }
 
-/** 产品资料段：基础行 + 【性能参数】【核心卖点】（未录入占位对齐原版） */
+/** 产品资料段：基础行 + 【性能参数】【核心卖点】（未录入占位对齐原版）。
+ *  2026-11-15 用户裁决（服务端参数统一 JSON）：features/selling_points 进 prompt
+ *  前经 productFeaturesText/productSellingPointsText 解析——JSON=「key：value」/
+ *  逐条一行可读文本，LLM 不再吃原始 JSON 串；非 JSON（手填/旧 markdown）剥标记透传。 */
 export function buildProductSection(
   record: ProductBasicRecord | null | undefined,
   features: string,
@@ -91,9 +97,9 @@ export function buildProductSection(
   return [
     basic,
     '',
-    `【性能参数】\n${features ? features : '（未录入）'}`,
+    `【性能参数】\n${productFeaturesText(features) || '（未录入）'}`,
     '',
-    `【核心卖点】\n${sellingPoints ? sellingPoints : '（未录入）'}`,
+    `【核心卖点】\n${productSellingPointsText(sellingPoints) || '（未录入）'}`,
   ].join('\n').replace(/^\n+/, '')
 }
 

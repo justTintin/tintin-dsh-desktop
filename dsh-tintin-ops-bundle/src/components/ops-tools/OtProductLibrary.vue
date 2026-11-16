@@ -15,6 +15,8 @@ import {
   BASIC_FIELDS,
   PRODUCT_FIELDS,
   productSixViewSlots,
+  parseFeaturesJson,
+  parseSellingPointsJson,
 } from '@/composables/opsProductLibraryLogic'
 import { useOpsProductLibrary } from '@/composables/useOpsProductLibrary'
 import { TOOL_TAB_CTX, NOOP_TOOL_TAB_CTX, useToolTabBusy } from '@/composables/useToolTabs'
@@ -23,6 +25,18 @@ import OtCopywritingPanel from './OtCopywritingPanel.vue'
 import OtPickMaterialDialog from './OtPickMaterialDialog.vue'
 
 const P = useOpsProductLibrary()
+/* 智能挖掘美观化（2026-11-15 用户裁决：服务端参数统一 JSON，客户端按数据美观化）：
+   JSON 解析成功=渲染 kv 网格/编号列表（默认态）；「编辑原文」切回 textarea（保留
+   手填与 JSON round-trip——编辑内容原样保存，未改动的原始串原样回传服务端）。
+   切换产品/挖掘回填（form 变化）自动回美观态（watch form 两个键）。 */
+const editFeaturesRaw = ref(false)
+const editSellingRaw = ref(false)
+const featuresPairs = computed(() => parseFeaturesJson(P.form.value.features))
+const sellingPointsList = computed(() => parseSellingPointsJson(P.form.value.selling_points))
+watch(() => [P.form.value.features, P.form.value.selling_points], () => {
+  editFeaturesRaw.value = false
+  editSellingRaw.value = false
+})
 
 /* ── 六视图（2026-10-09 服务端 8f073bbf：详情内嵌 item.six_views；
    2026-10-10 e44a8b66：+逐视图上传替换，纯替换语义=其余五张不动；
@@ -342,22 +356,49 @@ function onDelete() {
             </button>
           </div>
           <div class="mine-grid">
-            <label class="mine-field">
-              <span class="form-label">性能参数</span>
+            <div class="mine-field">
+              <div class="mine-field-head">
+                <span class="form-label">性能参数</span>
+                <button
+                  v-if="featuresPairs"
+                  type="button" class="mine-edit-toggle"
+                  @click="editFeaturesRaw = !editFeaturesRaw"
+                >{{ editFeaturesRaw ? '✓ 完成' : '✎ 编辑原文' }}</button>
+              </div>
+              <!-- JSON 统一契约（2026-11-15）：解析成功=kv 网格美观态；编辑态/手填
+                  （非 JSON）=textarea 原样——保存时内容原样回传服务端（round-trip） -->
+              <div v-if="featuresPairs && !editFeaturesRaw" class="mine-pretty">
+                <div v-for="(p, i) in featuresPairs" :key="i" class="mine-kv">
+                  <span class="mine-kv-key">{{ p.key || '—' }}</span>
+                  <span class="mine-kv-val">{{ p.value || '—' }}</span>
+                </div>
+              </div>
               <textarea
+                v-else
                 class="input ta"
                 :placeholder="P.mining.value ? '挖掘中…' : '点击【智能挖掘】自动从大模型获取性能参数，或在此手动输入...'"
                 v-model="P.form.value.features"
               ></textarea>
-            </label>
-            <label class="mine-field">
-              <span class="form-label">核心卖点</span>
+            </div>
+            <div class="mine-field">
+              <div class="mine-field-head">
+                <span class="form-label">核心卖点</span>
+                <button
+                  v-if="sellingPointsList"
+                  type="button" class="mine-edit-toggle"
+                  @click="editSellingRaw = !editSellingRaw"
+                >{{ editSellingRaw ? '✓ 完成' : '✎ 编辑原文' }}</button>
+              </div>
+              <ol v-if="sellingPointsList && !editSellingRaw" class="mine-pretty mine-points">
+                <li v-for="(pt, i) in sellingPointsList" :key="i" class="mine-point">{{ pt }}</li>
+              </ol>
               <textarea
+                v-else
                 class="input ta"
                 :placeholder="P.mining.value ? '挖掘中…' : '点击【智能挖掘】自动从大模型获取核心卖点，或在此手动输入...'"
                 v-model="P.form.value.selling_points"
               ></textarea>
-            </label>
+            </div>
           </div>
           <div v-if="P.mineStatus.value" class="mine-status">{{ P.mineStatus.value }}</div>
         </div>
@@ -547,6 +588,30 @@ function onDelete() {
 .mine-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .mine-field { display: flex; flex-direction: column; gap: 4px; }
 .ta { height: 192px; padding: 8px 10px; resize: vertical; line-height: 1.5; } /* 2026-09-05 用户裁决：96→192px，参数/卖点篇幅加倍 */
+/* 美观态（2026-11-15 参数统一 JSON 批）：头部=标签+编辑切换；kv 网格/编号列表
+   与 textarea 同高（192px）内滚，挖掘回填即渲染，不再见原始 JSON 串 */
+.mine-field-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.mine-edit-toggle {
+  height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: transparent; color: var(--muted-foreground); font-size: 11px; cursor: pointer;
+}
+.mine-edit-toggle:hover { border-color: var(--primary); color: var(--primary); }
+.mine-pretty {
+  height: 192px; overflow-y: auto; box-sizing: border-box;
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface-container); padding: var(--space-2);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.mine-kv {
+  display: grid; grid-template-columns: 88px 1fr; gap: var(--space-2);
+  padding: 3px 6px; border-radius: var(--radius-sm); background: var(--surface-container-high, transparent);
+}
+.mine-kv:nth-child(odd) { background: color-mix(in srgb, var(--surface-container-high, transparent) 55%, transparent); }
+.mine-kv-key { font-size: 12px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mine-kv-val { font-size: 12px; color: var(--foreground); line-height: 1.45; }
+.mine-points { margin: 0; padding-left: 26px; counter-reset: none; list-style: decimal; }
+.mine-point { font-size: 12px; color: var(--foreground); line-height: 1.5; padding-left: 2px; }
+.mine-point::marker { color: var(--primary); font-weight: 600; }
 .mine-status { font-size: 12px; color: var(--muted-foreground); }
 
 /* 产品六视图卡 */
