@@ -102,13 +102,16 @@ edit('lib/routes.js', [
     "const channelFor = new Map([...new Set([...Object.keys(installed), 'dshmarket'])]"],
 ])
 // checkUpdates 注入用正则:1.73.14 起上游会给 options 追加新实参(如 releaseSources)，
-// 只在 holdYoungReleases 前插 provideNpmVersions，对后续继续加参免疫(精确串锚点已翻车一次)
+// 只在 holdYoungReleases 前插 provideNpmVersions，对后续继续加参免疫(精确串锚点已翻车一次)。
+// 1.73.20 起上游把三处 checkUpdates 调用合并为一处(L2519，结果仍按名字分发)——
+// 注入点数随之 3→1，语义等价(单点覆盖全部检查路径)；口径改为 ≥1 处即注入每处，
+// 0 处=锚点被重写，仍抛错交人工(不静默吞)。
 {
   const path = join(mod, 'lib/routes.js')
   const text = readFileSync(path, 'utf8')
   const pattern = /catalogNpmByRepo, \{ holdYoungReleases: /g
   const count = (text.match(pattern) ?? []).length
-  if (count !== 3) throw new Error(`lib/routes.js: 期望 3 处、实得 ${count} 处 —— checkUpdates 注入锚点`)
+  if (count < 1) throw new Error(`lib/routes.js: checkUpdates 注入锚点 0 处 —— 上游重写了 options 形态，需人工看 diff`)
   writeFileSync(path, text.replace(pattern, 'catalogNpmByRepo, { provideNpmVersions: new Map([["dshmarket", marketVersion()]]), holdYoungReleases: '), 'utf8')
 }
 
