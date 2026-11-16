@@ -1,19 +1,15 @@
-// Fetch TinTin media binaries (ffmpeg/ffprobe/yt-dlp) into the TinTin channel's
-// packaging resources.
+// fetch-tintin-binaries.mjs — 媒体二进制(ffmpeg/ffprobe/yt-dlp)就位核对脚本。
+// 2026-11-16 用户裁决(逻辑定案):**文件来源只有一个=工程内 tintin-resources/bin
+// (git-ignored 的工程准备目录,由原工程 LFS checkout 一次性拷入)**;安装目录里的
+// 可执行文件/附加文件是安装包的产物,不是文件来源,永远不从系统运行路径取——打包
+// 时从工程取,安装时由安装包产生,两个方向永不混用。外部 checkout
+// (TinTin_Client_Electron 等)路径候选全部废除,staging 缺文件=显式报错指路,
+// 绝不静默从别处抓。
 //
-// These are ~300 MB and tracked via git LFS in the original client repo
-// (D:\Project\TinTin_Client_Electron), so they are intentionally NOT committed
-// here (tintin-resources/bin keeps only a placeholder). Run before packaging:
-//
-//   node scripts/fetch-tintin-binaries.mjs
-//
-// yt-dlp (2026-11-05 修复): 旧脚本从老工程 checkout 复制，版本冻结在拷贝当时的
-// 发布版 —— 抖音是 yt-dlp 抽取器攻防最频繁的站点，抽取器修复跟着版本走（当期
-// 报障：2026.08.19 旧版对当期抖音报 `Fresh cookies are needed`）。改为**每次打包
-// 下载最新 release**；GitHub 不可达/校验失败时回落旧拷贝并大声告警（不阻塞打包，
-// 沿用 1012 GitHub 阻断处置口径），绝不静默变旧。
-// ffmpeg/ffprobe (~300 MB, 版本稳定) 维持旧工程拷贝。
-import { copyFileSync, existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+//   node scripts/fetch-tintin-binaries.mjs           # 核对三件套在位(不联网不改文件)
+//   node scripts/fetch-tintin-binaries.mjs --latest  # 显式升级 yt-dlp 到 GitHub 最新
+//                                                    # (工程侧动作,与打包解耦,铁律 18)
+import { copyFileSync, existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -23,96 +19,61 @@ const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 const NAMES = ['ffmpeg.exe', 'ffprobe.exe', 'yt-dlp.exe']
 const YT_DLP_URL = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe'
 
-const srcCandidates = [
-  process.env.TINTIN_SRC,
-  'D:\\Project\\TinTin_Client_Electron',
-  'D:\\Project\\dsh-desktop',
-].filter(Boolean)
-const srcBinOf = (root) => join(root, 'resources', 'bin')
-const srcRoot = srcCandidates.find((root) => NAMES.every((name) => existsSync(join(srcBinOf(root), name)))) ?? srcCandidates[0]
-const srcBin = srcBinOf(srcRoot)
+/** 工程内 bin 就位目录(唯一文件来源;git-ignored,由工程侧维护) */
 const destBin = join(repoRoot, 'dsh-plugin-desktop-tintin', 'tintin-resources', 'bin')
 
 mkdirSync(destBin, { recursive: true })
 
-let copied = 0
-// ffmpeg/ffprobe：版本稳定，维持旧工程拷贝
-for (const name of ['ffmpeg.exe', 'ffprobe.exe']) {
-  const from = join(srcBin, name)
-  if (!existsSync(from)) {
-    console.error(`missing ${from} — set TINTIN_SRC to a checkout holding all of ${NAMES.join(', ')}`)
-    process.exitCode = 1
-    continue
-  }
-  copyFileSync(from, join(destBin, name))
-  console.log(`fetched ${name}`)
-  copied++
+const missing = NAMES.filter((name) => !existsSync(join(destBin, name)))
+if (missing.length) {
+  console.error(`工程内 bin 缺文件: ${missing.join(', ')}`)
+  console.error(`就位目录: ${destBin}`)
+  console.error(`本目录由工程侧维护(git-ignored);新环境首次就位可从原工程 LFS checkout 一次性拷入,之后升级走 --latest。打包不从这里以外任何路径取文件。`)
+  process.exitCode = 1
+  process.exit(process.exitCode)
 }
 
-// yt-dlp(2026-11-16 用户裁决二改):**打包链内默认钉死 staging 现有版本**——已存在且
-// 版本可读时原样保留、绝不覆盖不回落;显式 --latest(TINTIN_YTDLP_LATEST=1)才下载最新
-// release(升级=显式决策,与 dshmarket 钉版口径一致,铁律 18)。手动升级:
-//   node scripts/fetch-tintin-binaries.mjs --latest
-// 「GitHub 失败→回落旧工程拷贝」路径废除:它会静默把升级成果覆盖回旧版(1113→1116
-// 事故原型);staging 缺 yt-dlp 时才允许从旧工程补位(首装种子)。
-const destYtdlp = join(destBin, 'yt-dlp.exe')
-const wantLatestYtdlp = process.argv.includes('--latest') || process.env.TINTIN_YTDLP_LATEST === '1'
-const existingVersion = () => {
-  if (!existsSync(destYtdlp)) return null
+const versionOf = (file) => {
   try {
-    const v = String(spawnSync(destYtdlp, ['--version'], { stdio: 'pipe', timeout: 15000 }).stdout || '').trim()
+    const v = String(spawnSync(file, ['--version'], { stdio: 'pipe', timeout: 15000 }).stdout || '').trim()
     return /^\d{4}\.\d{2}\.\d{2}/.test(v) ? v : null
   } catch { return null }
 }
-let ytdlpHandled = false
+
+const wantLatestYtdlp = process.argv.includes('--latest') || process.env.TINTIN_YTDLP_LATEST === '1'
+const destYtdlp = join(destBin, 'yt-dlp.exe')
+
 if (!wantLatestYtdlp) {
-  const current = existingVersion()
-  if (current) {
-    ytdlpHandled = true
-    console.log(`yt-dlp.exe pinned at ${current} (staging kept; run with --latest to upgrade)`)
-  }
-}
-const tmpYtdlp = destYtdlp + '.download'
-let downloaded = false
-if (!ytdlpHandled) {
-  try {
-    const res = await fetch(YT_DLP_URL, { redirect: 'follow', signal: AbortSignal.timeout(120000) })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const buf = Buffer.from(await res.arrayBuffer())
-    // 校验：体积合理 + PE 头（GitHub 阻断期的拦截页/杀软页是 HTML，不是 MZ）
-    if (buf.length < 1024 * 1024 || buf[0] !== 0x4d || buf[1] !== 0x5a) {
-      throw new Error(`downloaded payload is not a PE exe (${buf.length} bytes)`)
-    }
-    writeFileSync(tmpYtdlp, buf)
-    const v = spawnSync(tmpYtdlp, ['--version'], { stdio: 'pipe', timeout: 15000 })
-    if (v.status !== 0) throw new Error(`--version probe failed (exit ${v.status})`)
-    const version = String(v.stdout || '').trim()
-    if (!/^\d{4}\.\d{2}\.\d{2}/.test(version)) throw new Error(`unexpected version string: ${version}`)
-    if (existsSync(destYtdlp)) unlinkSync(destYtdlp)
-    copyFileSync(tmpYtdlp, destYtdlp)
-    downloaded = true
-    console.log(`fetched yt-dlp.exe (latest release ${version})`)
-  } catch (err) {
-    console.error(`yt-dlp latest download failed: ${err instanceof Error ? err.message : err}`)
-  } finally {
-    try { if (existsSync(tmpYtdlp)) unlinkSync(tmpYtdlp) } catch { /* ignore */ }
-  }
-}
-if (!downloaded && !ytdlpHandled) {
-  const from = join(srcBin, 'yt-dlp.exe')
-  if (existsSync(from)) {
-    copyFileSync(from, destYtdlp)
-    copied++
-    let staleVersion = 'unknown'
-    try { staleVersion = String(spawnSync(from, ['--version'], { stdio: 'pipe', timeout: 15000 }).stdout || '').trim() } catch { /* ignore */ }
-    console.error(`WARNING: yt-dlp seeded from the legacy copy (${staleVersion}) — 首装种子;升级请跑本脚本 --latest`)
-  } else {
-    console.error(`missing ${from} — set TINTIN_SRC to a checkout holding all of ${NAMES.join(', ')}`)
-    process.exitCode = 1
-  }
-} else {
-  // downloaded(显式 --latest 成功)或 ytdlpHandled(pinned 保留)——yt-dlp 已就位
-  copied++
+  const versions = NAMES.map((n) => {
+    if (n === 'yt-dlp.exe') return `${n} ${versionOf(destYtdlp) ?? '(版本不可读)'}`
+    return n
+  })
+  console.log(`bin 就位(工程内原样): ${versions.join(', ')}`)
+  console.log('OK: 3/3 binaries in tintin-resources/bin')
+  process.exit(0)
 }
 
-console.log(copied === NAMES.length ? `OK: ${copied}/${NAMES.length} binaries in tintin-resources/bin` : `incomplete: ${copied}/${NAMES.length}`)
+// 显式升级 yt-dlp(--latest)
+const tmpYtdlp = destYtdlp + '.download'
+try {
+  const res = await fetch(YT_DLP_URL, { redirect: 'follow', signal: AbortSignal.timeout(120000) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const buf = Buffer.from(await res.arrayBuffer())
+  // 校验:体积合理 + PE 头(GitHub 阻断期的拦截页/杀软页是 HTML,不是 MZ)
+  if (buf.length < 1024 * 1024 || buf[0] !== 0x4d || buf[1] !== 0x5a) {
+    throw new Error(`downloaded payload is not a PE exe (${buf.length} bytes)`)
+  }
+  writeFileSync(tmpYtdlp, buf)
+  const v = spawnSync(tmpYtdlp, ['--version'], { stdio: 'pipe', timeout: 15000 })
+  if (v.status !== 0) throw new Error(`--version probe failed (exit ${v.status})`)
+  const version = String(v.stdout || '').trim()
+  if (!/^\d{4}\.\d{2}\.\d{2}/.test(version)) throw new Error(`unexpected version string: ${version}`)
+  if (existsSync(destYtdlp)) unlinkSync(destYtdlp)
+  copyFileSync(tmpYtdlp, destYtdlp)
+  console.log(`fetched yt-dlp.exe (latest release ${version})`)
+} catch (err) {
+  console.error(`yt-dlp latest download failed: ${err instanceof Error ? err.message : err}`)
+  process.exitCode = 1
+} finally {
+  try { if (existsSync(tmpYtdlp)) unlinkSync(tmpYtdlp) } catch { /* ignore */ }
+}
