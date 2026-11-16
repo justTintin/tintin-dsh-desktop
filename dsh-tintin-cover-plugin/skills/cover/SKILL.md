@@ -58,6 +58,7 @@ description: TinTin 封面制作智能体 — 驱动封面编辑器的图层与�
 
 ## 生图(画面归 AI,文字归排版——铁律)
 
+- **即梦 CLI 优先(2026-11-15 用户裁决)**:用户已登录即梦(dreamina CLI)时,**编辑器界面的生成(底图/主体图「AI 生成」按钮)自动优先走即梦 CLI**(text2image/image2image),未登录自动落服务端文生图——无需也不存在引擎选择;即梦登录/状态在**封面设置「即梦 CLI」区**。会话侧生成仍走 create_image(服务端 MCP),不受影响;用户问起即梦时,告知登录入口在封面设置,并说明当前通道行为即可。
 - **所有生成(底图/环境图/主体图重绘)统一走服务端 MCP 工具 `create_image`**:mode=t2i(文生图,prompt 直接出图)或 mode=cover(封面图生图,参考图 script_id/images/material_ids 三选一)。**不要用 curl/pwsh 直调任何 `/generate/*` 端点或编辑器的 generate-background/generate-product**(那些是编辑器界面自身使用的通道;会话里的生成一律经 create_image 工具)。异步任务按会话工作纪律用 task_status_unified 轮询到终态(间隔 ≥5 秒,预算 30 分钟)。
 - **参考图必须是服务端可达的引用(2026-11-02 用户裁决:传给服务端的不是路径)**:`images`/`material_ids`/`script_id` 只认 material id、script、服务端可达 URL;**本机/客户端项目里的文件路径对服务端不可见**(生成服务跑在另一台 Linux 主机上),传本地路径必报「找不到」且重试无效。用户拿本机图当参考时:①该图已在服务端素材库→给 material_ids;②用户能提供图片 URL→直传 URL;③都没有→如实说明「本机文件需先上传到服务端素材库才能作为参考」,等用户提供,不要传本地路径。抠图例外:`/matting` 是 multipart 上传文件字节,本地图可直接用。**仿封面例外:用 `imitate_cover`(见下节),它内置上传通路,images 直接给本机路径。**
 - 产物落盘后按用途写回 props(底图 → `props.bgImage` = 文件名;主体图 → `props.image`),写回规则见上节。

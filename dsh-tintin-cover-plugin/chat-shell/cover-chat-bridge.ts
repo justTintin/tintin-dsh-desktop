@@ -282,7 +282,7 @@ function renderLibraryDrawer(): void {
   el.id = 'tintin-cover-library';
   el.style.cssText = [
     'position:fixed', 'left:0', 'top:0', 'right:0', 'z-index:70', 'display:flex', 'flex-direction:column', 'overflow:hidden',
-    'background:var(--surface-2, #232326)', 'border-top:1px solid var(--border, #3a3a3e)', 'font-size:12.5px', 'color:var(--text, #e8e8e6)',
+    'background:var(--bg-panel, #232326)', 'border-top:1px solid var(--border, #3a3a3e)', 'font-size:12.5px', 'color:var(--text, #e8e8e6)',
   ].join(';');
   el.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border, #3a3a3e)">
@@ -295,7 +295,7 @@ function renderLibraryDrawer(): void {
       <span class="tintin-lib-tab" style="padding:4px 12px;border-radius:6px;background:rgba(79,124,255,0.22);color:#bfdbfe;font-size:12px;font-weight:600">图片</span>
     </div>
     <div style="padding:8px 12px;border-bottom:1px solid var(--border, #3a3a3e)">
-      <input class="tintin-lib-search" placeholder="搜索素材名" style="width:100%;box-sizing:border-box;background:var(--surface, #1c1c1e);border:1px solid var(--border, #3a3a3e);border-radius:8px;color:var(--text, #e8e8e6);font-size:12px;padding:6px 10px;outline:none" />
+      <input class="tintin-lib-search" placeholder="搜索素材名" style="width:100%;box-sizing:border-box;background:var(--bg-raised, #1c1c1e);border:1px solid var(--border, #3a3a3e);border-radius:8px;color:var(--text, #e8e8e6);font-size:12px;padding:6px 10px;outline:none" />
     </div>
     <div class="tintin-lib-list" style="overflow-y:auto;flex:1 1 auto;min-height:0"></div>`;
   document.body.appendChild(el);

@@ -15,14 +15,14 @@ type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: u
 
 const STYLE = [
   /* 停靠形态(2026-11-12): 铺满聊天列的会话区, 底=输入框上缘(open 时按实位 JS 设), 无圆角无投影 */
-  '.tintin-pd-panel{position:fixed;left:0;right:0;top:0;bottom:120px;z-index:70;background:var(--surface-2, #232326);border-bottom:1px solid var(--border, #3a3a3e);display:none;flex-direction:column;font:12.5px/1.5 system-ui;color:var(--text, #e8e8e6);box-sizing:border-box}',
+  '.tintin-pd-panel{position:fixed;left:0;right:0;top:0;bottom:120px;z-index:70;background:var(--bg-panel, #232326);border-bottom:1px solid var(--border, #3a3a3e);display:none;flex-direction:column;font:12.5px/1.5 system-ui;color:var(--text, #e8e8e6);box-sizing:border-box}',
   '.tintin-pd-head{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border, #3a3a3e)}',
   '.tintin-pd-title{flex:1;font-weight:600;font-size:12.5px}',
   '.tintin-pd-close{border:0;background:transparent;color:var(--text-muted, #b8b8b6);font-size:14px;cursor:pointer;padding:0 2px;line-height:1}',
-  '.tintin-pd-search{margin:8px 12px;background:var(--surface, #1c1c1e);border:1px solid var(--border, #3a3a3e);border-radius:8px;color:var(--text, #e8e8e6);font:12px system-ui;padding:6px 10px;outline:none}',
+  '.tintin-pd-search{margin:8px 12px;background:var(--bg-raised, #1c1c1e);border:1px solid var(--border, #3a3a3e);border-radius:8px;color:var(--text, #e8e8e6);font:12px system-ui;padding:6px 10px;outline:none}',
   '.tintin-pd-list{flex:1;min-height:0;overflow:auto;padding:0 12px;display:flex;flex-direction:column;gap:8px}',
-  '.tintin-pd-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border, #3a3a3e);border-radius:9px;background:var(--surface, #1c1c1e);cursor:pointer}',
-  '.tintin-pd-row:hover{border-color:#3b6fd4;background:var(--surface-3, #1b2030)}',
+  '.tintin-pd-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border, #3a3a3e);border-radius:9px;background:var(--bg-raised, #1c1c1e);cursor:pointer}',
+  '.tintin-pd-row:hover{border-color:#3b6fd4;background:var(--bg-hover, #1b2030)}',
   '.tintin-pd-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
   '.tintin-pd-name{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
   '.tintin-pd-meta{color:var(--text-faint, #77787e);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',

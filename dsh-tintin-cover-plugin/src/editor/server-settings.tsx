@@ -9,7 +9,23 @@ import React from 'react'
  *  mcp-discover-cache.json,GET server-config 带回;打开时静默自动刷新一次,失败留缓存)
  *  ②左右布局=左表单右清单(同视频剪辑设置),整体限高,清单内部滚动不撑破弹层。
  *  2026-11-03 三次裁决:弹层尺寸=技能弹窗同款(min(1200px,100vw-64)×min(800px,100vh-80)),
- *  标题行右上角关闭钮(✕ 同款);内容保持左右布局。 */
+ *  标题行右上角关闭钮(✕ 同款);内容保持左右布局。
+ *  2026-11-15 四次裁决(用户问询「增加的即梦配置呢」):左栏加「即梦 CLI」区=状态卡
+ *  (安装/版本/登录态/积分)+设备码两段式登录(与创作模式「即梦 CLI」卡片同门)+退出;
+ *  引擎不做选择——已登录即梦时生成自动优先即梦 CLI(路由在 cover-background.js)。 */
+type DreaminaStatus = {
+  available?: boolean
+  bin?: string
+  version?: string
+  loggedIn?: boolean
+  credit?: number
+  vipLevel?: string
+  userId?: string
+  error?: string
+}
+type DreaminaLoginFlow = { verificationUri: string; userCode: string; checking: boolean; failed?: string }
+
+const INSTALL_HINT = 'curl -s https://jimeng.jianying.com/cli | bash'
 export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [url, setUrl] = React.useState('')
   const [loaded, setLoaded] = React.useState(false)
@@ -19,6 +35,22 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
   const [messageOk, setMessageOk] = React.useState(false)
   const [tools, setTools] = React.useState<Array<{ name: string; description: string }>>([])
   const [mcpUrl, setMcpUrl] = React.useState('')
+  /* 即梦 CLI(2026-11-15 四次裁决):状态卡+设备码两段式登录+退出;引擎不选,已登录自动优先 */
+  const [jm, setJm] = React.useState<DreaminaStatus | null>(null)
+  const [jmLoaded, setJmLoaded] = React.useState(false)
+  const [jmBusy, setJmBusy] = React.useState<'login' | 'logout' | null>(null)
+  const [jmFlow, setJmFlow] = React.useState<DreaminaLoginFlow | null>(null)
+
+  const dreaminaCall = (payload: Record<string, unknown>): Promise<Record<string, unknown>> =>
+    fetch('/tintin/ipc/cover/dreamina', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
+    }).then((r) => r.json())
+
+  const loadDreamina = (): Promise<void> =>
+    dreaminaCall({ action: 'status' })
+      .then((j) => setJm(j as DreaminaStatus))
+      .catch(() => setJm({ available: false, error: '即梦状态获取失败' }))
+      .finally(() => setJmLoaded(true))
 
   const discoverInto = (target: string, quiet: boolean): Promise<void> =>
     new Promise((resolve) => {
@@ -68,7 +100,38 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
       })
       .catch(() => {})
       .finally(() => setLoaded(true))
+    void loadDreamina()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /** 即梦登录(2026-11-15):设备码两段式——login-headless 取授权材料 → 展示链接+UserCode
+   *  → login-check 服务端阻塞轮询(poll 90s)→ 成功刷新状态;失败可重试。 */
+  const dreaminaLogin = (): void => {
+    setJmBusy('login')
+    dreaminaCall({ action: 'login-headless' })
+      .then((j) => {
+        const verificationUri = String(j?.verificationUri ?? '')
+        const userCode = String(j?.userCode ?? '')
+        const deviceCode = String(j?.deviceCode ?? '')
+        if (!j?.ok || !verificationUri || !deviceCode) throw new Error(String(j?.error ?? '未取得设备码材料'))
+        setJmFlow({ verificationUri, userCode, checking: true })
+        return dreaminaCall({ action: 'login-check', deviceCode, poll: 90 }).then((done) => {
+          if (!done?.ok) throw new Error('授权未完成——可重试')
+          setJmFlow(null)
+          return loadDreamina()
+        })
+      })
+      .catch((e) => {
+        setJmFlow((f) => (f ? { ...f, checking: false, failed: e instanceof Error ? e.message : String(e) } : null))
+      })
+      .finally(() => setJmBusy(null))
+  }
+  const dreaminaLogout = (): void => {
+    setJmBusy('logout')
+    dreaminaCall({ action: 'logout' })
+      .then(() => loadDreamina())
+      .finally(() => setJmBusy(null))
+  }
 
   const save = (): void => {
     setBusy('save'); setMessage('')
@@ -116,7 +179,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
           </div>
         </div>
         <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <div style={{ width: 300, flexShrink: 0, padding: '12px 22px 22px', borderRight: '1px solid #2c2c30', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
+        <div style={{ width: 300, flexShrink: 0, padding: '12px 22px 22px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', boxSizing: 'border-box', overflowY: 'auto' }}>
           <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-faint)', marginBottom: 16 }}>服务端地址与视频剪辑/总助手共用一份配置；封面与剪辑会话的 MCP 工具在会话创建时按此地址自动挂载。</div>
           <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700, marginBottom: 6 }}>服务端地址</div>
           <input
@@ -135,6 +198,43 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
               {message}
             </div>
           ) : null}
+          {/* 即梦 CLI(2026-11-15 四次裁决):状态卡+设备码两段式登录+退出;引擎不做选择——
+              已登录即梦时封面生图/图片编辑自动优先即梦 CLI(路由在 cover-background.js) */}
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700, marginBottom: 6 }}>即梦 CLI</div>
+            {!jmLoaded ? (
+              <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>正在检测即梦 CLI…</div>
+            ) : jmFlow ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--text)' }}>登录即梦：访问链接，输入授权码完成授权</div>
+                <a href={jmFlow.verificationUri} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--accent)', wordBreak: 'break-all' }}>{jmFlow.verificationUri}</a>
+                <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 2, fontFamily: 'var(--font-mono)', color: 'var(--text)', background: 'var(--bg-field)', borderRadius: 8, padding: '6px 10px', textAlign: 'center' }}>{jmFlow.userCode}</div>
+                <div style={{ fontSize: 12, color: jmFlow.failed ? 'var(--err)' : 'var(--text-faint)' }}>
+                  {jmFlow.failed ? `✗ ${jmFlow.failed}` : jmFlow.checking ? '等待授权中…（完成网页授权后自动回到这里）' : ''}
+                </div>
+                {jmFlow.failed ? <button onClick={dreaminaLogin} style={{ ...btn('ghost'), flex: 'none' }}>重试登录</button> : null}
+              </div>
+            ) : jm?.available === false ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ fontSize: 12, color: 'var(--warn)' }}>未安装即梦创作 CLI。安装并登录后，封面生图/图片编辑自动优先走即梦。</div>
+                <code style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', background: 'var(--bg-field)', borderRadius: 8, padding: '6px 10px', wordBreak: 'break-all' }}>{INSTALL_HINT}</code>
+              </div>
+            ) : jm?.loggedIn ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--ok)' }}>
+                  已登录{jm.userId ? ` · ${jm.userId}` : ''}{typeof jm.credit === 'number' ? ` · 积分 ${jm.credit}` : ''}{jm.vipLevel ? ` · ${jm.vipLevel}` : ''}
+                </div>
+                <div style={{ fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-faint)' }}>封面生图与图片编辑已自动优先即梦 CLI；未登录时自动落服务端文生图。</div>
+                <button onClick={dreaminaLogout} disabled={jmBusy !== null} style={{ ...btn('ghost'), flex: 'none' }}>{jmBusy === 'logout' ? '退出中…' : '退出登录'}</button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 12, color: 'var(--warn)' }}>已安装{jm?.version ? ` · ${jm.version}` : ''}，未登录</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>登录后，封面生图与图片编辑自动优先走即梦 CLI。</div>
+                <button onClick={dreaminaLogin} disabled={jmBusy !== null} style={{ ...btn('primary'), flex: 'none' }}>{jmBusy === 'login' ? '取设备码…' : '登录即梦'}</button>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, padding: '12px 22px 22px', display: 'flex', flexDirection: 'column', boxSizing: 'border-box' }}>
           <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 700, marginBottom: 8 }}>

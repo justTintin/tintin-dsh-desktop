@@ -25,6 +25,9 @@ import { registerCoverToolsMcp } from './cover-tools-mcp.js'
 // 配置仓/技能落盘管线=宿主公共设施(dsh-tintin-shared 叶子包,2026-10-31 抽共享包
 // 裁决);bundle 侧 channel-table/machine-id-store 同用。
 import { mergeTintinConfigStore } from 'dsh-tintin-shared/lib/tintin-config-store.js'
+// 即梦创作 CLI 路由族(2026-11-15 封面设置批)——独立模块(行数门禁拆分先例),注册即梦
+// 状态/登录/退出端点;生成路由的登录态自动优先在 cover-background.js
+import { registerCoverDreaminaRoutes } from './cover-dreamina-routes.js'
 // 技能包落盘管线(2026-10-30 封面技能管理裁决):与创作模式技能管理同一条
 import { installSkillPackage, migrateCoverSkillsHome } from 'dsh-tintin-shared/lib/skills-install.js'
 
@@ -306,6 +309,10 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
       }))
     },
   })
+
+  // ── 即梦 CLI(2026-11-15 用户裁定「设置里有即梦的 CLI 登录;已登录即梦→优先即梦
+  //    CLI 生图/图片编辑」):注册族在 cover-dreamina-routes.js(门禁拆分先例)。
+  const dreaminaDisposes = registerCoverDreaminaRoutes({ registeringWebServer, mutationAllowed, sendJson })
 
   // ── 封面技能管理(2026-10-30 用户裁决:会话框 ▦ 打开封面自己的技能管理)──
   // 清单=服务端注册表(GET /skills,经注入的 httpRequest/getServerUrl)+已安装装位
@@ -972,6 +979,7 @@ export function registerCoverPluginRoute({ webServer, isTrustedRequest, sendJson
     disposeExportDir()
     disposeExportEncode()
     disposeExportWrite()
+    for (const d of dreaminaDisposes) { try { d() } catch { /* ignore */ } }
     disposeUpload()
     disposeUploadUrl()
     disposeMatting()

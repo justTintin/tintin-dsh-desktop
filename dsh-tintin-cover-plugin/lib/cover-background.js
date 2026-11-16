@@ -13,6 +13,18 @@ const DONE = new Set(['completed', 'succeeded', 'success', 'done'])
 const FAILED = new Set(['failed', 'error', 'cancelled', 'canceled'])
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/** 即梦登录态探测(2026-11-15 用户裁决「已登录即梦→优先即梦 CLI 生图/图片编辑」):
+ *  dreamina:status 一次取全(二进制/版本/登录态);未安装或未登录=false,路由落服务端。
+ *  opts.jimengReady 可注入(测试确定性;真身每次现查,装完 CLI 无需重启)。 */
+async function jimengReadyProbe() {
+  try {
+    const api = createDreaminaApi()
+    const status = await api['dreamina:status']()
+    if (!status || status.error) return false
+    return Boolean(status.available && status.loggedIn)
+  } catch { return false }
+}
+
 /**
  * 生成一张封面底图(无文字氛围图;文字层永远走代码排版——需求文档 §一)。
  * @returns {Promise<{ok:true, bytes:Buffer, name:string, engine:string, url:string}|{ok:false,error:string}>}
@@ -20,23 +32,28 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  */
 export async function generateCoverBackground(
   { prompt, aspect = '16:9', engine = 'server', timeoutMs = 900_000 },
-  { httpRequest, getServerUrl, resolveDir, log = () => {}, warn = () => {} } = {},
+  { httpRequest, getServerUrl, resolveDir, log = () => {}, warn = () => {}, jimengReady, jimengGenerate } = {},
 ) {
   try {
     const text = String(prompt || '').trim()
     if (!text || text.length > 2000) return { ok: false, error: 'prompt 必填(1..2000 字符)' }
-    // 双通道裁决(2026-10-27):即梦 = text2image(比例随横竖屏);缺省 = 服务端文生图。
-    // 检查顺序:通道可用性 → 落盘目录。
-    if (engine !== 'jimeng' && (typeof httpRequest !== 'function' || typeof getServerUrl !== 'function')) {
+    // 双通道路由(2026-11-15 用户裁定,替代 2026-10-27 的 engine 参数选择):
+    // **已登录即梦(dreamina CLI)→ 优先即梦 CLI 生图,无需选引擎;未登录/未安装 → 服务端
+    // 文生图兜底**。显式 engine='jimeng' 仍强制即梦(登录缺失时给指引)。探测可注入
+    // (测试确定性),真身每次现查——用户装完/登录完 CLI 无需重启宿主。
+    const preferJimeng = engine === 'jimeng'
+      ? true
+      : await (jimengReady ? jimengReady() : jimengReadyProbe())
+    if (!preferJimeng && (typeof httpRequest !== 'function' || typeof getServerUrl !== 'function')) {
       return { ok: false, error: '服务端出图通道不可用(缺 httpRequest/getServerUrl)' }
     }
     const dir = typeof resolveDir === 'function' ? resolveDir() : null
     if (!dir) return { ok: false, error: '封面插件目录不存在,无法保存底图' }
-    if (engine === 'jimeng') {
-      return runJimengGeneration(
-        { command: 'text2image', prompt: text, ratio: aspect === '9:16' ? '9:16' : '16:9' },
-        { resolveDir, namePrefix: 'bg', engineLabel: 'dreamina-text2image', log, warn },
-      )
+    if (preferJimeng) {
+      const run = jimengGenerate
+        ? jimengGenerate
+        : async (args) => runJimengGeneration(args, { resolveDir, namePrefix: 'bg', engineLabel: 'dreamina-text2image', log, warn })
+      return await run({ command: 'text2image', prompt: text, ratio: aspect === '9:16' ? '9:16' : '16:9' })
     }
     const submitted = await httpRequest('POST', '/generate/image', {
       body: { prompt: text, aspect: String(aspect || '16:9') },
@@ -149,7 +166,7 @@ async function runJimengGeneration(
     if (q.failReason) return { ok: false, error: `即梦任务失败:${q.failReason}` }
     if (!urls.length) await sleep(8000)
   }
-  if (!urls.length) return { ok: false, error: '即梦未返回产物(可能未登录——到创作模式「即梦 CLI」卡片登录后重试)' }
+  if (!urls.length) return { ok: false, error: '即梦未返回产物(可能未登录——到封面设置「即梦 CLI」或创作模式登录后重试)' }
   let bytes = null
   if (localDir && existsSync(localDir)) {
     const hit = readdirSync(localDir).find((f) => /\.(png|jpe?g|webp)$/i.test(f))

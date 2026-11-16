@@ -4,7 +4,7 @@ html,
 body {
   height: 100%;
   margin: 0;
-  background: var(--dock-shell, #1a1a1c);
+  background: var(--bg-app, #1a1a1c);
 }
 
 #root {

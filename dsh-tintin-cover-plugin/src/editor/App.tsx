@@ -13,6 +13,7 @@ import { LayersPanel } from './layers-panel'
 import { ServerSettingsModal } from './server-settings'
 import { SkillsModal } from './skills-modal'
 import { chatFrameRef } from './ui'
+import { useHostDark } from './hostTheme'
 import { canvasDragFreeze } from './use-canvas-zoom'
 
 /** 预览区顶条(2026-10-29 用户裁决:设置从左面板移到预览区上方横条;横竖屏+预览显示同行)。
@@ -320,6 +321,16 @@ function ensurePjStyle(): void {
 export const EditorApp: React.FC = () => {
   const [showExport, setShowExport] = React.useState(false)
   const [showServer, setShowServer] = React.useState(false)
+  /* 主题跟随客户端(2026-11-15 用户问询批):hostTheme 判定档位打在 App 根与 mount host
+     的 data-theme 上,token 块亮/暗两档切换(bundle-entry);mount host 在 App 根之外,
+     由 rootRef effect 同步。封面画布内容(模板配色)不随主题——作品不变,只变 chrome。 */
+  const isDark = useHostDark()
+  const rootRef = React.useRef<HTMLDivElement | null>(null)
+  React.useEffect(() => {
+    const theme = isDark ? 'dark' : 'light'
+    const host = rootRef.current?.parentElement
+    if (host && host.hasAttribute('data-tintin-cover-scope')) host.setAttribute('data-theme', theme)
+  }, [isDark])
   /* 封面项目制(2026-10-30 用户裁决):tab=项目;切换=目录+会话(iframe 按纪元重挂)跟随。
      tab × 关闭=仅移出栏(项目目录与数据保留在磁盘,可从「打开项目」重新打开);
      关闭当前项目自动切到剩余项目,无剩余则新建。 */
@@ -439,7 +450,7 @@ export const EditorApp: React.FC = () => {
     background: 'transparent', color: 'var(--text-muted)',
   }
   return (
-    <div data-tintin-cover-scope="" style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', color: 'var(--text)', fontFamily: 'var(--font-sans)' }}>
+    <div data-tintin-cover-scope="" ref={rootRef} data-theme={isDark ? 'dark' : 'light'} style={{ width: '100%', height: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-app)', color: 'var(--text)', fontFamily: 'var(--font-sans)' }}>
       <div style={{ height: 40, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '0 14px', background: 'var(--bg-titlebar)', borderBottom: '1px solid var(--border)' }}>
         {/* 顶栏(2026-10-30 用户裁决):T 图标与「封面制作」文字删除;「打开项目」=弹全部
             项目列表(含已关闭,点击打开/切换);tab × 关闭项目=仅移出栏,数据保留可重开 */}

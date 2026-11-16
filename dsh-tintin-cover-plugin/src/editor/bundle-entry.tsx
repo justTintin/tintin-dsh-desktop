@@ -28,8 +28,11 @@ window.remotion_staticBase = '/tintin/cover/editor'
 
 // 设计 token(2026-11-10 用户裁决:与视频剪辑一致)——值=OpenFilm Studio globals.css
 // 暗色档逐字拷贝(字体族/色板/圆角/阴影),封面编辑器组件一律引用这些变量,不再自造色。
-// 字体栈与 OpenFilm 同款;Inter Variable 需字体文件未随包,西文自然回落 system-ui,
-// 中文(PingFang/微软雅黑)一致——阅读面主要在中文。
+// 2026-11-15 主题跟随批:客户端亮/暗主题编辑器跟随(用户问询「主题有没有跟随客户端」
+// 检查发现恒暗色)——缺省档=暗色(无信号宿主兜底,旧口径);[data-theme='light'] 档=
+// Studio globals.css 亮色档逐字拷贝(与暗色档同源同法);档位由 App 根 hostTheme 判定
+// 打标(App 根与 mount host 都同步)。字体栈与 OpenFilm 同款;Inter Variable 需字体文件
+// 未随包,西文自然回落 system-ui,中文(PingFang/微软雅黑)一致——阅读面主要在中文。
 const tokens = document.createElement('style')
 tokens.dataset.plugin = 'dsh-tintin-cover-plugin'
 /* 作用域=[data-tintin-cover-scope](mount 的 host + App 根都打标):token 只进封面子树,
@@ -64,6 +67,34 @@ tokens.textContent = `
   --warn: #f0b03c;
   --err: #f2665f;
   --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+/* 亮色档(2026-11-15):OpenFilm Studio globals.css 亮色档逐字(封面用到的子集);
+   App 根 hostTheme 判定打 data-theme='light' 时覆盖上面的缺省暗色档 */
+[data-tintin-cover-scope][data-theme='light'] {
+  --bg-app: #e4e4e8;
+  --bg-titlebar: #e4e4e8;
+  --bg-panel: #fbfbfc;
+  --bg-raised: #ffffff;
+  --bg-field: rgba(16, 16, 24, 0.055);
+  --bg-hover: rgba(16, 16, 24, 0.05);
+  --bg-pressed: rgba(16, 16, 24, 0.09);
+  --bg-selected: rgba(0, 163, 174, 0.13);
+  --text: #161619;
+  --text-muted: #5d5d63;
+  --text-faint: #8b8b92;
+  --border: rgba(16, 16, 24, 0.085);
+  --border-strong: rgba(16, 16, 24, 0.16);
+  --primary: #161619;
+  --primary-hover: #2e2e33;
+  --on-primary: #ffffff;
+  --accent: #0098a3;
+  --accent-soft: rgba(0, 163, 174, 0.12);
+  --on-accent: #ffffff;
+  --bg-picked: rgba(0, 163, 174, 0.14);
+  --ok: #1f8a4c;
+  --warn: #b25e00;
+  --err: #d1342f;
+  --shadow-lg: 0 12px 32px rgba(16, 16, 24, 0.1), 0 4px 8px rgba(16, 16, 24, 0.05);
 }
 /* 图标按钮(OpenFilm AppMenu 同款):26×26 圆角 md、默认 muted、hover 提亮;
    编辑器 iconBtn 全部走本类,替代各自的内联底色。 */

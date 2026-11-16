@@ -581,6 +581,25 @@ PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑�
 - **顶栏回退**:7.21 加在编辑器顶栏的模板管理图标撤除(入口统一到会话底栏);模板管理弹窗仍由编辑器承载(PSD 导入走 pc/psd-import)。
 - 验证:src/chat-shell 双 tsc 零错;187/187;check:tintin 绿;chat-shell 构建标记 2026-11-14-b;client.js+chat-shell/dist+SKILL.md 热刷真身(重启/新会话生效,SKILL.md 新会话生效)。
 
+### 7.23 主题跟随客户端:编辑器+会话双面补齐(2026-11-15;用户问询「封面主题有没有跟随客户端」检查发现恒暗色)
+
+检查结论:封面域**没有**主题跟随——①编辑器 token 块写死 Studio 暗色档(11-10 裁决拷贝源即暗色档),无判定/无亮色档;②会话 iframe cover-chat.html 写死 data-theme='dark'。对照媒体/运营/创作三面(1018-1019 批 hostTheme 四级链)均跟随。
+
+- **修法(与三包同口径,React 版)**:新 src/editor/hostTheme.ts(判定链 body[data-ds-dark-theme]→html[data-ds-theme-source]→html.dark→系统偏好 + MutationObserver 跟随翻转);App 根与 mount host 打 data-theme=dark|light;bundle-entry token 块补 [data-theme='light'] 亮色档=Studio globals.css 亮色档逐字(与暗色档同源同法,11-10 裁决延伸);无信号宿主兜底=暗色(旧口径)。**封面画布内容(模板配色)不随主题——作品不变,只变 chrome**。
+- **会话 iframe**:cover-chat.html 写死档位改为首绘前按父文档判定(同源 iframe 直读四级链)+MutationObserver 跟随;跨源/异常宿主=dark 兜底。页面脚本的主题盲区兜底色一并修齐(--surface/--surface-2/--surface-3/--dock-shell 不是 Studio 变量名,恒走暗色兜底→映射 --bg-panel/--bg-raised/--bg-hover/--bg-app,亮色下面板不再黑块)。
+- **已知暗色孤岛**:layers-panel.tsx PALETTE 常量=刻意 1:1 对齐 PhotoCraft 的暗色面板(1111 批移植基准),本批保留不动;是否随主题等用户表态。
+- **状态核对付账**:昨晚并行会话提交 4bdac593a3(11-14 21:25)带新裁决——**工作模式整体废除(「没有工作模式的说法」)、底栏回归注入选择器(+附件/在线素材/选择产品)、模板管理入口统一回编辑器顶栏、模板进 @ 引用(技能后分组)**;7.22 的底栏三钮(技能/模板管理/模式注入)与 SKILL.md 工作模式节随之废除,本批在其上正交叠加(纯主题,无排布改动);热刷真身与最新裁决对齐。
+- 验证:src tsc 零错;187/187;check:tintin 绿;client.js(207KB 含亮色档)+chat-shell dist 热刷真身。
+
+### 7.24 封面设置补「即梦 CLI」登录+已登录自动优先即梦生图(2026-11-15;用户问询「增加的即梦配置呢」+裁定「设置里有即梦的 CLI 登录;引擎不需要选择;已登录即梦时优先即梦 CLI 生图和图片编辑」)
+
+审计定案:封面设置从未有过即梦配置——setGenEngine 自 10-27 起只有 store 定义从未被任何 UI 调用(引擎选择 UI 从未落地,非丢失)。即梦引擎接线一直在(cover-background 双通道+共享门 dreamina.js),登录/安装只在创作模式「即梦 CLI」卡片。
+
+- **设置弹窗加「即梦 CLI」区**(server-settings.tsx 左栏服务端地址下方):状态卡(安装/版本/登录态/积分/VIP)+设备码两段式登录(login-headless 取材料→展示链接+授权码→login-check 阻塞轮询 90s→成功刷新状态;失败可重试)+退出;未安装显示官方安装命令。新路由 POST /tintin/cover/api/dreamina {action:status|login-headless|login-check|logout}——共享门直通,独立模块 cover-dreamina-routes.js(行数门禁 1024>1000 触发,拆分优于基线,同 photocraft 先例;主路由回 997 行)。
+- **生成路由改登录态自动优先**(cover-background.js,替代 10-27 的 engine 参数选择):已登录即梦→优先即梦 CLI(text2image/image2image),未登录/未安装→服务端文生图兜底;显式 engine=jimeng 仍强制即梦;探测 jimengReadyProbe 每请求现查(装完/登录完无需重启),opts 可注入(测试确定性)。**编辑器界面的生成自动分流;会话侧 create_image(服务端 MCP)不变**。
+- **SKILL.md 生图节加即梦条**:告知登录入口在封面设置;界面生成已自动分流,会话不受影响。
+- 验证:190/190(+3 即梦路由测试:已登录优先不触服务端/显式 jimeng 强制/未登录落服务端);tsc 零错;check:tintin 绿(150 锚+载荷新鲜);热刷真身(client.js+lib×4+SKILL.md+dist/editor,editor 资产含 dreamina 确认)。
+- **坑两枚**:①测试断言两红=engine:jimeng 放进 opts(它属输入对象)——参数对象/选项对象双形态签名最易踩,写测试先核参数位;②行数门禁在 stage 后才报(verify-tintin-gate 在 check:tintin 链),新增路由先估行数,逼近 1000 直接独立模块。
 ### 7.16 环境图层属性面板掉进装饰文案分支(2026-11-13 晚;用户报「点环境图出的是改名字,不该是图片操作吗」)
 
 - 根因:layers-panel.tsx 属性分支只认 `type==='product' || key==='bgImage'` 走图片编辑;7.8 起 video 族环境图键换 `environment`(layerDefs 无 propsKey→键=layer.id),字符串文件名值掉进「装饰层文案」通用分支——用户点环境图看到的是文件名文本框+文案提示,而非图片操作(换图/AI 生成底图/缩放)。

@@ -5,8 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TinTin 封面会话</title>
 <script>
-  /* 主题先于首绘:封面编辑器恒深色(其画布区 #141416) */
-  document.documentElement.dataset.theme = 'dark';
+  /* 主题先于首绘+跟随客户端(2026-11-15 用户问询「封面主题有没有跟随客户端」批;
+     原写死 dark=封面编辑器恒深色旧口径):同源 iframe 直接读父文档——判定链与编辑器
+     hostTheme 同口径(body[data-ds-dark-theme] → html[data-ds-theme-source] →
+     html.dark → 父系统偏好),并观察父 body 属性翻转即跟随;父不可达/无信号=dark 兜底
+     (旧口径,Studio globals 亮/暗两档已随构建管线在位,vite scopeChat 把
+     [data-theme=light|dark] 规则保留在 iframe 文档层)。 */
+  (function () {
+    var resolve = function () {
+      try {
+        var d = window.parent.document;
+        if (d.body && d.body.hasAttribute('data-ds-dark-theme')) return 'dark';
+        var source = d.documentElement.dataset.dsThemeSource;
+        if (source === 'dark' || source === 'light') return source;
+        if (d.documentElement.classList.contains('dark')) return 'dark';
+        if (window.parent.matchMedia && window.parent.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+        return 'light';
+      } catch (e) { return 'dark'; } /* 跨源/异常宿主:暗色兜底(旧口径) */
+    };
+    var apply = function () { document.documentElement.dataset.theme = resolve(); };
+    apply();
+    try {
+      new MutationObserver(apply).observe(window.parent.document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme'] });
+    } catch (e) { /* 观察失败:首绘档位恒留 */ }
+  })();
 </script>
 </head>
 <body>
