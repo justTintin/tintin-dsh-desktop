@@ -30,6 +30,19 @@ function Ensure-File($name, $url, $minSizeMB) {
 
 $ok = $true
 $ok = (Ensure-File 'yt-dlp.exe'   'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' 5) -and $ok
+  # openfilm 三件(lite 下载清单, 2026-11-16): node.exe + openfilm npm 包
+  $ok = (Ensure-File 'node.exe' 'https://npmmirror.com/mirrors/node/v22.23.2/win-x64/node.exe' 60) -and $ok
+  $openfilmTgz = Join-Path $env:TEMP 'openfilm-0.3.2.tgz'
+  if (-not (Test-Path (Join-Path $PSScriptRoot 'resources/openfilm/node_modules/openfilm/package.json'))) {
+    try {
+      Write-Host '[get ] openfilm npm 包 <- npmmirror'
+      Invoke-WebRequest -Uri 'https://registry.npmmirror.com/openfilm/-/openfilm-0.3.2.tgz' -OutFile $openfilmTgz -UseBasicParsing -TimeoutSec 600
+      New-Item -ItemType Directory -Force -Path (Join-Path $PSScriptRoot 'resources/openfilm') | Out-Null
+      tar -xzf $openfilmTgz -C (Join-Path $PSScriptRoot 'resources/openfilm')
+      Write-Host '[ok  ] openfilm 包解包就位'
+    } catch { Write-Host "[fail] openfilm 包: $(($_.Exception.Message))"; $ok = $false }
+    finally { Remove-Item $openfilmTgz -Force -ErrorAction SilentlyContinue }
+  }
 $ok = (Ensure-File 'ffmpeg.exe'  'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' 60) -and $ok
 $ok = (Ensure-File 'ffprobe.exe' 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' 150) -and $ok
 

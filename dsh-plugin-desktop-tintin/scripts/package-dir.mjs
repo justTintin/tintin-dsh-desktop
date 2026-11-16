@@ -29,6 +29,12 @@ function applyLitePackage() {
   }
   const remotion = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '.remotion')
   if (existsSync(remotion)) { rmSync(remotion, { recursive: true, force: true }); removed.push('.remotion') }
+  const ofDir = join(packageRoot, 'tintin-resources', 'openfilm')
+  if (existsSync(ofDir)) { rmSync(ofDir, { recursive: true, force: true }); removed.push('openfilm') }
+  const loArm = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '@deepseek-ai', 'libreoffice-kit-win32-arm64')
+  if (existsSync(loArm)) { rmSync(loArm, { recursive: true, force: true }); removed.push('libreoffice-kit-win32-arm64') }
+  const tmpDir = join(packageRoot, 'tintin-resources', 'cover-plugin', '.tmp')
+  if (existsSync(tmpDir)) { rmSync(tmpDir, { recursive: true, force: true }); removed.push('.tmp') }
   writeFileSync(join(packageRoot, 'tintin-resources', 'cover-plugin', '.tintin-lite'), 'lite package: media binaries download after install; .remotion auto-downloads on first render\n')
   process.stdout.write(`[lite] staging 剔除: ${removed.join(', ') || '(已缺)'} + 放置 .tintin-lite 标记\n`)
 }

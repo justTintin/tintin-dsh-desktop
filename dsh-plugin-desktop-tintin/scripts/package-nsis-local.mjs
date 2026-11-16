@@ -43,6 +43,16 @@ if (process.argv.includes('--lite') || process.env.DSH_PACKAGE_LITE === '1') {
   }
   const remotion = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '.remotion')
   if (ex(remotion)) { rm(remotion, { recursive: true, force: true }); removed.push('.remotion') }
+  // openfilm 三件(node.exe 83MB + openfilm 包 51MB + playwright-core 12MB):
+  // 全组件可下载(nodejs.org 镜像/npm), 装后由 ensureOpenfilmRuntime 补齐
+  const ofDir = join(packageRoot, 'tintin-resources', 'openfilm')
+  if (ex(ofDir)) { rm(ofDir, { recursive: true, force: true }); removed.push('openfilm') }
+  // libreoffice-kit arm64: x64 包永远不加载, 白背 172MB
+  const loArm = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '@deepseek-ai', 'libreoffice-kit-win32-arm64')
+  if (ex(loArm)) { rm(loArm, { recursive: true, force: true }); removed.push('libreoffice-kit-win32-arm64') }
+  // cover-plugin/.tmp: stage 冒烟残渣泄漏(垃圾)
+  const tmpDir = join(packageRoot, 'tintin-resources', 'cover-plugin', '.tmp')
+  if (ex(tmpDir)) { rm(tmpDir, { recursive: true, force: true }); removed.push('.tmp') }
   wf(join(packageRoot, 'tintin-resources', 'cover-plugin', '.tintin-lite'), 'lite package: media binaries download after install; .remotion auto-downloads on first render\n')
   process.stdout.write(`[lite] staging 剔除: ${removed.join(', ') || '(已缺)'} + 放置 .tintin-lite 标记\n`)
 }

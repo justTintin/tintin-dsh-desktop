@@ -4,6 +4,22 @@
 // 自己功能增长走提取付账).
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
+
+/** lite 包(2026-11-16 用户裁决): openfilm 运行时缺位时后台拉起装后补齐脚本
+ *  (幂等: 已在的跳过; yt-dlp/node/openfilm 包均按清单补)。下次调用即命中。 */
+function kickOpenfilmProvision() {
+  try {
+    const resourcesDir = process.resourcesPath
+    if (!resourcesDir) return
+    const ps1 = join(resourcesDir, 'download-binaries.ps1')
+    if (!existsSync(ps1)) return
+    if (existsSync(join(resourcesDir, 'bin', 'node.exe')) &&
+        existsSync(join(resourcesDir, 'openfilm', 'node_modules', 'openfilm', 'package.json'))) return
+    const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1],
+      { detached: true, stdio: 'ignore', windowsHide: true })
+    child.unref()
+  } catch { /* 补齐失败静默 */ }
+}
 import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -347,7 +363,7 @@ export function createOpenfilmChannels({ sync, httpRequest, compatUrl }) {
         const project = String(payload.project || '')
         if (!project || !existsSync(join(project, 'film.html'))) return { error: '不是影片项目（缺 film.html）' }
         const runtime = resolveOpenfilmRuntime({ env: process.env, bundleDir: bundleRoot })
-        if (!runtime) return { error: 'OpenFilm 运行时未安装：请重装 TinTin 安装包' }
+        if (!runtime) { kickOpenfilmProvision(); return { error: 'OpenFilm 运行时未安装：请重装 TinTin 安装包（已后台下载，稍后重试）' } }
         const argv = [runtime.cli, 'render']
         if (payload.out) argv.push(String(payload.out))
         if (payload.fps) argv.push('--fps', String(payload.fps))
@@ -378,7 +394,7 @@ export function createOpenfilmChannels({ sync, httpRequest, compatUrl }) {
         const project = String(payload.project || '')
         if (!project || !existsSync(join(project, 'film.html'))) return { error: '不是影片项目' }
         const runtime = resolveOpenfilmRuntime({ env: process.env, bundleDir: bundleRoot })
-        if (!runtime) return { error: 'OpenFilm 运行时未安装：请重装 TinTin 安装包' }
+        if (!runtime) { kickOpenfilmProvision(); return { error: 'OpenFilm 运行时未安装：请重装 TinTin 安装包（已后台下载，稍后重试）' } }
         const run = await startStudio({
           runtime,
           homeDir: homedir(),
