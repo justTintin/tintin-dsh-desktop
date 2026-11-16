@@ -756,16 +756,16 @@
     "minCount": 4
   },
   {
-    "comment": "registry: the dshmarket patch keeps holdYoungReleases (desktop-host update gating)",
+    "comment": "registry: the dshmarket patch keeps holdYoungReleases (desktop-host update gating; 1.73.20 起上游三处 checkUpdates 合并为单点,注入锚 6→2)",
     "path": ".yarn/patches/dshmarket-desktop.patch",
     "pattern": "holdYoungReleases",
-    "minCount": 6
+    "minCount": 2
   },
   {
-    "comment": "registry: the dshmarket patch keeps provideNpmVersions (market version feeding)",
+    "comment": "registry: the dshmarket patch keeps provideNpmVersions (market version feeding; 1.73.20 起单点注入 4→2)",
     "path": ".yarn/patches/dshmarket-desktop.patch",
     "pattern": "provideNpmVersions",
-    "minCount": 4
+    "minCount": 2
   },
   {
     "comment": "registry: root keeps the dshmarket patch wired",

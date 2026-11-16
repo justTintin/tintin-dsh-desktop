@@ -1,8 +1,8 @@
 diff --git a/client/client.js b/client/client.js
-index bfe9120..40e0bfe 100644
+index d42ff3e..ce8f788 100644
 --- a/client/client.js
 +++ b/client/client.js
-@@ -13413,7 +13413,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
+@@ -14785,7 +14785,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
  					return next;
  				});
  			}, []);
@@ -11,7 +11,7 @@ index bfe9120..40e0bfe 100644
  			const updatableNames = Object.keys(installed).filter((name) => name !== selfName && !effectiveDisabledSet.has(name) && isPluginUpdatable(name, String(installed[name]), updates[name], updatedNames));
  			const batchUpdatableNames = updatableNames.filter((name) => updates[name]?.restoreRequired !== true);
  			const ignoredUpdateSet = (0, react.useMemo)(() => new Set(ignoredUpdateNames), [ignoredUpdateNames]);
-@@ -14752,7 +14752,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
+@@ -16144,7 +16144,7 @@ window.__ModuleLoader__.load({ id: "dshmarket", factory: (require) => {
  			]);
  			const batchActions = /* @__PURE__ */ (0, react_jsx_runtime.jsxs)(react_jsx_runtime.Fragment, { children: [
  				(() => {
@@ -21,10 +21,10 @@ index bfe9120..40e0bfe 100644
  					return status && status.updateAvailable && !updatedNames.includes(self) && !quietUpdateSet.has(self) && /* @__PURE__ */ (0, react_jsx_runtime.jsx)(_deepseek_ai_dsh_client_ui_primitives.Button, {
  						variant: "primary",
 diff --git a/lib/routes.js b/lib/routes.js
-index f853463..cce5c51 100644
+index 9eaaa23..8f684d4 100644
 --- a/lib/routes.js
 +++ b/lib/routes.js
-@@ -2270,7 +2270,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup, ho
+@@ -2404,7 +2404,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup, ho
          // unreleased work.
          const channel = activeChannel();
          const installed = readInstalled(config.profile, activeProfileDir);
@@ -33,40 +33,22 @@ index f853463..cce5c51 100644
              .filter(name => SELF_NAMES.has(name))
              .map(name => [name, channel]));
          const onlineSourceFor = new Map();
-@@ -2460,7 +2460,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup, ho
-                 }
-                 try {
-                     const { channelFor, onlineSourceFor, catalogNpmByRepo, releaseSources } = await updateCheckInputs();
--                    const updates = await checkUpdates(config.profile, forceCheckFrom(request), activeProfileDir, channelFor, onlineSourceFor, catalogNpmByRepo, { holdYoungReleases: config.desktopHost === true, releaseSources });
-+                    const updates = await checkUpdates(config.profile, forceCheckFrom(request), activeProfileDir, channelFor, onlineSourceFor, catalogNpmByRepo, { provideNpmVersions: new Map([["dshmarket", marketVersion()]]), holdYoungReleases: config.desktopHost === true, releaseSources });
-                     // `packages` carries the same objects the single-package endpoint
-                     // returns, so one parser serves both. Only updatable ones: a badge
-                     // wants the count, a panel wants the rows, and neither wants to
-@@ -2507,7 +2507,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup, ho
-                         // or a catalog-matched local package answers here with the
-                         // release it can be compared against rather than with nothing.
-                         const { channelFor, onlineSourceFor, catalogNpmByRepo, releaseSources } = await updateCheckInputs();
--                        const update = (await checkUpdates(config.profile, force, activeProfileDir, channelFor, onlineSourceFor, catalogNpmByRepo, { holdYoungReleases: config.desktopHost === true, releaseSources }))[name];
-+                        const update = (await checkUpdates(config.profile, force, activeProfileDir, channelFor, onlineSourceFor, catalogNpmByRepo, { provideNpmVersions: new Map([["dshmarket", marketVersion()]]), holdYoungReleases: config.desktopHost === true, releaseSources }))[name];
-                         if (update === undefined) {
-                             sendJson(response, 404, { schema: UPDATE_API_V1_SCHEMA, error: 'plugin is not installed' });
-                             return;
-@@ -4435,7 +4435,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup, ho
-                     catch (error) {
-                         logEvent('warn', 'updates', `package source lookup failed — ${error instanceof Error ? error.message : String(error)}`);
-                     }
--                    const updates = await checkUpdates(config.profile, force, activeProfileDir, channelFor, onlineSourceFor, catalogNpmByRepo, { holdYoungReleases: config.desktopHost === true, releaseSources });
-+                    const updates = await checkUpdates(config.profile, force, activeProfileDir, channelFor, onlineSourceFor, catalogNpmByRepo, { provideNpmVersions: new Map([["dshmarket", marketVersion()]]), holdYoungReleases: config.desktopHost === true, releaseSources });
-                     for (const [name, migration] of sourceMigrationFor) {
-                         const status = updates[name];
-                         if (status !== undefined)
+@@ -2516,7 +2516,7 @@ export function mountMarketRoutes(host, config, commandRuntime, agentsLookup, ho
+             if (Object.keys(installed).length === 0)
+                 return { updates: {} };
+             const { channelFor, onlineSourceFor, catalogNpmByRepo, releaseSources, sourceMigrationFor, lookupFailed } = await updateCheckInputs();
+-            const checked = await checkUpdates(config.profile, force, activeProfileDir, channelFor, onlineSourceFor, catalogNpmByRepo, { holdYoungReleases: config.desktopHost === true, releaseSources });
++            const checked = await checkUpdates(config.profile, force, activeProfileDir, channelFor, onlineSourceFor, catalogNpmByRepo, { provideNpmVersions: new Map([["dshmarket", marketVersion()]]), holdYoungReleases: config.desktopHost === true, releaseSources });
+             const updates = {};
+             for (const [name, status] of Object.entries(checked)) {
+                 const sourceMigration = sourceMigrationFor.get(name);
 diff --git a/lib/updates.js b/lib/updates.js
-index eae0d78..7ecca3d 100644
+index 47e4ffc..2cb94af 100644
 --- a/lib/updates.js
 +++ b/lib/updates.js
-@@ -777,11 +777,17 @@ options = {}) {
-         return updatesCache.data;
-     }
+@@ -774,6 +774,12 @@ catalogNpmByRepo = new Map(),
+ options = {}) {
+     const activeProfileDir = profileDir(profile, explicitDir);
      const installed = readInstalled(profile, activeProfileDir);
 +    const provided = new Map();
 +    for (const [name, version] of options.provideNpmVersions ?? []) {
@@ -75,6 +57,9 @@ index eae0d78..7ecca3d 100644
 +        provided.set(name, version);
 +    }
      const lockCommits = readLockCommits(profile, activeProfileDir);
+     const installedIdentity = JSON.stringify(Object.entries(installed).sort(([a], [b]) => a.localeCompare(b))
+         .map(([name, spec]) => [name, spec, readInstalledVersion(profile, name, activeProfileDir), readGitResolutionCommit(profile, spec, activeProfileDir)]));
+@@ -789,7 +795,7 @@ options = {}) {
      const result = {};
      let nextCandidateMaturityAt = Infinity;
      await Promise.all(Object.entries(installed).map(async ([name, spec]) => {

@@ -24,7 +24,7 @@
     "dsh-plugin-desktop-tintin"
   ],
   "resolutions": {
-    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.2.0-desktop.caa12e7a2c181.rc2b11bfc.tgz",
+    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.2.0-desktop.c99b49e3e0593.rc2b11bfc.tgz",
     "@deepseek-ai/cordis": "4.0.6-alpha.1",
     "@deepseek-ai/cordis-plugin-include": "1.0.11-alpha.1",
     "@deepseek-ai/cordis-plugin-loader": "1.0.7-alpha.1",
@@ -787,7 +787,7 @@
     "open@npm:^11.0.0": "patch:open@npm%3A11.0.1#./patches/open@11.0.1.patch",
     "open@npm:^11.0.2": "patch:open@npm%3A11.0.4#./patches/open@11.0.4.patch",
     "pnpm@npm:11.8.0": "patch:pnpm@npm%3A11.8.0#./patches/pnpm@11.8.0.patch",
-    "dshmarket@npm:1.73.19": "patch:dshmarket@npm%3A1.73.19#./.yarn/patches/dshmarket-desktop.patch"
+    "dshmarket@npm:1.73.20": "patch:dshmarket@npm%3A1.73.20#./.yarn/patches/dshmarket-desktop.patch"
   },
   "dependenciesMeta": {
     "@deepseek-ai/dsh-subprocess-local": {
@@ -870,10 +870,11 @@
     "dist:win:next": "yarn market:prepare && yarn aa:prepare-release && yarn aa:prepare-release --verify-release && yarn workspace dsh-community-market build && yarn workspace dsh-desktop-next dist:win",
     "market:prepare": "node scripts/prepare-dsh-market.mjs",
     "market:check": "node scripts/prepare-dsh-market.mjs --check",
+    "market:upgrade": "node scripts/prepare-dsh-market.mjs --latest",
     "test:market-release": "node --test scripts/prepare-dsh-market.test.mjs",
     "package:tintin:dir": "node scripts/package-tintin.mjs",
-    "package:tintin:dir:full": "yarn workspace dsh-tintin-bundle fetch:openfilm && yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin package:dir",
-    "package:tintin:dir:local": "node scripts/package-tintin-local.mjs",
+    "package:tintin:dir:full": "yarn workspace dsh-tintin-bundle fetch:openfilm && yarn workspace dsh-tintin-browser fetch:bin && yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin package:dir",
+    "package:tintin:dir:local": "yarn workspace dsh-tintin-browser fetch:bin && node scripts/package-tintin-local.mjs",
     "package:tintin:publish": "node dsh-plugin-desktop-tintin/scripts/publish-github-release.mjs",
     "package:tintin:release": "node scripts/release-tintin.mjs",
     "package:tintin:dir:hot": "yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin package:dir:hot",

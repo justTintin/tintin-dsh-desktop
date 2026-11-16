@@ -1,4 +1,13 @@
-/** Refresh the bundled market from npm latest without floating the committed lockfile. */
+/** Refresh the bundled market — pinned by default; npm latest is an explicit upgrade.
+ *  2026-11-16 用户裁决：①钉死在哪个版本就在哪个版本打包（模式 1 不再追 npm latest，
+ *  钉版=resolutions+patch 是合约，升级=显式决策）；②打包默认不联网改版本。
+ *  口径（与 AA 本地全编锚定 2026-10-21 同款）：
+ *  · 默认（pinned）= 沿用已安装/已锁定 dshmarket，只核验补丁在位与四通道版本一致，
+ *    不访问 npm、不重写 manifests/lockfile——打包结果可复现。
+ *  · 显式升级（--latest / DSH_MARKET_LATEST=1，或 market:upgrade 脚本）= 才走
+ *    「查 npm latest → 改 resolutions/manifests → install → 补丁失配自动重接线」
+ *    的追新路径；撞锚点失配时按 1116 的人工看 diff 流程处理。
+ *  · market:check 保留 latest 对账（发布前人工核 freshness 用），不进打包链。 */
 import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -78,13 +87,17 @@ function healMarketPatch(directory, version) {
   console.log(`[market] patch re-wired for dshmarket ${version} (auto-repair)`)
 }
 
-export async function prepareMarket(directory, { check = false, pinned = false, fetcher = fetch, runInstall = install } = {}) {
-  if (pinned) {
-    // 本地全编锚定（2026-10-21 用户裁决）：沿用已安装/已锁定的 dshmarket，
-    // 不访问 npm、不重写版本——与 AA 的本地锚定同一条"钉死"口径。
+export async function prepareMarket(directory, { check = false, pinned, fetcher = fetch, runInstall = install } = {}) {
+  // 2026-11-16 用户裁决：默认 pinned（钉版打包）；--latest/DSH_MARKET_LATEST=1 才追新。
+  const wantLatest = pinned === false
+    || process.env.DSH_MARKET_LATEST === '1'
+    || (pinned === undefined && process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url
+      && process.argv.slice(2).includes('--latest'))
+  if (!wantLatest) {
+    // 钉版口径（与 AA pinned 同款）：沿用已安装/已锁定 dshmarket，不访问 npm、不重写版本。
     const installed = MARKET_WORKSPACES.map(workspace => installedVersion(directory, workspace))
     const version = installed[0]
-    if (version === undefined) throw new Error('dshmarket is not installed; run corepack yarn market:prepare once online to seed it')
+    if (version === undefined) throw new Error('dshmarket is not installed; run corepack yarn market:upgrade once online to seed it')
     if (installed.some(entry => entry !== version)) throw new Error(`dshmarket versions diverge across workspaces: ${installed.join(', ')}`)
     if (!existsSync(resolve(directory, '.yarn', 'patches', 'dshmarket-desktop.patch'))) throw new Error('dshmarket desktop patch is missing')
     return version
@@ -149,10 +162,15 @@ export async function prepareMarket(directory, { check = false, pinned = false, 
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   const args = process.argv.slice(2)
-  if (args.some(arg => arg !== '--check' && arg !== '--pinned')) throw new Error('Usage: corepack yarn market:prepare [--check] [--pinned]')
-  const pinned = args.includes('--pinned') || process.env.DSH_MARKET_PINNED === '1'
-  const version = await prepareMarket(root, { check: args.includes('--check'), pinned })
-  console.log(pinned
-    ? `dshmarket pinned to the installed ${version} in Stable, Beta, Next and the TinTin channel (no npm access)`
-    : `dshmarket latest verified: ${version} in Stable, Beta, Next and the TinTin channel`)
+  if (args.some(arg => arg !== '--check' && arg !== '--pinned' && arg !== '--latest')) {
+    throw new Error('Usage: corepack yarn market:prepare [--check] [--pinned] [--latest]')
+  }
+  const check = args.includes('--check')
+  // CLI 默认=pinned(2026-11-16 用户裁决);--latest 显式追新
+  const latest = args.includes('--latest') || process.env.DSH_MARKET_LATEST === '1'
+  const version = await prepareMarket(root, { check, pinned: !latest })
+  console.log((latest
+    ? `dshmarket latest verified: ${version}`
+    : `dshmarket pinned to the installed ${version}`) + ' in Stable, Beta, Next and the TinTin channel'
+    + (latest ? '' : ' (no npm access)'))
 }

@@ -49,40 +49,64 @@ for (const name of ['ffmpeg.exe', 'ffprobe.exe']) {
   copied++
 }
 
-// yt-dlp：下载最新 release，校验 PE 头 + 可执行版本后落盘；失败回落旧拷贝并告警
+// yt-dlp(2026-11-16 用户裁决二改):**打包链内默认钉死 staging 现有版本**——已存在且
+// 版本可读时原样保留、绝不覆盖不回落;显式 --latest(TINTIN_YTDLP_LATEST=1)才下载最新
+// release(升级=显式决策,与 dshmarket 钉版口径一致,铁律 18)。手动升级:
+//   node scripts/fetch-tintin-binaries.mjs --latest
+// 「GitHub 失败→回落旧工程拷贝」路径废除:它会静默把升级成果覆盖回旧版(1113→1116
+// 事故原型);staging 缺 yt-dlp 时才允许从旧工程补位(首装种子)。
 const destYtdlp = join(destBin, 'yt-dlp.exe')
+const wantLatestYtdlp = process.argv.includes('--latest') || process.env.TINTIN_YTDLP_LATEST === '1'
+const existingVersion = () => {
+  if (!existsSync(destYtdlp)) return null
+  try {
+    const v = String(spawnSync(destYtdlp, ['--version'], { stdio: 'pipe', timeout: 15000 }).stdout || '').trim()
+    return /^\d{4}\.\d{2}\.\d{2}/.test(v) ? v : null
+  } catch { return null }
+}
+let ytdlpHandled = false
+if (!wantLatestYtdlp) {
+  const current = existingVersion()
+  if (current) {
+    ytdlpHandled = true
+    copied++
+    console.log(`yt-dlp.exe pinned at ${current} (staging kept; run with --latest to upgrade)`)
+  }
+}
 const tmpYtdlp = destYtdlp + '.download'
 let downloaded = false
-try {
-  const res = await fetch(YT_DLP_URL, { redirect: 'follow', signal: AbortSignal.timeout(120000) })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const buf = Buffer.from(await res.arrayBuffer())
-  // 校验：体积合理 + PE 头（GitHub 阻断期的拦截页/杀软页是 HTML，不是 MZ）
-  if (buf.length < 1024 * 1024 || buf[0] !== 0x4d || buf[1] !== 0x5a) {
-    throw new Error(`downloaded payload is not a PE exe (${buf.length} bytes)`)
+if (!ytdlpHandled) {
+  try {
+    const res = await fetch(YT_DLP_URL, { redirect: 'follow', signal: AbortSignal.timeout(120000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    // 校验：体积合理 + PE 头（GitHub 阻断期的拦截页/杀软页是 HTML，不是 MZ）
+    if (buf.length < 1024 * 1024 || buf[0] !== 0x4d || buf[1] !== 0x5a) {
+      throw new Error(`downloaded payload is not a PE exe (${buf.length} bytes)`)
+    }
+    writeFileSync(tmpYtdlp, buf)
+    const v = spawnSync(tmpYtdlp, ['--version'], { stdio: 'pipe', timeout: 15000 })
+    if (v.status !== 0) throw new Error(`--version probe failed (exit ${v.status})`)
+    const version = String(v.stdout || '').trim()
+    if (!/^\d{4}\.\d{2}\.\d{2}/.test(version)) throw new Error(`unexpected version string: ${version}`)
+    if (existsSync(destYtdlp)) unlinkSync(destYtdlp)
+    copyFileSync(tmpYtdlp, destYtdlp)
+    downloaded = true
+    console.log(`fetched yt-dlp.exe (latest release ${version})`)
+  } catch (err) {
+    console.error(`yt-dlp latest download failed: ${err instanceof Error ? err.message : err}`)
+  } finally {
+    try { if (existsSync(tmpYtdlp)) unlinkSync(tmpYtdlp) } catch { /* ignore */ }
   }
-  writeFileSync(tmpYtdlp, buf)
-  const v = spawnSync(tmpYtdlp, ['--version'], { stdio: 'pipe', timeout: 15000 })
-  if (v.status !== 0) throw new Error(`--version probe failed (exit ${v.status})`)
-  const version = String(v.stdout || '').trim()
-  if (!/^\d{4}\.\d{2}\.\d{2}/.test(version)) throw new Error(`unexpected version string: ${version}`)
-  if (existsSync(destYtdlp)) unlinkSync(destYtdlp)
-  copyFileSync(tmpYtdlp, destYtdlp)
-  downloaded = true
-  console.log(`fetched yt-dlp.exe (latest release ${version})`)
-} catch (err) {
-  console.error(`yt-dlp latest download failed: ${err instanceof Error ? err.message : err}`)
-} finally {
-  try { if (existsSync(tmpYtdlp)) unlinkSync(tmpYtdlp) } catch { /* ignore */ }
 }
-if (!downloaded) {
+if (!downloaded && !ytdlpHandled) {
   const from = join(srcBin, 'yt-dlp.exe')
   if (existsSync(from)) {
     copyFileSync(from, destYtdlp)
     copied++
     let staleVersion = 'unknown'
     try { staleVersion = String(spawnSync(from, ['--version'], { stdio: 'pipe', timeout: 15000 }).stdout || '').trim() } catch { /* ignore */ }
-    console.error(`WARNING: yt-dlp fell back to the legacy copy (${staleVersion}) — 抖音抽取器可能落后，请排查 GitHub 连通性后重跑本脚本`)
+    console.error(`WARNING: yt-dlp seeded from the legacy copy (${staleVersion}) — 首装种子;升级请跑本脚本 --latest`)
   } else {
     console.error(`missing ${from} — set TINTIN_SRC to a checkout holding all of ${NAMES.join(', ')}`)
     process.exitCode = 1
