@@ -56,3 +56,9 @@ debug.log
 
 # Stray tooling debris
 dsh-plugin-desktop-tintin/dsh python venv */
+
+# Repo-root one-off probes/logs/temp artifacts (2026-11-17: must live under .tmp/, never bare in root)
+/.tmp/
+
+# ZCode workspace tool state (sessions/permissions; not project content)
+/.zcode/
