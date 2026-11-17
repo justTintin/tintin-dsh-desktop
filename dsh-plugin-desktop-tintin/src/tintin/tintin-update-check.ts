@@ -45,6 +45,11 @@ export function tintinInstallerAssetName(version: string): string {
   return `TinTin-${version}-x64-Setup.exe`
 }
 
+/** 最小包资产名(2026-11-17 用户裁决「发布什么包就用什么包名」): lite 发布以本名上传。 */
+export function tintinInstallerLiteAssetName(version: string): string {
+  return `TinTin-${version}-x64-Setup-lite.exe`
+}
+
 /**
  * One parsed TinTin release identity. TinTin versions append a build stamp to
  * the package version — `0.2.2-rc.1-20261112-2217` (or `.` before the clock) —
@@ -373,14 +378,24 @@ export async function resolveTintinInstallerRelease(
       logCheck('resolve-atom-tag-missing', { requested: version }, 'error')
       return null
     }
-    const asset = reconstructedAsset(target.version)
-    if (asset === undefined) {
+    const candidates = reconstructedAssetCandidates(target.version)
+    if (candidates.length === 0) {
       logCheck('resolve-asset-url-rejected', { requested: version }, 'error')
       return null
     }
-    logCheck('resolve-atom-hit', { requested: version })
-    const sha256 = await resolveReconstructedSha256(asset, request, signal)
-    return { asset, ...(sha256 === undefined ? {} : { sha256 }) }
+    // 逐一探测(标准名 → lite 名): 发布形态二选一,命中的候选即本轮资产。
+    // 保留旧行为兜底: 两个候选都解析不出 sha 时,仍返回首个候选(无 sha),
+    // 与旧实现「asset 命中即返回(sha 可缺)」一致。
+    let firstHit: { asset: TintinReleaseAsset; sha256?: string } | undefined
+    for (const asset of candidates) {
+      logCheck('resolve-atom-hit', { requested: version, asset: asset.name })
+      const sha256 = await resolveReconstructedSha256(asset, request, signal)
+      if (sha256 !== undefined) return { asset, sha256 }
+      firstHit ??= { asset }
+    }
+    if (firstHit !== undefined) return firstHit
+    logCheck('resolve-atom-candidates-missed', { requested: version }, 'error')
+    return null
   } catch (cause) {
     logCheck('resolve-atom-failed', {
       error: cause instanceof Error ? cause.message : String(cause),
@@ -389,17 +404,24 @@ export async function resolveTintinInstallerRelease(
   }
 }
 
-/** Reconstructed installer asset per the artifact-name contract, or undefined when the URL fails the host checks. */
-function reconstructedAsset(version: string): TintinReleaseAsset | undefined {
-  const name = tintinInstallerAssetName(version)
-  let url: URL
-  try {
-    url = new URL(`https://github.com/${TINTIN_RELEASES_REPO}/releases/download/v${version}/${name}`)
-  } catch {
-    return undefined
+/** Reconstructed installer asset candidates per the artifact-name contract, in
+ * probe order: 全量(标准名) → 最小(-lite 名)。两种发布形态都在候选里——发布什么
+ * 包就用什么包名(2026-11-17 用户裁决),Atom 回退路径逐一探测直到命中。
+ * Or undefined when every URL fails the host checks. */
+function reconstructedAssetCandidates(version: string): TintinReleaseAsset[] {
+  const names = [tintinInstallerAssetName(version), tintinInstallerLiteAssetName(version)]
+  const candidates: TintinReleaseAsset[] = []
+  for (const name of names) {
+    let url: URL
+    try {
+      url = new URL(`https://github.com/${TINTIN_RELEASES_REPO}/releases/download/v${version}/${name}`)
+    } catch {
+      continue
+    }
+    if (!isTintinAssetUrl(url.toString())) continue
+    candidates.push({ name, url: url.toString(), size: 0 })
   }
-  if (!isTintinAssetUrl(url.toString())) return undefined
-  return { name, url: url.toString(), size: 0 }
+  return candidates
 }
 
 /**

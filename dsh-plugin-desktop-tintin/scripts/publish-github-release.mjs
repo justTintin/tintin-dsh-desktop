@@ -69,12 +69,14 @@ async function resolveGitHubToken() {
 }
 const token = await resolveGitHubToken()
 
-// 选安装包：--file 显式指定，否则取 dist/ 里最新的 TinTin-*-x64-Setup.exe。
+// 选安装包：--file 显式指定，否则取 dist/ 里最新的安装包(2026-11-17 用户裁决
+// 「发布什么包就用什么包名」：全量 -x64-Setup.exe 与最小 -x64-Setup-lite.exe 两种
+// 名字都接受,资产以其本名上传,不做任何改名伪装)。
 let installerPath = argValue('--file')
 if (installerPath === undefined) {
-  const candidates = (await readdir(distDir)).filter(name => /^TinTin-.+-x64-Setup\.exe$/u.test(name))
+  const candidates = (await readdir(distDir)).filter(name => /^TinTin-.+-x64-Setup(?:-lite)?\.exe$/u.test(name))
   if (candidates.length === 0) {
-    throw new Error('dist/ 下没有 TinTin-*-x64-Setup.exe——先完成 NSIS 打包步骤，或用 --file 指定安装包路径')
+    throw new Error('dist/ 下没有 TinTin-*-x64-Setup[-lite].exe——先完成 NSIS 打包步骤，或用 --file 指定安装包路径')
   }
   const newest = (await Promise.all(candidates.map(async name => ({
     name,
@@ -86,9 +88,9 @@ installerPath = resolve(installerPath)
 const installerName = basename(installerPath)
 
 // 版本号与 tag 必须与文件名严格一致（应用内检查按 tag 全字比对）。
-const version = /^TinTin-(.+)-x64-Setup\.exe$/u.exec(installerName)?.[1]
+const version = /^TinTin-(.+)-x64-Setup(?:-lite)?\.exe$/u.exec(installerName)?.[1]
 if (version === undefined) {
-  throw new Error(`安装包命名不符合 TinTin-<版本>-x64-Setup.exe：${installerName}`)
+  throw new Error(`安装包命名不符合 TinTin-<版本>-x64-Setup[-lite].exe：${installerName}`)
 }
 const tag = `v${version}`
 
