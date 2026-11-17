@@ -91,15 +91,21 @@ Var pid
 
 ; ── lite 包装后补齐(2026-11-16 用户裁决: 最小包装后联网下载缺失大件)──
 ; 打包链在 lite 包里放置 .tintin-lite 标记与 download-binaries.ps1; full 包无标记, 整段跳过。
+; ⚠ 2026-11-17 事故修复: 打包链把标记放在 resources\cover-plugin\ 下,旧检查只看安装
+; 根目录 → 路径永远不匹配,装后下载段从未触发(用户只看到安装、无任何下载)。双路检测。
 !macro customInstall
-  IfFileExists "$INSTDIR\.tintin-lite" 0 dsh_lite_skip
-    DetailPrint "下载媒体组件(yt-dlp / ffmpeg / ffprobe)..."
+  IfFileExists "$INSTDIR\.tintin-lite" 0 dsh_lite_check_payload
+    Goto dsh_lite_run
+  dsh_lite_check_payload:
+  IfFileExists "$INSTDIR\resources\cover-plugin\.tintin-lite" 0 dsh_lite_skip
+  dsh_lite_run:
+    DetailPrint "最小包:联网补齐附加组件(媒体三件 + OpenFilm 运行时)——下载内容见下方详情行..."
     nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\download-binaries.ps1"'
     Pop $R0
     ${if} $R0 != 0
-      DetailPrint "媒体组件下载失败——可在安装目录手动运行 resources\download-binaries.ps1 重试"
+      DetailPrint "⚠ 部分附加组件下载失败(见上方 [fail] 行)——重启 TinTin 后媒体工具会自动重试,也可手动运行 resources\download-binaries.ps1"
     ${else}
-      DetailPrint "媒体组件就位"
+      DetailPrint "附加组件全部就位"
     ${endIf}
   dsh_lite_skip:
 !macroend

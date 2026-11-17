@@ -27,12 +27,21 @@
 // when the primary host is unreachable (1012/1015 阻断先例).
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
+// 打包应用自愈模式(2026-11-17 修复③): plugin.js kick 时设 TINTIN_RESOURCES_TARGET=
+// <应用 resources 目录>,全部产物落到该目录(免安装目录/已装应用都能自愈),并跳过
+// playwright browsers 段(应用首跑下载兜底);未设 env = 工作区打包资源模式,行为不变。
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
-const resourcesDir = join(repoRoot, 'dsh-plugin-desktop-tintin', 'tintin-resources')
+const scriptDir = dirname(fileURLToPath(import.meta.url))
+const packagedMode = Boolean(process.env.TINTIN_RESOURCES_TARGET)
+  // 自动检测: 打包应用里脚本位于 resources/app/node_modules/dsh-tintin-bundle/scripts,
+  // 上三级有 app/package.json(工作区该路径不存在)。免安装目录直接跑本脚本也能自愈。
+  || existsSync(join(scriptDir, '..', '..', '..', 'app', 'package.json'))
+const resourcesDir = process.env.TINTIN_RESOURCES_TARGET
+  ?? (packagedMode ? resolve(scriptDir, '..', '..', '..') : join(repoRoot, 'dsh-plugin-desktop-tintin', 'tintin-resources'))
 const binDir = join(resourcesDir, 'bin')
 const openfilmDir = join(resourcesDir, 'openfilm')
 const browsersDir = join(resourcesDir, 'playwright-browsers')
@@ -121,20 +130,25 @@ if (!existsSync(npmCli)) {
 // 产物不含 skills/（仓库工作区 openfilm 才带，~2MB 七个技能）——skills 抽屉与
 // openfilm:skills 的 runtimeOk 探测都要它。npm install 重置 openfilm 包，因此与
 // tintin provider 同款「每次 fetch 后重拷」（幂等，含 install 跳过时）。
-const wsSkills = join(repoRoot, 'node_modules', 'openfilm', 'skills')
+// 打包模式技能源=bundle 自带副本(2026-11-17 修复③)：dsh-tintin-bundle/lib/openfilm/
+// openfilm-skills/（构建时随包携带），工作区路径在打包应用里不存在。
+const wsSkills = packagedMode
+  ? join(scriptDir, '..', 'lib', 'openfilm', 'openfilm-skills')
+  : join(repoRoot, 'node_modules', 'openfilm', 'skills')
 const skillsDst = join(openfilmDir, 'node_modules', 'openfilm', 'skills')
 if (existsSync(wsSkills)) {
   rmSync(skillsDst, { recursive: true, force: true })
   cpSync(wsSkills, skillsDst, { recursive: true })
   console.log(`openfilm skills vendored (${readdirSync(skillsDst).length} entries)`)
 } else {
-  console.warn(`workspace skills missing at ${wsSkills} — 跳过补拷（运行时首跑下载兜底不受影响）`)
+  console.warn(`skills seed missing at ${wsSkills} — 跳过补拷（技能抽屉将为空,视频剪辑本体不受影响）`)
 }
 
 // 2c. TinTin 一等 provider（2026-11-09 用户裁决：TinTin 服务=内置连接服务，不借 OpenAI 外皮）：
 // 源文件在 dsh-tintin-bundle/lib/openfilm/providers/tintin.mjs（tracked）；npm install 重置整个
 // openfilm 包，因此每次 fetch 后重拷并重挂 index.mjs（幂等，含 install 跳过时）。
-const tintinSrc = join(repoRoot, 'dsh-tintin-bundle', 'lib', 'openfilm', 'providers', 'tintin.mjs')
+// 路径改为脚本相对(2026-11-17 修复③)：scripts/.. = bundle 根,工作区与打包应用两模式通用。
+const tintinSrc = join(scriptDir, '..', 'lib', 'openfilm', 'providers', 'tintin.mjs')
 const tintinDst = join(openfilmDir, 'node_modules', 'openfilm', 'studio', 'server', 'providers', 'tintin.mjs')
 const tintinIdx = join(openfilmDir, 'node_modules', 'openfilm', 'studio', 'server', 'providers', 'index.mjs')
 if (existsSync(tintinSrc) && existsSync(tintinIdx)) {
@@ -148,8 +162,11 @@ if (existsSync(tintinSrc) && existsSync(tintinIdx)) {
 }
 // 3. Playwright browsers — the build matching the vendored playwright-core,
 // into PLAYWRIGHT_BROWSERS_PATH so the packaged app never first-run-downloads.
+// 打包模式跳过(2026-11-17 修复③): 浏览器 ~700MB 不进应用目录,由应用首跑下载兜底。
 const playwrightCli = join(openfilmDir, 'node_modules', 'playwright-core', 'cli.js')
-if (existsSync(playwrightCli)) {
+if (packagedMode) {
+  console.log('packaged mode: playwright browsers 由应用首跑下载兜底——此处跳过')
+} else if (existsSync(playwrightCli)) {
   console.log('playwright install chromium (headless shell + deps)')
   const res = spawnSync(process.execPath, [playwrightCli, 'install', 'chromium'], {
     stdio: 'inherit',

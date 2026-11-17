@@ -7,14 +7,30 @@ import { spawn } from 'node:child_process'
 
 /** lite 包(2026-11-16 用户裁决): openfilm 运行时缺位时后台拉起装后补齐脚本
  *  (幂等: 已在的跳过; yt-dlp/node/openfilm 包均按清单补)。下次调用即命中。 */
-function kickOpenfilmProvision() {
+function kickOpenfilmProvision(force = false) {
   try {
     const resourcesDir = process.resourcesPath
     if (!resourcesDir) return
     const ps1 = join(resourcesDir, 'download-binaries.ps1')
     if (!existsSync(ps1)) return
-    if (existsSync(join(resourcesDir, 'bin', 'node.exe')) &&
-        existsSync(join(resourcesDir, 'openfilm', 'node_modules', 'openfilm', 'package.json'))) return
+    // 完备判定(2026-11-17 修正): node.exe 在 openfilm/bin/ 下(不在 bin/——CreateProcess
+    // 父目录优先会劫持 ffmpeg,见 fetch 脚本头注);旧判定查 bin\node.exe 永不成立 →
+    // 每次都空跑 ps1。改为查 openfilm/bin/node.exe + openfilm 包。
+    const complete = existsSync(join(resourcesDir, 'openfilm', 'bin', 'node.exe')) &&
+        existsSync(join(resourcesDir, 'openfilm', 'node_modules', 'openfilm', 'package.json'))
+    if (complete && !force) return
+    // 24h 门控(2026-11-17 用户裁决「附件包也要能更新」): force 模式(运行时探测处
+    // 低频触发)用于附件包版本核对更新——ps1 内部逐件比对钉版/latest,旧则重下,
+    // 新则秒级 [skip];非 force(缺件急补)不受门控,立即执行。
+    const gate = join(homedir(), '.dsh-tintin', '.openfilm-provision-check')
+    if (force && existsSync(gate)) {
+      const age = Date.now() - statSync(gate).mtimeMs
+      if (age < 24 * 60 * 60 * 1000) return
+    }
+    try {
+      mkdirSync(dirname(gate), { recursive: true })
+      writeFileSync(gate, String(Date.now()))
+    } catch { /* 门控写失败=每次都跑,可接受 */ }
     const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1],
       { detached: true, stdio: 'ignore', windowsHide: true })
     child.unref()
@@ -240,6 +256,10 @@ export function createOpenfilmChannels({ sync, httpRequest, compatUrl }) {
         // runtimeOk 供客户端可用性探测（2026-11-13 用户报障「明明已装却判未安装」）：
         // vendored 运行时本体（node+CLI）在即算已安装——skills 抽屉空（0.3.2 包结构
         // 变化等）只是展示损失，不再作为「运行时未安装」的判据。
+        // 附件包版本核对更新挂在此处(2026-11-17 用户裁决「附件包也要能更新」):
+        // 客户端探测 runtimeOk 时顺带 24h 门控触发 ps1 版本核对(yt-dlp 对 GitHub
+        // latest、node/openfilm/playwright-core 对客户端钉版,旧则重下),detached 静默。
+        kickOpenfilmProvision(true)
         return { native, server, runtimeOk: !!runtime }
       } catch (error) {
         return { error: error instanceof Error ? error.message : String(error) }
