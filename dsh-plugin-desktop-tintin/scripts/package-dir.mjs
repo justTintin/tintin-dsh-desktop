@@ -39,6 +39,67 @@ function applyLitePackage() {
   process.stdout.write(`[lite] staging 剔除: ${removed.join(', ') || '(已缺)'} + 放置 .tintin-lite 标记\n`)
 }
 
+/** 收掉占用旧产物的自愈 PowerShell（2026-11-18 EBUSY 事故）。
+ *  lite 装后补齐/缺件自愈会用 detached PowerShell 跑本包 dist\win-unpacked\resources\
+ *  下的 download-binaries.ps1 长下载(数百 MB,可达数分钟),期间该文件被锁;
+ *  electron-builder 就地覆写同名文件会以 EBUSY 失败——且发生在数分钟构建之后。
+ *  只收命令行同时命中「本包路径 + win-unpacked + download-binaries.ps1」的
+ *  powershell/pwsh,杀软扫描与其它进程不由本函数处理。非 win32 直接空手返回。 */
+export function sweepUnpackedSelfHealHolders(options = {}) {
+  if (process.platform !== 'win32') return []
+  const run = options.run ?? spawnSync
+  const root = options.packagePath ?? packageRoot
+  const script = [
+    "$root = '" + root.replace(/'/g, "''") + "'",
+    "$hits = Get-CimInstance Win32_Process -Filter \"Name='powershell.exe' OR Name='pwsh.exe'\" |",
+    "  Where-Object { $_.CommandLine -and $_.CommandLine -like '*download-binaries.ps1*' -and $_.CommandLine -like '*win-unpacked*' -and $_.CommandLine -like ('*' + $root + '*') }",
+    "foreach ($p in $hits) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }",
+    "($hits | ForEach-Object { $_.ProcessId }) -join ','",
+  ].join('\n')
+  try {
+    const result = run('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' })
+    const out = String(result.stdout ?? '').trim()
+    // Number('')===0,空段必须先按文本剔除,只认纯数字段
+    return out === '' ? [] : out.split(',').map((s) => s.trim()).filter((s) => /^\d+$/.test(s)).map(Number)
+  } catch {
+    // CIM 查询失败不拦构建——真正的占用由随后的整树删除兜底暴露
+    return []
+  }
+}
+
+/** 打包前整树删除旧 dist\win-unpacked(2026-11-18 用户裁决:覆写失败类一律先清场)。
+ *  删除重试间穿插一次自愈进程收割;重试耗尽仍被占用则立即失败并把可疑占用方写明,
+ *  把失败提前到构建之前而不是 4 分钟之后。双包第二遍(lite)时 full 产物已挪 dist/full/,
+ *  此处删除的是已让位的旧壳,无数据损失。
+ *  只在 CLI 入口调用:packageDirectory 本体保持纯转参语义——单测(tests/package-dir.spec.ts)
+ *  以注入 run 直调该函数,体内挂预清理会顺手删掉真实 dist 产物。 */
+export function removeStaleUnpackedOutput(options = {}) {
+  const target = options.unpackedPath ?? join(packageRoot, 'dist', 'win-unpacked')
+  if (!existsSync(target)) return false
+  const attempts = options.attempts ?? 5
+  const waitMs = options.waitMs ?? 1500
+  const sweep = options.sweep ?? sweepUnpackedSelfHealHolders
+  let lastError = null
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const killed = sweep()
+    if (killed.length) process.stdout.write(`[dir-preclean] 已收掉占用旧产物的自愈进程: PID ${killed.join(', ')}\n`)
+    try {
+      rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+      process.stdout.write(`[dir-preclean] 已清理旧产物: ${target}\n`)
+      return true
+    } catch (error) {
+      lastError = error
+      if (attempt < attempts) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs)
+    }
+  }
+  const code = lastError?.code ?? String(lastError?.message ?? '')
+  throw new Error(
+    `旧产物 ${target} 被占用,打包前无法清理(${code})。` +
+    '可疑占用方:正在跑 download-binaries.ps1 的 PowerShell(lite 装后补齐自愈)、杀软实时扫描、' +
+    '或正从该目录运行的程序——关闭后重跑。',
+  )
+}
+
 /** Electron Builder overrides that make the directory build unconditionally unsigned. */
 export const UNSIGNED_DIRECTORY_BUILD_ARGS = Object.freeze([
   '--dir',
@@ -122,5 +183,6 @@ export function packageDirectory(options = {}) {
 
 const invokedPath = process.argv[1]
 if (invokedPath !== undefined && fileURLToPath(import.meta.url) === resolve(invokedPath)) {
+  removeStaleUnpackedOutput()
   packageDirectory()
 }

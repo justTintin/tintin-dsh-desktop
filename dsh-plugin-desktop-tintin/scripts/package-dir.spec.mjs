@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test from 'node:test'
+
+import {
+  removeStaleUnpackedOutput,
+  sweepUnpackedSelfHealHolders,
+} from './package-dir.mjs'
+
+const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+
+const fakeRun = (stdout = '') => () => ({ stdout })
+
+test('sweep parses self-heal holder pids from CIM output', () => {
+  assert.deepEqual(sweepUnpackedSelfHealHolders({ run: fakeRun('123,456') }), [123, 456])
+  assert.deepEqual(sweepUnpackedSelfHealHolders({ run: fakeRun('  ') }), [])
+  assert.deepEqual(sweepUnpackedSelfHealHolders({ run: fakeRun('1,,x,7') }), [1, 7])
+})
+
+test('sweep swallows CIM failures and returns no holders', () => {
+  assert.deepEqual(sweepUnpackedSelfHealHolders({ run: () => { throw new Error('boom') } }), [])
+})
+
+test('sweep live query returns an array (empty on a clean session)', () => {
+  // win32 真跑一次 PowerShell 查询链;非 win32 恒空
+  assert.ok(Array.isArray(sweepUnpackedSelfHealHolders()))
+})
+
+test('removeStaleUnpackedOutput no-ops when nothing stale exists', () => {
+  assert.equal(removeStaleUnpackedOutput({ unpackedPath: join(tmpdir(), 'definitely-not-here-xyz') }), false)
+})
+
+test('removeStaleUnpackedOutput deletes a stale tree', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pkgdir-preclean-'))
+  writeFileSync(join(dir, 'download-binaries.ps1'), '# stale\n')
+  assert.equal(removeStaleUnpackedOutput({ unpackedPath: dir, attempts: 2, waitMs: 100 }), true)
+  assert.equal(removeStaleUnpackedOutput({ unpackedPath: dir }), false)
+})
+
+test('preclean is wired at the CLI entry only, never inside packageDirectory', () => {
+  const source = readFileSync(new URL('./package-dir.mjs', import.meta.url), 'utf8')
+  // CLI 入口:清场在前、构建在后
+  const entry = source.slice(source.indexOf('const invokedPath'))
+  assert.ok(entry.includes('removeStaleUnpackedOutput()\n  packageDirectory()'), 'CLI 入口必须先清场再打包')
+  // 函数体内禁止出现预清理——单测以注入 run 直调,体内清场会删真实 dist 产物
+  const body = source.slice(source.indexOf('export function packageDirectory'), source.indexOf('const invokedPath'))
+  assert.ok(!body.includes('removeStaleUnpackedOutput'), 'packageDirectory 本体不得调用预清理')
+})
+
+test('removeStaleUnpackedOutput fails fast with guidance when a holder locks the tree', { timeout: 30000, skip: process.platform !== 'win32' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pkgdir-locked-'))
+  const locked = join(dir, 'download-binaries.ps1')
+  writeFileSync(locked, '# held open with no sharing\n')
+  const holder = spawn('powershell.exe', [
+    '-NoProfile',
+    '-Command',
+    `$fs=[IO.File]::Open('${locked.replace(/'/g, "''")}','Open','ReadWrite','None'); Start-Sleep 25`,
+  ], { stdio: 'ignore' })
+  try {
+    // 等 PowerShell 真握住独占句柄:期间任何其它打开都会失败
+    const deadline = Date.now() + 10000
+    let held = false
+    while (Date.now() < deadline) {
+      try {
+        const fd = openSync(locked, 'r')
+        closeSync(fd)
+        sleep(200)
+      } catch {
+        held = true
+        break
+      }
+    }
+    assert.ok(held, '测试夹具未能在 10s 内锁住文件')
+    assert.throws(
+      () => removeStaleUnpackedOutput({ unpackedPath: dir, attempts: 2, waitMs: 200 }),
+      /被占用/,
+    )
+  } finally {
+    holder.kill()
+    // kill 后句柄释放有竞态,清理自身带界重试
+    for (let i = 0; i < 25; i++) {
+      try {
+        rmSync(dir, { recursive: true, force: true })
+        break
+      } catch {
+        sleep(200)
+      }
+    }
+  }
+})
