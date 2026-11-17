@@ -69,20 +69,22 @@ async function resolveGitHubToken() {
 }
 const token = await resolveGitHubToken()
 
-// 选安装包：--file 显式指定，否则取 dist/ 里最新的安装包(2026-11-17 用户裁决
-// 「发布什么包就用什么包名」：全量 -x64-Setup.exe 与最小 -x64-Setup-lite.exe 两种
-// 名字都接受,资产以其本名上传,不做任何改名伪装)。
+// 选安装包：--file 显式指定 > TINTIN_PUBLISH_DIR 环境变量指定的打包产物目录 >
+// 通道 dist(最后回退,历史约定)。2026-11-17 用户裁决「工程是代码工程不是打包目录」:
+// builder 流程永远传 --file 指向 products/,默认扫描只是手工直跑兜底;三种名字都接受
+// (全量 -x64-Setup.exe / 最小 -x64-Setup-lite.exe),资产以其本名上传,不做改名伪装。
 let installerPath = argValue('--file')
 if (installerPath === undefined) {
-  const candidates = (await readdir(distDir)).filter(name => /^TinTin-.+-x64-Setup(?:-lite)?\.exe$/u.test(name))
+  const scanDir = process.env.TINTIN_PUBLISH_DIR ? resolve(process.env.TINTIN_PUBLISH_DIR) : distDir
+  const candidates = (await readdir(scanDir)).filter(name => /^TinTin-.+-x64-Setup(?:-lite)?\.exe$/u.test(name))
   if (candidates.length === 0) {
-    throw new Error('dist/ 下没有 TinTin-*-x64-Setup[-lite].exe——先完成 NSIS 打包步骤，或用 --file 指定安装包路径')
+    throw new Error(`${scanDir} 下没有 TinTin-*-x64-Setup[-lite].exe——先完成打包归档,或用 --file 指定安装包路径(也可设 TINTIN_PUBLISH_DIR 指向产物目录)`)
   }
   const newest = (await Promise.all(candidates.map(async name => ({
     name,
-    mtimeMs: (await stat(join(distDir, name))).mtimeMs,
+    mtimeMs: (await stat(join(scanDir, name))).mtimeMs,
   })))).sort((left, right) => right.mtimeMs - left.mtimeMs)[0]
-  installerPath = join(distDir, newest.name)
+  installerPath = join(scanDir, newest.name)
 }
 installerPath = resolve(installerPath)
 const installerName = basename(installerPath)
