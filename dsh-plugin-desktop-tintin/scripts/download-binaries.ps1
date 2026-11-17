@@ -16,37 +16,44 @@ $OPENFILM_VERSION = '0.3.2'
 $PLAYWRIGHT_CORE_VERSION = '1.61.1'
 $ok = $true
 
-function Ensure-Exe($name, $url, $minSizeMB, $destDir) {
+function Ensure-Exe($name, $urls, $minSizeMB, $destDir) {
+  # $urls = 镜像数组,逐一尝试(2026-11-17 沙盒实证: 单源网络抖动即缺件;
+  # node.exe 双镜像 nodejs.org/npmmirror,yt-dlp 单源 GitHub curl 重试)。
   $target = Join-Path $destDir $name
   if ((Test-Path $target) -and ((Get-Item $target).Length -gt $minSizeMB * 1MB)) {
     Write-Host "[skip] $name 已在"
     return $true
   }
-  Write-Host "[get ] $name <- $url"
   $tmp = $target + '.download'
-  try {
-    Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -TimeoutSec 600
-    if ((Get-Item $tmp).Length -lt $minSizeMB * 1MB) { throw "下载尺寸过小" }
-    New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-    if (Test-Path $target) { Remove-Item $target -Force }
-    Move-Item $tmp $target -Force
-    Write-Host "[ok  ] $name 已就位"
-    return $true
-  } catch {
-    Write-Host "[fail] $name : $($_.Exception.Message)"
-    if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
-    return $false
+  New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+  foreach ($url in @($urls)) {
+    Write-Host "[get ] $name <- $url"
+    try {
+      & curl.exe -L --fail --retry 3 -sS -o $tmp $url
+      if (-not (Test-Path $tmp) -or ((Get-Item $tmp).Length -lt $minSizeMB * 1MB)) { throw "下载尺寸过小/失败" }
+      if (Test-Path $target) { Remove-Item $target -Force }
+      Move-Item $tmp $target -Force
+      Write-Host "[ok  ] $name 已就位"
+      return $true
+    } catch {
+      Write-Host "[warn] $name 自 $url 失败: $($_.Exception.Message)"
+      if (Test-Path $tmp) { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
+    }
   }
+  Write-Host "[fail] $name : 所有镜像均失败"
+  return $false
 }
 
 function Get-NpmTgz($label, $url, $destDir) {
   Write-Host "[get ] $label <- $url"
   $tgz = Join-Path $env:TEMP ($label + '.tgz')
   try {
-    Invoke-WebRequest -Uri $url -OutFile $tgz -UseBasicParsing -TimeoutSec 600
     New-Item -ItemType Directory -Force -Path $destDir | Out-Null
     Remove-Item (Join-Path $destDir '*') -Recurse -Force -ErrorAction SilentlyContinue
-    tar -xzf $tgz -C $destDir --strip-components=1
+    & curl.exe -L --fail --retry 2 -sS -o $tgz $url
+    if (-not (Test-Path $tgz) -or ((Get-Item $tgz).Length -lt 1024)) { throw "下载尺寸过小" }
+    # 锁 System32 bsdtar(2026-11-17 沙盒实证: PATH 里 Git 的 GNU tar 把 C: 当远程主机)
+    & "$env:SystemRoot\System32\tar.exe" -xzf $tgz -C $destDir --strip-components=1
     if (-not (Test-Path (Join-Path $destDir 'package.json'))) { throw "解包后缺 package.json" }
     Write-Host "[ok  ] $label 解包就位"
     return $true
@@ -78,32 +85,13 @@ if (Test-Path $ytdlp) {
     Write-Host '[skip] yt-dlp 版本源不可达,沿用现有'
   }
 }
-$ok = (Ensure-Exe 'yt-dlp.exe' 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' 5 $bin) -and $ok
+$ok = (Ensure-Exe 'yt-dlp.exe' @('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe') 5 $bin) -and $ok
 
-if (-not ((Test-Path (Join-Path $bin 'ffmpeg.exe')) -and (Test-Path (Join-Path $bin 'ffprobe.exe')))) {
-  Write-Host "[get ] ffmpeg+ffprobe 合包(约90MB) <- gyan.dev"
-  $zip = Join-Path $env:TEMP 'tintin-ffmpeg-essentials.zip'
-  $xdir = Join-Path $env:TEMP 'tintin-ffmpeg-x'
-  try {
-    Invoke-WebRequest -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $zip -UseBasicParsing -TimeoutSec 900
-    Remove-Item $xdir -Recurse -Force -ErrorAction SilentlyContinue
-    Expand-Archive -Path $zip -DestinationPath $xdir -Force
-    $root = (Get-ChildItem $xdir -Directory | Select-Object -First 1).FullName
-    New-Item -ItemType Directory -Force -Path $bin | Out-Null
-    foreach ($n in 'ffmpeg.exe', 'ffprobe.exe') {
-      Copy-Item (Join-Path $root (Join-Path 'bin' $n)) (Join-Path $bin $n) -Force
-      Write-Host "[ok  ] $n 解包就位"
-    }
-  } catch {
-    Write-Host "[fail] ffmpeg+ffprobe : $($_.Exception.Message)"
-    $ok = $false
-  } finally {
-    Remove-Item $zip -Force -ErrorAction SilentlyContinue
-    Remove-Item $xdir -Recurse -Force -ErrorAction SilentlyContinue
-  }
-} else {
-  Write-Host "[skip] ffmpeg / ffprobe 已在"
-}
+# ffmpeg/ffprobe: npmmirror ffmpeg-static b6.1.1 裸 exe 直链(2026-11-17: gyan.dev
+# 90MB 合包在本机超时实证,换镜像源,两件各约 79MB 独立下载无需解包)
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+$ok = (Ensure-Exe 'ffmpeg.exe' 'https://registry.npmmirror.com/-/binary/ffmpeg-static/b6.1.1/ffmpeg-win32-x64' 60 $bin) -and $ok
+$ok = (Ensure-Exe 'ffprobe.exe' 'https://registry.npmmirror.com/-/binary/ffmpeg-static/b6.1.1/ffprobe-win32-x64' 60 $bin) -and $ok
 
 Write-Host "== OpenFilm 运行时(node / openfilm / playwright-core) =="
 # node.exe 版本感知: 本地 --version 与钉版不符则重下
@@ -118,7 +106,7 @@ if (Test-Path $nodeExe) {
     Write-Host "[skip] node.exe $have 已匹配"
   }
 }
-$ok = (Ensure-Exe 'node.exe' "https://npmmirror.com/mirrors/node/$NODE_VERSION/win-x64/node.exe" 60 (Join-Path $ofDir 'bin')) -and $ok
+$ok = (Ensure-Exe 'node.exe' @("https://npmmirror.com/mirrors/node/$NODE_VERSION/win-x64/node.exe", "https://nodejs.org/dist/$NODE_VERSION/win-x64/node.exe") 60 (Join-Path $ofDir 'bin')) -and $ok
 
 # openfilm 包版本感知: package.json 与钉版不符则重取
 $ofPkgDir = Join-Path $ofModules 'openfilm'
