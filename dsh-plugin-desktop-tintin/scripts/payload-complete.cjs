@@ -43,7 +43,11 @@ function completeCoverPayload(input) {
 
   const exeAt = (base) => join(base, '.remotion', EXE_REL)
   const rendererAt = (base) => join(base, '@remotion', 'renderer')
-  if (!exists(exeAt(stagingPlugins))) {
+  /* lite 包(2026-11-16 用户裁决): appOutDir 有 .tintin-lite 标记 = 浏览器缓存
+     刻意不入包, 首渲染由 Remotion ensureBrowser 联网下载; @remotion/renderer
+     渲染库仍必须随包(staging 与载荷都校验)。full 包门禁原样保留。 */
+  const litePackage = exists(join(packageRoot, 'tintin-resources', 'cover-plugin', '.tintin-lite'))
+  if (!litePackage && !exists(exeAt(stagingPlugins))) {
     throw new Error('staging 缺 .remotion 浏览器缓存(渲染必需)——先跑 stage.mjs 并保留缓存,再打包')
   }
   if (!exists(rendererAt(stagingPlugins))) {
@@ -53,7 +57,7 @@ function completeCoverPayload(input) {
   if (!payloadComplete) {
     cp(stagingPlugins, distModules, { recursive: true })
   }
-  if (!exists(exeAt(distModules))) {
+  if (!litePackage && !exists(exeAt(distModules))) {
     throw new Error('载荷浏览器缓存拷贝后仍缺失——检查 dist 载荷目录权限')
   }
   if (!exists(rendererAt(distModules))) {

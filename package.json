@@ -24,7 +24,7 @@
     "dsh-plugin-desktop-tintin"
   ],
   "resolutions": {
-    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.2.0-desktop.c99b49e3e0593.rc2b11bfc.tgz",
+    "@agents-anywhere/dsh-bridge-next": "file:vendor/agents-anywhere/agents-anywhere-dsh-bridge-next-2.2.0-desktop.c98dd0e6e5ddc.rc2b11bfc.tgz",
     "@deepseek-ai/cordis": "4.0.6-alpha.1",
     "@deepseek-ai/cordis-plugin-include": "1.0.11-alpha.1",
     "@deepseek-ai/cordis-plugin-loader": "1.0.7-alpha.1",
@@ -874,7 +874,8 @@
     "test:market-release": "node --test scripts/prepare-dsh-market.test.mjs",
     "package:tintin:dir": "node scripts/package-tintin.mjs",
     "package:tintin:dir:full": "yarn workspace dsh-tintin-bundle fetch:openfilm && yarn workspace dsh-tintin-browser fetch:bin && yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin package:dir",
-    "package:tintin:dir:lite": "yarn workspace dsh-tintin-bundle fetch:openfilm && yarn workspace dsh-tintin-browser fetch:bin && yarn market:prepare && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && node dsh-plugin-desktop-tintin/scripts/package-nsis-local.mjs --lite",    "package:tintin:dir:local": "yarn workspace dsh-tintin-browser fetch:bin && node scripts/package-tintin-local.mjs",
+    "package:tintin:dir:lite": "yarn workspace dsh-tintin-bundle fetch:openfilm && yarn workspace dsh-tintin-browser fetch:bin && yarn market:prepare && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && node dsh-plugin-desktop-tintin/scripts/package-nsis-local.mjs --lite",
+    "package:tintin:dir:local": "yarn workspace dsh-tintin-browser fetch:bin && node scripts/package-tintin-local.mjs",
     "package:tintin:publish": "node dsh-plugin-desktop-tintin/scripts/publish-github-release.mjs",
     "package:tintin:release": "node scripts/release-tintin.mjs",
     "package:tintin:dir:hot": "yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-creation-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin package:dir:hot",
