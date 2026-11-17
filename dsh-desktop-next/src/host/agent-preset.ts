@@ -33,7 +33,7 @@ export function installAgentPresetResolution(runtimeDir: string): ModuleHooks | 
   return registerHooks({
     resolve(specifier, context, nextResolve) {
       const resolved = nextResolve(specifier, context)
-      if (!resolved.url.startsWith('file:') || !/\/node_modules\/@deepseek-ai\/dsh-agent-preset\/package\.json$/u.test(new URL(resolved.url).pathname)) return resolved
+      if (!resolved.url.startsWith('file:') || !new URL(resolved.url).pathname.endsWith('/node_modules/@deepseek-ai/dsh-agent-preset/package.json')) return resolved
       const canonical = pathToFileURL(realpathSync(fileURLToPath(resolved.url))).href
       if (canonical !== source) {
         if (canonical.startsWith(pathToFileURL(archive + '/').href)) {

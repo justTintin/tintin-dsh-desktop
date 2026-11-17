@@ -110,7 +110,7 @@ export function createMediaStorage(ipcMain: Electron.IpcMain, deps: MediaStorage
     save(STORAGE_KEYS.DOWNLOADS, downloadCache)
   }
   const saveSettings = (s: Partial<StorageSettings>): void => {
-    settingsCache = { ...settingsCache, ...(s || {}) }
+    settingsCache = { ...settingsCache, ...s }
     save(STORAGE_KEYS.SETTINGS, settingsCache)
   }
   const saveFavorites = (list: SniffedItem[]): void => {

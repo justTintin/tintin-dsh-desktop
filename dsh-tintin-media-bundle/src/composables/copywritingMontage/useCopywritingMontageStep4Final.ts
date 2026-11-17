@@ -906,7 +906,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
       if (!tab) continue
       if (textFxEnabled.value || fancyEnabled.value) {
         exportStage.value = `关键词命中判定（分镜 ${pi + 1}/${vPlans.length}）...`
-        planHits.push(...[await resolveKeywordHits(tab.narrative, tab.voiceWav ? tab.voiceWav + '.timing.json' : '', vPlans[pi].outputPath)])
+        planHits.push(await resolveKeywordHits(tab.narrative, tab.voiceWav ? tab.voiceWav + '.timing.json' : '', vPlans[pi].outputPath))
       } else {
         planHits.push([])
       }

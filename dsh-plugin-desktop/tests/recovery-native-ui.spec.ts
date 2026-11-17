@@ -39,7 +39,7 @@ describe('Recovery native terminal action', () => {
     const data = source.indexOf('body={copy.dataGuideBody}')
     const diagnostics = source.indexOf('body={copy.diagnosticsGuideBody}')
     expect([safeMode, plugins, rollback, profiles, data, diagnostics]).toEqual(
-      [...[safeMode, plugins, rollback, profiles, data, diagnostics]].sort((left, right) => left - right),
+      [safeMode, plugins, rollback, profiles, data, diagnostics].sort((left, right) => left - right),
     )
     expect(source).toContain('<TabsContent value="plugins"><PluginsPanel copy={copy} state={state} /></TabsContent>')
     expect(source).toContain('<TabsContent value="rollback"><RollbackPanel copy={copy} state={state} /></TabsContent>')

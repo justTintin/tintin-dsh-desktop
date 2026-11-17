@@ -170,4 +170,11 @@ for (const [name, version] of Object.entries(nextDesktop.dependencies)) {
   if ((name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-')) && version !== nextReference.version) fail(`Next ${name} must match the pinned upstream family`)
 }
 
+// ── 根目录卫生(铁律 19,2026-11-18 门禁化): git 跟踪的根级文件不得含临时物形态 ──
+// (.tmp-* 散件、*.tmp.json 抓包残留、*.log 日志)。临时物归 .tmp/(已 ignore)。
+const ROOT_TEMP_PATTERN = /(^\.tmp-|\.tmp\.json$|\.log$)/u
+const trackedRootFiles = run('git', ['ls-files', ':/:']).split('\n').filter(Boolean).filter(name => !name.includes('/'))
+const strays = trackedRootFiles.filter(name => ROOT_TEMP_PATTERN.test(name))
+if (strays.length > 0) fail(`铁律 19: 根目录存在被跟踪的临时物——git rm 后移入 .tmp/: ${strays.join(', ')}`)
+
 process.stdout.write(`verify-layout: Desktop workspaces including Next and upstream ${activeUpstream.commit.slice(0, 10)} are consistent\n`)

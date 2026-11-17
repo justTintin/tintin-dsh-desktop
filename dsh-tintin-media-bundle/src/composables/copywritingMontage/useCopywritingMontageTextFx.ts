@@ -488,7 +488,7 @@ export function useCopywritingMontageTextFx(ctx: CopywritingMontageTextFxContext
     } catch (_) { /* 无 env 桥（预览环境） */ }
   }
   function srvAbs(p: string): string {
-    if (!p || /^https:\/\//.test(p)) return p
+    if (!p || p.startsWith('https://')) return p
     return srvBase.value ? srvBase.value.replace(/\/$/, '') + (p.startsWith('/') ? p : '/' + p) : p
   }
   /** 拉取服务端文字模板库（GET /text_templates/templates，2026-09-10 纠偏；进入 Step4 时调用；空库时下拉仅随机项） */

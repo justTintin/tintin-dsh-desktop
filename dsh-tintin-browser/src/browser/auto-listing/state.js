@@ -54,7 +54,7 @@ function writeState(runsRoot, runId, patch) {
   const p = statePath(runsRoot, runId)
   fs.mkdirSync(path.dirname(p), { recursive: true })
   const cur = readState(runsRoot, runId) || defaultState(runId)
-  const next = { ...cur, ...(patch || {}), runId: String(runId), ts: Date.now() }
+  const next = { ...cur, ...patch, runId: String(runId), ts: Date.now() }
   const tmp = p + '.tmp'
   fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8')
   fs.renameSync(tmp, p)

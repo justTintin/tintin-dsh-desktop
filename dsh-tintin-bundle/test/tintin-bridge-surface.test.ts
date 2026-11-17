@@ -37,7 +37,6 @@ function makeSandbox() {
     },
     window: {} as Record<string, unknown>,
   }
-  sandbox.window = sandbox.window as Record<string, unknown>
   vm.createContext(sandbox)
   new vm.Script(bridgeSrc, { filename: 'client.js#bridge' }).runInContext(sandbox as never)
   const tintin = (sandbox.window as { tintin?: Record<string, unknown> }).tintin as never as {

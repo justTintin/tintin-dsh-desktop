@@ -48,7 +48,7 @@ describe('voiceScaleOf / underfillAfterVoice / topUpClipGroups', () => {
     expect(r2.groups).toEqual([[1, 2]])
     // 池耗尽：单行池、绑定即该行 → 无可补，保持欠装（欠装明示口径不变）
     const p1 = pool(row(9, 4))
-    const r3 = topUpClipGroups([{ duration: 4 }], [[9]], p1, 5.06 * 0 + 11.385)
+    const r3 = topUpClipGroups([{ duration: 4 }], [[9]], p1, 11.385)
     expect(r3.appendedTotal).toBe(0)
     expect(r3.groups).toEqual([[9]])
   })

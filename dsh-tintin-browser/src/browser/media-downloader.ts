@@ -214,7 +214,8 @@ export function createMediaDownloaderIpc(deps: MediaDownloaderDeps) {
     taskId: string, url: string, destPath: string, referer: string | undefined, partition: string,
     onProgress: (p: { progress: number; size: number; receivedBytes: number; message: string }) => void,
   ): Promise<{ totalBytes: number }> {
-    return new Promise(async (resolve, reject) => {
+    return new Promise((resolve, reject) => {
+      void (async () => {
       let cookieString = ''
       try {
         const sess = sessionFromPartition(partition)
@@ -321,6 +322,7 @@ export function createMediaDownloaderIpc(deps: MediaDownloaderDeps) {
       }
 
       makeRequest(url)
+      })().catch(reject)
     })
   }
 

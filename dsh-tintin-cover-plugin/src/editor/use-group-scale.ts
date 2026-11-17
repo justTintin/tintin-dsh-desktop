@@ -70,7 +70,7 @@ export function useGroupScale(deps: GroupScaleDeps): GroupScaleHandles {
     const members = collectMembers(d)
     if (members.length < 2) return
     const u = d.multiUnion
-    const scale = Math.max(d.compositionRect()?.width ?? 0 / d.tplWidth, 0.05)
+    const scale = Math.max(d.compositionRect()?.width ?? 0, 0.05)
     const qx = corner === 'nw' || corner === 'sw' ? u.x + u.w : u.x
     const qy = corner === 'nw' || corner === 'ne' ? u.y + u.h : u.y
     const px = (e.clientX - (d.compositionRect()?.left ?? 0)) / scale

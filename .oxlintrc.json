@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "unicorn/no-useless-spread": "warn",
+    "unicorn/no-useless-fallback-in-spread": "warn",
+    "no-unused-vars": ["warn", { "args": "none", "caughtErrors": "none", "varsIgnorePattern": "^_" }],
+    "no-useless-escape": "warn",
+    "no-unsafe-optional-chaining": "warn",
+    "no-control-regex": "warn"
+  },
+  "ignorePatterns": [
+    "node_modules", "deepseek-harness", "vendor", "patches", ".yarn", ".tmp",
+    ".build", ".agents", "dsh-community-fabric",
+    "**/dist/**",
+    "dsh-plugin-desktop/lib", "dsh-plugin-desktop-beta/lib", "dsh-plugin-desktop-tintin/lib",
+    "dsh-community-market/lib", "dsh-desktop-next/lib",
+    "**/*.d.ts", "**/*.generated.*"
+  ]
+}

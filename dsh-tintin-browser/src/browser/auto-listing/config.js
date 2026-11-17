@@ -59,7 +59,7 @@ function loadConfig(store, userDataDir) {
 
 /** 写配置（patch 合入 autoListing.* 并落盘；返回合并后配置） */
 function saveConfig(store, userDataDir, patch) {
-  const merged = { ...loadConfig(store, userDataDir), ...(patch || {}) }
+  const merged = { ...loadConfig(store, userDataDir), ...patch }
   if (store && typeof store.set === 'function') {
     try { store.set('autoListing', merged) } catch (_) { /* 写失败静默 */ }
   }

@@ -109,7 +109,7 @@ function AssetsPanel({ project }: { project: string }): React.ReactElement {
       2026-11-02 用户裁决:成败按服务端真实应答判定;失败界面只说人话(拒绝原因),
       HTTP 状态码与 JSON 原文进 console 供排查——UI 禁现传输层噪音。 */
   const importFiles = async (list: FileList | null): Promise<void> => {
-    const files = Array.from(list ?? []).filter((f) => /^image\//.test(f.type) || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(f.name))
+    const files = Array.from(list ?? []).filter((f) => f.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(f.name))
     if (!files.length) { flashNotice('仅支持图片文件(png/jpg/webp/gif/svg)'); return }
     setImportBusy(true)
     const existing = new Set(items.map((i) => i.path.split('/').pop() ?? i.path))

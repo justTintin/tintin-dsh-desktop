@@ -84,7 +84,7 @@ export const TOOL_CALL_GUARD = { warn: 40, stop: 60 } as const
 /** 轮询类工具(task_status_unified)按任务预算时长管理(工作纪律第 2 条), 不计入护栏计数。
  *  ACP 投影里工具名在 update.title(MCP 公开名 mcp__tintin-server__<raw>)。 */
 export function isPollingToolCall(title: unknown): boolean {
-  return typeof title === 'string' && /__task_status_unified$/.test(title)
+  return typeof title === 'string' && title.endsWith('__task_status_unified')
 }
 
 export type ToolCallGuardState = { count: number; warned: boolean }

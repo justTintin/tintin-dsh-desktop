@@ -21,7 +21,7 @@ function scanFontFiles(fontDir, cacheDir) {
   const seen = new Set()
   const push = (fp, source) => {
     const base = path.basename(fp)
-    if (/^\._/.test(base)) return // macOS AppleDouble 垃圾
+    if (base.startsWith('._')) return // macOS AppleDouble 垃圾
     if (!/\.(ttf|otf)$/i.test(base)) return
     let st
     try { st = fs.statSync(fp) } catch (_) { return }

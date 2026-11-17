@@ -77,7 +77,7 @@ function fixture() {
     configForms: { describe: () => ({ getSnapshot: () => ({}), subscribe: noop }), get: () => undefined },
     slots: { inject: (_name: string, register: () => unknown) => {
       const result = register()
-      if (result && typeof result === 'object' && Symbol.iterator in result) [...result as Iterable<unknown>]
+      if (result && typeof result === 'object' && Symbol.iterator in result) void Array.from(result as Iterable<unknown>)
     }, register: (options: { name: string; store?: any }, view: typeof Page) => {
       if (options.name === 'main') { Page = view; navigation = options.store.create() }
       return () => {}

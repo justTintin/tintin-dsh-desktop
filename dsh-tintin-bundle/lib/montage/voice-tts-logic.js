@@ -1352,7 +1352,7 @@ function buildTextTemplateDecorations(dir, rid, videoW, videoH) {
     }
     decorations.forEach((d) => { d.used = false })
     const elements = (p.elements || []).filter((e) => e && e.type === 'sticker')
-    const assign = new Array(elements.length).fill(null)
+    const assign = Array.from({ length: elements.length }, () => null)
     elements.forEach((e, i) => {
       const c = (e.attach_info && e.attach_info.clip) || {}
       const ow = Number(e.attach_info.original_size_width || 0), oh = Number(e.attach_info.original_size_height || 0)

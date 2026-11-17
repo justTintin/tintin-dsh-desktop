@@ -525,7 +525,7 @@ export class DesktopProfileCheckpoint {
     this.releaseChannel = assertReleaseChannel(options.releaseChannel ?? 'stable')
     this.dshVersion = assertAppVersion(options.dshVersion ?? 'unknown')
     this.now = options.now ?? Date.now
-    this.limits = { ...FILE_LIMITS, ...(options.maxFileBytes ?? {}) }
+    this.limits = { ...FILE_LIMITS, ...options.maxFileBytes }
     for (const name of DESKTOP_PROFILE_CHECKPOINT_FILES) {
       if (!Number.isSafeInteger(this.limits[name]) || this.limits[name] < 0) fail(`invalid size limit for ${name}`)
     }

@@ -53,6 +53,7 @@ it('keeps stream errors and early-consumer cancellation semantics intact', async
   const { ctx, records, dispatch } = await environment()
   const options = { provider: 'test', model: 'example', messages: [] }
   const failure = new Error('network failed', { cause: new Error('socket closed') })
+  // oxlint-disable-next-line require-yield -- 故意只抛错的生成器:验证 dispatch 对生成器异常的透传
   const failed = dispatch('llm/stream', options, async function* () { throw failure })
   await expect(failed.next()).rejects.toBe(failure)
   expect(records().at(-1)).toMatchObject({ event: 'request.failed', error: { cause: { message: 'socket closed' } } })

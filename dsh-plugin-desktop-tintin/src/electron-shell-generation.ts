@@ -332,7 +332,7 @@ export class ElectronShellGeneration {
         webSecurity: true,
         partition: 'dsh-desktop-compatibility-host',
       } } : {}),
-      ...(restoredBounds ?? {}),
+      ...restoredBounds,
     })
     window.accessibleTitle = spec.windowTitle
     platform.configureWindow(window)

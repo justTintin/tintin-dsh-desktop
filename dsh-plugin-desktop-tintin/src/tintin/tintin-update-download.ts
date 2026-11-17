@@ -126,6 +126,8 @@ export async function downloadTintinUpdateArtifact(options: TintinDownloadOption
   }
 
   let failure: unknown
+  let cleanupFailure: unknown
+  let completed: string | undefined
   try {
     const declared = Number(response.headers.get('content-length'))
     const total = Number.isFinite(declared) && declared > 0 ? declared : undefined
@@ -139,18 +141,24 @@ export async function downloadTintinUpdateArtifact(options: TintinDownloadOption
     }
     await unlinkIfPresent(paths.completed)
     await rename(paths.temporary, paths.completed)
-    return paths.completed
+    completed = paths.completed
   } catch (cause) {
     failure = options.signal?.aborted === true || isAbortFailure(cause) ? aborted(cause) : cause
-    throw failure
   } finally {
     try {
       await unlinkIfPresent(paths.temporary)
     } catch (cleanupCause) {
-      if (failure === undefined) throw cleanupCause
-      throw new AggregateError([failure, cleanupCause], 'Failed to download and clean up the tintin update installer.')
+      cleanupFailure = cleanupCause
     }
   }
+  // 语义与旧版逐分支一致: 主失败优先,收尾失败并入 AggregateError;纯收尾失败单独抛。
+  if (failure !== undefined) {
+    throw cleanupFailure !== undefined
+      ? new AggregateError([failure, cleanupFailure], 'Failed to download and clean up the tintin update installer.')
+      : failure
+  }
+  if (cleanupFailure !== undefined) throw cleanupFailure
+  return completed as string
 }
 
 function validatedArtifactPath(path: string): string {
