@@ -38,6 +38,8 @@ describe('unsigned directory packaging', () => {
       CSC_IDENTITY_AUTO_DISCOVERY: 'false',
       DSH_PACKAGE_CHECK_ALREADY_RAN: '1',
       DSH_ELECTRON_BUILDER_TRAVERSAL_ONLY: '1',
+      // bc69261d43: NSIS 载荷默认 7z mx=2(提速),环境面随带
+      ELECTRON_BUILDER_COMPRESSION_LEVEL: '2',
     })
   })
 
@@ -48,7 +50,7 @@ describe('unsigned directory packaging', () => {
       cwd: '/workspace/desktop',
       electronBuilderCli: '/workspace/electron-builder.js',
       electronDistPath: '/workspace/electron/dist',
-      env: { CSC_NAME: 'Developer ID Application: Release', KEEP: 'yes' },
+      env: { CSC_NAME: 'Developer ID Application: Release', KEEP: 'yes', DSH_VERSION_STAMP: 'off' },
       nodeExecutable: '/runtime/node',
       run: run as unknown as typeof import('node:child_process').spawnSync,
     })
@@ -76,6 +78,9 @@ describe('unsigned directory packaging', () => {
         env: {
           CSC_IDENTITY_AUTO_DISCOVERY: 'false',
           DSH_ELECTRON_BUILDER_TRAVERSAL_ONLY: '1',
+          ELECTRON_BUILDER_COMPRESSION_LEVEL: '2',
+          // versionStampArgs(2026-10-12 裁决):off=不注入 extraMetadata.version,断言免受时间影响
+          DSH_VERSION_STAMP: 'off',
           KEEP: 'yes',
         },
         stdio: 'inherit',
