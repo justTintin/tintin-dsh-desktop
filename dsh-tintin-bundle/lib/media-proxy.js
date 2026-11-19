@@ -101,7 +101,12 @@ export function createVsrApi({ multipartPost, isExpectedOfflineError }) {
         if (p.mask_expand_y !== undefined) parts.push({ name: 'mask_expand_y', value: String(p.mask_expand_y) })
         if (p.sttn_max_load_num !== undefined) parts.push({ name: 'sttn_max_load_num', value: String(p.sttn_max_load_num) })
         try {
-          return await multipartPost('/vsr/remove', parts)
+          // 2026-11-19 实测证据（用户报障：去字幕十几分钟必报 Request timeout）：
+          // /vsr/remove 为同步推理（STTN/lama 逐帧修复，长视频十几分钟），期间无
+          // 字节回流——multipartPost 默认 120s 空闲超时必杀（Node timeout=空闲计时
+          // 不是总时长）。对齐 rembg/montage:split 的长任务口径，按实测时长放大到
+          // 30 分钟上限；服务端真死连时仍会在上限处失败，不会永挂。
+          return await multipartPost('/vsr/remove', parts, 1800000)
         } catch (err) {
           if (err && err.status) {
             const detail = err.response ? JSON.stringify(err.response).slice(0, 300) : ''

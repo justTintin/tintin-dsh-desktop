@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   createAudioArchiveApi,
   createRembgApi,
+  createVsrApi,
   mattingOutPath,
 } from '../lib/media-proxy.js'
 import { isExpectedOfflineError } from 'dsh-tintin-shared/lib/server-proxy.js'
@@ -130,6 +131,53 @@ describe('rembg matting native channels', () => {
     const api = createRembgApi({ multipartPost: async () => Buffer.alloc(0), isExpectedOfflineError })
     const out = await (api['rembg:submit'] as Entry)([{ model: 'u2net' }])
     expect(out).toEqual({ error: 'rembg:submit missing `image` 本地路径' })
+  })
+})
+
+// vsr:remove — 视频去水印字幕（lib/media-proxy.js createVsrApi）。2026-11-19
+// 回归锚：/vsr/remove 为同步推理（长视频十几分钟），multipartPost 必须显式带
+// 30 分钟超时——默认 120s 空闲超时会中途杀掉仍在处理的服务端任务（用户报障
+// 「Request timeout」即此字符串）。其余契约：{path} 包装与裸字符串都映射为
+// file part、可选八参仅在传入时成对出现、离线 → null、缺 video → {error}。
+describe('vsr remove native channel (subtitle/watermark removal card)', () => {
+  it('posts /vsr/remove with the 30-minute long-job timeout (2026-11-19 regression)', async () => {
+    const calls: Array<{ endpoint: string; parts: MultipartPart[]; timeout?: number }> = []
+    const api = createVsrApi({
+      multipartPost: async (endpoint, parts, timeout) => {
+        calls.push({ endpoint, parts, timeout })
+        return { task_id: 't1' }
+      },
+      isExpectedOfflineError,
+    })
+    const out = await (api['vsr:remove'] as Entry)([{
+      video: { path: 'D:\\v\\a.mp4' },
+      inpaint_mode: 'sttn', sub_areas: '', purpose: 'subtitle', mode: 'select',
+      mask_dilate: 4, mask_expand_y: 0, sttn_max_load_num: 100,
+    }])
+    expect(out).toEqual({ task_id: 't1' })
+    expect(calls).toHaveLength(1)
+    expect(calls[0].endpoint).toBe('/vsr/remove')
+    expect(calls[0].timeout).toBe(1800000)
+  })
+
+  it('maps a bare string video to the file part and maps expected offline failures to null', async () => {
+    const partsSeen: MultipartPart[] = []
+    const api = createVsrApi({
+      multipartPost: async (_endpoint, parts) => {
+        partsSeen.push(...parts)
+        throw offlineError()
+      },
+      isExpectedOfflineError,
+    })
+    const offline = await (api['vsr:remove'] as Entry)([{ video: 'D:\\v\\b.mp4' }])
+    expect(offline).toBeNull()
+    expect(partsSeen).toEqual([{ name: 'file', path: 'D:\\v\\b.mp4' }])
+  })
+
+  it('rejects a payload without video as {error}', async () => {
+    const api = createVsrApi({ multipartPost: async () => ({}), isExpectedOfflineError })
+    const out = await (api['vsr:remove'] as Entry)([{ purpose: 'subtitle' }])
+    expect(out).toEqual({ error: 'vsr:remove missing `video`' })
   })
 })
 
