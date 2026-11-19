@@ -46,7 +46,9 @@ const discoverInto = (target: string, quiet: boolean): Promise<void> =>
           tools.value = Array.isArray(j.tools) ? j.tools : []
           mcpUrl.value = String(j.mcpUrl ?? '')
           messageOk.value = true
-          message.value = `已连接 ${j.mcpUrl}，自动发现 ${j.count} 个 MCP 服务。`
+          // 文案明确「探测≠保存」(2026-11-19 事故:绿字「已连接」被当成保存完成,
+          // 用户改地址后只点发现不点保存,重开弹窗回显旧值——探测不落盘)
+          message.value = `探测成功 ${j.mcpUrl}（${j.count} 个服务）——探测不落盘，记得点「保存地址」。`
         } else if (!quiet) {
           messageOk.value = false
           message.value = `获取失败：${j?.error ?? '未知错误'}`
@@ -96,7 +98,11 @@ const load = (): void => {
 
 watch(() => props.visible, (visible) => { if (visible) load() })
 
-/** 保存本面地址（normalized 空串=清空回落全局）；连接状态由「获取 MCP 服务」给出。 */
+/** 保存本面地址（normalized 空串=清空回落全局）；连接状态由「获取 MCP 服务」给出。
+ *  2026-11-19 假成功事故（保存后地址不生效）：宿主 config:merge 失败经 200 {error}
+ *  透传（callNative 不转 throw），此前 UI 不看 j.error 直接报「已保存」——写入失败
+ *  被吞成成功文案，文件保持旧值。修复=①拆包 {error} 直报宿主原文 ②merge 后 config:get
+ *  回读比对，任何中间层吞写当场暴露，不再有「看起来保存了」。 */
 const save = (): void => {
   const normalized = normalizeServerUrl(url.value)
   if (normalized === null) {
@@ -106,8 +112,17 @@ const save = (): void => {
   }
   busy.value = 'save'
   message.value = ''
-  configChannel()?.merge?.({ [props.surface]: { serverUrl: normalized } })
-    .then(() => {
+  const channel = configChannel()
+  Promise.resolve(channel?.merge?.({ [props.surface]: { serverUrl: normalized } }))
+    .then(async (j) => {
+      if (j && typeof j === 'object' && 'error' in (j as Record<string, unknown>)) {
+        throw new Error(String((j as Record<string, unknown>).error))
+      }
+      const res = await Promise.resolve(channel?.get?.())
+      const written = surfaceServerUrl((res as { value?: unknown } | null)?.value, props.surface)
+      if (written !== normalized) {
+        throw new Error(`保存未生效：配置读回「${written || '(空)'}」≠ 写入「${normalized || '(空)'}」——请重试；反复出现请查看宿主日志`)
+      }
       url.value = normalized
       messageOk.value = true
       message.value = normalized
