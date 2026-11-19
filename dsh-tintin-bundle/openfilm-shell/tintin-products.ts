@@ -5,7 +5,6 @@
  * 数据经 openfilmNative.products(主进程代理服务端 /api/product-library/*, 实测形状)。
  */
 import { bootFail } from './boot';
-import { requestShowSkills } from './bridge';
 
 type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: unknown; goods_no?: unknown; features?: unknown; selling_points?: unknown };
 
@@ -98,31 +97,11 @@ const mount = (): void => {
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(fabTick, 0))
     else setTimeout(fabTick, 0)
 
-    /* 技能入口(2026-11-07 用户裁决「按原来的图标和原来的窗口」): 0.2.7 的 Blocks 图标(lucide,
-       与官方工具行按钮同款 16px/stroke 1.75) + show-skills 命令开恢复的技能弹窗(发现/服务端/我的)。 */
-    const skillFab = document.createElement('button');
-    skillFab.className = 'openfilm-composer-tool';
-    skillFab.title = '技能库(发现/服务端/我的)';
-    skillFab.setAttribute('data-tintin-skills', '1');
-    skillFab.setAttribute('aria-label', '技能库');
-    skillFab.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="7" x="14" y="3" rx="1"/><path d="M10 21V8a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H3"/></svg>';
-    skillFab.onclick = () => requestShowSkills();
-    const attachSkill = (): boolean => {
-      const official = document.querySelector('.openfilm-composer-tool')
-      const row = official?.parentElement
-      if (!row) return false
-      if (row.querySelector('[data-tintin-skills]')) return true
-      row.append(skillFab)
-      return true
-    }
-    let skillTries = 0
-    const skillTick = (): void => {
-      if (attachSkill()) return
-      skillTries += 1
-      if (skillTries < 80) setTimeout(skillTick, 250)
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(skillTick, 0))
-    else setTimeout(skillTick, 0)
+    /* 技能入口 FAB 已删除（2026-11-19 用户裁决「最后一个也是进入的相同的吧。把最后一个删除」）：
+       0.4 官方 composer 工具行的 Community 按钮（App.tsx showExamples{kind:'plugins'}）与
+       本注入按钮（requestShowSkills=show-examples{kind:'skill'}）开的是同一个 Community
+       窗口，保留官方一个入口即可。requestShowSkills 本身保留（桥 API 面，takeLink 等
+       深链路径仍在用）。 */
 
     /* 在线素材的入口已移入 0.3 库面板素材侧栏(「收藏」下的「在线素材」, 2026-11-07 用户裁决) ——
        输入框旁的注入按钮退役。 */

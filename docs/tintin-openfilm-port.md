@@ -761,3 +761,4 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - **锚表 150→148**:删 0.4 退役项(SkillsDialog/SkillsLibrary/SkillsPane 文件锚+show-skills 命令接线×2),增 0.4 新锚 ×6(TinTinServerSkills hook/PluginsPane 挂载/在线素材缝 0.4/bridge requestShowSkills+libraryDock/connectors 空实现)。
 - **壳依赖**:package.json 增 26(0.4 新依赖:@tiptap 全家 3.32.0/@mediapipe tasks-vision/onnxruntime-web/tailwindcss 4/vite 7 等,对齐官方 packages/openfilm 声明)。
 - 生效需重打包;实机 CDP 验证待做。
+- **§16.42 社区界面两处收敛(2026-11-19 用户裁决)**:①composer 工具条注入的「技能库」FAB 删除——0.4 官方 Community 按钮(App.tsx `showExamples{kind:'plugins'}` Shapes 图标)与注入按钮(requestShowSkills=`show-examples{kind:'skill'}` Blocks 图标)开同一个 Community 窗口,保留官方一个入口;requestShowSkills 桥 API 保留(takeLink 深链路径仍用)。②Community 技能页(kind:'skills' Discover)顶部加 TinTin 服务端技能组——与 Mine 页同款 ServerLine 行(装/删/「有新版」徽标/行内详情,hook=useServerSkills 已在组件顶部),搜索按名字/描述过滤;装上的服务端技能进本机技能目录,@ 引用/使用走技能语义不变。壳 dist 经 prepare:openfilm-shell 重叠到 vendored editor dist,重启/新会话生效。

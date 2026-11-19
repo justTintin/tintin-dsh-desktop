@@ -620,10 +620,26 @@ export function PluginsPane({ line, query, projectId, opened, onOpen, onWorkbenc
   if (line === 'skills') {
     const shelves = CATEGORIES.map((c) => ({ c, list: byInstalls(catalogSkills.filter((k) => categoryOfSkill(k) === c)) })).filter((x) => x.list.length);
     const pick = shelves.some((x) => x.c === skillSort) ? skillSort : null;
+    /* TinTin 服务端技能组（2026-11-19 用户裁决：技能页也要有 0.3 技能弹窗的服务端组）。
+       行渲染与 Mine 的服务端 Shelf 同款（ServerLine）；装上的服务端技能进本机技能目录，
+       @ 引用/使用走技能语义不变。搜索时按名字/描述过滤。 */
+    const serverRows = server.skills.filter((s) => matches(s.name, s.description));
     return (
       <PluginsPage key={line} title={t('assetDrawer.tab_skills')} note={q ? undefined : t('assetDrawer.note_skills')}>
         {consent.dialog}
         {status}
+        {serverRows.length ? (
+          <Shelf title={t('gallery.server')} note={t('gallery.serverHint')}>
+            <GroupList items={serverRows.map((s): GroupItem => ({
+              key: `tintin-server:${s.name}`,
+              icon: <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[9px] bg-[var(--bg-field)] text-[var(--text-muted)]"><Server size={16} strokeWidth={1.75} /></span>,
+              title: s.name,
+              summary: s.update ? `${s.description} · ${t('gallery.updateOut').replace('{version}', String(s.detail?.version ?? ''))}` : s.description,
+              onOpen: undefined,
+              control: <ServerLine skill={s} onInstall={() => server.act('install', s.name)} onRemove={() => server.act('remove', s.name)} />,
+            }))} />
+          </Shelf>
+        ) : null}
         <StoreChips label={t('assetDrawer.tab_skills')} value={pick} onChange={setSkillSort}
           items={shelves.length > 1 ? [{ key: null, label: t('assetDrawer.allItems') }, ...shelves.map(({ c, list }) => ({ key: c, label: t(`assetDrawer.skillCat_${c}`), count: list.length }))] : []} />
         {waiting ? (
