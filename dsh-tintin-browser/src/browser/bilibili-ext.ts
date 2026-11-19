@@ -64,6 +64,9 @@ export function findBilibiliHelperDir(): string | null {
 export const BILI_DL_EXTRACT_SCRIPT = `(function(){
   function _dec(en){ try { return JSON.parse(decodeURIComponent(en)) } catch(_){} try { return JSON.parse(en) } catch(_){} return null; }
   function _norm(u){ try { return decodeURIComponent(u) } catch(_){ return u } }
+  // 2026-11-19 用户报障:多 P 视频官方 <a download> 文件名是「标题_pN」无扩展名
+  // (B站 DOM 链),落盘产物无扩展名(资源管理器类型=文件)。视频下载链一律兜底 .mp4。
+  function _mp4(n){ n = String(n || ''); return /\.[a-z0-9]{1,8}$/i.test(n) ? n : (n + '.mp4') }
   var host = document.getElementById('bilibili-helper-host');
   if(!host || !host.shadowRoot) return { hostFound: false, downloads: [] };
   try {
@@ -81,13 +84,13 @@ export const BILI_DL_EXTRACT_SCRIPT = `(function(){
       var sizeText = sm ? sm[1] : '';
       var href0 = a.getAttribute('href') || '';
       if (href0 && href0 !== '#nogo' && href0.indexOf('javascript:') !== 0) {
-        items.push({ url: href0, download: a.getAttribute('download') || '', text: quality + t + (sizeText?('<'+sizeText+'>'):''), sizeText: sizeText });
+        items.push({ url: href0, download: _mp4(a.getAttribute('download')), text: quality + t + (sizeText?('<'+sizeText+'>'):''), sizeText: sizeText });
         continue;
       }
       var durl = a.getAttribute('durl');
       if (durl) {
         var e = _dec(durl);
-        if (e && e.url) { items.push({ url: _norm(e.url), download: a.getAttribute('title') || '', text: quality + t + (sizeText?('<'+sizeText+'>'):''), sizeText: sizeText }); continue; }
+        if (e && e.url) { items.push({ url: _norm(e.url), download: _mp4(a.getAttribute('title')), text: quality + t + (sizeText?('<'+sizeText+'>'):''), sizeText: sizeText }); continue; }
       }
       var durls = a.getAttribute('durls');
       if (durls) {

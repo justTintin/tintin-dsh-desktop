@@ -114,6 +114,12 @@ export function registerSniffCapture(deps: SniffCaptureDeps): void {
     // 显式文件名（2026-11-07：解析链捕获下载按标题命名，URL 尾段是 CDN 哈希名；
     // 2026-11-13 扩展名保全——长标题截断不再砍掉尾部 .mp4）
     const filename = resolveSniffFilename(p.filename, tail)
+    // 2026-11-19 二道保险：调用方文件名仍无扩展名（B站官方 <a download> 多 P 名
+    // 「标题_pN」漏过注入脚本兜底）且目标是视频流（DASH m4s/videoplayback）时补
+    // .mp4——媒体嗅探下载产物本质是 fMP4；其它类型不猜，保持原样。
+    const finalFilename = filename && !/\.[a-z0-9]{1,8}$/i.test(filename) && /\.(m4s|mp4)|videoplayback|dash/i.test(url)
+      ? filename + '.mp4'
+      : (filename || tail)
     // 平台归属优先取调用方声明（2026-11-11：捕获会话与用户当前平台解耦——在 B站
     // 页面解析抖音链接时，cookie 分区与 referer 仍必须走抖音）
     const requested = String(p.platformId || '')
@@ -125,7 +131,7 @@ export function registerSniffCapture(deps: SniffCaptureDeps): void {
     const r = await deps.downloader.startMedia({
       url,
       ...(audioUrl ? { audioUrl } : {}),
-      filename: filename || tail,
+      filename: finalFilename,
       ...(referer ? { referer } : {}),
       ...(platformId ? { platformId, subDir: platformId } : {}),
       useYtdlp: needsYtdlp,
