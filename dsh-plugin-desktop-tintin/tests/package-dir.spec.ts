@@ -182,13 +182,13 @@ describe('installed DSH product version', () => {
 
 describe('cover payload completion gate (afterPack, 1113 用户裁决)', () => {
   const require = createRequire(import.meta.url)
-  // @ts-expect-error completion step is a CJS script shared with the electron-builder hook.
   const { completeCoverPayload } = require('../scripts/payload-complete.cjs') as {
     completeCoverPayload: (input: {
       appOutDir: string
       packageRoot: string
       stagingPlugins?: string
       distPlugins?: string
+      cp?: typeof import('node:fs').cpSync
     }) => { copied: boolean; pluginsDir: string }
   }
 
