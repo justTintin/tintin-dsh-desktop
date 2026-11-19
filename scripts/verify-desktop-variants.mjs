@@ -23,6 +23,9 @@ const allowedDifferences = new Set([
 // after the identity renaming below, so shared fixes stay three-way synced.
 const allowedTintinAdditions = new Set([
   'tintin/main-hook.ts',
+  // TinTin-only file/external-open/screenshot IPC face migrated out of main-hook
+  // (2026-11-19 iron rule 4: baseline-locked files only shrink; see 16.39).
+  'tintin/native-shell-channels.ts',
   'tintin/first-boot.ts',
   'tintin-main.ts',
   'tintin/studio-preload.ts',
