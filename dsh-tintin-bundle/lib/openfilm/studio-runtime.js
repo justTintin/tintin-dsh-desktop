@@ -154,6 +154,14 @@ export async function reconcileStudioInstance(studioHome, fingerprint, { verify 
   if (side && side.fingerprint === fingerprint) {
     if (verify === undefined || (await verify())) return false /* 版本相符且实测相符:附着即可 */
     /* 账本相符但实测不符:账本被毒化,按陈旧清场 */
+  } else if (!side && verify !== undefined && (await verify())) {
+    /* 2026-11-19 报障(视频剪辑升级后无法打开):账本缺失 ≠ 陈旧。双击竞态或相邻
+       实例退出清账(openfilm 服务退出时会顺手删 run.json)都会让 sidecar 短暂缺失,
+       此时按「无账本=杀」会把同版本活服务打死再冷启第二个——4788 被占后回落随机
+       端口,客户端还拿着被杀实例的地址 → 403「another Studio launch」/黑屏。
+       实测伺服自有编辑器 → 附着并补账,后续对账走快路径。 */
+    writeSidecar(studioHome, fingerprint)
+    return false
   }
   /* 先杀 supervisor 再杀服务:顺序反了会被 supervisor 立即拉起新实例 */
   for (const pid of [run.supervisor, run.pid]) {
@@ -266,6 +274,22 @@ export function studioEnv(runtime, env = process.env, { openaiCompatUrl } = {}) 
 }
 
 /**
+ * adopt 前的地址活性探针(2026-11-19 报障):GET /open 判「是否属于当前实例」。
+ * 403 = 服务器明确说这把钥匙不属于自己(启动竞态顶掉)→ false;网络层失败(服务
+ * 忙/探针超时)→ true 不作杀判,交给既有自愈链;其余状态(2xx/3xx/4xx 其它)→ true。
+ * @param {string} url 带 key 的 /open 地址
+ * @returns {Promise<boolean>}
+ */
+export async function adoptedUrlLiveness(url) {
+  try {
+    const res = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(4000) })
+    return res.status !== 403
+  } catch {
+    return true /* 不应答不误杀:黑屏比误报可恢复性差,宁可交给视图自愈 */
+  }
+}
+
+/**
  * Start (or attach to) Studio for `folder` and resolve with `{ url, origin, key, pid }`.
  * The CLI detaches the Studio server and exits; we read the address it prints,
  * falling back to run.json. Throws a sentence the UI can show on failure.
@@ -302,12 +326,20 @@ export function startStudio({ folder, runtime, homeDir, timeoutMs = 45_000, env 
       // pid 变了才是新服务。附着到既有服务时不覆盖账本 —— 覆盖会把 owned 指纹记到
       // 实际伺服旧 dist 的服务上,毒化对账(CLI 打印地址在附着模式也可能发生,不作判据)。
       if (fingerprint !== '' && (run?.pid ?? 0) > 0 && run?.pid !== prePid) writeSidecar(childEnvironment.OPENFILM_HOME, fingerprint)
-      finish(null, {
-        url,
-        origin: new URL(url).origin,
-        key: run?.key ?? '',
-        pid: run?.pid ?? 0,
-        project: parseStudioProject(output) || lastStudioProject(childEnvironment.OPENFILM_HOME),
+      // 2026-11-19 报障(视频剪辑升级后无法打开):adopt 前探一次地址本身。
+      // /open 403 =「another Studio launch」——启动竞态下打印地址的服务可能已被
+      // 后续实例顶掉,把这种地址交给视图只会黑屏(403 JSON 落在暗底上)。403 是
+      // 确凿错配 → 显式报错让 UI 呈现可重试文案;不应答/其它状态不作杀判(避免
+      // 探针超时把好地址误杀,既有自愈链(did-fail-load 强制重载)兜底)。
+      void adoptedUrlLiveness(url).then((alive) => {
+        if (!alive) return finish(new Error('Studio 地址已被另一实例接管（启动竞态），请重试打开视频剪辑'))
+        finish(null, {
+          url,
+          origin: new URL(url).origin,
+          key: run?.key ?? '',
+          pid: run?.pid ?? 0,
+          project: parseStudioProject(output) || lastStudioProject(childEnvironment.OPENFILM_HOME),
+        })
       })
     }
     // 实例对账(2026-10-23 用户裁决):spawn 前结束陈旧实例(旧构建/官方 app 启动的

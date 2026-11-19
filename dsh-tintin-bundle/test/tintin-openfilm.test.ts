@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mergeTinTinProvider, mergeTinTinService, syncProvidersAt, syncProvidersFile, TINTIN_SERVICE_ID } from '../lib/openfilm/providers-seed.js'
 import {
-  editorFingerprint, lastStudioProject, parseStudioAddress, parseStudioProject, readStudioRun, reconcileStudioInstance, resolveOpenfilmRuntime, seedStudioRecents, serverServesOwnedEditor, studioEnv, studioPageUrl,
+  adoptedUrlLiveness, editorFingerprint, lastStudioProject, parseStudioAddress, parseStudioProject, readStudioRun, reconcileStudioInstance, resolveOpenfilmRuntime, seedStudioRecents, serverServesOwnedEditor, studioEnv, studioPageUrl,
 } from '../lib/openfilm/studio-runtime.js'
 import { syncOpenfilmLibs, THREE_FILES, threeLibDir } from '../lib/openfilm/libs-sync.js'
 import { restoreOpenfilmLibraryPrefs, syncOpenfilmLibrary } from '../lib/openfilm/library-sync.js'
@@ -203,6 +203,66 @@ describe('studio-runtime', () => {
     } finally {
       kill.mockRestore()
     }
+  })
+
+  // 2026-11-19 报障回归(视频剪辑升级后无法打开):sidecar 缺失时先实测再定杀/附——
+  // 双击竞态或相邻实例退出清账都会短暂缺账,按「无账本=杀」会把同版本活服务打死再
+  // 冷启第二个(端口回落随机),客户端拿被杀实例地址 → 403/黑屏。
+  it('reconcileStudioInstance:无账本但实测是自有编辑器 → 附着并补账,不清场', async () => {
+    const root = tempDir()
+    seedEditorDist(root, '<html><script src="/assets/index-owned.js"></script></html>')
+    const home = tempDir()
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true)
+    try {
+      writeFileSync(join(home, 'run.json'), JSON.stringify({ pid: 111, supervisor: 222, origin: 'http://127.0.0.1:4788', key: 'k' }))
+      const fetchOwned = vi.fn(async () => ({ text: async () => '<html><script src="/assets/index-owned.js"></script></html>' }))
+      vi.stubGlobal('fetch', fetchOwned)
+      try {
+        expect(await reconcileStudioInstance(home, 'fp-1', {
+          verify: () => serverServesOwnedEditor('http://127.0.0.1:4788', 'k', '<html><script src="/assets/index-owned.js"></script></html>'),
+        })).toBe(false)
+        expect(kill).not.toHaveBeenCalled()
+        expect(existsSync(join(home, 'run.json'))).toBe(true)
+        expect(readFileSync(join(home, 'run.tintin.json'), 'utf8')).toContain('fp-1')
+      } finally {
+        vi.unstubAllGlobals()
+      }
+      // 实测不符(毒化/陈旧)仍按原口径清场
+      const fetchOld = vi.fn(async () => ({ text: async () => '<html><script src="/assets/index-OLD.js"></script></html>' }))
+      vi.stubGlobal('fetch', fetchOld)
+      try {
+        expect(await reconcileStudioInstance(home, 'fp-1', {
+          verify: () => serverServesOwnedEditor('http://127.0.0.1:4788', 'k', '<html><script src="/assets/index-owned.js"></script></html>'),
+        })).toBe(true)
+        expect(kill).toHaveBeenCalledWith(222)
+        expect(kill).toHaveBeenCalledWith(111)
+        expect(existsSync(join(home, 'run.json'))).toBe(false)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+      // 无 verify 注入时保持旧行为:无账本=陈旧清场
+      writeFileSync(join(home, 'run.json'), JSON.stringify({ pid: 333, supervisor: 444, origin: 'http://127.0.0.1:4788', key: 'k' }))
+      expect(await reconcileStudioInstance(home, 'fp-1')).toBe(true)
+      expect(kill).toHaveBeenCalledWith(444)
+    } finally {
+      kill.mockRestore()
+    }
+  })
+
+  // adopt 前的地址活性探针:403(另一实例接管)拒收,其余(含不应答)不误杀
+  it('adoptedUrlLiveness:403 拒收、2xx/3xx 放行、网络失败不误杀', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 403 })))
+    try {
+      expect(await adoptedUrlLiveness('http://127.0.0.1:4788/open?key=x')).toBe(false)
+    } finally { vi.unstubAllGlobals() }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ status: 302 })))
+    try {
+      expect(await adoptedUrlLiveness('http://127.0.0.1:4788/open?key=x')).toBe(true)
+    } finally { vi.unstubAllGlobals() }
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('connection refused') }))
+    try {
+      expect(await adoptedUrlLiveness('http://127.0.0.1:4788/open?key=x')).toBe(true)
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('serverServesOwnedEditor:比资产名,不应答按不符处理', async () => {
