@@ -9,7 +9,7 @@ import {
   editorFingerprint, lastStudioProject, parseStudioAddress, parseStudioProject, readStudioRun, reconcileStudioInstance, resolveOpenfilmRuntime, seedStudioRecents, serverServesOwnedEditor, studioEnv, studioPageUrl,
 } from '../lib/openfilm/studio-runtime.js'
 import { syncOpenfilmLibs, THREE_FILES, threeLibDir } from '../lib/openfilm/libs-sync.js'
-import { syncOpenfilmLibrary } from '../lib/openfilm/library-sync.js'
+import { restoreOpenfilmLibraryPrefs, syncOpenfilmLibrary } from '../lib/openfilm/library-sync.js'
 import { createOpenfilmChannels } from '../lib/openfilm/plugin.js'
 
 const tmpDirs: string[] = []
@@ -539,5 +539,39 @@ describe('tintin provider 接线（server.openfilmCompat，2026-11-09 用户裁�
     expect(keepEnv.TINTIN_SERVER_URL).toBe('http://x:1')
     const noCompat = studioEnv(null, { DSH_HOME: root }, { openaiCompatUrl: '' })
     expect(noCompat.TINTIN_SERVER_URL).toBeUndefined()
+  })
+})
+
+describe('restoreOpenfilmLibraryPrefs（1119 裁决：官方家 prefs 注入撤销）', () => {
+  const prefsOf = (home) => JSON.parse(readFileSync(join(home, '.openfilm', 'prefs.json'), 'utf8'))
+
+  it('注入态（projectsFolder==标记）→ 两键都删,官方默认生效', () => {
+    const home = tempDir()
+    const ws = resolve(join(tempDir(), 'tintin-workspace'))
+    mkdirSync(join(home, '.openfilm'), { recursive: true })
+    writeFileSync(join(home, '.openfilm', 'prefs.json'), JSON.stringify({ projectsFolder: ws, tintinProjectsFolder: ws, proxies: { on: true } }))
+    expect(restoreOpenfilmLibraryPrefs({ homeDir: home }).status).toBe('restored')
+    const prefs = prefsOf(home)
+    expect(prefs.projectsFolder).toBeUndefined()
+    expect(prefs.tintinProjectsFolder).toBeUndefined()
+    expect(prefs.proxies).toEqual({ on: true })
+  })
+
+  it('用户自选目录（projectsFolder≠标记）→ 只删标记,保留自选', () => {
+    const home = tempDir()
+    mkdirSync(join(home, '.openfilm'), { recursive: true })
+    writeFileSync(join(home, '.openfilm', 'prefs.json'), JSON.stringify({ projectsFolder: 'D:\my-films', tintinProjectsFolder: 'C:\old\ws' }))
+    expect(restoreOpenfilmLibraryPrefs({ homeDir: home }).status).toBe('released')
+    const prefs = prefsOf(home)
+    expect(prefs.projectsFolder).toBe('D:\my-films')
+    expect(prefs.tintinProjectsFolder).toBeUndefined()
+  })
+
+  it('无标记键→完全不动（幂等）', () => {
+    const home = tempDir()
+    mkdirSync(join(home, '.openfilm'), { recursive: true })
+    writeFileSync(join(home, '.openfilm', 'prefs.json'), JSON.stringify({ projectsFolder: 'D:\mine' }))
+    expect(restoreOpenfilmLibraryPrefs({ homeDir: home }).status).toBe('absent')
+    expect(prefsOf(home).projectsFolder).toBe('D:\mine')
   })
 })

@@ -741,3 +741,10 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - **即梦设备码登录授权链接「无法打开」**:根因=Studio 视图 setWindowOpenHandler 无条件 deny——封面编辑器 iframe 里 target=_blank 的授权链接点击被吞,授权流程卡死;CLI 侧 URL 正常(1.4.21 实测)。修=新通道 `openfilm:native:open-external`(只放行 https/http,与 electron-shell-generation 外开白名单同口径)+studio-preload `openfilmNative.openExternal` 映射+封面设置弹窗材料到手即自动拉系统浏览器/anchor 点击走桥/重新打开+复制链接兜底钮;wiring spec 钉三点接线。
 - **铁律 4 清偿**:main-hook.ts 是基线锁定超配文件(只减不增),open-external 入列一度越线;按「迁移是唯一合法的降行数机会」把整个 `openfilm:native:*` 文件/外开/截帧面(reveal-path/pick-folder/open-external/capture 四通道,行为逐字节等价)迁出至 `src/tintin/native-shell-channels.ts`,main-hook 1065→1023,基线同步只减。`registerNativeShellChannels({ipcMain,shell,dialog,getStudioView})` 单调用接线,capture 的 studioView 改 getter 访问。
 - 配套:open-external-wiring.spec 断言随拆分改位(handler 住 native-shell-channels.ts,main-hook 只许接线不许内联)。
+
+## 16.40 官方 OpenFilm 家 prefs 注入撤销(2026-11-19)
+
+- **用户裁决**:TinTin 视频剪辑插件(集成)此前把官方 OpenFilm.exe 的项目目录(prefs.json `projectsFolder`)指向 TinTin 工作区(2026-10-18 裁决的播种功能),经审查定性为对官方程序配置的实质污染——官方程序默认项目位置被静默改写,recent 列表随之全是 TinTin 工作区项目。
+- **修=①撤销**:`library-sync.js` 新增 `restoreOpenfilmLibraryPrefs`(幂等外科手术:注入态=删 `projectsFolder`+`tintinProjectsFolder` 两键恢复 OpenFilm 默认(Windows `~/Videos/OpenFilm/Projects`);用户自选目录=只删标记键保留自选;无标记=不动),宿主 openfilm 插件启动时对官方家执行。**②不再写**:plugin.js 的双腿 library 循环拆除——官方家腿从 `syncOpenfilmLibrary` 改为恢复调用,隔离 Studio 家(`.dsh-tintin/openfilm-studio`)的播种保留(TinTin 自家 prefs,无污染)。
+- **保持不变**:providers.json 的 TinTin 服务播种(1113 一等服务设计,后续裁决另议);官方家 prefs 的用户自选目录受保护。
+- 配套:restore 三态测试(absent/restored/released),tintin-openfilm 36/36 绿。

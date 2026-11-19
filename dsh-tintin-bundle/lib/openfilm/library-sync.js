@@ -45,3 +45,42 @@ export function syncOpenfilmLibrary({ homeDir, libraryDir, prefsPath }) {
   renameSync(temp, path)
   return { status: 'installed', path, folder }
 }
+
+/**
+ * Undo this integration's own prefs injection in one prefs document
+ * (2026-11-19 用户裁决「prefs 注入撤销」: the standalone OpenFilm desktop's
+ * projects folder must not be pointed at the TinTin workspace behind its back —
+ * only the isolated Studio home keeps the seeding). Idempotent and surgical:
+ *  - no marker key            → untouched ('absent')
+ *  - projectsFolder == marker → both keys removed, OpenFilm's own default
+ *    (~/Videos/OpenFilm/Projects on Windows) applies again ('restored')
+ *  - projectsFolder != marker → the person chose another folder themselves:
+ *    keep their choice, drop only the marker ('released')
+ * @param {{ homeDir?: string, prefsPath?: string }} options
+ */
+export function restoreOpenfilmLibraryPrefs({ homeDir, prefsPath } = {}) {
+  const path = prefsPath || openfilmPrefsPath(homeDir)
+  let prefs = {}
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'))
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) prefs = parsed
+  } catch {
+    return { status: 'absent', path }
+  }
+  const ours = typeof prefs.tintinProjectsFolder === 'string' ? prefs.tintinProjectsFolder.trim() : ''
+  if (!ours) return { status: 'absent', path }
+  const chosen = typeof prefs.projectsFolder === 'string' ? prefs.projectsFolder.trim() : ''
+  const next = { ...prefs }
+  delete next.tintinProjectsFolder
+  if (chosen && resolve(chosen) === resolve(ours)) {
+    delete next.projectsFolder
+    const temp = `${path}.${process.pid}.tmp`
+    writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
+    renameSync(temp, path)
+    return { status: 'restored', path }
+  }
+  const temp = `${path}.${process.pid}.tmp`
+  writeFileSync(temp, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 })
+  renameSync(temp, path)
+  return { status: 'released', path }
+}

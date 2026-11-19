@@ -44,7 +44,7 @@ import { syncProvidersAt, syncProvidersFile } from './providers-seed.js'
 import { lastStudioProject, resolveOpenfilmRuntime, seedStudioRecents, startStudio, studioEnv, tintinStudioHome } from './studio-runtime.js'
 import { srtToVtt } from './srt-vtt.js'
 import { syncOpenfilmLibs } from './libs-sync.js'
-import { syncOpenfilmLibrary } from './library-sync.js'
+import { restoreOpenfilmLibraryPrefs, syncOpenfilmLibrary } from './library-sync.js'
 
 /** This package's root (lib/openfilm/ → ../../). */
 const bundleRoot = fileURLToPath(new URL('../../', import.meta.url))
@@ -78,10 +78,13 @@ export function createOpenfilmSync({ getServerUrl, logger = console, openaiCompa
     if (!process.env.OPENFILM_HOME) process.env.OPENFILM_HOME = studioHome
     if (!process.env.OPENFILM_STUDIO_PORT) process.env.OPENFILM_STUDIO_PORT = '4788'
     if (!process.env.OPENFILM_LIBRARY) process.env.OPENFILM_LIBRARY = libraryDir()
-    for (const [homeDir, prefsPath] of [[homedir(), undefined], [studioHome, join(studioHome, 'prefs.json')]]) {
-      const library = syncOpenfilmLibrary({ homeDir, libraryDir: libraryDir(), prefsPath })
-      if (library.status === 'installed') logger.info('tintin-bundle: openfilm projects library → %s', library.folder)
-    }
+    // 隔离 Studio 家照旧播种项目目录;官方 OpenFilm 家(2026-11-19 用户裁决
+    // 「prefs 注入撤销」)不再写入——只收回本集成自己注入过的标记键,把官方
+    // 程序的项目目录还给 OpenFilm 默认(或用户自选目录,见 restoreOpenfilmLibraryPrefs)。
+    const studioLibrary = syncOpenfilmLibrary({ homeDir: studioHome, libraryDir: libraryDir(), prefsPath: join(studioHome, 'prefs.json') })
+    if (studioLibrary.status === 'installed') logger.info('tintin-bundle: openfilm projects library → %s', studioLibrary.folder)
+    const restored = restoreOpenfilmLibraryPrefs({ homeDir: homedir() })
+    if (restored.status !== 'absent') logger.info('tintin-bundle: openfilm prefs injection reverted (%s)', restored.status)
     let serverUrl = ''
     try { serverUrl = getServerUrl() } catch { serverUrl = '' }
     if (!serverUrl) return
