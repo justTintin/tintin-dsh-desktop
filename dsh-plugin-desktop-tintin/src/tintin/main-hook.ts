@@ -995,6 +995,24 @@ const installedServerSkillVersion = (dir: string): string => {
     const result = window ? await dialog.showOpenDialog(window, dialogOptions) : await dialog.showOpenDialog(dialogOptions)
     return result.canceled ? null : result.filePaths[0] ?? null
   })
+  // 系统浏览器外开(2026-11-19 即梦设备码登录事故):Studio 视图 setWindowOpenHandler
+  // 无条件 deny——封面编辑器 iframe 里 target=_blank 的授权链接点击被吞,授权流程卡死。
+  // 编辑器 iframe(同源 loopback)经 studio-preload 直达此通道;只放行 https/http,
+  // 其余协议(file:/自定义)一律拒绝——与 electron-shell-generation 的外开白名单同口径。
+  ipcMain.handle('openfilm:native:open-external', (_event, payload: unknown) => {
+    const raw = String((payload as { url?: unknown } | null)?.url ?? '')
+    let target: URL
+    try {
+      target = new URL(raw)
+    } catch {
+      return { ok: false, error: 'invalid url' }
+    }
+    if (target.protocol !== 'https:' && target.protocol !== 'http:') return { ok: false, error: 'protocol not allowed' }
+    return shell.openExternal(target.href).then(() => ({ ok: true })).catch((cause: unknown) => ({
+      ok: false,
+      error: cause instanceof Error ? cause.message : String(cause),
+    }))
+  })
   ipcMain.handle('openfilm:native:capture', async (_event, payload: unknown) => {
     const rect = (payload ?? {}) as { x?: number; y?: number; width?: number; height?: number }
     if (studioView === null || studioView.webContents.isDestroyed()) return null

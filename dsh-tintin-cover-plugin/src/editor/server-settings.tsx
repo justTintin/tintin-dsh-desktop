@@ -25,6 +25,23 @@ type DreaminaStatus = {
 }
 type DreaminaLoginFlow = { verificationUri: string; userCode: string; checking: boolean; failed?: string }
 
+/** 系统浏览器外开(2026-11-19 即梦登录事故):桌面壳 Studio 视图的 window.open 恒 deny,
+ *  target=_blank 授权链接点击被吞——授权流程「无法打开」。编辑器 iframe(同源 loopback)
+ *  与 Studio 主框架同 webContents,preload 注入的 openfilmNative 两个 frame 都可见;
+ *  self ?? parent 双查取桥(panels.tsx 的 FolderPicker 同口径),非桌面环境返回 null
+ *  (此时 anchor 走浏览器默认跳转,行为不变)。 */
+type OpenfilmNativeWithExternal = { openExternal?: (url: string) => Promise<void> }
+function resolveOpenExternal(): ((url: string) => Promise<void>) | null {
+  const self = window as unknown as { openfilmNative?: OpenfilmNativeWithExternal }
+  const parent = window.parent !== window ? (window.parent as unknown as { openfilmNative?: OpenfilmNativeWithExternal }) : null
+  return self.openfilmNative?.openExternal ?? parent?.openfilmNative?.openExternal ?? null
+}
+/** 经系统浏览器桥打开;无桥(纯浏览器环境)不导航——iframe 顶层导航会顶掉编辑器,
+ *  此时由 anchor 默认跳转与「复制链接」兜底。 */
+function openVerificationUri(url: string): void {
+  resolveOpenExternal()?.(url).catch(() => {})
+}
+
 const INSTALL_HINT = 'curl -s https://jimeng.jianying.com/cli | bash'
 export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [url, setUrl] = React.useState('')
@@ -105,7 +122,9 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
   }, [])
 
   /** 即梦登录(2026-11-15):设备码两段式——login-headless 取授权材料 → 展示链接+UserCode
-   *  → login-check 服务端阻塞轮询(poll 90s)→ 成功刷新状态;失败可重试。 */
+   *  → login-check 服务端阻塞轮询(poll 90s)→ 成功刷新状态;失败可重试。
+   *  2026-11-19:材料到手即经 openfilmNative.openExternal 拉起系统浏览器(设备码流标准
+   *  UX,用户无需手动点链接);桌面壳里 window.open 恒 deny,故不走 target=_blank 通道。 */
   const dreaminaLogin = (): void => {
     setJmBusy('login')
     dreaminaCall({ action: 'login-headless' })
@@ -115,6 +134,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
         const deviceCode = String(j?.deviceCode ?? '')
         if (!j?.ok || !verificationUri || !deviceCode) throw new Error(String(j?.error ?? '未取得设备码材料'))
         setJmFlow({ verificationUri, userCode, checking: true })
+        openVerificationUri(verificationUri)
         return dreaminaCall({ action: 'login-check', deviceCode, poll: 90 }).then((done) => {
           if (!done?.ok) throw new Error('授权未完成——可重试')
           setJmFlow(null)
@@ -206,9 +226,20 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
               <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>正在检测即梦 CLI…</div>
             ) : jmFlow ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ fontSize: 12, color: 'var(--text)' }}>登录即梦：访问链接，输入授权码完成授权</div>
-                <a href={jmFlow.verificationUri} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--accent)', wordBreak: 'break-all' }}>{jmFlow.verificationUri}</a>
+                <div style={{ fontSize: 12, color: 'var(--text)' }}>登录即梦：已自动打开系统浏览器，在网页输入授权码完成授权</div>
+                <a href={jmFlow.verificationUri} target="_blank" rel="noreferrer"
+                  onClick={(e) => {
+                    // 桌面壳 window.open 恒 deny(Studio 视图),点击改走系统浏览器桥;
+                    // 无桥环境(纯浏览器)保留默认跳转。
+                    const open = resolveOpenExternal()
+                    if (open) { e.preventDefault(); open(jmFlow.verificationUri).catch(() => {}) }
+                  }}
+                  style={{ fontSize: 12, color: 'var(--accent)', wordBreak: 'break-all' }}>{jmFlow.verificationUri}</a>
                 <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 2, fontFamily: 'var(--font-mono)', color: 'var(--text)', background: 'var(--bg-field)', borderRadius: 8, padding: '6px 10px', textAlign: 'center' }}>{jmFlow.userCode}</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => openVerificationUri(jmFlow.verificationUri)} style={{ ...btn('ghost'), flex: 'none', padding: '5px 12px', fontSize: 12 }}>重新打开链接</button>
+                  <button onClick={() => navigator.clipboard?.writeText(jmFlow.verificationUri).catch(() => {})} style={{ ...btn('ghost'), flex: 'none', padding: '5px 12px', fontSize: 12 }}>复制链接</button>
+                </div>
                 <div style={{ fontSize: 12, color: jmFlow.failed ? 'var(--err)' : 'var(--text-faint)' }}>
                   {jmFlow.failed ? `✗ ${jmFlow.failed}` : jmFlow.checking ? '等待授权中…（完成网页授权后自动回到这里）' : ''}
                 </div>

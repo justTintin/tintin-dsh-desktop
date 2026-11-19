@@ -169,6 +169,13 @@ contextBridge.exposeInMainWorld('openfilmNative', {
   revealPath: (path: string): Promise<void> => nativeInvoke('openfilm:native:reveal-path', { path }).then(() => undefined),
   pickFolder: (options?: { title?: string; defaultPath?: string }): Promise<string | null> =>
     nativeInvoke('openfilm:native:pick-folder', options ?? {}).then((r) => (typeof r === 'string' ? r : null)),
+  /* 系统浏览器外开(2026-11-19 即梦登录事故):Studio 视图 window.open 恒 deny,
+      页面(含同源 iframe)须经此通道打开外部授权/文档链接;主进程只放行 https/http */
+  openExternal: (url: string): Promise<void> =>
+    nativeInvoke('openfilm:native:open-external', { url }).then((r) => {
+      const result = r as { ok?: unknown; error?: unknown } | null
+      if (result && result.ok !== true) throw new Error(String(result.error ?? 'openExternal failed'))
+    }),
   capture: (rect: { x: number; y: number; width: number; height: number }): Promise<string | null> =>
     nativeInvoke('openfilm:native:capture', rect).then((r) => (typeof r === 'string' ? r : null)),
   prefs: {
