@@ -13,10 +13,17 @@ const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const read = (rel: string): string => readFileSync(join(pkgRoot, rel), 'utf8')
 
 describe('openfilm:native:open-external wiring', () => {
-  it('main-hook registers the channel with the https/http-only guard', () => {
-    const source = read('src/tintin/main-hook.ts')
+  it('native-shell-channels registers the channel with the https/http-only guard', () => {
+    const source = read('src/tintin/native-shell-channels.ts')
     expect(source).toContain("ipcMain.handle('openfilm:native:open-external'")
     expect(source).toMatch(/open-external[\s\S]{0,800}protocol !== 'https:'[\s\S]{0,200}protocol !== 'http:'/)
+  })
+
+  it('main-hook wires the migrated channel block (iron rule 4: baseline files only shrink)', () => {
+    const source = read('src/tintin/main-hook.ts')
+    expect(source).toContain('registerNativeShellChannels')
+    // main-hook 不得再内联 openfilm:native handler——全部住 native-shell-channels.ts
+    expect(source).not.toContain("ipcMain.handle('openfilm:native:open-external'")
   })
 
   it('studio-preload exposes openExternal through that channel', () => {
