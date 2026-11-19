@@ -23,7 +23,7 @@ type DreaminaStatus = {
   userId?: string
   error?: string
 }
-type DreaminaLoginFlow = { verificationUri: string; userCode: string; checking: boolean; failed?: string }
+type DreaminaLoginFlow = { verificationUri: string; userCode: string; deviceCode: string; checking: boolean; failed?: string }
 
 /** 系统浏览器外开(2026-11-19 即梦登录事故):桌面壳 Studio 视图的 window.open 恒 deny,
  *  target=_blank 授权链接点击被吞——授权流程「无法打开」。编辑器 iframe(同源 loopback)
@@ -124,7 +124,11 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
   /** 即梦登录(2026-11-15):设备码两段式——login-headless 取授权材料 → 展示链接+UserCode
    *  → login-check 服务端阻塞轮询(poll 90s)→ 成功刷新状态;失败可重试。
    *  2026-11-19:材料到手即经 openfilmNative.openExternal 拉起系统浏览器(设备码流标准
-   *  UX,用户无需手动点链接);桌面壳里 window.open 恒 deny,故不走 target=_blank 通道。 */
+   *  UX,用户无需手动点链接);桌面壳里 window.open 恒 deny,故不走 target=_blank 通道。
+   *  2026-11-20 报障「网页授权成功但客户端报未完成」:用户开浏览器→输码→授权常超 90s
+   *  轮询窗,checklogin 超时退出后 UI 把 device_code 丢了——device_code 在有效期内仍可
+   *  单次 checklogin 补收。修=失败保留材料+「我已授权,完成登录」单查补收(poll=10),
+   *  不必整套重走(重走=新 device_code,网页还要重新授权)。 */
   const dreaminaLogin = (): void => {
     setJmBusy('login')
     dreaminaCall({ action: 'login-headless' })
@@ -133,10 +137,10 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
         const userCode = String(j?.userCode ?? '')
         const deviceCode = String(j?.deviceCode ?? '')
         if (!j?.ok || !verificationUri || !deviceCode) throw new Error(String(j?.error ?? '未取得设备码材料'))
-        setJmFlow({ verificationUri, userCode, checking: true })
+        setJmFlow({ verificationUri, userCode, deviceCode, checking: true })
         openVerificationUri(verificationUri)
         return dreaminaCall({ action: 'login-check', deviceCode, poll: 90 }).then((done) => {
-          if (!done?.ok) throw new Error('授权未完成——可重试')
+          if (!done?.ok) throw new Error('90 秒内未确认授权——若网页已显示「授权成功」，点下方「我已授权，完成登录」补收')
           setJmFlow(null)
           return loadDreamina()
         })
@@ -145,6 +149,21 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
         setJmFlow((f) => (f ? { ...f, checking: false, failed: e instanceof Error ? e.message : String(e) } : null))
       })
       .finally(() => setJmBusy(null))
+  }
+  /** 超窗补收(2026-11-20):用原 device_code 单次 checklogin(poll=10),token 仍可收下。 */
+  const dreaminaConfirmAuthorized = (): void => {
+    const deviceCode = jmFlow?.deviceCode
+    if (!deviceCode) return
+    setJmFlow((f) => (f ? { ...f, checking: true, failed: undefined } : f))
+    dreaminaCall({ action: 'login-check', deviceCode, poll: 10 })
+      .then((done) => {
+        if (!done?.ok) throw new Error('仍未查到授权结果——device_code 可能已过期，请重新登录')
+        setJmFlow(null)
+        return loadDreamina()
+      })
+      .catch((e) => {
+        setJmFlow((f) => (f ? { ...f, checking: false, failed: e instanceof Error ? e.message : String(e) } : null))
+      })
   }
   const dreaminaLogout = (): void => {
     setJmBusy('logout')
@@ -243,7 +262,12 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
                 <div style={{ fontSize: 12, color: jmFlow.failed ? 'var(--err)' : 'var(--text-faint)' }}>
                   {jmFlow.failed ? `✗ ${jmFlow.failed}` : jmFlow.checking ? '等待授权中…（完成网页授权后自动回到这里）' : ''}
                 </div>
-                {jmFlow.failed ? <button onClick={dreaminaLogin} style={{ ...btn('ghost'), flex: 'none' }}>重试登录</button> : null}
+                {jmFlow.failed ? (
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={dreaminaConfirmAuthorized} disabled={jmFlow.checking} style={{ ...btn('primary'), flex: 'none' }}>{jmFlow.checking ? '收尾中…' : '我已授权，完成登录'}</button>
+                    <button onClick={dreaminaLogin} disabled={jmFlow.checking} style={{ ...btn('ghost'), flex: 'none' }}>重新登录</button>
+                  </div>
+                ) : null}
               </div>
             ) : jm?.available === false ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
