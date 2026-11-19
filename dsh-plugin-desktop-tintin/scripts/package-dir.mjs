@@ -157,27 +157,36 @@ export function packageDirectory(options = {}) {
   const nodeExecutable = options.nodeExecutable ?? process.execPath
   const electronBuilderCli = options.electronBuilderCli ?? builderCli
   const configuredElectronDist = options.electronDistPath ?? electronDist
-  const result = run(
-    nodeExecutable,
-    [
-      electronBuilderCli,
-      ...UNSIGNED_DIRECTORY_BUILD_ARGS,
-      ...versionStampArgs(options.env ?? process.env),
-      `--config.electronDist=${configuredElectronDist}`,
-      // 封面载荷完成性(afterPack,2026-11-13 用户裁决):装配完成、产物落地前补拷
-      // 插件生产 node_modules 整树并双校验——与 NSIS 安装包同钩子,一处门禁全产物生效。
-      `--config.afterPack=${join(packageRoot, 'scripts', 'after-pack.cjs')}`,
-    ],
-    {
-      cwd: options.cwd ?? packageRoot,
-      env: unsignedDirectoryBuildEnvironment(options.env ?? process.env),
-      stdio: 'inherit',
-    },
-  )
+  const argv = () => [
+    electronBuilderCli,
+    ...UNSIGNED_DIRECTORY_BUILD_ARGS,
+    ...versionStampArgs(options.env ?? process.env),
+    `--config.electronDist=${configuredElectronDist}`,
+    // 封面载荷完成性(afterPack,2026-11-13 用户裁决):装配完成、产物落地前补拷
+    // 插件生产 node_modules 整树并双校验——与 NSIS 安装包同钩子,一处门禁全产物生效。
+    `--config.afterPack=${join(packageRoot, 'scripts', 'after-pack.cjs')}`,
+  ]
+  const env = () => ({
+    cwd: options.cwd ?? packageRoot,
+    env: unsignedDirectoryBuildEnvironment(options.env ?? process.env),
+    stdio: 'inherit',
+  })
+  const result = run(nodeExecutable, argv(), env())
 
   if (result.error !== undefined) throw result.error
   if (result.status !== 0) {
-    throw new Error(`electron-builder --dir exited with ${String(result.status)}`)
+    // Windows 杀软对刚落地的 extraResources 文件(如 download-binaries.ps1)即时扫描
+    // 会短暂持锁,electron-builder 的 copyfile 无重试——2026-11-19 12:55 轮实证
+    // (preclean 后仍 EBUSY,目标=本轮新建文件,非旧产物残留)。瞬态锁秒级即释,
+    // --dir 幂等可整体重跑:3s 后重试一次,第二次仍败=真错误原样上抛。
+    // spawn 层失败(error,ENOENT 类)非瞬态锁,不重试直接上抛。
+    process.stderr.write('[dir-retry] electron-builder --dir 失败(疑瞬态文件锁/杀软扫描),3s 后重试一次\n')
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3000)
+    const retry = run(nodeExecutable, argv(), env())
+    if (retry.error !== undefined) throw retry.error
+    if (retry.status !== 0) {
+      throw new Error(`electron-builder --dir exited with ${String(retry.status)} (重试后仍失败)`)
+    }
   }
 }
 

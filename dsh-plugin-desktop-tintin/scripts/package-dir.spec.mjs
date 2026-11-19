@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import {
+  packageDirectory,
   removeStaleUnpackedOutput,
   sweepUnpackedSelfHealHolders,
 } from './package-dir.mjs'
@@ -48,6 +49,31 @@ test('preclean is wired at the CLI entry only, never inside packageDirectory', (
   // 函数体内禁止出现预清理——单测以注入 run 直调,体内清场会删真实 dist 产物
   const body = source.slice(source.indexOf('export function packageDirectory'), source.indexOf('const invokedPath'))
   assert.ok(!body.includes('removeStaleUnpackedOutput'), 'packageDirectory 本体不得调用预清理')
+})
+
+test('transient nonzero exit retries once and succeeds (antivirus scan lock)', () => {
+  let calls = 0
+  const flaky = () => {
+    calls++
+    return calls === 1 ? { status: 1 } : { status: 0 }
+  }
+  packageDirectory({ run: flaky })
+  assert.equal(calls, 2, '首败应恰好重试一次')
+})
+
+test('persistent nonzero exit surfaces after the single retry', () => {
+  const alwaysFail = () => ({ status: 7 })
+  assert.throws(() => packageDirectory({ run: alwaysFail }), /exited with 7 \(重试后仍失败\)/)
+})
+
+test('spawn-level errors are not retried (ENOENT-class, not a transient lock)', () => {
+  let calls = 0
+  const spawnError = () => {
+    calls++
+    return { error: new Error('cannot spawn') }
+  }
+  assert.throws(() => packageDirectory({ run: spawnError }), /cannot spawn/)
+  assert.equal(calls, 1, 'spawn 层失败不得重试')
 })
 
 test('removeStaleUnpackedOutput fails fast with guidance when a holder locks the tree', { timeout: 30000, skip: process.platform !== 'win32' }, () => {
