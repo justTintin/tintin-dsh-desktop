@@ -510,18 +510,6 @@
     "minCount": 2
   },
   {
-    "comment": "replay: the 0.2.7 skills dialog stays the one wired in (aria-label is TinTin-only)",
-    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/SkillsDialog.tsx",
-    "pattern": "'技能库'",
-    "minCount": 1
-  },
-  {
-    "comment": "replay: the 0.2.7 skills library component is restored wholesale",
-    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/SkillsLibrary.tsx",
-    "pattern": "SkillsLibrary",
-    "minCount": 1
-  },
-  {
     "comment": "replay: custom-service notes render as the structured ServiceNote list",
     "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/settings/CustomServices.tsx",
     "pattern": "ServiceNote",
@@ -564,34 +552,10 @@
     "minCount": 2
   },
   {
-    "comment": "replay: the show-skills host command exists",
-    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/lib/host.ts",
-    "pattern": "'show-skills'",
-    "minCount": 1
-  },
-  {
-    "comment": "replay: ProjectView wires the skills dialog through the host command",
-    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/ProjectView.tsx",
-    "pattern": "command.type === 'show-skills'",
-    "minCount": 1
-  },
-  {
     "comment": "replay: the online-library drawer seam (window.tintinOnlineLibrary page bridge)",
     "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/LibraryDrawer.tsx",
     "pattern": "tintinOnlineLibrary",
     "minCount": 4
-  },
-  {
-    "comment": "replay: SkillsPane server group keeps its hook and lines",
-    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/SkillsPane.tsx",
-    "pattern": "useServerSkills",
-    "minCount": 2
-  },
-  {
-    "comment": "replay: SkillsPane keeps Server/Trash2 icons the 0.3.1 import dropped (CDP-caught blank pane)",
-    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/SkillsPane.tsx",
-    "pattern": "RefreshCw, Server, Star, Trash2",
-    "minCount": 1
   },
   {
     "comment": "replay: the chat composer keeps product @ references on send",
@@ -858,18 +822,6 @@
     "minCount": 2
   },
   {
-    "comment": "replay: SkillsPane server lines carry the installed-version ledger and update flag (2026-11-12 aligned with the cover skill modal)",
-    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/SkillsPane.tsx",
-    "pattern": "installedVersion",
-    "minCount": 2
-  },
-  {
-    "comment": "replay: SkillsLibrary server views carry the installed-version ledger and update flag (2026-11-12 aligned with the cover skill modal)",
-    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/SkillsLibrary.tsx",
-    "pattern": "installedVersion",
-    "minCount": 2
-  },
-  {
     "comment": "replay: studio i18n zh-CN keeps the server update keys",
     "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/zh-CN.ts",
     "pattern": "serverUpdate",
@@ -898,5 +850,41 @@
     "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/i18n/ko.ts",
     "pattern": "serverUpdate",
     "minCount": 1
+  },
+  {
+    "comment": "0.4 服务端技能组迁移: hook 存在（数据=openfilmNative.skills.list 原桥）",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/TinTinServerSkills.tsx",
+    "pattern": "useServerSkills",
+    "minCount": 1
+  },
+  {
+    "comment": "0.4 Community(Mine) 挂载服务端技能组（React#300 教训:hook 挂组件顶部）",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/PluginsPane.tsx",
+    "pattern": "useServerSkills(true)",
+    "minCount": 1
+  },
+  {
+    "comment": "在线素材嵌入缝 0.4 重放(window.tintinOnlineLibrary 页级桥,2026-11-19 用户裁决保留)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/LibraryDrawer.tsx",
+    "pattern": "tintinOnlineLibrary",
+    "minCount": 4
+  },
+  {
+    "comment": "0.4 技能入口=show-examples{kind:skill} 开 Community(tintin-products 注入按钮消费)",
+    "path": "dsh-tintin-bundle/openfilm-shell/bridge.ts",
+    "pattern": "requestShowSkills",
+    "minCount": 1
+  },
+  {
+    "comment": "0.4 壳桥重做:libraryDock/beside/workspaceBounds 布局面(库面板盖聊天列=chat)",
+    "path": "dsh-tintin-bundle/openfilm-shell/bridge.ts",
+    "pattern": "libraryDock",
+    "minCount": 1
+  },
+  {
+    "comment": "0.4 connectors 空实现(集成智能体走 DSH ACP,连接器面板空态不炸)",
+    "path": "dsh-plugin-desktop-tintin/src/tintin/studio-preload.ts",
+    "pattern": "connectors",
+    "minCount": 2
   }
 ]

@@ -6,8 +6,7 @@ credit anyone.
 - The transitions, effects, text, stickers that move, filters and templates are made by the OpenFilm contributors:
   the pages written by hand, the pictures drawn by OpenFilm's renderer (`scripts/library-previews.mjs`) over stills
   made for OpenFilm.
-- The sounds and music (`audio/`) were made by OpenFilm with ElevenLabs' sound effects and music models on a paid plan,
-  which gives OpenFilm their rights; a few sounds are made by code (`scripts/library-sounds.mjs`).
+- The sounds and music (`audio/`) are OpenFilm's.
 
 These are dedicated to the public domain under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
 

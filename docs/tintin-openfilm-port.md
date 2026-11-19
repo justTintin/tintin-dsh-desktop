@@ -748,3 +748,16 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - **修=①撤销**:`library-sync.js` 新增 `restoreOpenfilmLibraryPrefs`(幂等外科手术:注入态=删 `projectsFolder`+`tintinProjectsFolder` 两键恢复 OpenFilm 默认(Windows `~/Videos/OpenFilm/Projects`);用户自选目录=只删标记键保留自选;无标记=不动),宿主 openfilm 插件启动时对官方家执行。**②不再写**:plugin.js 的双腿 library 循环拆除——官方家腿从 `syncOpenfilmLibrary` 改为恢复调用,隔离 Studio 家(`.dsh-tintin/openfilm-studio`)的播种保留(TinTin 自家 prefs,无污染)。
 - **保持不变**:providers.json 的 TinTin 服务播种(1113 一等服务设计,后续裁决另议);官方家 prefs 的用户自选目录受保护。
 - 配套:restore 三态测试(absent/restored/released),tintin-openfilm 36/36 绿。
+
+## 16.41 OpenFilm 0.3.2→0.4.0 升级:技能迁社区+壳桥重做(2026-11-19 用户裁决)
+
+- **裁决**:上游 D:\Project\openfilm 已更 0.4.0,集成版本随升;技能管理转到 0.4 新社区界面(Community);保留=服务端技能/会话产品注入/在线素材/默认智能体(TinTin智能体)。
+- **升级流**:pin ×2(shell COMMIT→715c3a6=Version packages 0.4.0 /runtime OPENFILM_VERSION→0.4.0)+fetch:openfilm(runtime npm 0.4.0,tintin provider 2b 步自动重挂)+fetch-openfilm-shell(清树重 vendor,新增 shared 树)+补丁重放=直恢复 6(BrandLogo×2/CustomServices/prompt-text/PromptPill/index.ts)+git merge-file 三方合并 18(0 冲突 16+手解 2:ProjectView 4 块/LibraryDrawer 3 块,全取 theirs——0.4 把弹层 portal 化重构,旧 0.2.7 弹窗分支退役)。
+- **技能→社区界面(0.4 重构核心)**:上游删 SkillsPane/SkillsLibrary/SkillsDialog,技能进 Community(PluginsPane/PluginsWindow/SkillPage)。TinTin 服务端技能组迁移=新文件 `TinTinServerSkills.tsx`(useServerSkills hook+ServerLine 1:1 移植:装/删/「有新版」徽标/行内详情,数据=openfilmNative.skills.list 原桥,openfilm:skills-changed 监听刷新)+PluginsPane Mine 页挂独立 Shelf(hook 挂组件顶部——React#300 教训)+lucide Server 图标导入。聊天注入按钮(tintin-products)经 `requestShowSkills()` 改发 `show-examples{kind:'skill'}` 开 Community(与官方 openfilm:// 深链同命令面);0.2.7 弹窗接线(show-skills 命令/ProjectView 分支)退役。
+- **壳桥 bridge.ts 0.4 重做**(官方 bridge 为基底):布局新面=workspaceBounds/setBounds/setPlacement/side+libraryDock('chat'=库面板盖聊天列,2026-11-07 默认展开裁决延续)/assets.beside/overlay 信号;新命令=node/show-file/voice→settings;unrefer/onUnrefer/onOpenLink(takeLink 可选守卫);TinTin 保留=name TinTin/update 恒 off/tabs 桩/影片目录跟随(tintinFilmDir 按路径匹配,嵌入页 /open 无 /projects 路由,place() 路由守卫拆除)/products 桥(search limit 200+texts 直取详情)/skills 包装(菜单只列已装服务端技能)。
+- **studio-preload**:connectors 空实现(0.4 新面:集成智能体走 DSH ACP 不经连接器,空列表+如实报错,连接器面板空态不炸)。
+- **在线素材缝 0.4 重放**(用户裁决「素材里在线素材要保留」):LibraryDrawer 三落点——state/effect(cat 声明后,TDZ 教训)+媒体轨道收藏行后「在线素材」行(RAIL_BOX 按钮形态)+内容区 cat==='media' 前置挂载容器(0.3 同款语义:点其它 rail 行不自动收回,类别切换卸载)。
+- **agent-definitions**:tintin-agent(TinTin智能体)行重放回 0.4 上游版(两副本:openfilm-shell/src+tintin-resources/src 同步);0.4 上游未动该文件其余行=直恢复。
+- **锚表 150→148**:删 0.4 退役项(SkillsDialog/SkillsLibrary/SkillsPane 文件锚+show-skills 命令接线×2),增 0.4 新锚 ×6(TinTinServerSkills hook/PluginsPane 挂载/在线素材缝 0.4/bridge requestShowSkills+libraryDock/connectors 空实现)。
+- **壳依赖**:package.json 增 26(0.4 新依赖:@tiptap 全家 3.32.0/@mediapipe tasks-vision/onnxruntime-web/tailwindcss 4/vite 7 等,对齐官方 packages/openfilm 声明)。
+- 生效需重打包;实机 CDP 验证待做。

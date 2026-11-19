@@ -29,12 +29,15 @@ import { readableLink, referenceSource } from '../../src/media-links.mjs';
 import { clipKind } from '../../src/film-doc.mjs';
 import { readPrefs } from './prefs.mjs';
 import { readyProxy, undecodable } from './proxies.mjs';
-import { madeCopy } from '../../src/seekable.mjs';
+import { gradedCopy, gradeSoon, madeCopy } from '../../src/seekable.mjs';
 import { isPreviewKey, previewDir } from './preview-cache.mjs';
-import { soundOf } from './derived.mjs';
+import { probe, soundOf } from './derived.mjs';
 import { compoundOuter } from './parts.mjs';
 
 const BRIDGE = readFileSync(new URL('./bridge.js', import.meta.url), 'utf8');
+
+/** The header a file's sound (`?film-sound`) tells its length in (s): the editor's mixer decodes only short ones. */
+export const SOUND_LENGTH = 'x-film-sound-length';
 
 /* sounds a browser cannot play (AIFF, which macOS's `say` writes): the preview gets a WAV of each, made once */
 const UNPLAYABLE = /\.(aif|aiff|aifc)$/i;
@@ -137,13 +140,18 @@ export async function startPages({ port, editorOrigin, secret, projects }) {
     headers: policy(),
     /* heavy footage is played from its proxy once it is made, while proxies are on, and footage the editor's browser
        does not decode whether they are or not (proxies.mjs); else from a copy made for footage a render's browser does
-       not decode, or that seeks slowly (src/seekable.mjs), when there is one */
-    swap: (file) => {
+       not decode, or that seeks slowly (src/seekable.mjs), when there is one. A video graded by LUTs is played from
+       its graded copy, the one an export draws, asked for by its key (`?of-grade`), proxies on or off */
+    swap: (file, query) => {
       if (clipKind(file) !== 'video') return null;
+      const graded = gradedCopy(root, query?.get('of-grade') ?? '');
+      if (graded) return graded;
       const { proxies } = readPrefs();
       const rel = relative(root, file).split(sep).join('/');
       return (proxies.on || undecodable(root, rel) ? readyProxy(root, rel, proxies.height) : null) ?? madeCopy(referenceSource(root, file) ?? file, root);
     },
+    /* a video graded by LUTs: its graded copy begun in the project's cache, the preview playing it as it is meanwhile */
+    grade: (/** @type {string} */ file, /** @type {string[]} */ luts, /** @type {[number, number] | null} */ time) => gradeSoon(file, luts, root, time),
   });
 
   /** a project's playable copies (UNPLAYABLE), served as its files are */
@@ -195,7 +203,11 @@ export async function startPages({ port, editorOrigin, secret, projects }) {
       const file = await soundOf(entry.root, plain.replace(/^\/+/, '')).catch((/** @type {any} */ e) => (e?.status === 404 ? undefined : null));
       if (file === undefined) { res.writeHead(404, headers).end('not found'); return; }
       if (!file) { res.writeHead(204, headers).end(); return; }
-      if (!folderFiles(dirname(file), { headers: policy() })(req, res, `/${basename(file)}`, url.searchParams)) res.writeHead(403, headers).end();
+      /* its length (s), known from the file's probe: a long one is played as it streams, never decoded whole */
+      const length = (await probe(entry.root, plain.replace(/^\/+/, '')).catch(() => null))?.duration;
+      /** @type {Record<string, string>} */
+      const told = Number.isFinite(length) ? { [SOUND_LENGTH]: String(length), 'access-control-expose-headers': SOUND_LENGTH } : {};
+      if (!folderFiles(dirname(file), { headers: { ...policy(), ...told } })(req, res, `/${basename(file)}`, url.searchParams)) res.writeHead(403, headers).end();
       return;
     }
     /* a stretch of the film rendered for the preview to play in its place (preview-cache.mjs): its cache, not the

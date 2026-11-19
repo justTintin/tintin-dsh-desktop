@@ -8,6 +8,7 @@ import { chromium } from 'playwright-core';
 import { filmHtml } from '../src/film-doc.mjs';
 import { openProject } from './server/projects.mjs';
 import { startStudio } from './server/server.mjs';
+import { showWorkbench } from './show-workbench.mjs';
 
 test('a canvas video uploads in place and keeps its frame while playing, renaming, and dragging', {
   timeout: 60_000, skip: spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status !== 0,
@@ -37,13 +38,14 @@ test('a canvas video uploads in place and keeps its frame while playing, renamin
     await page.route('**/files?path=*clip.webm', async (route) => { await hold; await route.continue(); });
     const openCanvas = async () => {
       await page.goto(url);
-      await page.locator('[data-work-mode="edit"]').click();
+      await page.locator('[data-work-mode="edit"]').waitFor();
+      await showWorkbench(page, 'canvas');
       await page.locator('[data-studio-canvas][data-canvas-ready="1"]').waitFor();
     };
     await openCanvas();
     await page.locator('.react-flow__pane').dblclick({ position: { x: 600, y: 360 } });
     const chooser = page.waitForEvent('filechooser');
-    await page.getByRole('button', { name: 'Upload', exact: true }).click();
+    await page.locator('[data-canvas-add-menu]').getByRole('button', { name: 'Upload', exact: true }).click();
     await (await chooser).setFiles(input);
     const pending = page.locator('.react-flow__node').filter({ hasText: 'Uploading…' });
     await pending.waitFor();
@@ -62,7 +64,8 @@ test('a canvas video uploads in place and keeps its frame while playing, renamin
       return [...context.getImageData(10, 10, 1, 1).data];
     }, png.toString('base64'));
     const checkFirstFrame = async () => {
-      const deadline = Date.now() + 1000;
+      /* the video is ready before its picture reaches the screen: on a slow machine (Windows CI) that takes seconds */
+      const deadline = Date.now() + 5000;
       let pixel;
       do {
         pixel = await sample(await node.screenshot());
@@ -214,7 +217,7 @@ test('a canvas video uploads in place and keeps its frame while playing, renamin
     near(origin, cardEdge);
     near(tip, drop);
     assert.deepEqual(await stroke(menuWire), activeStroke);
-    await page.getByRole('button', { name: 'Text', exact: true }).click();
+    await page.locator('[data-canvas-add-menu]').getByRole('button', { name: 'Text', exact: true }).click();
     await menuWire.waitFor({ state: 'detached' });
     const made = page.locator('.react-flow__node-note').first();
     await made.waitFor();
@@ -241,7 +244,7 @@ test('a canvas video uploads in place and keeps its frame while playing, renamin
     await page.mouse.up();
     await menuWire.waitFor({ state: 'attached' });
     near((await endpoints(menuWire))[1], leftDrop);
-    await page.getByRole('button', { name: 'Text', exact: true }).click();
+    await page.locator('[data-canvas-add-menu]').getByRole('button', { name: 'Text', exact: true }).click();
     const reference = page.locator('.react-flow__node-note').nth(1);
     await reference.waitFor();
     const referenceBox = await reference.boundingBox();
@@ -305,7 +308,7 @@ test('a canvas video uploads in place and keeps its frame while playing, renamin
     await writeFile(canvasFile, JSON.stringify(doc));
     await page.reload();
     await page.locator('[data-work-mode]').first().waitFor();
-    if (await page.locator('[data-work-mode="edit"]').count()) await page.locator('[data-work-mode="edit"]').click();
+    await showWorkbench(page, 'canvas');
     await page.locator('[data-studio-canvas][data-canvas-ready="1"]').waitFor();
     await node.getByText('Final shot', { exact: true }).waitFor();
     const legacyBox = await node.boundingBox();
@@ -340,7 +343,7 @@ test('a canvas video uploads in place and keeps its frame while playing, renamin
     await highlighted.waitFor();
     await highlighted.waitFor({ state: 'hidden' });
     assert.equal(await page.locator('[data-work-mode="canvas"]').count(), 1);
-    await library.getByRole('button', { name: 'Favorites', exact: true }).click();
+    await library.getByRole('button', { name: 'Mine', exact: true }).click();
     await library.getByRole('button', { name: 'Effects', exact: true }).click();
     await reveal.click();
     await highlighted.waitFor();

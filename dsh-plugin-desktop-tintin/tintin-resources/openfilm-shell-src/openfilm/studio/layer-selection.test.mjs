@@ -58,8 +58,13 @@ async function withCard(name, run, { chat = false, again = false, mixed = false 
     const scale = box.width / 1080;
     /** A point of the film (its px) on the screen. */
     const on = (x, y) => ({ x: box.x + x * scale, y: box.y + y * scale });
-    const until = async (check, what) => {
-      for (let i = 0; i < 60; i += 1) { if (await check()) return; await page.waitForTimeout(100); }
+    /* waits by the clock, not by tries: a slow machine draws a new page later */
+    const until = async (check, what, wait = 20_000) => {
+      for (const end = Date.now() + wait; ;) {
+        if (await check()) return;
+        if (Date.now() >= end) break;
+        await page.waitForTimeout(100);
+      }
       assert.fail(`${what}; selection: ${JSON.stringify(await selection())}`);
     };
     /** What is selected on the picture: how many layers together (null: not several), the Layers rows selected, and
@@ -164,7 +169,8 @@ test('Shift-click on the picture, ⌘ / Ctrl-click in Layers, adds a layer to wh
     await page.mouse.move(title.x, title.y);
     await page.mouse.down();
     await page.mouse.up();
-    await page.waitForTimeout(120);
+    /* the first click's selection is in before the second one comes: on a slow machine 120 ms was not always enough */
+    await is(['Parcel'], 'a Shift-click on the title adds it');
     await page.mouse.down({ clickCount: 2 });
     await page.mouse.up({ clickCount: 2 });
     await page.keyboard.up('Shift');

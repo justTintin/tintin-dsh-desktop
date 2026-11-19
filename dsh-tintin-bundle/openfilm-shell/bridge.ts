@@ -10,9 +10,12 @@
  * (TinTin 的 studio-preload.ts 实现;官方为 src/preload.cjs)。Imported before Studio's modules and the chat's:
  * Studio reads its host as it loads.
  *
- * TinTin 适配(2026-10-23 移植,原文件 apps/desktop/shell/bridge.ts):
- *   1. name 'TinTin';2. update 面恒 off(更新走 TinTin 桌面自身通道);3. tabs 为单视图壳的桩;
- *   4. capture/审批由主进程实现(审批=官方 approve 口径自动放行,阶段 1 已定)。
+ * TinTin 适配(2026-11-19 重做于 0.4.0 官方壳桥基底;原文件 apps/desktop/shell/bridge.ts):
+ *   1. name 'TinTin';2. update 面走官方形态(更新由 TinTin 桌面自身通道承担, native.updateState 恒 off);
+ *   3. tabs 为单视图壳的桩;4. 项目跟随=影片目录(tintinFilmDir)按路径匹配, 嵌入页在 /open 无 /projects
+ *   路由 —— place() 的路由守卫与 projectChanged 的 id 守卫拆除, 聊天列恒显;5. 库面板盖聊天列
+ *   (libraryDock 'chat') 且默认展开(2026-11-07 用户裁决延续);6. products/skills 过滤两桥移植;
+ *   7. 技能入口改发 show-examples{kind:'skill'} 开 0.4 Community(旧 0.2.7 弹窗退役)。
  */
 import { flushSync } from 'react-dom';
 import { productContextOf } from './tintin-products';
@@ -30,6 +33,8 @@ interface Native {
   pickFolder(options?: { title?: string; button?: string; at?: string }): Promise<string | null>;
   capture(rect: { x: number; y: number; width: number; height: number }): Promise<string | null>;
   agents: NonNullable<StudioHost['agents']>;
+  /* the connectors (src/connectors.mjs) — TinTin: Studio 设置的连接器面, 空实现(集成智能体不走它) */
+  connectors: NonNullable<StudioHost['connectors']>;
   /* the window's tabs (TinTin: 单视图壳的桩) */
   tabs: NonNullable<StudioHost['tabs']>;
   localAgents: Record<string, unknown>;
@@ -51,12 +56,13 @@ interface Native {
   restartToUpdate(): Promise<{ ok: boolean; error?: string }>;
   updateState(): Promise<unknown>;
   checkForUpdate(): Promise<unknown>;
+  /* the app's openfilm:// deep link (official); TinTin has no such links */
+  takeLink?(): Promise<{ uid?: string } | null>;
+  onOpenLink?(listener: Listener<{ uid?: string }>): Stop;
 }
 
 const native = (window as unknown as { openfilmNative: Native }).openfilmNative;
 const hello = native.hello();
-
-/* 诊断改由影片视图底部的日志条承载(client-ui 轮询 has-shell 诊断), 页内不再挂角标。 */
 
 /** A value that tells its listeners when it changes. */
 function signal<T>(value: T) {
@@ -69,33 +75,32 @@ function signal<T>(value: T) {
 }
 const events = <T,>() => signal<T>(undefined as T);
 
-/* ── the chat's column: open or not, how wide, and the assets drawer over it ── */
+/* ── the chat's column, left of Studio: open or not, how wide, and the assets drawer over it ── */
 const TOP_BAR = 32;
 const column = document.getElementById('of-chat')!;
-const layout = { open: true, width: 420, min: 340, studioMin: 640 };
+const layout = { open: true, width: 420, min: 340, studioMin: 640, side: 'left' as 'left' | 'right', libraryDock: 'chat' as 'left' | 'right' | 'bottom' | 'chat' };
 /** the assets open in the column (Studio draws them, above the composer); `bottom`: the composer's height, all the
-    chat shows then. TinTin(2026-11-07 用户裁决): 默认展开 —— 库面板(八项工具栏)常驻聊天列,
-    素材按钮可收起回完整聊天。 */
-const assets = { open: true, bottom: 120 };
+    chat shows then. TinTin(2026-11-07 用户裁决): 默认展开 —— 库面板常驻聊天列, 素材按钮可收起回完整聊天。 */
+const assets = { open: true, bottom: 120, beside: 120 };
 const assetsSignal = signal(false);
+const assetsOverlaySignal = signal(false);
 const chatOpenSignal = signal(true);
 
 /** The column's width as the window allows it: Studio keeps its least width, the chat its own while it fits. */
-const shownWidth = () => (layout.open ? Math.max(Math.min(layout.width, innerWidth - layout.studioMin), Math.min(layout.min, innerWidth)) : 0);
-  /* TinTin(2026-11-07 用户裁决方案 1, 推翻 10-24 的不声明缝): 向 Studio 声明 assets 缝,
-     对齐官方 0.3 形态 —— Studio 不再画自己的左侧媒体面板, 库面板(素材/技能/模板/字幕/配音/
-     音效/音乐/文本)经 PanelSeam 盖在聊天列上。TinTin 在线素材抽屉改由注入按钮直开
-     (requestLibraryDrawer), 不再占用聊天的素材按钮。 */
-  const panelState = () => ({ open: layout.open, width: shownWidth(), assets: { open: assets.open && layout.open, bottom: assets.bottom } });
+let workspaceBounds: { left: number; top: number; width: number; height: number } | null = null;
+const shownWidth = () => workspaceBounds && layout.open ? workspaceBounds.width : (layout.open ? Math.max(Math.min(layout.width, innerWidth - layout.studioMin), Math.min(layout.min, innerWidth)) : 0);
+const panelState = () => ({ open: layout.open, width: shownWidth(), preferredWidth: layout.width, assets: { open: assets.open && (layout.libraryDock !== 'chat' || layout.open), bottom: assets.bottom, beside: assets.beside } });
 const panelListeners = new Set<Listener<ReturnType<typeof panelState>>>();
 
-/** 聊天列必现(2026-10-23 用户明确: 会话框不能是隐藏态)—— 只有手动的收起开关能藏它。 */
+/** TinTin: 嵌入页在 /open, 不走 /projects 路由 —— 聊天列恒显(0.3 形态; 官方的路由判定拆除)。
+    The column never moves or resizes for the assets: the chat shows only its composer then (libraryDock 'chat'). */
+const overlay = () => assets.open && layout.open && layout.libraryDock === 'chat';
 function place() {
   column.hidden = !layout.open;
   column.style.width = `${shownWidth()}px`;
-  column.style.top = `${TOP_BAR}px`;
-  /* the column never moves or resizes for the assets: the chat shows only its composer then (官方 0.3 同款) */
-  column.toggleAttribute('data-assets-open', assets.open && layout.open);
+  column.style.top = `${workspaceBounds?.top ?? TOP_BAR}px`;
+  column.toggleAttribute('data-assets-open', overlay());
+  assetsOverlaySignal.set(overlay());
   const state = panelState();
   for (const listener of panelListeners) listener(state);
 }
@@ -105,7 +110,7 @@ function setChatOpen(open: boolean) {
   if (open === layout.open) return;
   layout.open = open;
   flushSync(() => {
-    if (!open && assets.open) { assets.open = false; assetsSignal.set(false); }
+    if (!open && assets.open && layout.libraryDock === 'chat') { assets.open = false; assetsSignal.set(false); }
     place();
     chatOpenSignal.set(open);
   });
@@ -118,16 +123,16 @@ function setChatWidth(width: number, done = false) {
   if (done) native.saveLayout({ chatOpen: layout.open, chatWidth: layout.width });
 }
 function setAssetsOpen(open: boolean) {
-  if (open && !layout.open) setChatOpen(true);
+  if (open && !layout.open && layout.libraryDock === 'chat') setChatOpen(true);
+  assets.open = open && (layout.libraryDock !== 'chat' || layout.open);
   /* the chat folding to its composer and Studio's drawer appearing are one frame: neither is seen without the other */
-  assets.open = open && layout.open;
   flushSync(() => {
     assetsSignal.set(assets.open);
     place();
   });
 }
-/* 在线素材抽屉的开合机制(registerAssetsDrawer/requestLibraryDrawer)已退役(2026-11-07):
-   在线素材嵌入 0.3 库面板素材侧栏(经 window.tintinOnlineLibrary 页级桥挂载)。 */
+/* 在线素材抽屉的开合机制(registerAssetsDrawer/requestLibraryDrawer)已退役: 在线素材嵌入
+   库面板素材侧栏(经 window.tintinOnlineLibrary 页级桥挂载; 0.4 的 LibraryDrawer 三方合并保留该缝)。 */
 native.onToggleChat(() => setChatOpen(!layout.open));
 
 /* ── the theme and the language are the page's (Studio sets them on <html>) ── */
@@ -186,28 +191,28 @@ projectReady = follow();
 /* TinTin: 影片目录由 studio-preload 轮询提供 —— 周期性按目录重解析项目并重排
    (嵌入页无 /projects 路由可依赖; place 在项目落地后必须重跑, 否则聊天列停留隐藏态) */
 setInterval(() => { void follow().then(() => place()) }, 2500);
-/* TinTin: 影片目录由 studio-preload 轮询提供 —— 周期性按目录重解析项目(无路由可依赖) */
-setInterval(() => { void follow() }, 2500);
 
 /* ── between Studio and the chat: what is selected, what is referenced, what Studio is asked to show ── */
 const selection = signal<StudioSelection | null>(null);
 const refer = events<StudioRef>();
-/* a skill picked in the examples (Studio's ExamplesDialog), to be named in the message; and "Add a skill" there */
+/* a reference taken out of the message being written, from Studio (what it marked closed there) */
+const unrefer = events<StudioRef>();
+/* a skill tried in the Community (Studio 0.4), to be named in the message; and "Add a skill" */
 const skillPicked = events<{ name: string; description: string; title?: string; newConversation?: boolean }>();
 const skillAdd = events<void>();
-/** 打开技能弹窗(2026-11-07 用户裁决「按原来的图标和原来的窗口集成技能」): 0.2.7 的
-    Blocks 按钮经 show-examples 开 ExamplesGallery(Skills 视图), 0.3 重构删了按钮与
-    SkillsLibrary —— TinTin 注入按钮发 show-skills 命令, Studio 开恢复的独立弹窗。 */
-export function requestShowSkills(): void {
-  command?.({ type: 'show-skills' });
-}
-/* Studio 为人写好的提问(0.3 的 ask): 文字进输入框、引用随行, 人自己发送(对齐官方壳桥) */
 const asked = events<{ text: string; refs: StudioRef[] }>();
 /** what the pointer is over in Studio (null: nothing), for the chat to light its pills that point at it */
 const hover = signal<StudioRef | null>(null);
 let command: ((command: StudioCommand) => void) | null = null;
 const fullScreen = signal(false);
 native.onFullScreen((full) => fullScreen.set(full));
+
+/** 打开技能社区(2026-11-19 用户裁决「技能转到新的社区界面管理中」): 0.2.7 弹窗
+    (SkillsLibrary/SkillsDialog)随 0.4 退役, 注入按钮改发 show-examples{kind:'skill'}
+    开 0.4 Community 的技能区 —— 与官方 openfilm:// 深链同一条命令面。 */
+export function requestShowSkills(): void {
+  command?.({ type: 'show-examples', open: { kind: 'skill' } });
+}
 
 /*
  * ── a reference's picture of the viewer (StudioRefImage `viewer`): what the person sees there now, taken by the app as
@@ -241,7 +246,7 @@ async function withPicture(ref: StudioRef): Promise<StudioRef> {
       const left = Math.max(r.left, r.left + crop.x * k);
       const top = Math.max(r.top, r.top + crop.y * k);
       const right = Math.min(r.right, r.left + (crop.x + crop.w) * k);
-      const bottom = Math.min(r.bottom, r.top + (crop.y + crop.h) * k);
+      const bottom = Math.min(r.bottom, r.top + (crop.x + crop.h) * k);
       box = { x: left, y: top, width: right - left, height: bottom - top };
     }
     const jpeg = await native.capture(box).catch(() => null);
@@ -256,7 +261,7 @@ const asks = signal<HostAsk[]>([]);
 let answerAsk: (id: string, allow: boolean) => void = () => {};
 
 /* ── Settings → Developer (kept by the app): Studio switches it, the chat shows each turn's log and changes by it ── */
-interface AppPrefs { developer: boolean; changes: boolean }
+interface AppPrefs { developer: boolean; changes: boolean; notify?: boolean }
 const developerOf = (prefs: AppPrefs) => ({ logs: prefs.developer === true, changes: prefs.changes !== false });
 const developer = {
   get: async () => developerOf(await native.prefs.get()),
@@ -267,7 +272,14 @@ const developer = {
   onChange: (listener: Listener<{ logs: boolean; changes: boolean }>) => native.prefs.onChange((prefs) => listener(developerOf(prefs))),
 };
 
-/* ── the app's update: TinTin 桌面的更新走自身通道, Studio 顶栏恒 off ── */
+/* ── Settings → Advanced (kept by the app): the system's notifications of a turn done, stopped or waiting ── */
+const notifications = {
+  get: async () => (await native.prefs.get()).notify === true,
+  set: (on: boolean) => native.prefs.set({ notify: on }),
+  onChange: (listener: Listener<boolean>) => native.prefs.onChange((prefs) => listener(prefs.notify === true)),
+};
+
+/* ── the app's update: TinTin 桌面的更新走自身通道, Studio 顶栏恒 off(native.updateState 恒 off) ── */
 const WAITING = ['agent-busy', 'exporting', 'install-failed'] as const;
 function shownUpdate(state: unknown): HostUpdate | null {
   const s = state as { status?: string; availableVersion?: string | null; error?: string | null } | null;
@@ -302,34 +314,52 @@ const host: StudioHost = {
   version: 1,
   name: 'TinTin',
   projectChanged,
-  ...(mac ? { titlebar: { inset: INSET, onChange: (listener: Listener<number>) => { fullScreen.on((full) => listener(full ? 6 : INSET)); } } } : {}),
+  ...(mac ? { titlebar: { get inset() { return fullScreen.get() ? 0 : INSET; }, onChange: (listener: Listener<number>) => { fullScreen.on((full) => listener(full ? 0 : INSET)); } } } : {}),
   ...(windows ? { titlebar: { inset: 6, insetRight: INSET_RIGHT } } : {}),
   /* in order, each with its picture: two pointed at quickly must not swap or share a screenshot */
   refer: (ref) => {
     if (!layout.open) setChatOpen(true);
     pictured = pictured.then(() => withPicture(ref)).then((done) => refer.set(done));
   },
+  unrefer: (ref) => { pictured = pictured.then(() => unrefer.set(ref)); },
   onSelection: (next) => selection.set(next),
   onHover: (ref) => hover.set(ref ?? null),
-  onCommand: (listener) => { command = listener; },
+  onCommand: (listener) => {
+    command = listener;
+    /* the app's openfilm:// deep link (official) — TinTin has no such links, guarded optional */
+    void native.takeLink?.().then((link) => { if (link?.uid) listener({ type: 'show-examples', open: { kind: 'skill', name: link.uid } }); }, () => {});
+    native.onOpenLink?.((link) => command?.({ type: 'show-examples', open: { kind: 'skill', name: link.uid } }));
+  },
   settings: { onOpen: (listener) => native.onOpenSettings(listener) },
   /* read live: Studio may read the panel before or after the kept layout arrives */
   panel: {
     label: 'Chat',
     get open() { return layout.open; },
     get width() { return shownWidth(); },
-    /* TinTin(2026-10-24 用户裁决): 不在 panel 上挂 assets/setAssetsOpen —— Studio 以两者
-       存在与否判定「宿主收走素材」(host.ts useHostPanel); 不挂 = 项目素材留在 Studio
-       左侧面板。聊天列的素材按钮走 AppBridge 的 setAssetsOpen(在线素材抽屉), 与此无关。 */
+    get preferredWidth() { return layout.width; },
+    get assets() { return panelState().assets; },
     setOpen: setChatOpen,
-    setWidth: (width, done) => setChatWidth(width, done === true),
-    /* 0.3 库面板(PanelSeam)的开关: useHostPanel 以本方法存在与否判定宿主 assets 缝(2026-11-07 方案 1) */
     setAssetsOpen,
-    onChange: (listener) => { panelListeners.add(listener); listener(panelState()); },
+    setWidth: (width, done) => setChatWidth(width, done === true),
+    setBounds(bounds) {
+      if (bounds && !Object.values(bounds).every((value) => Number.isFinite(value) && value >= 0)) return;
+      if (JSON.stringify(workspaceBounds) === JSON.stringify(bounds)) return;
+      workspaceBounds = bounds;
+      place();
+    },
+    setPlacement(placement) {
+      if (layout.side === placement.side && layout.libraryDock === placement.libraryDock) return;
+      layout.side = placement.side; layout.libraryDock = placement.libraryDock;
+      if (assets.open && layout.libraryDock === 'chat' && !layout.open) setChatOpen(true);
+      place();
+    },
+    onChange: (listener) => { panelListeners.add(listener); listener(panelState()); return () => { panelListeners.delete(listener); }; },
   },
   agents: native.agents,
+  connectors: native.connectors,
   asks: { show: (list, answer) => { answerAsk = answer; asks.set(list); } },
   developer,
+  notifications,
   update,
   folders: { pick: native.pickFolder, pathOf: native.pathForFile },
   tabs: native.tabs,
@@ -366,9 +396,12 @@ function commandFor(ref: StudioRef): StudioCommand {
     case 'range': return { type: 'show-range', start: ref.start, end: ref.end };
     case 'track': return { type: 'show-track', track: ref.track };
     case 'file': return { type: 'show-file', path: ref.path };
+    case 'node': return { type: 'show-node', id: ref.id };
     case 'subtitle': return { type: 'show-subtitle', start: ref.start, end: ref.end };
     /* another film: the examples, where it came from */
     case 'example': return { type: 'show-examples', open: { kind: 'example', id: ref.id } };
+    /* a voice: Services, where its service is connected */
+    case 'voice': return { type: 'settings', section: 'providers' };
   }
 }
 
@@ -377,10 +410,13 @@ function commandFor(ref: StudioRef): StudioCommand {
   platform: native.platform,
   pathForFile: native.pathForFile,
   revealPath: native.revealPath,
+  /* the composer's Add folder */
+  pickFolder: native.pickFolder,
   agents: {
     list: native.agents.list,
     connect: native.agents.connect,
     onChange: native.agents.onChange,
+    refreshModels: native.agents.refreshModels,
   },
   localAgents: native.localAgents,
   openSettings: (section: string) => command?.({ type: 'settings', section: section === 'providers' ? 'providers' : 'agents' }),
@@ -400,9 +436,11 @@ function commandFor(ref: StudioRef): StudioCommand {
   /* Studio failing to start leaves no page to tell: the app shows that itself */
   onStudioFailed: () => () => {},
   onRefer: refer.on,
+  onUnrefer: unrefer.on,
   onSelection: (listener: Listener<StudioSelection>) => selection.on((s) => { if (s) listener(s); }),
   onFfmpeg: native.onFfmpeg,
   showInStudio: (ref: StudioRef) => command?.(commandFor(ref)),
+  openInStudio: (link: string) => command?.({ type: 'open', link }),
   /* an example's folder on this computer (Studio fetches it when needed), for a reference to one in a message sent */
   async exampleFolder(id: string) {
     const res = await fetch(`/api/examples/${encodeURIComponent(id)}/folder`, { method: 'POST' });
@@ -413,13 +451,9 @@ function commandFor(ref: StudioRef): StudioCommand {
   /* the composer's examples button: the examples over the film, to point at one or name a skill */
   showExamples: (open?: CommunityItem) => command?.({ type: 'show-examples', ...(open ? { open } : {}) }),
   onUseSkill: skillPicked.on,
-  /* Studio 写好的提问(0.3 的 ask)流进聊天输入框 */
   onAsk: asked.on,
-  /* 空会话的技能卡(0.3 的 starters): npm 包剥离了官方 skills 目录、TinTin 技能无封面,
-     如实回空 —— 卡片区留空不崩, 技能走 @ 菜单/素材抽屉自有通道。 */
-  starterSkills: async () => [],
   onAddSkill: skillAdd.on,
-  useSkill: (skill: { name: string; description: string; newConversation?: boolean }) => skillPicked.set(skill),
+  useSkill: (skill: { name: string; description: string; title?: string; newConversation?: boolean }) => skillPicked.set(skill),
   /* a reference made in the chat (⌘L there, the @ menu) gets its picture as Studio's own do */
   withPicture: (ref: StudioRef) => { const done = pictured.then(() => withPicture(ref)); pictured = done.then(() => {}); return done; },
   /* what a pill hovered in the chat points at, lit in Studio while it is (null: none); and the references of the
@@ -438,10 +472,16 @@ function commandFor(ref: StudioRef): StudioCommand {
   assetsOpen: () => assets.open,
   setAssetsOpen,
   onAssets: assetsSignal.on,
-  setComposerHeight(px: number) {
+  assetsOverlay: () => assetsOverlaySignal.get(),
+  onAssetsOverlay: assetsOverlaySignal.on,
+  setComposerHeight(px: number, besidePx?: number) {
     const bottom = Math.round(px);
-    if (!Number.isFinite(bottom) || bottom < 40 || bottom === assets.bottom) return;
+    if (!Number.isFinite(bottom) || bottom < 40) return;
+    /* beside the way back to the chat: the composer alone */
+    const beside = Number.isFinite(besidePx) ? Math.min(bottom, Math.max(0, Math.round(besidePx!))) : bottom;
+    if (bottom === assets.bottom && beside === assets.beside) return;
     assets.bottom = bottom;
+    assets.beside = beside;
     place();
   },
   /* a menu of the chat's floats in its own layer over everything: nothing to make room for */
@@ -449,8 +489,8 @@ function commandFor(ref: StudioRef): StudioCommand {
   /* the chat's record of each project, in its .film/chat and .film/logs */
   chat: native.chat,
   /* TinTin (2026-10-31 用户裁决): 聊天菜单里的技能=已安装的技能 —— 服务端技能只有装进
-     编导 home(film-agent-home/skills)才对智能体可见, 未装的不进 / 与 @ 菜单; 技能弹窗的
-     服务端 tab 直用 openfilmNative 原桥(发现/安装), 不经本包装, 不受影响。 */
+     编导 home(film-agent-home/skills)才对智能体可见, 未装的不进 / 与 @ 菜单; 社区界面的
+     服务端组直用 openfilmNative 原桥(发现/安装), 不经本包装, 不受影响。 */
   skills: {
     ...native.skills,
     list: async (...args: Parameters<typeof native.skills.list>) => {

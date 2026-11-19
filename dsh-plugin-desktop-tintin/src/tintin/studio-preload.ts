@@ -145,6 +145,15 @@ contextBridge.exposeInMainWorld('openfilmNative', {
   products: {
     call: (payload: unknown): Promise<unknown> => agentInvoke('openfilm:products', payload),
   },
+  /* 0.4 的连接器面(Studio 设置的 agent 连接器): 集成智能体走 DSH ACP, 不经 connectors ——
+     空实现(空列表+如实报错), Studio 的连接器面板显示空态不炸。 */
+  connectors: {
+    list: async (): Promise<unknown[]> => [],
+    connect: async (): Promise<{ ok: false; error: string }> => ({ ok: false, error: 'TinTin: 集成智能体由服务端提供, 无需连接器' }),
+    cancel: async (): Promise<{ ok: true }> => ({ ok: true }),
+    disconnect: async (): Promise<{ ok: true }> => ({ ok: true }),
+    onChange: (): (() => void) => () => {},
+  },
   agents: agentRegistry,
   localAgents,
   chat,
