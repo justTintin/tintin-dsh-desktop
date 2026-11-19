@@ -70,9 +70,12 @@ for (const dir of [binDir, openfilmDir, browsersDir]) mkdirSync(dir, { recursive
 function fetchTo(urls, dest) {
   for (const url of urls) {
     console.log(`fetch ${url}`)
+    // 2026-11-20 报障（打包 4/7 半小时无进展）：fetch 无超时——被限速的连接不会失败
+    // 只会龟速爬（实测 nodejs.org ~8KB/s，87MB 要 3 小时），永远不会切到下一个镜像。
+    // 总时长超时（300s，>87MB@500KB/s）触发失败→自动换 npmmirror 镜像重试。
     const res = spawnSync(process.execPath, ['-e', `
       const { pipeline } = require('node:stream/promises'); const fs = require('node:fs');
-      fetch(process.argv[1]).then((r) => {
+      fetch(process.argv[1], { signal: AbortSignal.timeout(300000) }).then((r) => {
         if (!r.ok) throw new Error('HTTP ' + r.status)
         return pipeline(r.body, fs.createWriteStream(process.argv[2]))
       }).then(() => console.log('OK')).catch((e) => { console.error(e.message); process.exit(1) })
