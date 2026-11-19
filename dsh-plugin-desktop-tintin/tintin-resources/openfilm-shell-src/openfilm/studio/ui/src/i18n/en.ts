@@ -242,6 +242,7 @@ export const en = {
     details: 'Details',
     offLine: 'Off. Agents won\'t use it.',
     installedOne: 'Installed',
+    serverInstalled: 'Installed',
     serverVersion: 'Version',
     serverUpdate: 'Update',
     serverInstalledVersion: 'Installed version',

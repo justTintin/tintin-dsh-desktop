@@ -548,15 +548,13 @@ export function PluginsPane({ line, query, projectId, opened, onOpen, onWorkbenc
           </Shelf>
         ) : null}
         {server.skills.length ? (
+          /* ServerLine 本身就是完整一行（icon+标题+描述+按钮）——不能套 GroupList
+             （GroupItem 的 control 会再渲染一遍整行=2026-11-20 报障「界面显示错乱」
+             行内嵌套双渲染），Shelf 直排（0.3 SkillsPane 原版形态）。 */
           <Shelf title={t('gallery.server')} note={t('assetDrawer.note_mineSkills')}>
-            <GroupList items={server.skills.map((s): GroupItem => ({
-              key: `tintin-server:${s.name}`,
-              icon: <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[9px] bg-[var(--bg-field)] text-[var(--text-muted)]"><Server size={16} strokeWidth={1.75} /></span>,
-              title: s.name,
-              summary: s.update ? `${s.description} · ${t('gallery.updateOut').replace('{version}', String(s.detail?.version ?? ''))}` : s.description,
-              onOpen: undefined,
-              control: <ServerLine skill={s} onInstall={() => server.act('install', s.name)} onRemove={() => server.act('remove', s.name)} />,
-            }))} />
+            {server.skills.map((s) => (
+              <ServerLine key={s.name} skill={s} onInstall={() => server.act('install', s.name)} onRemove={() => server.act('remove', s.name)} />
+            ))}
           </Shelf>
         ) : null}
         {packRows.length ? (
@@ -629,15 +627,11 @@ export function PluginsPane({ line, query, projectId, opened, onOpen, onWorkbenc
         {consent.dialog}
         {status}
         {serverRows.length ? (
+          /* 同 Mine 页：ServerLine 是完整一行，Shelf 直排不套 GroupList（行内嵌套双渲染） */
           <Shelf title={t('gallery.server')} note={t('gallery.serverHint')}>
-            <GroupList items={serverRows.map((s): GroupItem => ({
-              key: `tintin-server:${s.name}`,
-              icon: <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[9px] bg-[var(--bg-field)] text-[var(--text-muted)]"><Server size={16} strokeWidth={1.75} /></span>,
-              title: s.name,
-              summary: s.update ? `${s.description} · ${t('gallery.updateOut').replace('{version}', String(s.detail?.version ?? ''))}` : s.description,
-              onOpen: undefined,
-              control: <ServerLine skill={s} onInstall={() => server.act('install', s.name)} onRemove={() => server.act('remove', s.name)} />,
-            }))} />
+            {serverRows.map((s) => (
+              <ServerLine key={s.name} skill={s} onInstall={() => server.act('install', s.name)} onRemove={() => server.act('remove', s.name)} />
+            ))}
           </Shelf>
         ) : null}
         <StoreChips label={t('assetDrawer.tab_skills')} value={pick} onChange={setSkillSort}

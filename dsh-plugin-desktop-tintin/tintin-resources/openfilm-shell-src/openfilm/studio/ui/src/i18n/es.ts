@@ -235,6 +235,7 @@ export const es: Words = {
     details: 'Detalles',
     offLine: 'Desactivada. Los agentes no la usan.',
     installedOne: 'Instalada',
+    serverInstalled: 'Instalada',
     serverVersion: 'Versión',
     serverUpdate: 'Actualizar',
     serverInstalledVersion: 'Versión instalada',

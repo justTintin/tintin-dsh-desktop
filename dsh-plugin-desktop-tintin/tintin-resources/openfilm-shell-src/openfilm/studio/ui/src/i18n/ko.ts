@@ -233,6 +233,7 @@ export const ko: Words = {
     details: '자세히',
     offLine: '꺼짐. 에이전트가 쓰지 않습니다.',
     installedOne: '설치됨',
+    serverInstalled: '설치됨',
     serverVersion: '버전',
     serverUpdate: '업데이트',
     serverInstalledVersion: '설치된 버전',

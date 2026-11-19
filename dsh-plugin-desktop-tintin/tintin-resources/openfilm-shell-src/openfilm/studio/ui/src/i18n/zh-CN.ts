@@ -241,6 +241,7 @@ export const zhCN: Words = {
     details: '详情',
     offLine: '已关闭，智能体不会用它。',
     installedOne: '已安装',
+    serverInstalled: '已安装',
     serverVersion: '版本',
     serverUpdate: '更新',
     serverInstalledVersion: '已装版本',

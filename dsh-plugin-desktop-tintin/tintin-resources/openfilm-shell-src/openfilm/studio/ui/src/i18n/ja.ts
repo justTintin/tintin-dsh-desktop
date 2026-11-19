@@ -235,6 +235,7 @@ export const ja: Words = {
     details: '詳細',
     offLine: 'オフ。エージェントは使いません。',
     installedOne: 'インストール済み',
+    serverInstalled: 'インストール済み',
     serverVersion: 'バージョン',
     serverUpdate: '更新',
     serverInstalledVersion: 'インストール済みバージョン',
