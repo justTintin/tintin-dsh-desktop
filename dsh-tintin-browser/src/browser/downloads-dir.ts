@@ -8,7 +8,7 @@ import { shell } from 'electron'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-export function registerOpenDownloadsDir(ipcMain: { handle(channel: string, fn: () => unknown): void }, workspaceDir: () => string, userDataDir?: () => string): void {
+export function registerOpenDownloadsDir(ipcMain: { handle(channel: string, fn: (event: unknown, payload: unknown) => unknown): void }, workspaceDir: () => string, userDataDir?: () => string): void {
   // 资源管理器打开 materials（不存在先建，保证总能打开）
   ipcMain.handle('browser:openDownloadsDir', () => {
     try {

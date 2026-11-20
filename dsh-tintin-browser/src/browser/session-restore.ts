@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 export interface SessionTabRecord { platform: string; url: string; title?: string }
-export interface SessionSnapshot { tabs: SessionTabRecord[]; activeId?: string }
+export interface SessionSnapshot { tabs: SessionTabRecord[]; activeId?: string | undefined }
 
 export const sessionFileAt = (baseDir: string): string => join(baseDir, 'session.json')
 
@@ -51,7 +51,7 @@ export function applyRestoredSession(
   snapshot: SessionSnapshot,
   io: {
     ensureTab: (platform: string) => { id: string } | null
-    getTabView: (id: string) => { webContents: { loadURL: (url: string, opts?: unknown) => Promise<void>; isDestroyed: () => boolean } } | undefined
+    getTabView: (id: string) => { webContents: { loadURL: (url: string) => Promise<void>; isDestroyed: () => boolean } } | undefined
   },
   log: (msg: string) => void,
 ): void {

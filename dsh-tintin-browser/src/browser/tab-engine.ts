@@ -9,7 +9,7 @@ import { isDeepLinkScheme, PLATFORM_DEFS } from './platform-meta.ts'
 import { attachContextMenu } from './context-menu.ts'
 import { activateTab, closeTab, openTab, updateTab, type TabPoolState } from './tab-model.ts'
 import { migrateDefaultSessionCookies } from './cookie-sync.ts'
-import { applyRestoredSession, debouncedSessionSave } from './session-restore.ts'
+import { applyRestoredSession, debouncedSessionSave, readSessionSnapshot } from './session-restore.ts'
 
 export interface TabEngineDeps {
   ipcMain: Pick<Electron.IpcMain, 'handle'>
@@ -233,7 +233,7 @@ export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => s
   // 恢复在首帧后微延迟执行（ensureTab 依赖宿主 focus/attach 就绪）。
   if (deps.sessionFile && deps.sessionRestore !== false) {
     setTimeout(() => {
-      try { applyRestoredSession(deps.sessionFile!, deps, (m) => log(`session-restore: ${m}`)) } catch (err) { log(`session restore failed: ${err instanceof Error ? err.message : err}`) }
+      try { const snap = readSessionSnapshot(deps.sessionFile!, deps.sessionRestore !== false); if (snap) applyRestoredSession(snap, { ensureTab, getTabView: (id) => { const v = deps.getTabView(id); return v && !v.webContents.isDestroyed() ? { webContents: v.webContents } : undefined } }, (m) => log(`session-restore: ${m}`)) } catch (err) { log(`session restore failed: ${err instanceof Error ? err.message : err}`) }
     }, 600)
   }
   return { ensureTab }
