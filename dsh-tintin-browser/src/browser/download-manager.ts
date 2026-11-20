@@ -249,7 +249,7 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
    *  isAutomation：捕获窗 webContents 判定（browser-service 注入，2026-11-20 两链并存分流） */
   function attachSession(session: Electron.Session, opts?: { isAutomation?: (wc: WebContents) => boolean }): void {
     session.on('will-download', (_e, item, wc) => {
-      handleNativeDownload(item, wc, { isAutomation: opts?.isAutomation?.(wc) })
+      handleNativeDownload(item, wc, { isAutomation: opts?.isAutomation?.(wc) === true })
     })
   }
 

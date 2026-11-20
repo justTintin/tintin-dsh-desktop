@@ -596,8 +596,8 @@ export function registerBrowserService(
   registerDeepLinkSwallow(ctxLog)
   probeWebTheme() // 主题初始化+导航探针（web 层真值，2026-11-08 白底修复 §16.23）
   try {
-    const themeMo = (): void => probeWebTheme()
-    for (const ev of ['dom-ready', 'did-navigate', 'did-navigate-in-page'] as const) mainWindow.webContents.on(ev, themeMo)
+    const themeMo = (..._args: unknown[]): void => probeWebTheme()
+    for (const ev of ['dom-ready', 'did-navigate', 'did-navigate-in-page'] as const) mainWindow.webContents.on(ev as 'dom-ready', themeMo)
   } catch { /* 窗口生命周期竞态 */ }
   // 下载落盘根（2026-11-08 前移：设置页/下载目录展示在注册早期就要用）
   const workspaceDir = (): string => process.env.TINTIN_WORKSPACE_DIR || join(homedir(), 'Documents', 'tintin-workspace')
