@@ -40,6 +40,8 @@ const desktopBrowser = {
   revealDailyAsset: (payload: unknown) => invoke('browser:revealDailyAsset', payload),
   /** 资源管理器高亮任意文件（下载栏「打开目录」用；与历史视图定位同 shell 通道） */
   revealPath: (payload: unknown) => invoke('browser:revealDailyAsset', payload),
+  /** 顶栏 ⬇（2026-11-20 用户裁决）：资源管理器打开下载目录（materials） */
+  openDownloadsDir: () => invoke('browser:openDownloadsDir'),
   sniffList: (payload?: unknown) => invoke('browser:sniffList', payload),
   sniffClear: (payload?: unknown) => invoke('browser:sniffClear', payload),
   sniffDownload: (payload: unknown) => invoke('browser:sniffDownload', payload),
@@ -47,7 +49,6 @@ const desktopBrowser = {
   getSettings: () => invoke('browser:getSettings'),
   setSettings: (payload: unknown) => invoke('browser:setSettings', payload),
   clearData: (payload: unknown) => invoke('browser:clearData', payload),
-  openDownloadsDir: () => invoke('browser:openDownloadsDir'),
   // 扩展管理
   extensionList: () => invoke('browser:extensionList'),
   extensionInstall: (payload: unknown) => invoke('browser:extensionInstall', payload),

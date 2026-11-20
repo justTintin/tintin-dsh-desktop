@@ -30,6 +30,7 @@ import { browserCookiesDir, collectPlatformCookies, migrateDefaultSessionCookies
 import { registerSettingsIpc } from './settings-store.ts'
 import { registerHistoryBookmarkIpc } from './history-bookmark.ts'
 import { attachContextMenu } from './context-menu.ts'
+import { registerOpenDownloadsDir } from './downloads-dir.ts'
 import { registerTabEngine, type TabEngineHandle } from './tab-engine.ts'
 import { createPageDownloadMirror } from './page-downloads.ts'
 import { createThemeSync } from './theme-sync.ts'
@@ -599,9 +600,7 @@ export function registerBrowserService(
     mainWindow.webContents.on('did-navigate-in-page', themeMo)
   } catch { /* 窗口生命周期竞态 */ }
   // 下载落盘根（2026-11-08 前移：设置页/下载目录展示在注册早期就要用）
-  const workspaceDir = (): string =>
-    process.env.TINTIN_WORKSPACE_DIR
-      || join(homedir(), 'Documents', 'tintin-workspace')
+  const workspaceDir = (): string => process.env.TINTIN_WORKSPACE_DIR || join(homedir(), 'Documents', 'tintin-workspace')
   // 设置存储/代理应用/清除数据（2026-11-08 第一批 P0「设置入口」；注册即读盘并应用代理）
   const settingsStore = registerSettingsIpc(ipcMain, { workspaceDir, log: ctxLog })
   // 媒体嗅探先于挂接创建（2026-11-04 修复：原创建语句在挂接循环之后约 200 行，
@@ -835,6 +834,7 @@ export function registerBrowserService(
       return { success: true }
     } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) } }
   })
+  registerOpenDownloadsDir(ipcMain, workspaceDir) // 顶栏 ⬇=打开下载目录（handler 在 downloads-dir.ts，铁律 4 拆出）
   // 页内查找（2026-11-08 第一批 P0 #5）：作用于当前活跃平台视图
   ipcMain.handle('browser:findInPage', (_e, p: unknown) => {
     const q = (p || {}) as { text?: unknown; forward?: unknown }

@@ -99,3 +99,13 @@
 1. ~~**下载扩展链复活**(P0 #1+#2+#4)~~ ✅ **已交付(2026-10-26)**:`douyin-parse-logic.ts`(1:1)+ `bili-ext-dl.ts`(轮询/console 双通道,依赖注入可单测)+ `media-downloader.ts`(有界 1:1,yt-dlp 主链路/流引擎/ffmpeg 合并/取消暂停)+ browser-service 接线(B站 view 挂接、`browser:extensionPickAndInstall`、`browser:sniffDownload` 改走媒体引擎)+ preload 四桥 + UI 页三面(B站下载助手/抖音解析框/扩展管理视图)。依据:②一比一(源码在位,脚本资产已迁);新增单测 3 件 23 例,全仓 browser 87 例全绿。剩余:面板/历史通道见 #2。
 2. **下载面板/历史收尾**(P0 #3 余量):`downloads-history.json` 持久化(300 条)、任务档案 snapshot/OpenFile/Reveal/RemoveRecord/GetDir/SetDir 通道、浮窗下载面板或页面历史视图承接(media-storage 数据面已在)。
 3. **壳层健壮性五件**(P1 #6-#10):小切口,各自独立可测。
+
+## 顶栏 ⬇ = 打开下载目录（2026-11-20 用户裁决）
+
+浏览器页顶栏下载图标（`#dlBtn`，带活跃下载数徽标）此前无点击行为（纯摆设）。
+修=三层接线：①`browser:openDownloadsDir` IPC（resources 管理器打开落盘根
+`materials`，不存在先建；handler 拆出到 `downloads-dir.ts`——铁律 4，browser-service
+基线 1025 持平）②`browser-page-preload` 暴露 `openDownloadsDir()` ③页面 `#dlBtn`
+onclick 调桥（桥缺失退化=展开/收起下载栏），title 改「打开下载目录」。
+生效：主进程链须重启；页面 html 刷新即得。完成行「打开目录」按钮（11-11 批）仍保留，
+语义=高亮具体文件；本次=整目录。

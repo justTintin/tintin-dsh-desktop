@@ -239,7 +239,7 @@
     </div>
     <button class="ic" id="starBtn" title="收藏此页">☆</button>
     <button class="ic" id="themeBtn" title="主题（跟随系统）">◐</button>
-    <button class="ic" id="dlBtn" title="下载">
+    <button class="ic" id="dlBtn" title="打开下载目录">
       ⬇<span id="dlBadge">0</span>
     </button>
   </div>
@@ -425,6 +425,18 @@
   $('b-fwd').onclick = function () { nav('forward') }
   $('b-rel').onclick = function () { nav(relState === 'loading' ? 'stop' : 'reload') }
   $('b-home').onclick = function () { nav('home') }
+  // 顶栏 ⬇（2026-11-20 用户裁决：点击跳转下载目录）——资源管理器打开 materials；
+  // 桥缺失（纯浏览器预览）退化为展开/收起下载栏。
+  $('dlBtn').onclick = function () {
+    if (bridge && bridge.openDownloadsDir) {
+      bridge.openDownloadsDir().then(function (r) {
+        if (r && r.success === false) toast('打开下载目录失败：' + (r.error || '未知错误'))
+      }).catch(function (e) { toast('打开下载目录失败：' + ((e && e.message) || e)) })
+      return
+    }
+    var el = $('shelf')
+    if (el) el.style.display = el.style.display === 'none' ? 'flex' : 'none'
+  }
   // 地址栏归一（2026-11-04 限制清除批）：显式 http(s) 直过；域名/IP/localhost 补协议；
   // 其余输入不再硬拼 https://（无效主机白屏），按关键词走搜索兜底（引擎随设置，11-08 第一批）。
   var SEARCH_BASES = { baidu: 'https://www.baidu.com/s?wd=', bing: 'https://www.bing.com/search?q=', google: 'https://www.google.com/search?q=' }
