@@ -15,7 +15,7 @@ const tintinClient = (() => {
       window.__tintinChrome?.dispose?.()
       // 入口视图（工作台=无覆盖层默认态；浏览器=内嵌视图）
       const VIEWS = [
-        { id: 'creation', label: '素材创作' },
+        // 素材创作(creation)暂停开发,入口隐藏(2026-11-20 用户裁决;恢复=此处回插 { id: 'creation', label: '素材创作' }, 一行,提供方注册/分面服务端配置原样保留)
         { id: 'ops', label: '运营工具' },
         { id: 'media', label: '媒体工具' }, // 技能管理侧栏入口已随 2026-10-30 用户裁决移除(封面插件自带技能管理,各插件自管)
         { id: 'cover', label: '封面制作', glyph: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="5.4" cy="6" r="1.2"/><path d="M4 11.4 7.6 8.2l2.6 2.1 2-1.7 2.8 2.6"/>' }, // 封面制作(2026-10-27 用户裁决:独立菜单置于视频剪辑上方;封面编辑器 dsh-tintin-cover-plugin)
