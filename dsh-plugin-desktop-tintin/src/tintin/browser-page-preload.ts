@@ -47,6 +47,8 @@ const desktopBrowser = {
   downloadsHistory: () => invoke('browser:downloadsHistory'),
   downloadsHistoryRemove: (payload: unknown) => invoke('browser:downloadsHistoryRemove', payload),
   downloadsHistoryClear: () => invoke('browser:downloadsHistoryClear'),
+  /** 提取字幕（2026-11-20 用户裁决）：done 条目/音频流 → 服务端 /whisper/transcribe → SRT/字级 ASS */
+  extractSubtitle: (payload: unknown) => invoke('browser:extractSubtitle', payload),
   /** 网站权限（2026-11-20 权限面询问批）：记忆表读取/逐条移除（询问弹窗在主进程） */
   permissionsList: () => invoke('browser:permissionsList'),
   permissionsReset: (payload: unknown) => invoke('browser:permissionsReset', payload),

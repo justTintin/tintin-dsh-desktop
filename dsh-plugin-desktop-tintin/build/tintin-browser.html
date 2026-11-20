@@ -733,6 +733,24 @@
           bridge.revealPath(d.finalPath).catch(function (e) { toast('打开目录失败：' + ((e && e.message) || e)) })
         }
         row.appendChild(openBtn)
+        // 提取字幕（2026-11-20 用户裁决）：done 文件 → 服务端 /whisper/transcribe → SRT/字级 ASS 同目录
+        if (bridge.extractSubtitle) {
+          var subBtn = document.createElement('button')
+          subBtn.className = 'da-btn'
+          subBtn.textContent = '提取字幕'
+          subBtn.style.flexShrink = '0'
+          subBtn.onclick = function () {
+            if (subBtn.disabled) return
+            subBtn.disabled = true; subBtn.textContent = '提取中…'
+            toast('正在提取字幕（转写时长取决于视频长度）…')
+            var dir = d.finalPath.replace(/[\/][^\/]+$/, '')
+            bridge.extractSubtitle({ filePath: d.finalPath, outDir: dir }).then(function (r) {
+              subBtn.disabled = false; subBtn.textContent = '提取字幕'
+              toast(r && r.success ? '字幕已保存：' + (r.srtPath || '') + (r.wordLevel ? '（字级 ASS）' : '') : '提取失败：' + ((r && r.error) || '未知'))
+            }).catch(function (e) { subBtn.disabled = false; subBtn.textContent = '提取字幕'; toast('提取失败：' + ((e && e.message) || e)) })
+          }
+          row.appendChild(subBtn)
+        }
       }
       el.appendChild(row)
     })
@@ -1028,6 +1046,29 @@
       btn.style.marginTop = '6px'
       btn.style.marginLeft = '0'
       card.append(nm, meta, btn)
+      // 提取字幕（2026-11-20 用户裁决）：B站双流用音频流转写（视频流无声）；
+      // 服务端 /whisper/transcribe → SRT/字级 ASS 落 materials/bilibili 同目录
+      if (dl.audioUrl && bridge.extractSubtitle) {
+        var subBtn = document.createElement('button')
+        subBtn.className = 'sn-btn'
+        subBtn.textContent = '提取字幕'
+        subBtn.style.width = '100%'
+        subBtn.style.height = '24px'
+        subBtn.style.marginTop = '4px'
+        subBtn.onclick = function () {
+          if (subBtn.disabled) return
+          subBtn.disabled = true; subBtn.textContent = '提取中…（下载音频+转写，请稍候）'
+          bridge.extractSubtitle({
+            audioUrl: dl.audioUrl,
+            referer: $('addr').value || 'https://www.bilibili.com/',
+            outDir: 'materials/bilibili',
+          }).then(function (r) {
+            subBtn.disabled = false; subBtn.textContent = '提取字幕'
+            toast(r && r.success ? '字幕已保存：' + (r.srtPath || '') + (r.wordLevel ? '（字级 ASS）' : '') : '提取失败：' + ((r && r.error) || '未知'))
+          }).catch(function (e) { subBtn.disabled = false; subBtn.textContent = '提取字幕'; toast('提取失败：' + ((e && e.message) || e)) })
+        }
+        card.appendChild(subBtn)
+      }
       list.appendChild(card)
     })
   }

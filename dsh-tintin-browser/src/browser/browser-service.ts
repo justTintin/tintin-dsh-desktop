@@ -33,6 +33,7 @@ import { attachContextMenu } from './context-menu.ts'
 import { isCaptureWebContents } from './sniff-capture.ts'
 import { registerOpenDownloadsDir } from './downloads-dir.ts'
 import { registerPermissionPolicies } from './permissions.ts'
+import { registerExtractSubtitle } from './subtitle-extract.ts'
 import { sessionFileAt } from './session-restore.ts'
 import { registerTabEngine, type TabEngineHandle } from './tab-engine.ts'
 import { createPageDownloadMirror } from './page-downloads.ts'
@@ -238,10 +239,7 @@ function layoutBrowserWindow(): void {
   const view = activeView()
   if (!view) return
   const rect = pageHostRect
-  if (!rect || rect.width <= 0 || rect.height <= 0) {
-    detachPlatformView(view)
-    return
-  }
+  if (!rect || rect.width <= 0 || rect.height <= 0) { detachPlatformView(view); return }
   if (embedActive) {
     const win = hostWin()
     if (!win) return
@@ -396,10 +394,7 @@ function navigateTo(platform: string, targetUrl?: string): { ok: boolean; error?
   if (!ensured) return { ok: false, error: '标签创建失败（已达上限或平台未知）' }
   if (targetUrl) {
     const view = tabViews.get(ensured.id)
-    if (view && !view.webContents.isDestroyed()) {
-      recordNavIntent(view.webContents, targetUrl)
-      void view.webContents.loadURL(targetUrl).catch(() => {})
-    }
+    if (view && !view.webContents.isDestroyed()) { recordNavIntent(view.webContents, targetUrl); void view.webContents.loadURL(targetUrl).catch(() => {}) }
   }
   return { ok: true }
 }
@@ -606,7 +601,7 @@ export function registerBrowserService(
     for (const platform of Object.keys(PLATFORM_COOKIE_DOMAINS)) {
       try {
         const psess = session.fromPartition(PLATFORM_DEFS[platform]!.partition)
-        registerPermissionPolicies(psess, ctxLog)
+        registerPermissionPolicies(psess, { log: ctxLog, store: settingsStore })
         psess.cookies.on('changed', () => scheduleCookieSync(platform))
       } catch (err) {
         ctxLog(`cookie watch failed for ${platform}: ${err instanceof Error ? err.message : err}`)
@@ -829,7 +824,9 @@ export function registerBrowserService(
       return { success: true }
     } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) } }
   })
-  registerOpenDownloadsDir(ipcMain, workspaceDir, () => app.getPath('userData')) // ⬇目录+下载管理历史（permissions-downloads.ts，铁律 4 拆出）
+  registerOpenDownloadsDir(ipcMain, workspaceDir, () => app.getPath('userData')) // ⬇目录+下载管理历史（铁律 4 拆出）
+  // 提取字幕（1120 用户裁决）：done 条目文件/音频流 → 服务端 /whisper/transcribe → SRT/字级 ASS 同目录
+  registerExtractSubtitle(ipcMain, { serverUrl: () => { try { return String((JSON.parse(readFileSync(join(process.env.DSH_HOME || '', 'tintin', 'config.json'), 'utf8')) as { media?: { serverUrl?: unknown } }).media?.serverUrl) ?? '' } catch { return '' } }, log: ctxLog })
   // 页内查找（2026-11-08 第一批 P0 #5）：作用于当前活跃平台视图
   ipcMain.handle('browser:findInPage', (_e, p: unknown) => {
     const q = (p || {}) as { text?: unknown; forward?: unknown }

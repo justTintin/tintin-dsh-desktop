@@ -119,3 +119,16 @@ onclick 调桥（桥缺失退化=展开/收起下载栏），title 改「打开�
 - 权限面=permissions.ts 新模块：每平台 session setPermissionRequestHandler/CheckHandler——ALLOW=fullscreen/pointerLock/clipboard-sanitized-write；其余（notifications/geolocation/摄像头麦克风采集/midi/sensors/display-capture/backgroundSync）拒绝并记日志（Electron 无 handler 时默认放行=与 Chrome 询问语义不同，本批固定策略，per-origin 询问 UI 留后续批）。
 - 页面标题=tab-engine onActiveTitle 回调 → 主窗 setTitle「<tab 标题> · TinTin 浏览器」（任务栏跟随；空标题回 TinTin 浏览器）。
 生效：主进程链重启；页面 html 刷新即得。browser-service 基线 1025 持平（1058+ 归档/打包链自动带上）。
+
+## 下载条目「提取字幕」（2026-11-20 用户裁决）
+
+下载栏完成行「打开目录」旁新增**提取字幕**；B站助手双流卡（音频流）也加同名按钮。
+通道 `browser:extractSubtitle`（subtitle-extract.ts，铁律 4 拆出）：
+- 入口双形态：done 行传 `filePath`（已落盘文件直接上传）；B站助手 dual 卡传
+  `audioUrl`（视频流无声，**先下载音频流到临时再转写**，Referer=B站页面）
+- 服务端 `POST <media.serverUrl>/whisper/transcribe` multipart（file+language=zh+fmt=json，
+  超时 15 分钟）；fmt=json 含 words → **字级 ASS**（\k 卡拉OK标签，间隔>1.2s 断句）；
+  JSON 仅句级 → 细化 SRT；非 JSON（200 恒回 SRT 纯文本历史行为）→ 原样落盘
+- 落盘 `<下载目录>/<同名>.srt|.ass`（相对 outDir 挂工作区根）；临时音频清理
+- media.serverUrl 读 `<DSH_HOME>/tintin/config.json` media 节（三面分面独立口径）
+生效：主进程链重启；页面 html 刷新即得。
