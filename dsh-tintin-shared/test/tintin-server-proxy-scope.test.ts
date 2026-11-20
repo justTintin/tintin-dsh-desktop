@@ -1,14 +1,15 @@
 // test/tintin-server-proxy-scope.test.ts — 分面服务端地址解析（2026-11-14 用户裁决：
-// 素材创作/运营工具/媒体工具三面各自独立配置，空/缺省回落全局解析链）纯逻辑回归。
+// 运营工具/媒体工具各自独立配置，空/缺省回落全局解析链；素材创作面已随 2026-11-20
+// 整包移除）纯逻辑回归。
 import { describe, expect, it } from 'vitest'
 import { TINTIN_SURFACES, resolveScopedServerUrl } from '../lib/server-proxy.js'
 
 describe('resolveScopedServerUrl', () => {
   const base = () => 'http://global:8000'
 
-  it('keeps the three-surface whitelist in sync with the bridge client', () => {
+  it('keeps the surface whitelist in sync with the bridge client', () => {
     // dsh-tintin-bundle/client.js forSurface 白名单字面量须与此同步
-    expect(TINTIN_SURFACES).toEqual(['creation', 'ops', 'media'])
+    expect(TINTIN_SURFACES).toEqual(['ops', 'media'])
   })
 
   it('prefers the surface section when it carries a non-empty string', () => {

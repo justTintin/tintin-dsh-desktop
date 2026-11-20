@@ -826,7 +826,7 @@ export function registerBrowserService(
   })
   registerOpenDownloadsDir(ipcMain, workspaceDir, () => app.getPath('userData')) // ⬇目录+下载管理历史（铁律 4 拆出）
   // 提取字幕（1120 用户裁决）：done 条目文件/音频流 → 服务端 /whisper/transcribe → SRT/字级 ASS 同目录
-  registerExtractSubtitle(ipcMain, { serverUrl: () => { try { return String((JSON.parse(readFileSync(join(process.env.DSH_HOME || '', 'tintin', 'config.json'), 'utf8')) as { media?: { serverUrl?: unknown } }).media?.serverUrl) ?? '' } catch { return '' } }, log: ctxLog })
+  registerExtractSubtitle(ipcMain, { serverUrl: () => { try { return String((JSON.parse(readFileSync(join(process.env.DSH_HOME || '', 'tintin', 'config.json'), 'utf8')) as { media?: { serverUrl?: unknown } }).media?.serverUrl ?? '') } catch { return '' } }, log: ctxLog })
   // 页内查找（2026-11-08 第一批 P0 #5）：作用于当前活跃平台视图
   ipcMain.handle('browser:findInPage', (_e, p: unknown) => {
     const q = (p || {}) as { text?: unknown; forward?: unknown }

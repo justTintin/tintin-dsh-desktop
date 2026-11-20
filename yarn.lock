@@ -15384,7 +15384,6 @@ __metadata:
     dsh-tintin-bundle: "npm:0.1.0-dev.0"
     dsh-tintin-client-ui: "npm:0.1.0-dev.0"
     dsh-tintin-cover-plugin: "npm:0.1.0-dev.0"
-    dsh-tintin-creation-bundle: "npm:0.1.0-dev.0"
     dsh-tintin-media-bundle: "npm:0.1.0-dev.0"
     dsh-tintin-ops-bundle: "npm:0.1.0-dev.0"
     dsh-tintin-shared: "npm:0.1.0-dev.0"
@@ -15726,19 +15725,6 @@ __metadata:
     vitest: "npm:2.1.8"
     zundo: "npm:2.3.0"
     zustand: "npm:5.0.3"
-  languageName: unknown
-  linkType: soft
-
-"dsh-tintin-creation-bundle@npm:0.1.0-dev.0, dsh-tintin-creation-bundle@workspace:dsh-tintin-creation-bundle":
-  version: 0.0.0-use.local
-  resolution: "dsh-tintin-creation-bundle@workspace:dsh-tintin-creation-bundle"
-  dependencies:
-    "@vitejs/plugin-vue": "npm:^6.0.9"
-    typescript: "npm:~5.6.3"
-    vite: "npm:^7.0.0"
-    vitest: "npm:4.1.8"
-    vue: "npm:^3.5.43"
-    vue-tsc: "npm:^2.1.10"
   languageName: unknown
   linkType: soft
 

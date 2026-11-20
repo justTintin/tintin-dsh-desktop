@@ -18,18 +18,16 @@
       name: dsh-plugin-desktop-tintin/profiles
     - id: desktop-updates
       name: dsh-plugin-desktop-tintin/updates
-    # TinTin port: host bridge and the three view sub-applications
+    # TinTin port: host bridge and the two view sub-applications
     # (docs/tintin-migration-plan.md). Each mounted package that declares
-    # dsh.client joins the web boot graph; the creation bundle registers the
-    # 'creation' and 'skills' views, the ops bundle registers 'ops'.
+    # dsh.client joins the web boot graph; the ops bundle registers 'ops'.
+    # 素材创作包已整体移除（2026-11-20 用户裁决；git 历史 ≤4976a1f7c4 可考）。
     - id: tintin-client-ui
       name: dsh-tintin-client-ui
     - id: tintin-host
       name: dsh-tintin-bundle
     - id: tintin-media
       name: dsh-tintin-media-bundle
-    - id: tintin-creation
-      name: dsh-tintin-creation-bundle
     - id: tintin-ops
       name: dsh-tintin-ops-bundle
     # 封面制作独立插件(2026-10-30 用户裁决):宿主入口挂封面路由族/会话桥/工具组,

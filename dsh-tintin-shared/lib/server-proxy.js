@@ -54,13 +54,14 @@ export function createServerUrlResolver({ readConfig, readTintinStore, readAiCon
 }
 
 /**
- * Per-surface server URLs（2026-11-14 用户裁决：素材创作/运营工具/媒体工具三面
- * 各自独立配置服务端地址）。弹窗经 config:merge 把 `<surface>.serverUrl` 写进
- * tintin/config.json 顶层段；空/缺省回落全局解析链。调用面随请求头
- * x-tintin-scope 进入宿主 AsyncLocalStorage（tintin-bundle/index.js 三个 IPC
- * 入口包装），本清单与 dsh-tintin-bundle/client.js 的白名单字面量须同步。
+ * Per-surface server URLs（2026-11-14 用户裁决：素材创作/运营工具/媒体三面
+ * 各自独立配置服务端地址；素材创作面已随 2026-11-20 整包移除从清单摘除）。
+ * 弹窗经 config:merge 把 `<surface>.serverUrl` 写进 tintin/config.json 顶层段；
+ * 空/缺省回落全局解析链。调用面随请求头 x-tintin-scope 进入宿主
+ * AsyncLocalStorage（tintin-bundle/index.js 的 IPC 入口包装），本清单与
+ * dsh-tintin-bundle/client.js 的白名单字面量须同步。
  */
-export const TINTIN_SURFACES = ['creation', 'ops', 'media']
+export const TINTIN_SURFACES = ['ops', 'media']
 
 /** Pure core of the scope-aware resolution (宿主 getServerUrl 包装的内芯):
  * the per-surface store section wins only with a non-empty string; anything

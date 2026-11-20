@@ -768,12 +768,6 @@
     "minCount": 1
   },
   {
-    "comment": "registry: the creation bundle keeps its dsh face",
-    "path": "dsh-tintin-creation-bundle/package.json",
-    "pattern": "\"dsh\": {",
-    "minCount": 1
-  },
-  {
     "comment": "registry: the ops bundle keeps its dsh face",
     "path": "dsh-tintin-ops-bundle/package.json",
     "pattern": "\"dsh\": {",
@@ -807,12 +801,6 @@
     "comment": "registry: the channel mounts the cover plugin",
     "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
     "pattern": "tintin-cover",
-    "minCount": 2
-  },
-  {
-    "comment": "registry: the channel mounts the creation bundle",
-    "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
-    "pattern": "tintin-creation",
     "minCount": 2
   },
   {

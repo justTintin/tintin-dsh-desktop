@@ -36,7 +36,7 @@ const newest = (dir, extraSkip) => {
 }
 
 // [源码目录, 构建产物(目录或文件), 构建命令提示, 源码扫描额外排除目录?];源码目录不存在=可选,跳过。
-// 2026-11-15 扩账(用户裁决「每次打包都应有所有功能代码」):三个 Vue 子应用 dist、封面
+// 2026-11-15 扩账(用户裁决「每次打包都应有所有功能代码」):两个 Vue 子应用 dist、封面
 // client.js/engine、chat-shell dist 全部入账——此前只盯 3 对,1237 安装包(构建于功能
 // 落地前)暴露的「部分产物不在守卫名单」漏洞就此关闭。
 const PAIRS = [
@@ -45,7 +45,6 @@ const PAIRS = [
   ['dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src', 'dsh-plugin-desktop-tintin/tintin-resources/openfilm/node_modules/openfilm/studio/ui/dist', 'corepack yarn workspace dsh-plugin-desktop-tintin prepare:openfilm-shell'],
   ['dsh-tintin-media-bundle/src', 'dsh-tintin-media-bundle/dist', 'corepack yarn workspace dsh-tintin-media-bundle build'],
   ['dsh-tintin-ops-bundle/src', 'dsh-tintin-ops-bundle/dist', 'corepack yarn workspace dsh-tintin-ops-bundle build'],
-  ['dsh-tintin-creation-bundle/src', 'dsh-tintin-creation-bundle/dist', 'corepack yarn workspace dsh-tintin-creation-bundle build'],
   ['dsh-tintin-cover-plugin/src', 'dsh-tintin-cover-plugin/client.js', 'node ../dsh-tintin-cover-plugin/scripts/stage.mjs'],
   ['dsh-tintin-cover-plugin/src', 'dsh-tintin-cover-plugin/dist/engine.mjs', 'node ../dsh-tintin-cover-plugin/scripts/stage.mjs'],
   ['dsh-tintin-cover-plugin/chat-shell', 'dsh-tintin-cover-plugin/chat-shell/dist', 'node ../dsh-tintin-cover-plugin/chat-shell/build.mjs', ['dist']],
@@ -79,4 +78,4 @@ if (problems.length > 0) {
   for (const fix of fixes) console.error(`    ${fix}`)
   process.exit(1)
 }
-console.log('[verify-hot-fresh] 载荷新鲜:通道 lib、OpenFilm 壳、三个 Vue 子应用 dist 与封面载荷(client.js/engine/chat-shell)均不旧于源码 ✓')
+console.log('[verify-hot-fresh] 载荷新鲜:通道 lib、OpenFilm 壳、两个 Vue 子应用 dist 与封面载荷(client.js/engine/chat-shell)均不旧于源码 ✓')

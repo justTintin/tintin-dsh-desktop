@@ -15,7 +15,7 @@ const tintinClient = (() => {
       window.__tintinChrome?.dispose?.()
       // 入口视图（工作台=无覆盖层默认态；浏览器=内嵌视图）
       const VIEWS = [
-        // 素材创作(creation)暂停开发,入口隐藏(2026-11-20 用户裁决;恢复=此处回插 { id: 'creation', label: '素材创作' }, 一行,提供方注册/分面服务端配置原样保留)
+        // 素材创作(creation)已整体移除（2026-11-20 用户裁决,git 历史 ≤4976a1f7c4 可考）
         { id: 'ops', label: '运营工具' },
         { id: 'media', label: '媒体工具' }, // 技能管理侧栏入口已随 2026-10-30 用户裁决移除(封面插件自带技能管理,各插件自管)
         { id: 'cover', label: '封面制作', glyph: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="5.4" cy="6" r="1.2"/><path d="M4 11.4 7.6 8.2l2.6 2.1 2-1.7 2.8 2.6"/>' }, // 封面制作(2026-10-27 用户裁决:独立菜单置于视频剪辑上方;封面编辑器 dsh-tintin-cover-plugin)
@@ -108,7 +108,6 @@ const tintinClient = (() => {
           else b.textContent = v.label
           // 图标：语义参考原版 Electron，风格对齐 DSH 侧栏 16×16 线稿（stroke currentColor / 线宽 1）
           const GLYPHS = {
-            creation: '<path d="M8 2.2 9.5 6.5 13.8 8 9.5 9.5 8 13.8 6.5 9.5 2.2 8 6.5 6.5z"/><path d="M12.3 11.6v3.2M10.7 13.2h3.2"/>',
             media: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6.8 5.9v4.2l3.6-2.1z"/>',
             ops: '<rect x="2" y="5.5" width="12" height="8" rx="1.5"/><path d="M6 5.5V4a1.5 1.5 0 0 1 1.5-1.5h1A1.5 1.5 0 0 1 10 4v1.5"/><path d="M2 8.5h12"/>',
             browser: '<circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c-1.8 1.6-2.8 3.7-2.8 6s1 4.4 2.8 6c1.8-1.6 2.8-3.7 2.8-6S9.8 3.6 8 2z"/>',
@@ -335,7 +334,7 @@ const tintinClient = (() => {
       // 独立）── activeCallScope 由 forSurface 的 wrapper 在同步调用段置位/复位；
       // call()/XHR/sse fetch 都在该同步段发起，此刻读取安全。白名单与 server-proxy.js
       // TINTIN_SURFACES 同步；宿主只认白名单面值，其余忽略（落全局解析链）。
-      const TINTIN_SURFACES = ['creation', 'ops', 'media']
+      const TINTIN_SURFACES = ['ops', 'media']
       let activeCallScope = null
       const scopeHeaders = () => (activeCallScope ? { 'x-tintin-scope': activeCallScope } : {})
       const call = (channel, payload) =>

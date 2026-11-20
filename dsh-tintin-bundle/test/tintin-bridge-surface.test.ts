@@ -1,5 +1,5 @@
-// test/tintin-bridge-surface.test.ts — 分面调用面回归（2026-11-14 用户裁决：素材
-// 创作/运营/媒体三面服务端地址分面独立）。工作树无 jsdom 依赖（宿主 chrome 区段
+// test/tintin-bridge-surface.test.ts — 分面调用面回归（2026-11-14 用户裁决：运营/
+// 媒体两服务端地址分面独立；素材创作面已随 2026-11-20 整包移除）。工作树无 jsdom 依赖（宿主 chrome 区段
 // 重 DOM 不宜整体求值），故取 client.js installTintinBridge 的桥体源码切片（首尾
 // 都是稳定语句锚点，块内纯桥定义无 DOM 依赖）在 vm 沙箱内以 stub fetch/XHR 驱动
 // 真实实现：forSurface 句柄按调用面携带 x-tintin-scope 头、全局调用不带面值、调用
@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 const clientSrc = readFileSync(fileURLToPath(new URL('../client.js', import.meta.url)), 'utf8')
 // 切片锚点：桥体起点（分面机械的清单声明）与终点（polyfill 安装完成打点）。
-const START = "const TINTIN_SURFACES = ['creation', 'ops', 'media']"
+const START = "const TINTIN_SURFACES = ['ops', 'media']"
 const END = "console.info('[tintin] window.tintin polyfill installed')"
 const bridgeSrc = clientSrc.slice(clientSrc.indexOf(START), clientSrc.indexOf(END))
 if (!bridgeSrc.includes('forSurface')) throw new Error('tintin-bridge-surface: client.js slice lost the forSurface block — anchors moved?')
@@ -74,9 +74,9 @@ describe('tintin bridge forSurface (client.js slice)', () => {
 
   it('carries the scope header onto multipart XHR uploads', async () => {
     const { xhrs, tintin } = makeSandbox()
-    const creation = tintin.forSurface('creation')
-    await creation.server.upload('/upload/target', {})
-    expect(xhrs[0]?.['x-tintin-scope']).toBe('creation')
+    const media = tintin.forSurface('media')
+    await media.server.upload('/upload/target', {})
+    expect(xhrs[0]?.['x-tintin-scope']).toBe('media')
   })
 
   it('rejects unknown surfaces and passes through non-function members', () => {
