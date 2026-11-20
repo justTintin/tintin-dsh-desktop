@@ -9,6 +9,7 @@ import { isDeepLinkScheme, PLATFORM_DEFS } from './platform-meta.ts'
 import { attachContextMenu } from './context-menu.ts'
 import { activateTab, closeTab, openTab, updateTab, type TabPoolState } from './tab-model.ts'
 import { migrateDefaultSessionCookies } from './cookie-sync.ts'
+import { applyRestoredSession, debouncedSessionSave } from './session-restore.ts'
 
 export interface TabEngineDeps {
   ipcMain: Pick<Electron.IpcMain, 'handle'>
@@ -41,6 +42,11 @@ export interface TabEngineDeps {
    *  下载助手空：扩展注入/console 捕获此前只接主平台视图，tab 视图从未接入） */
   onTabViewCreated?: (platform: string, view: WebContentsView) => void
   log: (msg: string) => void
+  /** 会话持久化（2026-11-20 壳层欠账「启动恢复」）：文件路径 + 开关；pushTabs 去抖写盘 */
+  sessionFile?: string
+  sessionRestore?: boolean
+  /** 活跃 tab 标题回调（宿主 setTitle 任务栏标题跟随；空串=回默认） */
+  onActiveTitle?: (title: string) => void
 }
 
 /** 标签引擎句柄：宿主（browser-service）导航中枢按平台打开/聚焦标签用。 */
@@ -133,10 +139,14 @@ export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => s
     return view
   }
 
+  const saveSession = deps.sessionFile ? debouncedSessionSave(deps.sessionFile) : null
   function pushTabs(): void {
     const host = deps.pageHost()
-    if (!host) return
     const pool = deps.getPool()
+    // 会话持久化（2026-11-20 壳层欠账「启动恢复」）+ 活跃标题回调（宿主任务栏 setTitle）
+    if (saveSession) saveSession(pool)
+    if (deps.onActiveTitle) { const at = pool.tabs.find((t) => t.id === pool.activeId); try { deps.onActiveTitle(String(at?.title || '')) } catch { /* 宿主竞态 */ } }
+    if (!host) return
     try { host.webContents.send('tintin-browser-page:tabs', { tabs: pool.tabs, activeTabId: pool.activeId }) } catch { /* 页面未就绪 */ }
   }
   function refocusTab(id: string): void {
@@ -219,5 +229,12 @@ export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => s
     return { ok: true }
   })
 
+  // 启动恢复（2026-11-20 壳层欠账）：开关默认开；逐 tab ensureTab + 记录 url 补跳。
+  // 恢复在首帧后微延迟执行（ensureTab 依赖宿主 focus/attach 就绪）。
+  if (deps.sessionFile && deps.sessionRestore !== false) {
+    setTimeout(() => {
+      try { applyRestoredSession(deps.sessionFile!, deps, (m) => log(`session-restore: ${m}`)) } catch (err) { log(`session restore failed: ${err instanceof Error ? err.message : err}`) }
+    }, 600)
+  }
   return { ensureTab }
 }

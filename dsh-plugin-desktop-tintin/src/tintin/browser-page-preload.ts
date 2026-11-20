@@ -42,6 +42,11 @@ const desktopBrowser = {
   revealPath: (payload: unknown) => invoke('browser:revealDailyAsset', payload),
   /** 顶栏 ⬇（2026-11-20 用户裁决）：资源管理器打开下载目录（materials） */
   openDownloadsDir: () => invoke('browser:openDownloadsDir'),
+  /** 下载管理（2026-11-20 壳层欠账批）：历史写/读/删/清 */
+  downloadsHistoryAdd: (payload: unknown) => invoke('browser:downloadsHistoryAdd', payload),
+  downloadsHistory: () => invoke('browser:downloadsHistory'),
+  downloadsHistoryRemove: (payload: unknown) => invoke('browser:downloadsHistoryRemove', payload),
+  downloadsHistoryClear: () => invoke('browser:downloadsHistoryClear'),
   sniffList: (payload?: unknown) => invoke('browser:sniffList', payload),
   sniffClear: (payload?: unknown) => invoke('browser:sniffClear', payload),
   sniffDownload: (payload: unknown) => invoke('browser:sniffDownload', payload),

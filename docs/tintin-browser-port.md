@@ -109,3 +109,13 @@
 onclick 调桥（桥缺失退化=展开/收起下载栏），title 改「打开下载目录」。
 生效：主进程链须重启；页面 html 刷新即得。完成行「打开目录」按钮（11-11 批）仍保留，
 语义=高亮具体文件；本次=整目录。
+
+## 壳层欠账批 3/4/5（2026-11-20 用户裁决「以上开始补」）
+
+**3 浏览器设置页**（增项）：下载时询问保存位置（askWhereToSave，默认关——媒体自动捕获链恒静默不受影响；开=用户 tab 非媒体流原生下载也弹保存框）+ 启动恢复标签页（sessionRestore，默认开）。设置存储 settings.json 扩两字段。
+**4 下载管理**：左栏功能扩展「下载管理」视图——历史持久化 userData/tintin/browser/downloads-history.json（上限 500；downloads:done 事件即写经 downloadsHistoryAdd），列表含时间/大小/打开目录/删除记录/清空记录（文件本体不动）。
+**5 会话恢复/权限面/页面标题**：
+- 会话恢复=session-restore.ts 新模块：pushTabs 去抖写 session.json（tabs/platform/url/title+activeId），启动微延迟 applyRestoredSession（逐 tab ensureTab，web 平台每次新建=恢复多开；记录 url 非 seed 补跳；开关 sessionRestore 默认开）。
+- 权限面=permissions.ts 新模块：每平台 session setPermissionRequestHandler/CheckHandler——ALLOW=fullscreen/pointerLock/clipboard-sanitized-write；其余（notifications/geolocation/摄像头麦克风采集/midi/sensors/display-capture/backgroundSync）拒绝并记日志（Electron 无 handler 时默认放行=与 Chrome 询问语义不同，本批固定策略，per-origin 询问 UI 留后续批）。
+- 页面标题=tab-engine onActiveTitle 回调 → 主窗 setTitle「<tab 标题> · TinTin 浏览器」（任务栏跟随；空标题回 TinTin 浏览器）。
+生效：主进程链重启；页面 html 刷新即得。browser-service 基线 1025 持平（1058+ 归档/打包链自动带上）。

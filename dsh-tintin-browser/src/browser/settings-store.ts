@@ -16,6 +16,10 @@ export interface BrowserSettings {
   searchEngine?: string
   proxyMode?: 'system' | 'direct' | 'manual'
   proxyRules?: string
+  /** 下载时询问保存位置（默认关=静默落 materials；捕获自动化不受此项影响恒静默） */
+  askWhereToSave?: boolean
+  /** 启动时恢复上次会话标签页（默认开） */
+  sessionRestore?: boolean
 }
 
 const ALLOWED_STORAGES = new Set(['cookies', 'cachestorage', 'localstorage', 'indexdb', 'serviceworkers'])
@@ -66,6 +70,8 @@ export function registerSettingsIpc(
     if (typeof p.searchEngine === 'string' && SEARCH_ENGINES.has(p.searchEngine)) cache.searchEngine = p.searchEngine
     if (p.proxyMode === 'system' || p.proxyMode === 'direct' || p.proxyMode === 'manual') cache.proxyMode = p.proxyMode
     if (typeof p.proxyRules === 'string') cache.proxyRules = p.proxyRules.trim().slice(0, 300)
+    if (p.askWhereToSave === true || p.askWhereToSave === false) cache.askWhereToSave = p.askWhereToSave
+    if (p.sessionRestore === true || p.sessionRestore === false) cache.sessionRestore = p.sessionRestore
     save()
     const proxyTouched = typeof p.proxyMode === 'string' || typeof p.proxyRules === 'string'
     if (proxyTouched) applyProxy()
@@ -91,12 +97,5 @@ export function registerSettingsIpc(
     }
     return { success: cleared > 0, cleared }
   })
-  ipcMain.handle('browser:openDownloadsDir', async () => {
-    const { shell } = await import('electron')
-    const dir = join(workspaceDir(), 'materials')
-    const err = await shell.openPath(dir)
-    return err ? { success: false, error: err } : { success: true }
-  })
-
   return { getSettings: () => ({ ...cache }) }
 }

@@ -32,6 +32,8 @@ import { registerHistoryBookmarkIpc } from './history-bookmark.ts'
 import { attachContextMenu } from './context-menu.ts'
 import { isCaptureWebContents } from './sniff-capture.ts'
 import { registerOpenDownloadsDir } from './downloads-dir.ts'
+import { registerPermissionPolicies } from './permissions.ts'
+import { sessionFileAt } from './session-restore.ts'
 import { registerTabEngine, type TabEngineHandle } from './tab-engine.ts'
 import { createPageDownloadMirror } from './page-downloads.ts'
 import { createThemeSync } from './theme-sync.ts'
@@ -187,20 +189,14 @@ function platformOf(p: string | null): PlatformDef | null {
 
 /** 当前活跃 view：标签池活跃标签优先（第二批 #2），否则平台行单视图兜底 */
 function activeView(): WebContentsView | null {
-  if (tabPool.activeId) {
-    const v = tabViews.get(tabPool.activeId)
-    return v && !v.webContents.isDestroyed() ? v : null
-  }
+  if (tabPool.activeId) { const v = tabViews.get(tabPool.activeId); return v && !v.webContents.isDestroyed() ? v : null }
   const v = currentPlatform ? browserViews.get(currentPlatform) : null
   return v && !v.webContents.isDestroyed() ? v : null
 }
 
 /** 活跃标签的分区平台（标签池路径用；无标签回落 currentPlatform） */
 function activeTabPlatform(): string | null {
-  if (tabPool.activeId) {
-    const t = tabPool.tabs.find((x) => x.id === tabPool.activeId)
-    if (t) return t.platform
-  }
+  if (tabPool.activeId) { const t = tabPool.tabs.find((x) => x.id === tabPool.activeId); if (t) return t.platform }
   return currentPlatform
 }
 
@@ -349,9 +345,7 @@ function ensureBrowserView(platform: string): WebContentsView {
   view.webContents.on('did-stop-loading', () => pushPageState())
   // B站扩展下载链接 console 捕获（2026-10-26 复活，SRC viewpool L237-254 冗余通道；
   // 主动轮询已升级为宿主级「跟随活跃 B站内容面」，见 registerTabEngine 之后的宿主轮询）
-  if (platform === 'bilibili') {
-    attachBiliDlConsoleCapture(view.webContents, (pl) => downloadMirror().pushBiliExtDl(pl))
-  }
+  if (platform === 'bilibili') attachBiliDlConsoleCapture(view.webContents, (pl) => downloadMirror().pushBiliExtDl(pl))
   // 分区存量救援：分区空而默认 session 有该平台登录（分区事故期间落的）→ 迁回
   void migrateDefaultSessionCookies(platform, ctxLog)
   browserViews.set(platform, view)
@@ -364,10 +358,8 @@ function attachToWindow(): void {
   const view = activeView()
   if (!view) return
   // 原生下载接管（幂等：session 每分区只挂一次）；挂活跃标签/平台的分区 session
-  const focusPlatform = activeTabPlatform() ?? currentPlatform
-  const sess = platformOf(focusPlatform)
-    ? session.fromPartition(platformOf(focusPlatform)!.partition)
-    : session.defaultSession
+  const pf = platformOf(activeTabPlatform() ?? currentPlatform)
+  const sess = pf ? session.fromPartition(pf.partition) : session.defaultSession
   if (downloadManager && !(sess as unknown as { __tintinDlAttached?: boolean }).__tintinDlAttached) {
     ;(sess as unknown as { __tintinDlAttached?: boolean }).__tintinDlAttached = true
     // 两链并存（1120 裁决）：捕获窗下载=定制静默落 materials；用户 tab 原生下载=原版弹保存框
@@ -613,7 +605,9 @@ export function registerBrowserService(
     cookieWatchInstalled = true
     for (const platform of Object.keys(PLATFORM_COOKIE_DOMAINS)) {
       try {
-        session.fromPartition(PLATFORM_DEFS[platform]!.partition).cookies.on('changed', () => scheduleCookieSync(platform))
+        const psess = session.fromPartition(PLATFORM_DEFS[platform]!.partition)
+        registerPermissionPolicies(psess, ctxLog)
+        psess.cookies.on('changed', () => scheduleCookieSync(platform))
       } catch (err) {
         ctxLog(`cookie watch failed for ${platform}: ${err instanceof Error ? err.message : err}`)
       }
@@ -744,6 +738,7 @@ export function registerBrowserService(
   downloadManager = createDownloadManager({
     workspacePath: workspaceDir,
     emit: downloadEmit,
+    shouldAsk: () => settingsStore.getSettings().askWhereToSave === true,
   })
   downloadManager.registerIpc(ipcMain)
   const mediaDownloader = createMediaDownloaderIpc({
@@ -834,7 +829,7 @@ export function registerBrowserService(
       return { success: true }
     } catch (err) { return { success: false, error: err instanceof Error ? err.message : String(err) } }
   })
-  registerOpenDownloadsDir(ipcMain, workspaceDir) // 顶栏 ⬇=打开下载目录（handler 在 downloads-dir.ts，铁律 4 拆出）
+  registerOpenDownloadsDir(ipcMain, workspaceDir, () => app.getPath('userData')) // ⬇目录+下载管理历史（permissions-downloads.ts，铁律 4 拆出）
   // 页内查找（2026-11-08 第一批 P0 #5）：作用于当前活跃平台视图
   ipcMain.handle('browser:findInPage', (_e, p: unknown) => {
     const q = (p || {}) as { text?: unknown; forward?: unknown }
@@ -899,6 +894,9 @@ export function registerBrowserService(
     activeView: () => activeView(),
     clearFocus: () => { currentPlatform = null },
     hostWin: () => hostWin(),
+    sessionFile: sessionFileAt(join(app.getPath('userData'), 'tintin', 'browser')),
+    sessionRestore: settingsStore.getSettings().sessionRestore !== false,
+    onActiveTitle: (title) => { try { const n = String(title || '').trim(); hostWin()?.setTitle(n ? `${n} · TinTin 浏览器` : 'TinTin 浏览器') } catch { /* 窗口竞态 */ } },
     mainWindow: () => mainWindowRef,
     pageHost: () => pageHost(),
     seedUrl: (platform) => platformOf(platform)?.seedUrl ?? PLATFORM_DEFS.web!.seedUrl,
