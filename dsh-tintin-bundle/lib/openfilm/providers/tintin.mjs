@@ -57,7 +57,30 @@ async function mcpCall(tool, args, ctx) {
   const said = String(payload?.result?.content?.[0]?.text ?? '');
   if (payload?.result?.isError) throw new Error(`${NAME} 的 ${tool} 失败：${said.slice(0, 300)}`);
   let out = null;
-  try { out = JSON.parse(said); } catch { /* 同步文本答案（无 JSON 包装） */ }
+  try { out = JSON.parse(said); } catch {
+    /* 服务端 create_image 的 text 块=JSON 对象 + 追加说明（如「[异步任务] 轮询: GET …」），
+       整体 parse 必失败 → 提取首个平衡 JSON 对象（字符串感知配对）再试；
+       2026-11-20 报障：画面里 create_image 误报「没有返回任务 id」（id 明明在文本里）。 */
+    const start = said.indexOf('{');
+    if (start >= 0) {
+      let depth = 0, inStr = false, esc = false;
+      for (let i = start; i < said.length; i++) {
+        const ch = said[i];
+        if (esc) { esc = false; continue; }
+        if (ch === '\\') { esc = true; continue; }
+        if (ch === '"') inStr = !inStr;
+        if (inStr) continue;
+        if (ch === '{') depth++;
+        else if (ch === '}') {
+          depth--;
+          if (depth === 0) {
+            try { out = JSON.parse(said.slice(start, i + 1)); } catch { /* 仍非 JSON */ }
+            break;
+          }
+        }
+      }
+    }
+  }
   return { said, out };
 }
 
