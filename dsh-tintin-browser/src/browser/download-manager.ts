@@ -7,7 +7,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { basename, dirname, join } from 'node:path'
 import { URL } from 'node:url'
-import type { DownloadItem, WebContents } from 'electron'
+import { dialog, type DownloadItem, type WebContents } from 'electron'
 
 interface NativeTask {
   type: 'native'
@@ -83,7 +83,17 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
     // mime 缺失时按来源域名兜底（B站下载域一律视频）
     const videoExt = videoExtOf[mime] ?? (/bilibili\.com/i.test(item.getURL?.() || '') ? '.mp4' : '')
     const finalName = needsExt && videoExt ? rawName + videoExt : rawName
-    const savePath = params.savePath || join(workspacePath(), 'materials', finalName)
+    let savePath = params.savePath || join(workspacePath(), 'materials', finalName)
+    // 2026-11-20 用户报障（B站助手「合并下载」不弹保存框）：扩展 wasm 合并产物是
+    // blob: URL 经 <a download> 触发 will-download——blob=用户主动下载的合成产物，
+    // 弹保存框（Electron 无自带下载 UI；默认路径=下载目录+推荐名），取消=不下载。
+    // 媒体 CDN 流保持静默落 materials（嗅探/口令自动化语义不变）。
+    if (!params.savePath && item.getURL().startsWith('blob:')) {
+      mkdirSync(join(workspacePath(), 'materials'), { recursive: true })
+      const chosen = dialog.showSaveDialogSync({ title: '保存下载', defaultPath: savePath })
+      if (!chosen) { try { item.cancel() } catch { /* 已终止 */ } return '' }
+      savePath = chosen
+    }
     mkdirSync(dirname(savePath), { recursive: true })
     item.setSavePath(savePath)
 
