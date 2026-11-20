@@ -73,11 +73,14 @@ function parseAnnotatedJson(said) {
 /** One MCP tools/call：mode 契约——'strict'=会话（纯 JSON）；'annotated'=画布（JSON+尾注，
  *  Studio 画面 create_image/edit_image 的服务端返回形态）。 */
 async function mcpCall(tool, args, ctx, mode = 'strict') {
+  /* patience 30s（2026-11-20 报障 create_music fetch failed）：缺省 patience=0=不重试，
+     公网网关间歇抖动一次即抛「could not be reached」；30s 窗口内 1s/2s/4s…指数退避
+     自动穿越抖动（call 内建机制，此前未启用）。 */
   const res = await call(NAME, `${base()}/mcp`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }),
-  }, ctx);
+  }, ctx, { patience: 30_000 });
   const raw = await res.text();
   let payload = null;
   try { payload = JSON.parse(raw); } catch {
