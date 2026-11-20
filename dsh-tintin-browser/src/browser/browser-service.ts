@@ -30,6 +30,7 @@ import { browserCookiesDir, collectPlatformCookies, migrateDefaultSessionCookies
 import { registerSettingsIpc } from './settings-store.ts'
 import { registerHistoryBookmarkIpc } from './history-bookmark.ts'
 import { attachContextMenu } from './context-menu.ts'
+import { isCaptureWebContents } from './sniff-capture.ts'
 import { registerOpenDownloadsDir } from './downloads-dir.ts'
 import { registerTabEngine, type TabEngineHandle } from './tab-engine.ts'
 import { createPageDownloadMirror } from './page-downloads.ts'
@@ -369,7 +370,8 @@ function attachToWindow(): void {
     : session.defaultSession
   if (downloadManager && !(sess as unknown as { __tintinDlAttached?: boolean }).__tintinDlAttached) {
     ;(sess as unknown as { __tintinDlAttached?: boolean }).__tintinDlAttached = true
-    downloadManager.attachSession(sess)
+    // 两链并存（1120 裁决）：捕获窗下载=定制静默落 materials；用户 tab 原生下载=原版弹保存框
+    downloadManager.attachSession(sess, { isAutomation: (wc) => isCaptureWebContents(wc.id) })
   }
   // 切换焦点：其余 view（平台单视图+标签视图）全部摘下并静音（本体常驻保登录态）
   for (const v of browserViews.values()) {
@@ -595,9 +597,7 @@ export function registerBrowserService(
   probeWebTheme() // 主题初始化+导航探针（web 层真值，2026-11-08 白底修复 §16.23）
   try {
     const themeMo = (): void => probeWebTheme()
-    mainWindow.webContents.on('dom-ready', themeMo)
-    mainWindow.webContents.on('did-navigate', themeMo)
-    mainWindow.webContents.on('did-navigate-in-page', themeMo)
+    for (const ev of ['dom-ready', 'did-navigate', 'did-navigate-in-page'] as const) mainWindow.webContents.on(ev, themeMo)
   } catch { /* 窗口生命周期竞态 */ }
   // 下载落盘根（2026-11-08 前移：设置页/下载目录展示在注册早期就要用）
   const workspaceDir = (): string => process.env.TINTIN_WORKSPACE_DIR || join(homedir(), 'Documents', 'tintin-workspace')

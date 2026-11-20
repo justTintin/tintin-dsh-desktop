@@ -84,6 +84,12 @@ function closeCaptureWindow(): void {
   if (win && !win.isDestroyed()) win.destroy()
 }
 
+/** 该 webContents 是否后台捕获窗（2026-11-20：will-download 分流用——捕获自动化
+ *  下载静默落 materials（定制链），用户 tab 的原生下载保持原版特性=弹保存框） */
+export function isCaptureWebContents(wcId: number): boolean {
+  try { return !!captureWin && !captureWin.isDestroyed() && captureWin.webContents.id === wcId } catch { return false }
+}
+
 /** 捕获页当前地址（嗅探详情页门控用；无捕获/非该平台时 null） */
 export function activeCapturePageUrl(platform: string): string | null {
   if (!captureWin || capturePlatform !== platform) return null

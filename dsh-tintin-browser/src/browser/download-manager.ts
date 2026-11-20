@@ -71,7 +71,7 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
   }
 
   /** Electron 原生下载（来自 BrowserView/webContents 的 will-download） */
-  function handleNativeDownload(item: DownloadItem, _webContents: WebContents, params: { savePath?: string }): string {
+  function handleNativeDownload(item: DownloadItem, _webContents: WebContents, params: { savePath?: string; isAutomation?: boolean }): string {
     const taskId = genTaskId()
     // 2026-11-20 用户报障（B站下载二次复发）：B站助手 content-script 的下载名「标题_pN」
     // 无扩展名，原生 will-download 按原名落盘=资源管理器类型「文件」。落盘前兜底：调用方
@@ -88,7 +88,9 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
     // blob: URL 经 <a download> 触发 will-download——blob=用户主动下载的合成产物，
     // 弹保存框（Electron 无自带下载 UI；默认路径=下载目录+推荐名），取消=不下载。
     // 媒体 CDN 流保持静默落 materials（嗅探/口令自动化语义不变）。
-    if (!params.savePath && item.getURL().startsWith('blob:')) {
+    /* 2026-11-20 用户裁决（两链并存）：捕获自动化下载（isAutomation=后台捕获窗发起）
+       保持定制行为静默落 materials；用户 tab 的原生下载恢复原版特性=弹保存框。 */
+    if (!params.savePath && !params.isAutomation && item.getURL().startsWith('blob:')) {
       mkdirSync(join(workspacePath(), 'materials'), { recursive: true })
       const chosen = dialog.showSaveDialogSync({ title: '保存下载', defaultPath: savePath })
       if (!chosen) { try { item.cancel() } catch { /* 已终止 */ } return '' }
@@ -243,10 +245,11 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
     })
   }
 
-  /** will-download 挂接（browser-service 在 BrowserView 的 session 上调用） */
-  function attachSession(session: Electron.Session): void {
+  /** will-download 挂接（browser-service 在 BrowserView 的 session 上调用）；
+   *  isAutomation：捕获窗 webContents 判定（browser-service 注入，2026-11-20 两链并存分流） */
+  function attachSession(session: Electron.Session, opts?: { isAutomation?: (wc: WebContents) => boolean }): void {
     session.on('will-download', (_e, item, wc) => {
-      handleNativeDownload(item, wc, {})
+      handleNativeDownload(item, wc, { isAutomation: opts?.isAutomation?.(wc) })
     })
   }
 
