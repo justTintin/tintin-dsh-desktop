@@ -30,6 +30,11 @@ dsh-plugin-desktop-tintin/tintin-resources/bin/*
 dsh-plugin-desktop-tintin/tintin-resources/ext-assets/*
 !dsh-plugin-desktop-tintin/tintin-resources/bin/.gitkeep
 !dsh-plugin-desktop-tintin/tintin-resources/ext-assets/.gitkeep
+# 2026-11-20 用户裁决：ext-assets 收编入库——SRC 正源(TinTin_Client_Electron)已消失，
+# 本仓拷贝是孤本；B站下载扩展名修复落在 content-script 里，不入库=下轮打包链照样回退。
+# bilibili-helper 31MB（含 ffmpeg wasm）+ chrom-douyin 1.9MB，第三方静态资产不再变。
+!dsh-plugin-desktop-tintin/tintin-resources/ext-assets/bilibili-helper
+!dsh-plugin-desktop-tintin/tintin-resources/ext-assets/chrom-douyin
 dsh-desktop-next/.desktop-build/
 dsh-plugin-desktop/.desktop-build/
 dsh-plugin-desktop-beta/.desktop-build/

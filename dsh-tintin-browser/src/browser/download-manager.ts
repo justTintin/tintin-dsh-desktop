@@ -73,29 +73,39 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
   /** Electron 原生下载（来自 BrowserView/webContents 的 will-download） */
   function handleNativeDownload(item: DownloadItem, _webContents: WebContents, params: { savePath?: string }): string {
     const taskId = genTaskId()
-    const savePath = params.savePath || join(workspacePath(), 'materials', item.getFilename())
+    // 2026-11-20 用户报障（B站下载二次复发）：B站助手 content-script 的下载名「标题_pN」
+    // 无扩展名，原生 will-download 按原名落盘=资源管理器类型「文件」。落盘前兜底：调用方
+    // 名无扩展名且响应是视频 mime → 按子类型补（B站 DASH 实为 fMP4；其它类型不猜）。
+    const rawName = item.getFilename()
+    const mime = String(item.getMimeType?.() || '').toLowerCase()
+    const videoExtOf: Record<string, string> = { 'video/mp4': '.mp4', 'video/quicktime': '.mp4', 'video/x-matroska': '.mkv', 'video/webm': '.webm' }
+    const needsExt = Boolean(rawName) && !/\.[a-z0-9]{1,8}$/i.test(rawName)
+    // mime 缺失时按来源域名兜底（B站下载域一律视频）
+    const videoExt = videoExtOf[mime] ?? (/bilibili\.com/i.test(item.getURL?.() || '') ? '.mp4' : '')
+    const finalName = needsExt && videoExt ? rawName + videoExt : rawName
+    const savePath = params.savePath || join(workspacePath(), 'materials', finalName)
     mkdirSync(dirname(savePath), { recursive: true })
     item.setSavePath(savePath)
 
     let lastPercent = 0
     item.on('updated', (_e, state) => {
       if (state === 'interrupted') {
-        broadcastProgress(taskId, { state: 'paused', percent: lastPercent, file: item.getFilename() })
+        broadcastProgress(taskId, { state: 'paused', percent: lastPercent, file: finalName })
       } else if (state === 'progressing') {
         const received = item.getReceivedBytes()
         const total = item.getTotalBytes()
         const percent = total > 0 ? Math.round((received / total) * 100) : 0
         const speed = calculateSpeed(taskId, received)
         lastPercent = percent
-        broadcastProgress(taskId, { state: 'downloading', percent, speed, downloaded: received, total, file: item.getFilename() })
+        broadcastProgress(taskId, { state: 'downloading', percent, speed, downloaded: received, total, file: finalName })
       }
     })
     item.once('done', (_e, state) => {
       if (state === 'completed') {
         const stat = statSync(savePath)
-        broadcastDone(taskId, { finalPath: savePath, size: stat.size, file: item.getFilename() })
+        broadcastDone(taskId, { finalPath: savePath, size: stat.size, file: finalName })
       } else {
-        broadcastError(taskId, new Error(`Download ${state}`), item.getFilename())
+        broadcastError(taskId, new Error(`Download ${state}`), finalName)
       }
     })
     downloadTasks.set(taskId, { type: 'native', item, savePath })
