@@ -10,6 +10,12 @@ import tailwind from '@tailwindcss/vite';
 import type { Plugin as PostcssPlugin } from 'postcss';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+/* 0.4 workbench 多入口+页面 import map(2026-11-20 报障「Failed to resolve module
+   specifier openfilm/workbench/edit」根因):插件 browser 模块(plugins/<id>/ui.js,
+   服务端原样伺服)以裸 specifier 指名 workbench,页面 import map 负责映射到构建
+   产物——官方桌面壳 apps/desktop/shell/vite.config.ts 的三处接线(workbenches.ts
+   助手/插件列表/rollup 入口),0.4 升级 vendor 了助手文件但本配置漏接线。 */
+import { workbenchImportMap, workbenchInputs } from '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/workbenches.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SRC = resolve(here, '../../dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src');
@@ -78,9 +84,16 @@ const scopeChat: PostcssPlugin = {
 };
 
 export default defineConfig({
-  plugins: [twoTrees(), openfilmAliases(), react(), tailwind()],
+  plugins: [twoTrees(), openfilmAliases(), react(), tailwind(), workbenchImportMap()],
   css: { postcss: { plugins: [scopeChat] } },
   /* one React for both trees (each would find its own package's otherwise) */
   resolve: { dedupe: ['react', 'react-dom', 'lucide-react'] },
-  build: { outDir: 'dist', emptyOutDir: true, target: 'es2022', sourcemap: false },
+  build: {
+    outDir: 'dist', emptyOutDir: true, target: 'es2022', sourcemap: false,
+    /* a workbench's entry keeps what it exports (its element): it is imported by name, from outside the build */
+    rollupOptions: {
+      preserveEntrySignatures: 'exports-only',
+      input: { main: fileURLToPath(new URL('./index.html', import.meta.url)), ...workbenchInputs() },
+    },
+  },
 });
