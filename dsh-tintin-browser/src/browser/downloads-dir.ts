@@ -1,7 +1,7 @@
 // downloads-dir.ts — 顶栏 ⬇ 通道（2026-11-20 用户裁决：点击跳转下载目录）。
 // 从 browser-service 拆出（铁律 4：基线文件只减不增）——handler 全文在此，
 // browser-service 只留一行注册。落盘根=工作区 materials（/tintin/media 白名单根内）。
-import { ipcMain, shell } from 'electron'
+import { shell } from 'electron'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
