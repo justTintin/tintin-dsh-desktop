@@ -41,8 +41,38 @@ const MODELS = {
 /** The picture ratios Studio asks for → the aspects create_image takes (9:16/16:9/1:1/4:3). */
 const ASPECT = { '1:1': '1:1', '4:3': '4:3', '3:2': '4:3', '16:9': '16:9', '9:16': '9:16', '2:3': '9:16' };
 
-/** One MCP tools/call: the answer's first text block, parsed as JSON when it is one. */
-async function mcpCall(tool, args, ctx) {
+/** 整体 JSON.parse（会话模式契约：text 块=纯 JSON，无尾注） */
+function tryParseJson(said) {
+  try { return JSON.parse(said); } catch { return null; }
+}
+
+/** 画布模式契约（Studio 画面）：text 块=JSON 对象 + 尾部说明文字（如「[异步任务] 轮询: GET …」，
+ *  给人看的操作提示）。解析=提取首个平衡 JSON 对象（字符串/转义感知配对）——按契约确定性地
+ *  走这条路径，不是「parse 失败后再猜」（2026-11-20 用户裁决：两种请求模式两个接口）。 */
+function parseAnnotatedJson(said) {
+  const start = said.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < said.length; i++) {
+    const ch = said[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') inStr = !inStr;
+    if (inStr) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        try { return JSON.parse(said.slice(start, i + 1)); } catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
+/** One MCP tools/call：mode 契约——'strict'=会话（纯 JSON）；'annotated'=画布（JSON+尾注，
+ *  Studio 画面 create_image/edit_image 的服务端返回形态）。 */
+async function mcpCall(tool, args, ctx, mode = 'strict') {
   const res = await call(NAME, `${base()}/mcp`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
@@ -56,38 +86,14 @@ async function mcpCall(tool, args, ctx) {
   }
   const said = String(payload?.result?.content?.[0]?.text ?? '');
   if (payload?.result?.isError) throw new Error(`${NAME} 的 ${tool} 失败：${said.slice(0, 300)}`);
-  let out = null;
-  try { out = JSON.parse(said); } catch {
-    /* 服务端 create_image 的 text 块=JSON 对象 + 追加说明（如「[异步任务] 轮询: GET …」），
-       整体 parse 必失败 → 提取首个平衡 JSON 对象（字符串感知配对）再试；
-       2026-11-20 报障：画面里 create_image 误报「没有返回任务 id」（id 明明在文本里）。 */
-    const start = said.indexOf('{');
-    if (start >= 0) {
-      let depth = 0, inStr = false, esc = false;
-      for (let i = start; i < said.length; i++) {
-        const ch = said[i];
-        if (esc) { esc = false; continue; }
-        if (ch === '\\') { esc = true; continue; }
-        if (ch === '"') inStr = !inStr;
-        if (inStr) continue;
-        if (ch === '{') depth++;
-        else if (ch === '}') {
-          depth--;
-          if (depth === 0) {
-            try { out = JSON.parse(said.slice(start, i + 1)); } catch { /* 仍非 JSON */ }
-            break;
-          }
-        }
-      }
-    }
-  }
+  const out = mode === 'annotated' ? parseAnnotatedJson(said) : tryParseJson(said);
   return { said, out };
 }
 
 /** 一个生成任务到产物地址：tools/call → task_id → GET /tasks/unified/<id> 轮询 → output_url。 */
 async function generate(tool, args, what, ctx) {
   ctx.say(`${what}（TinTin 服务端）…`);
-  const { said, out } = await mcpCall(tool, args, ctx);
+  const { said, out } = await mcpCall(tool, args, ctx, 'annotated')
   const taskId = String(out?.task_id ?? out?.taskId ?? '');
   if (!taskId) throw new Error(`${NAME} 的 ${tool} 没有返回任务 id：${said.slice(0, 200)}`);
   const deadline = Date.now() + 10 * 60_000;
@@ -182,7 +188,7 @@ export default {
       const prompt = needed(args, 'prompt');
       const duration = clamp(Math.round(number(args.sec) ?? 20), 3, 30);
       ctx.say(`音乐（MusicGen BGM，${duration}s）…`);
-      const { said, out } = await mcpCall('create_music', { style: 'auto', duration: String(duration) }, ctx);
+      const { said, out } = await mcpCall('create_music', { style: 'auto', duration: String(duration) }, ctx, 'annotated')
       const url = String(out?.url ?? out?.audio_url ?? '') || (said.match(/https?:\/\/\S+/)?.[0] ?? '');
       if (!url) throw new Error(`${NAME} 的音乐生成没有返回音频地址：${said.slice(0, 200)}`);
       const path = landing('audio/music', args.out, 'mp3');
