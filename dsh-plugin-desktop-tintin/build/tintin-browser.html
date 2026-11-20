@@ -349,12 +349,20 @@
           <span id="setDlDir" class="set-hint" style="user-select:text;"></span>
           <button id="setDlOpen" class="da-btn" style="height:26px;">打开目录</button>
         </div>
+        <div class="set-row" style="align-items:flex-start;">
+          <label>网站权限</label>
+          <div style="flex:1 1 auto;display:flex;flex-direction:column;gap:4px;">
+            <div id="permList" style="display:flex;flex-direction:column;gap:4px;"></div>
+            <span class="set-hint">网站请求通知/定位/摄像头等权限时弹窗询问，选择会记住并在此列出；移除后同站再请求将重新询问。</span>
+          </div>
+        </div>
       </section>
       <section class="view" id="view-dlmgmt">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
           <span style="font-weight:700;">下载管理</span>
           <span id="dlmCount" style="color:var(--muted);font-size:12px;"></span>
           <span style="flex:1 1 auto;"></span>
+          <input id="dlmFilter" type="text" placeholder="按文件名/地址过滤" style="width:200px;padding:0 8px;" />
           <button id="dlmClear" class="da-btn" style="height:26px;">清空记录</button>
         </div>
         <div id="dlmList" style="display:flex;flex-direction:column;gap:6px;"></div>
@@ -520,6 +528,7 @@
   function stLoad() {
     if (!bridge || !bridge.getSettings) return
     bridge.getSettings().then(stApply).catch(function () { /* 桥不可达保持原状 */ })
+    permLoad()
   }
   $('setHomeSave').onclick = function () {
     if (!bridge) return
@@ -609,12 +618,15 @@
   // 「服务端」按钮已按 2026-11-08 用户裁决整体移除（含壳侧 server 动作与 resolveServerUrl 注入链）
 
   // ── 下载管理（2026-11-20 壳层欠账批）：历史=downloads:done 事件即写（经桥持久化）──
+  var dlmFilterText = ''
   function dlmLoad() {
     if (!bridge || !bridge.downloadsHistory) return
     bridge.downloadsHistory().then(function (r) {
-      var list = (r && r.items) || []
+      var all = (r && r.items) || []
+      var q = dlmFilterText.trim().toLowerCase()
+      var list = q ? all.filter(function (d) { return ((d.file || '') + ' ' + (d.url || '')).toLowerCase().indexOf(q) >= 0 }) : all
       var box = document.getElementById('dlmList')
-      $('dlmCount').textContent = list.length ? list.length + ' 条记录' : ''
+      $('dlmCount').textContent = list.length ? (q ? list.length + ' / ' + all.length + ' 条' : list.length + ' 条记录') : '暂无下载记录'
       box.textContent = ''
       if (!list.length) { box.innerHTML = '<span style="color:var(--muted);font-size:12px;">暂无下载记录。</span>'; return }
       list.forEach(function (d) {
@@ -641,6 +653,37 @@
     if (!bridge || !bridge.downloadsHistoryClear) return
     if (!window.confirm('清空全部下载记录？文件本身不受影响。')) return
     bridge.downloadsHistoryClear().then(dlmLoad).catch(function () {})
+  }
+  if ($('dlmFilter')) $('dlmFilter').oninput = function () { dlmFilterText = this.value; dlmLoad() }
+
+  // ── 设置页「网站权限」区（2026-11-20 权限面询问批）：记忆表列出+移除 ──
+  function permLoad() {
+    if (!bridge || !bridge.permissionsList) return
+    bridge.permissionsList().then(function (table) {
+      var box = document.getElementById('permList')
+      if (!box) return
+      box.textContent = ''
+      var rows = []
+      Object.keys(table || {}).forEach(function (origin) {
+        Object.keys(table[origin]).forEach(function (permission) {
+          rows.push({ origin: origin, permission: permission, decision: table[origin][permission] })
+        })
+      })
+      if (!rows.length) { box.innerHTML = '<span style="color:var(--muted);font-size:12px;">暂无已记住的网站授权。</span>'; return }
+      rows.forEach(function (row) {
+        var el = document.createElement('div')
+        el.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:12px;'
+        var txt = document.createElement('span')
+        txt.style.cssText = 'flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+        txt.textContent = row.origin + ' · ' + row.permission + ' · ' + (row.decision === 'allow' ? '允许' : '拒绝')
+        txt.title = txt.textContent
+        var btn = document.createElement('button')
+        btn.className = 'da-btn'; btn.textContent = '移除'; btn.style.height = '22px'; btn.style.flexShrink = '0'
+        btn.onclick = function () { bridge.permissionsReset({ origin: row.origin, permission: row.permission }).then(permLoad).catch(function () {}) }
+        el.append(txt, btn)
+        box.appendChild(el)
+      })
+    }).catch(function () {})
   }
 
   // ── 登录态 ──

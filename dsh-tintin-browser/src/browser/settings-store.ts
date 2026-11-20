@@ -20,6 +20,8 @@ export interface BrowserSettings {
   askWhereToSave?: boolean
   /** 启动时恢复上次会话标签页（默认开） */
   sessionRestore?: boolean
+  /** 网站权限记忆表（2026-11-20 权限面询问批）：origin → permission → allow|deny */
+  permissions?: Record<string, Record<string, 'allow' | 'deny'>>
 }
 
 const ALLOWED_STORAGES = new Set(['cookies', 'cachestorage', 'localstorage', 'indexdb', 'serviceworkers'])
@@ -37,7 +39,7 @@ export function resolveProxyConfig(s: BrowserSettings): ProxyConfig {
 export function registerSettingsIpc(
   ipcMain: Pick<Electron.IpcMain, 'handle'>,
   deps: { workspaceDir: () => string; log: (msg: string) => void },
-): { getSettings: () => BrowserSettings } {
+): { getSettings: () => BrowserSettings; getPermissions: () => Record<string, Record<string, 'allow' | 'deny'>>; setPermission: (origin: string, permission: string, decision: 'allow' | 'deny') => void } {
   const { log, workspaceDir } = deps
   const file = join(app.getPath('userData'), 'tintin', 'browser', 'settings.json')
   let cache: BrowserSettings = {}
@@ -77,6 +79,32 @@ export function registerSettingsIpc(
     if (proxyTouched) applyProxy()
     return withDownloads()
   })
+  // ── 网站权限记忆（2026-11-20 权限面询问批）：origin/permission 细粒度 allow|deny ──
+  ipcMain.handle('browser:permissionsList', () => cache.permissions ?? {})
+  ipcMain.handle('browser:permissionSet', (_e, p: unknown) => {
+    const q = (p || {}) as { origin?: unknown; permission?: unknown; decision?: unknown }
+    const origin = String(q.origin || '').trim()
+    const permission = String(q.permission || '').trim()
+    const decision = q.decision === 'allow' ? 'allow' : q.decision === 'deny' ? 'deny' : ''
+    if (!origin || !permission || !decision) return { success: false, error: '参数不全' }
+    const table = (cache.permissions ??= {})
+    ;(table[origin] ??= {})[permission] = decision as 'allow' | 'deny'
+    save()
+    return { success: true }
+  })
+  ipcMain.handle('browser:permissionsReset', (_e, p: unknown) => {
+    const q = (p || {}) as { origin?: unknown; permission?: unknown }
+    const origin = String(q.origin || '').trim()
+    const permission = String(q.permission || '').trim()
+    if (cache.permissions?.[origin]) {
+      if (permission) delete cache.permissions[origin]![permission]
+      else delete cache.permissions[origin]
+      if (!Object.keys(cache.permissions[origin] ?? {}).length) delete cache.permissions[origin]
+      save()
+    }
+    return { success: true }
+  })
+
   ipcMain.handle('browser:clearData', async (_e, payload: unknown) => {
     const p = (payload ?? {}) as { platform?: unknown; storages?: unknown }
     const storages = (Array.isArray(p.storages) ? p.storages : []).map(String).filter((s) => ALLOWED_STORAGES.has(s))
@@ -97,5 +125,11 @@ export function registerSettingsIpc(
     }
     return { success: cleared > 0, cleared }
   })
-  return { getSettings: () => ({ ...cache }) }
+  const getPermissions = (): Record<string, Record<string, 'allow' | 'deny'>> => cache.permissions ?? {}
+  const setPermission = (origin: string, permission: string, decision: 'allow' | 'deny'): void => {
+    const table = (cache.permissions ??= {})
+    ;(table[origin] ??= {})[permission] = decision
+    save()
+  }
+  return { getSettings: () => ({ ...cache }), getPermissions, setPermission }
 }

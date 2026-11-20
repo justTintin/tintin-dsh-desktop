@@ -47,6 +47,9 @@ const desktopBrowser = {
   downloadsHistory: () => invoke('browser:downloadsHistory'),
   downloadsHistoryRemove: (payload: unknown) => invoke('browser:downloadsHistoryRemove', payload),
   downloadsHistoryClear: () => invoke('browser:downloadsHistoryClear'),
+  /** 网站权限（2026-11-20 权限面询问批）：记忆表读取/逐条移除（询问弹窗在主进程） */
+  permissionsList: () => invoke('browser:permissionsList'),
+  permissionsReset: (payload: unknown) => invoke('browser:permissionsReset', payload),
   sniffList: (payload?: unknown) => invoke('browser:sniffList', payload),
   sniffClear: (payload?: unknown) => invoke('browser:sniffClear', payload),
   sniffDownload: (payload: unknown) => invoke('browser:sniffDownload', payload),
