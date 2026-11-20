@@ -154,7 +154,10 @@ export function registerTabEngine(deps: TabEngineDeps, themedBackground: () => s
   function ensureTab(platform: string): { id: string } | null {
     if (!PLATFORM_DEFS[platform]) return null
     const pool = deps.getPool()
-    const existing = pool.tabs.find((t) => t.platform === platform)
+    /* 2026-11-20 用户报障「+ 点了没反应」：+ 的预期=像 Chrome 新建标签页。原逻辑
+       「同平台已有→激活」让 web 平台永远只有一个标签（自锁）。改：web=通用标签，
+       每次都新开（多开共存）；平台标签（B站等）保持每平台一个复用激活。 */
+    const existing = platform === 'web' ? undefined : pool.tabs.find((t) => t.platform === platform)
     if (existing) {
       const next = activateTab(pool, existing.id)
       if (next !== pool) deps.setPool(next)

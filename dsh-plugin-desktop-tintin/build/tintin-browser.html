@@ -225,7 +225,7 @@
 <body>
   <div id="tabbar">
     <div id="tbTabs" style="display:flex;align-items:center;gap:4px;"></div>
-    <button id="tbNew" title="新建标签（当前平台）">＋</button>
+    <button id="tbNew" title="新建标签页">＋</button>
     <span style="flex:1 1 auto;"></span>
   </div>
   <div id="bar">
@@ -683,10 +683,12 @@
     paintTabs()
     if (lastTabs.activeTabId) { document.getElementById('starBtn').style.display = ''; if (page) page.action({ type: 'noop' }).catch(function () {}) }
   })
+  // 2026-11-20 用户报障「+ 点了没反应」：+ = 新建通用标签页（像 Chrome），恒开 web
+  // 标签（tab-engine 对 web 每次新建、多开共存）；不再绑定当前平台（同平台只会
+  // 激活已有标签=永远建不出新标签的自锁）。
   document.getElementById('tbNew').onclick = function () {
     if (!page) return
-    var plat = ($('hostTip').dataset.platform) || 'web'
-    page.tabOpen({ platform: plat }).then(function (r) {
+    page.tabOpen({ platform: 'web' }).then(function (r) {
       if (r && r.ok === false) toast(r.error || '新建标签失败')
     }).catch(function (e) { toast('新建标签失败：' + (e && e.message || e)) })
   }
