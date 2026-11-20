@@ -127,18 +127,22 @@ export const BILI_DL_EXTRACT_SCRIPT = `(function(){
         }
       }
     }
-    /* 收尾（2026-11-20 用户裁决，推翻上一版「配对后隐藏单流」）：恰 2 条且大小比 >4
-       （大=视频 小=音频）→ 两条流**原样保留**（kind 标注 video/audio，可各自单独下载），
-       再**追加**一条 dual 合并条（downloadMediaStart 的 audioUrl FFmpeg 合并链，
-       单文件落盘）。非该形态原样输出不猜。 */
+    /* 收尾（2026-11-20 用户裁决二，命名细化）：恰 2 条且大小比 >4（大=视频 小=音频）
+       → 两条流**原样保留**（kind 标注 video/audio，可各自单独下载；命名
+       标题_video.mp4 / 标题_audio.mp3——音频按裁决用 .mp3），再**追加**一条 dual
+       合并条（downloadMediaStart 的 audioUrl FFmpeg 合并链，单文件落盘 标题.mp4）。
+       非该形态原样输出不猜。 */
     if (singles.length === 2) {
       var big = singles[0].size >= singles[1].size ? singles[0] : singles[1];
       var small = big === singles[0] ? singles[1] : singles[0];
       if (big.size > 0 && small.size > 0 && big.size / Math.max(small.size, 1) > 4) {
+        var stem = String(big.download || '').replace(/\.mp4$/i, '');
         big.kind = 'video';
+        big.download = stem + '_video.mp4';
         small.kind = 'audio';
+        small.download = stem + '_audio.mp3';
         items.push(big, small);
-        items.push({ url: big.url, audioUrl: small.url, download: big.download, text: big.text, sizeText: big.sizeText, kind: 'merge', dual: true });
+        items.push({ url: big.url, audioUrl: small.url, download: stem + '.mp4', text: big.text, sizeText: big.sizeText, kind: 'merge', dual: true });
         return { hostFound: true, title: title, downloads: items, url: window.location.href, ts: Date.now() };
       }
     }

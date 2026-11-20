@@ -299,10 +299,15 @@ a.btn {
         var big = singles[0].size >= singles[1].size ? singles[0] : singles[1];
         var small = big === singles[0] ? singles[1] : singles[0];
         if(big.size > 0 && small.size > 0 && big.size / Math.max(small.size, 1) > 4){
+          /* 命名细化（2026-11-20 裁决二）：视频 标题_video.mp4 / 音频 标题_audio.mp3；
+             合并条保持 标题.mp4 */
+          var stem = String(big.download || '').replace(/\.mp4$/i, '');
           big.kind = 'video';
+          big.download = stem + '_video.mp4';
           small.kind = 'audio';
+          small.download = stem + '_audio.mp3';
           items.push(big, small);
-          items.push({ url: big.url, audioUrl: small.url, download: big.download, text: big.text, sizeText: big.sizeText, kind: 'merge', dual: true });
+          items.push({ url: big.url, audioUrl: small.url, download: stem + '.mp4', text: big.text, sizeText: big.sizeText, kind: 'merge', dual: true });
           singles = [];
         }
       }
