@@ -895,8 +895,10 @@
       var card = document.createElement('div'); card.className = 'sn-card'
       var nm = document.createElement('div'); nm.className = 'sn-name'; nm.textContent = dl.text || dl.url; nm.title = dl.url
       var meta = document.createElement('div'); meta.className = 'sn-meta'
-      var badge = document.createElement('span'); badge.className = 'sn-badge'; badge.textContent = dl.sizeText || (dl.audioUrl ? '音视频' : '视频')
-      var btn = document.createElement('button'); btn.className = 'sn-btn'; btn.textContent = biliBusy[dl.url] ? '下载中…' : '下载'
+      /* 2026-11-20 用户裁决：双流各标「视频/音频」可单独下载 + 一条「音视频合并」卡 */
+      var kindText = dl.kind === 'video' ? '视频' : dl.kind === 'audio' ? '音频' : dl.audioUrl ? '音视频合并' : '视频'
+      var badge = document.createElement('span'); badge.className = 'sn-badge'; badge.textContent = dl.sizeText || kindText
+      var btn = document.createElement('button'); btn.className = 'sn-btn'; btn.textContent = biliBusy[dl.url] ? '下载中…' : (dl.kind === 'merge' ? '合并下载' : '下载')
       btn.onclick = function () {
         if (!bridge || biliBusy[dl.url]) return
         biliBusy[dl.url] = true; btn.textContent = '下载中…'
@@ -912,7 +914,7 @@
         }).then(function (r) {
           biliBusy[dl.url] = false
           btn.textContent = r && r.success ? '已提交 ✓' : '失败'
-          setTimeout(function () { btn.textContent = '下载' }, 2500)
+          setTimeout(function () { btn.textContent = dl.kind === 'merge' ? '合并下载' : '下载' }, 2500)
         }).catch(function () { biliBusy[dl.url] = false; btn.textContent = '失败' })
       }
       meta.append(badge)
