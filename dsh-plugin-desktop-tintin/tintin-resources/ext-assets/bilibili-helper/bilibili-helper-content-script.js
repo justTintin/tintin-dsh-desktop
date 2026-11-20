@@ -251,6 +251,11 @@ a.btn {
       var titleEl = sr.querySelector('#title');
       var title = (titleEl && titleEl.textContent || '').trim();
       var items = [];
+      /* 2026-11-20 用户报障（视频/音频两文件落盘）：扩展把同一分 P 的 DASH 双流画成两个
+         <a merge=on>（各自 durls=[单流]），逐流条目→右栏两条卡→点两次=分开落盘。
+         单流条目先收 singles，收尾配对：恰 2 条且大小比 >4（大=视频 小=音频）→ 合并为
+         一个 dual item（audioUrl）走宿主 FFmpeg 合并链单文件落盘。非该形态原样输出。 */
+      var singles = [];
       list.forEach(function(a){
         var t = (a.textContent || '').trim();
         var sm = t.match(/\(([^)]+)\)/);
@@ -274,16 +279,29 @@ a.btn {
         var durls = a.getAttribute('durls');
         if(durls){
           var arr = _decodeEntry(durls);
-          if(Object.prototype.toString.call(arr) === '[object Array]'){
-            arr.forEach(function(g, i){
-              if(g && g.url) items.push({ url: _normUrl(g.url), download: _mp4((a.getAttribute('title') || '') + (arr.length>1 ? '_p'+(i+1) : '')), text: t + (arr.length>1 ? ' '+(i+1) : ''), sizeText: sizeText });
-            });
+          if(Object.prototype.toString.call(arr) === '[object Array]' && arr.length){
+            if(arr.length >= 2){
+              /* 双流在一个 durls 里：大=视频 小=音频 → 合并条 */
+              var v = arr[0], a2 = arr[1];
+              if(Number(a2 && a2.size || 0) > Number(v && v.size || 0)){ v = arr[1]; a2 = arr[0] }
+              if(v && v.url && a2 && a2.url){ items.push({ url: _normUrl(v.url), audioUrl: _normUrl(a2.url), download: _mp4(a.getAttribute('title') || ''), text: t, sizeText: sizeText, dual: true }); return }
+            }
+            if(arr[0] && arr[0].url){ singles.push({ url: _normUrl(arr[0].url), size: Number(arr[0].size) || 0, download: _mp4(a.getAttribute('title') || ''), text: t, sizeText: sizeText }) }
             return;
           }
         }
       });
-      if(!items.length) return;
-      var payload = { source: 'bilibili-helper', title: title, downloads: items, url: window.location.href, ts: Date.now() };
+      /* 收尾配对（见 singles 声明处注释）：恰 2 条且大小比 >4 → 音视频合并条 */
+      if(singles.length === 2){
+        var big = singles[0].size >= singles[1].size ? singles[0] : singles[1];
+        var small = big === singles[0] ? singles[1] : singles[0];
+        if(big.size > 0 && small.size > 0 && big.size / Math.max(small.size, 1) > 4){
+          items.push({ url: big.url, audioUrl: small.url, download: big.download, text: big.text, sizeText: big.sizeText, dual: true });
+          singles = [];
+        }
+      }
+      if(!(items.length + singles.length)) return;
+      var payload = { source: 'bilibili-helper', title: title, downloads: items.concat(singles), url: window.location.href, ts: Date.now() };
       var sig = JSON.stringify({ title: title, urls: items.map(function(x){ return x.url }) });
       if(sig === _lastSig) return; // 去重，避免 setInterval 重复推送刷新右栏
       _lastSig = sig;

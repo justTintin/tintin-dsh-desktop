@@ -77,6 +77,12 @@ export const BILI_DL_EXTRACT_SCRIPT = `(function(){
     var qm = title.match(/^\\[([^\\]]+)\\]/);
     var quality = qm ? ('[' + qm[1] + '] ') : '';
     var items = [];
+    /* 2026-11-20 用户报障（视频/音频两文件落盘）：扩展把同一分 P 的 DASH 双流画成两个
+       <a merge=on>（各自 durls=[单流]），逐流条目→右栏两条卡→用户点两次=视频/音频分开
+       落盘。单流条目先收 singles，收尾配对：恰好 2 条且大小比 >4（大=视频 小=音频）→
+       合并为一个 dual item 走 downloadMediaStart 的 audioUrl FFmpeg 合并链（单文件）。
+       非该形态（真多 P/多清晰度）原样输出，不猜。 */
+    var singles = [];
     for (var i = 0; i < list.length; i++) {
       var a = list[i];
       var t = (a.textContent || '').trim();
@@ -116,12 +122,20 @@ export const BILI_DL_EXTRACT_SCRIPT = `(function(){
               continue;
             }
           }
-          if (arr[0] && arr[0].url) { items.push({ url: _norm(arr[0].url), download: quality + base + '.mp4', text: mergeText, sizeText: liSize }); }
+          if (arr[0] && arr[0].url) { singles.push({ url: _norm(arr[0].url), size: Number(arr[0] && arr[0].size) || 0, download: quality + base + '.mp4', text: mergeText, sizeText: liSize }); }
           continue;
         }
       }
     }
-    return { hostFound: true, title: title, downloads: items, url: window.location.href, ts: Date.now() };
+    /* 收尾配对（见 singles 声明处注释）：恰 2 条且大小比 >4 → 音视频合并条 */
+    if (singles.length === 2) {
+      var big = singles[0].size >= singles[1].size ? singles[0] : singles[1];
+      var small = big === singles[0] ? singles[1] : singles[0];
+      if (big.size > 0 && small.size > 0 && big.size / Math.max(small.size, 1) > 4) {
+        return { hostFound: true, title: title, downloads: [{ url: big.url, audioUrl: small.url, download: big.download, text: big.text, sizeText: big.sizeText, dual: true }], url: window.location.href, ts: Date.now() };
+      }
+    }
+    return { hostFound: true, title: title, downloads: items.concat(singles), url: window.location.href, ts: Date.now() };
   } catch(e) { return { hostFound: true, downloads: [] }; }
 })()`
 
