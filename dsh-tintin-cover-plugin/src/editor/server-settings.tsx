@@ -264,7 +264,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
               <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>正在检测即梦 CLI…</div>
             ) : jmFlow ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ fontSize: 12, color: 'var(--text)' }}>登录即梦：已自动打开系统浏览器，在网页输入授权码完成授权</div>
+                <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text)' }}>登录分两步：① 在网页点「授权成功」＝<b>批准这台电脑</b>（只是同意，还没完成）；② 回到本客户端<b>自动领取凭证</b>（设备码 15 分钟内有效）——两步都完成才算登录成功。</div>
                 <a href={jmFlow.verificationUri} target="_blank" rel="noreferrer"
                   onClick={(e) => {
                     // 桌面壳 window.open 恒 deny(Studio 视图),点击改走系统浏览器桥;
@@ -290,7 +290,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
                   <button onClick={() => navigator.clipboard?.writeText(jmFlow.verificationUri).catch(() => {})} style={{ ...btn('ghost'), flex: 'none', padding: '5px 12px', fontSize: 12 }}>复制链接</button>
                 </div>
                 <div style={{ fontSize: 12, color: jmFlow.failed ? 'var(--err)' : 'var(--text-faint)' }}>
-                  {jmFlow.failed ? `✗ ${jmFlow.failed}` : jmFlow.checking ? '等待授权中…（完成网页授权后自动回到这里）' : ''}
+                  {jmFlow.failed ? `✗ ${jmFlow.failed}` : jmFlow.checking ? '第②步进行中：已批准的话，客户端正在自动领取凭证…（最长等 5 分钟）' : ''}
                 </div>
                 {jmFlow.failed ? (
                   <div style={{ display: 'flex', gap: 8 }}>
