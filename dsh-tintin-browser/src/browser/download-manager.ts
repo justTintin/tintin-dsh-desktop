@@ -31,6 +31,8 @@ export interface DownloadManagerDeps {
   workspacePath: () => string
   /** 广播出口（channel: downloads:progress|done|error；browser-service 接 mainWindow） */
   emit: (channel: 'downloads:progress' | 'downloads:done' | 'downloads:error', payload: Record<string, unknown>) => void
+  /** 设置「下载时询问保存位置」（2026-11-20 设置批）：开=用户 tab 非媒体流也弹保存框 */
+  shouldAsk?: () => boolean
 }
 
 export function createDownloadManager(deps: DownloadManagerDeps) {
@@ -90,7 +92,7 @@ export function createDownloadManager(deps: DownloadManagerDeps) {
     // 媒体 CDN 流保持静默落 materials（嗅探/口令自动化语义不变）。
     /* 2026-11-20 用户裁决（两链并存）：捕获自动化下载（isAutomation=后台捕获窗发起）
        保持定制行为静默落 materials；用户 tab 的原生下载恢复原版特性=弹保存框。 */
-    if (!params.savePath && !params.isAutomation && item.getURL().startsWith('blob:')) {
+    if (!params.savePath && !params.isAutomation && (item.getURL().startsWith('blob:') || (deps.shouldAsk?.() === true))) {
       mkdirSync(join(workspacePath(), 'materials'), { recursive: true })
       const chosen = dialog.showSaveDialogSync({ title: '保存下载', defaultPath: savePath })
       if (!chosen) { try { item.cancel() } catch { /* 已终止 */ } return '' }
