@@ -551,7 +551,7 @@ export function LayersPanel({ project }: { project: string }): React.ReactElemen
                   >＋ 添加一行</button>
                 </div>
               ) : null}
-              <TextProperties layerId={layer.id} baseFontSize={layer.fontSize ?? 36} tplWidth={tpl.width} />
+              <TextProperties layerId={layer.id} baseFontSize={layer.fontSize ?? 36} />
               <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
                 {Array.isArray(value) ? '每行一条(钩子/卖点);末行默认跳色可被颜色覆盖' : '支持中文;改动即时预览'}
               </div>

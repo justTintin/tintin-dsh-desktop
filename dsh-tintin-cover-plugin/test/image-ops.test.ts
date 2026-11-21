@@ -126,7 +126,7 @@ describe('store actions: duplicate + arrange', () => {
 })
 
 describe('多选撤销粒度(2026-11-11 §6.5 R9a: 批量动作=单条撤销)', () => {
-  it('applyLayerGeometry 三层一次提交,撤销栈只进一条,undo 一次全还原', () => {
+  it('applyGeom 三层一次提交,撤销栈只进一条,undo 一次全还原', () => {
     const s0 = useEditor.getState()
     s0.setTemplate('product')
     s0.setProp('image', 'a.png')
@@ -134,7 +134,7 @@ describe('多选撤销粒度(2026-11-11 §6.5 R9a: 批量动作=单条撤销)', 
     s0.addCustomLayer('c.png', 40, 40, 100)
     const st = useEditor.getState()
     const pastBefore = (useEditor as unknown as { temporal: { getState: () => { pastStates: unknown[] } } }).temporal.getState().pastStates.length
-    st.applyLayerGeometry([
+    st.applyGeom([
       { id: st.selectedLayer!, custom: true, x: 111, y: 222 },
       { id: 'img-x1', custom: false, x: 5, y: 6 }, // 固定层走 styles
     ])

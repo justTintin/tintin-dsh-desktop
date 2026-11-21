@@ -7,11 +7,12 @@
 //   enabled=token.icon / disabled=token.text_faint;分布=两个纯文本按钮(水平/垂直),≥3 选中才可用;
 // · ProMedium tokens(:225-244): icon #E2E2E2 / text_faint #A0A0A0 / hover #626262 / field #454545 / field_border #686868 / text #EEEEEE。
 // 动作层:对齐/分布一律点击时现场量 DOM(不吃面板 memo 快照——memo 测量提交前跑,天然慢一拍);
-// 文字层写 styles.dx/dy、自由图片层写 x/y、槽位写 styles.dx/dy;锁定层跳过。
+// 几何写入统一走 store.applyGeom(§7.27;对齐/分布整体=单条撤销);锁定层跳过。
 import React from 'react'
 import { getTemplate } from '../registry'
-import { compRectRef, layerEl } from './canvas-geom'
+import { canvasFrameNow, layerEl, type CanvasBox } from './canvas-geom'
 import { lockedOf } from './image-ops'
+import type { GeomEntry } from './layer-geom'
 import { useEditor } from './store'
 
 export type AlignMode = 'left' | 'centerX' | 'right' | 'top' | 'centerY' | 'bottom'
@@ -80,24 +81,22 @@ function AlignGlyph({ kind, on }: { kind: Kind; on: boolean }): React.ReactEleme
   )
 }
 
-/** 画布盒测量(现场量;compRectRef 由画布每次渲染回写) */
-function measureBox(id: string): { left: number; top: number; w: number; h: number; scale: number } | null {
-  const comp = compRectRef.current
-  if (!comp || comp.width <= 0) return null
-  const st = useEditor.getState()
-  const tpl = getTemplate(st.templateId)
-  const el = layerEl(id)
+/** 画布盒测量(现场量;frame 由画布 publish,scale 唯一换算源) */
+function measureBox(id: string): CanvasBox | null {
+  const frame = canvasFrameNow()
+  if (!frame) return null
+  const el = layerEl(id, frame.root)
   if (!(el instanceof HTMLElement)) return null
-  const scale = Math.max(comp.width / tpl.width, 0.05)
   const r = el.getBoundingClientRect()
-  return { left: (r.left - comp.left) / scale, top: (r.top - comp.top) / scale, w: r.width / scale, h: r.height / scale, scale }
+  return { left: (r.left - frame.rect.left) / frame.scale, top: (r.top - frame.rect.top) / frame.scale, w: r.width / frame.scale, h: r.height / frame.scale }
 }
 
-/** 六向对齐(选中的每一层各自对画布;PhotoCraft layer.align.* 语义) */
+/** 六向对齐(选中的每一层各自对画布;PhotoCraft layer.align.* 语义;一次 set=单条撤销) */
 export function alignSelection(mode: AlignMode, ids: string[]): void {
   const st = useEditor.getState()
   const tpl = getTemplate(st.templateId)
   const horizontal = mode === 'left' || mode === 'centerX' || mode === 'right'
+  const entries: GeomEntry[] = []
   for (const id of [...new Set(ids.filter(Boolean))]) {
     if (lockedOf(st.props, id)) continue
     const m = measureBox(id)
@@ -106,26 +105,28 @@ export function alignSelection(mode: AlignMode, ids: string[]): void {
       left: 0, centerX: (tpl.width - m.w) / 2, right: tpl.width - m.w,
       top: 0, centerY: (tpl.height - m.h) / 2, bottom: tpl.height - m.h,
     }[mode]
+    const delta = Math.round(horizontal ? goal - m.left : goal - m.top)
     if (id.startsWith('img-')) {
       const layer = (st.props.customLayers as Array<{ id: string; x: number; y: number }> | undefined)?.find((l) => l.id === id)
       if (!layer) continue
-      st.setCustomLayer(id, horizontal ? { x: Math.round(layer.x + (goal - m.left)) } : { y: Math.round(layer.y + (goal - m.top)) })
+      entries.push({ id, custom: true, x: layer.x + (horizontal ? delta : 0), y: layer.y + (horizontal ? 0 : delta) })
     } else {
       const look = (st.props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[id]
-      st.setLayerStyle(id, horizontal ? { dx: Math.round((look?.dx ?? 0) + (goal - m.left)) } : { dy: Math.round((look?.dy ?? 0) + (goal - m.top)) })
+      entries.push({ id, custom: false, x: (look?.dx ?? 0) + (horizontal ? delta : 0), y: (look?.dy ?? 0) + (horizontal ? 0 : delta) })
     }
   }
+  if (entries.length) st.applyGeom(entries)
 }
 
-/** 等距分布(PhotoCraft layer.distribute.* 语义;≥3 层:首尾钉住,中间层等间距) */
+/** 等距分布(PhotoCraft layer.distribute.* 语义;≥3 层:首尾钉住,中间层等间距;单条撤销) */
 export function distributeSelection(axis: 'h' | 'v', ids: string[]): boolean {
   const st = useEditor.getState()
   const items = [...new Set(ids.filter(Boolean))]
     .map((id) => ({ id, m: measureBox(id), locked: lockedOf(st.props, id) }))
-    .filter((v): v is { id: string; m: NonNullable<ReturnType<typeof measureBox>>; locked: boolean } => Boolean(v.m) && !v.locked)
+    .filter((v): v is { id: string; m: CanvasBox; locked: boolean } => Boolean(v.m) && !v.locked)
   if (items.length < 3) return false
-  const start = (b: { left: number; top: number }): number => (axis === 'h' ? b.left : b.top)
-  const size = (b: { w: number; h: number }): number => (axis === 'h' ? b.w : b.h)
+  const start = (b: CanvasBox): number => (axis === 'h' ? b.left : b.top)
+  const size = (b: CanvasBox): number => (axis === 'h' ? b.w : b.h)
   items.sort((a, b) => start(a.m) - start(b.m))
   const first = items[0]!
   const last = items[items.length - 1]!
@@ -133,19 +134,21 @@ export function distributeSelection(axis: 'h' | 'v', ids: string[]): boolean {
   const sum = items.reduce((s, v) => s + size(v.m), 0)
   const gap = (span - sum) / (items.length - 1)
   let cursor = start(first.m)
+  const entries: GeomEntry[] = []
   for (const v of items) {
     const delta = Math.round(cursor - start(v.m))
     if (delta !== 0) {
       if (v.id.startsWith('img-')) {
         const layer = (st.props.customLayers as Array<{ id: string; x: number; y: number }> | undefined)?.find((l) => l.id === v.id)
-        if (layer) st.setCustomLayer(v.id, axis === 'h' ? { x: layer.x + delta } : { y: layer.y + delta })
+        if (layer) entries.push({ id: v.id, custom: true, x: axis === 'h' ? layer.x + delta : layer.x, y: axis === 'h' ? layer.y : layer.y + delta })
       } else {
         const look = (st.props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.[v.id]
-        st.setLayerStyle(v.id, axis === 'h' ? { dx: (look?.dx ?? 0) + delta } : { dy: (look?.dy ?? 0) + delta })
+        entries.push({ id: v.id, custom: false, x: (look?.dx ?? 0) + (axis === 'h' ? delta : 0), y: (look?.dy ?? 0) + (axis === 'h' ? 0 : delta) })
       }
     }
     cursor += size(v.m) + gap
   }
+  if (entries.length) st.applyGeom(entries)
   return true
 }
 

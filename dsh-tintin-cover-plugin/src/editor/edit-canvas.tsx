@@ -16,7 +16,8 @@ import React from 'react'
 import { getTemplate } from '../registry'
 import { RenderSurface } from './render-surface'
 import { useCanvasShortcuts } from './canvas-keys'
-import { canvasBoxIn, compositionRectIn, compRectRef, layerEl, type CanvasBox } from './canvas-geom'
+import { boxInFrame, canvasFrameNow, compositionRectIn, layerEl, publishCanvasFrame, type CanvasBox } from './canvas-geom'
+import { TransformFrame } from './transform-frame'
 import { clampScale, lockedOf } from './image-ops'
 import { usePurePreview, cycleLayerSelection } from './canvas-aux'
 import { useInlineEditor } from './inline-edit'
@@ -40,7 +41,6 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   const setProp = useEditor((s) => s.setProp)
   const setLayerStyle = useEditor((s) => s.setLayerStyle)
   const addCustomLayer = useEditor((s) => s.addCustomLayer)
-  const setCustomLayer = useEditor((s) => s.setCustomLayer)
   const duplicateCustomLayer = useEditor((s) => s.duplicateCustomLayer)
   const userGuides = useEditor((s) => s.userGuides)
   const addUserGuide = useEditor((s) => s.addUserGuide)
@@ -97,10 +97,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     baseSx: number; baseSy: number
   } | null>(null)
   /** 合成盒(按模板比例缩放的画布容器)= 拖动/对齐/落点的统一坐标系;
-   *  每渲染刷新 compRectRef(text-properties 变换段 W/H/X/Y 的测量基准)。 */
+   *  每渲染 publish CanvasFrame(§7.27 唯一测量入口:面板订阅 frame,共享 scale 换算)。 */
   const compositionRect = (): DOMRect | null => {
     const rect = compositionRectIn(hostRef.current, playerWrapRef.current)
-    compRectRef.current = rect // R11c: 属性面板测量共享
+    if (rect && rect.width > 0) {
+      publishCanvasFrame({ rect, scale: rect.width / tpl.width, tplW: tpl.width, tplH: tpl.height, root: contentRef.current ?? document })
+    }
     return rect
   }
   React.useLayoutEffect(() => { compositionRect() })
@@ -110,8 +112,8 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     const scale = rect && rect.width > 0 ? rect.width / tpl.width : 1
     return { x: (clientX - (rect?.left ?? 0)) / scale, y: (clientY - (rect?.top ?? 0)) / scale, scale }
   }
-  /** 图层元素的画布盒(含 translate/scale 的视觉框 → 画布 px) */
-  const canvasBoxOf = (el: Element): CanvasBox => canvasBoxIn(el, compositionRect(), tpl.width)
+  /** 图层元素的画布盒(含 translate/scale 的视觉框 → 画布 px;boxInFrame=唯一换算) */
+  const canvasBoxOf = (el: Element): CanvasBox | null => boxInFrame(el, canvasFrameNow())
   /** 拖入图片 → 同步三写 → 新图层(锚点居中于投放点)。
    *  例外(2026-10-31 用户裁决:产品图可移动,移动不产生新副本): 拖入的与当前产品图是同一张时,
    *  平移产品槽位到投放点(select 便于继续拖),不再新增图层。 */
@@ -121,8 +123,8 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     const cur = String((props as { image?: string }).image ?? '')
     if (base(name) && base(name) === base(cur)) {
       const el = hostRef.current?.querySelector('[data-cover-layer="product"]')
-      if (el) {
-        const box = canvasBoxOf(el)
+      const box = el ? canvasBoxOf(el) : null
+      if (el && box) {
         const styles = (props.styles as Record<string, { dx?: number; dy?: number }> | undefined)?.product
         setLayerStyle('product', {
           dx: Math.round((styles?.dx ?? 0) + (point.x - (box.left + box.w / 2))),
@@ -386,6 +388,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
           const node = elm as HTMLElement
           if (drag.moves.some((m) => m.id === node.dataset.coverLayer)) return // 多选整体作为拖动主体(全部排除出候选)
           const b = canvasBoxOf(node)
+          if (!b) return
           for (const L of [b.left, b.left + b.w / 2, b.left + b.w]) { push(xs, L, L); push(xs, L - drag.boxW / 2, L); push(xs, L - drag.boxW, L) }
           for (const L of [b.top, b.top + b.h / 2, b.top + b.h]) { push(ys, L, L); push(ys, L - drag.boxH / 2, L); push(ys, L - drag.boxH, L) }
         })
@@ -477,11 +480,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
     const dx = Math.round(drag.curX - drag.baseX)
     const dy = Math.round(drag.curY - drag.baseY)
     if (dx === 0 && dy === 0) return // 0,0 早退(对照 PhotoCraft finish)
-    /* R8: 全部选中层同一 delta 提交(吸附 delta 按主选算,整体平移不破坏相对关系) */
-    for (const m of drag.moves) {
-      if (m.kind === 'custom') setCustomLayer(m.id, { x: Math.round(m.baseX + dx), y: Math.round(m.baseY + dy) })
-      else setLayerStyle(m.id, { dx: Math.round(m.baseX + dx), dy: Math.round(m.baseY + dy) })
-    }
+    /* R8: 全部选中层同一 delta 提交(吸附 delta 按主选算,整体平移不破坏相对关系);
+       一次 applyGeom=单条撤销(§7.27;此前逐层 set=N 条) */
+    useEditor.getState().applyGeom(drag.moves.map((m) => ({
+      id: m.id, custom: m.kind === 'custom',
+      x: Math.round(m.baseX + dx), y: Math.round(m.baseY + dy),
+    })))
   }
   const onPointerUp = (e: React.PointerEvent): void => {
     if (guideDragRef.current) { finishGuideDrag(e); return } // R9b 参考线落位/删除
@@ -494,18 +498,15 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
       try { hostRef.current?.releasePointerCapture?.(e.pointerId) } catch { /* 已隐式释放 */ }
       const f = sc.f
       if (Math.abs(f - 1) < 0.01) return
+      /* 统一几何提交(§7.27);数值=原 R20 公式逐值 */
       if (sc.kind === 'text') {
-        setLayerStyle(sc.id, { gscale: Math.round(Math.min(3, Math.max(0.3, sc.baseGscale * f)) * 1000) / 1000 })
+        useEditor.getState().applyGeom([{ id: sc.id, custom: false, gscale: Math.round(Math.min(3, Math.max(0.3, sc.baseGscale * f)) * 1000) / 1000 }])
       } else if (sc.kind === 'slot') {
-        setLayerStyle(sc.id, { sx: clampScale(sc.baseSx * f), sy: clampScale(sc.baseSy * f) })
+        useEditor.getState().applyGeom([{ id: sc.id, custom: false, sx: clampScale(sc.baseSx * f), sy: clampScale(sc.baseSy * f) }])
       } else {
         const w = Math.max(20, Math.min(8000, Math.round(sc.baseW * f)))
         const h = Math.max(20, Math.min(8000, Math.round(sc.baseH * f)))
-        setCustomLayer(sc.id, {
-          width: w, height: h,
-          x: Math.round(sc.baseX - (w - sc.baseW) / 2),
-          y: Math.round(sc.baseY - (h - sc.baseH) / 2),
-        })
+        useEditor.getState().applyGeom([{ id: sc.id, custom: true, width: w, height: h, x: Math.round(sc.baseX - (w - sc.baseW) / 2), y: Math.round(sc.baseY - (h - sc.baseH) / 2) }])
       }
       return
     }
@@ -606,6 +607,8 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
                   scale={Math.max(fitScale * zoom, 0.0001)}
                   style={{ width: '100%', height: '100%', borderRadius: 10, overflow: 'hidden', boxShadow: '0 18px 60px rgba(0,0,0,0.5)' }}
                 />
+                {/* 选择框+8 手柄(路线 v2 步骤4,§7.27 四约束;主选单层,未旋转层可缩放) */}
+                <TransformFrame id={selectedLayer} totalScale={Math.max(fitScale * zoom, 0.0001)} boxOf={canvasBoxOf} />
                 {/* 画布网格(显示开关;编辑器视觉辅助,不进导出) */}
                 {showGrid && !pcRunning && !purePreview ? (
                   <div data-preview-grid style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 40, backgroundImage: 'repeating-linear-gradient(0deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px), repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0 1px, transparent 1px 40px)' }} />

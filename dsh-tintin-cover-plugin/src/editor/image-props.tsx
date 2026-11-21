@@ -6,11 +6,11 @@
 // 导出」——这些操作图层面板已有(行拖拽排序/右键菜单/页脚 trash·square-plus/Alt+点击眼睛),
 // 卡内重复=多此一举。
 import React from 'react'
-import { getTemplate } from '../registry'
 import type { CustomLayer } from '../../templates/CustomLayers'
 import { lookScale, type ImageLook } from '../../templates/image-style'
-import { canvasBoxIn, layerEl, type CanvasBox } from './canvas-geom'
+import { boxInFrame, canvasFrameNow, layerEl, type CanvasBox } from './canvas-geom'
 import { clampScale, flipPatch, resizeWH, rotatePatch } from './image-ops'
+import type { GeomEntry } from './layer-geom'
 import { useEditor } from './store'
 import { AlignButtons, alignSelection, type AlignMode } from './align-row'
 import { ghostBtn, headStyle } from './ui'
@@ -74,22 +74,24 @@ export function PreviewSlider({ min, max, step, value, preview, commit }: {
   )
 }
 
-/** 图层的视觉包围盒与布局尺寸(布局尺寸不含 transform=缩放前的底尺寸);变化后下一帧重量 */
+/** 图层的视觉包围盒与布局尺寸(布局尺寸不含 transform=缩放前的底尺寸);变化后下一帧重量。
+ *  测量统一走 CanvasFrame(§7.27;boxInFrame=唯一 scale 换算入口)。 */
 function useLayerMetrics(id: string, sig: string): { box: CanvasBox; layoutW: number; layoutH: number } | null {
-  const tplWidth = useEditor((s) => getTemplate(s.templateId).width)
   const [m, setM] = React.useState<{ box: CanvasBox; layoutW: number; layoutH: number } | null>(null)
   React.useEffect(() => {
     let stopped = false
     const read = (): void => {
       if (stopped) return
-      const el = layerEl(id)
-      setM(el ? { box: canvasBoxIn(el, el.offsetParent?.getBoundingClientRect() ?? null, tplWidth), layoutW: el.offsetWidth, layoutH: el.offsetHeight } : null)
+      const frame = canvasFrameNow()
+      const el = layerEl(id, frame?.root)
+      const box = el ? boxInFrame(el, frame) : null
+      setM(el && box ? { box, layoutW: el.offsetWidth, layoutH: el.offsetHeight } : null)
     }
     const raf = requestAnimationFrame(read)
     const el = layerEl(id)
     if (el instanceof HTMLImageElement && !el.complete) el.addEventListener('load', read, { once: true })
     return () => { stopped = true; cancelAnimationFrame(raf); el?.removeEventListener('load', read) }
-  }, [id, sig, tplWidth])
+  }, [id, sig])
   return m
 }
 
@@ -120,13 +122,16 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
     if (!metrics || metrics.layoutW <= 0 || metrics.layoutH <= 0) return null
     return { w: Math.round(metrics.layoutW * lookScale(look.sx)), h: Math.round(metrics.layoutH * lookScale(look.sy)) }
   })()
+  /* 尺寸/位置写入统一走 applyGeom(§7.27;W/H=几何字段) */
   const setSize = (edit: { w?: number; h?: number }): void => {
     if (!size) return
     const next = resizeWH(size, edit, linked, target.kind === 'custom' ? 20 : 1)
     if (target.kind === 'custom') {
-      apply(linked && target.layer.height === undefined ? { width: next.w } : { width: next.w, height: next.h })
+      const entry: GeomEntry = { id, custom: true, width: next.w }
+      if (!(linked && target.layer.height === undefined)) entry.height = next.h
+      useEditor.getState().applyGeom([entry])
     } else if (metrics) {
-      apply({ sx: clampScale(next.w / metrics.layoutW), sy: clampScale(next.h / metrics.layoutH) })
+      useEditor.getState().applyGeom([{ id, custom: false, sx: clampScale(next.w / metrics.layoutW), sy: clampScale(next.h / metrics.layoutH) }])
     }
   }
   const pos = target.kind === 'custom'
@@ -134,11 +139,12 @@ export function ImageLayerProps({ target }: { target: ImageTarget }): React.Reac
     : metrics ? { x: Math.round(metrics.box.left), y: Math.round(metrics.box.top) } : null
   const setPos = (edit: { x?: number; y?: number }): void => {
     if (!pos) return
-    if (target.kind === 'custom') { apply(edit); return }
-    apply({
-      dx: Math.round((look.dx ?? 0) + (edit.x !== undefined ? edit.x - pos.x : 0)),
-      dy: Math.round((look.dy ?? 0) + (edit.y !== undefined ? edit.y - pos.y : 0)),
-    })
+    if (target.kind === 'custom') { useEditor.getState().applyGeom([{ id, custom: true, x: edit.x, y: edit.y }]); return }
+    useEditor.getState().applyGeom([{
+      id, custom: false,
+      x: Math.round((look.dx ?? 0) + (edit.x !== undefined ? edit.x - pos.x : 0)),
+      y: Math.round((look.dy ?? 0) + (edit.y !== undefined ? edit.y - pos.y : 0)),
+    }])
   }
   /* 六向对齐画布(2026-11-11 R17: PhotoCraft 语义=选区内每层各自对齐;实现在 align-row=现场量 DOM) */
   const alignToCanvas = (mode: AlignMode): void => {

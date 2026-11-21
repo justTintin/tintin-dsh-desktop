@@ -14,7 +14,7 @@ import React from 'react'
 import { FontFamilyPicker, FontStylePicker } from './font-picker'
 import { getTemplate } from '../registry'
 import { BLEND_MODES } from '../../templates/image-style'
-import { canvasBoxIn, compRectRef, layerEl } from './canvas-geom'
+import { canvasFrameNow, layerEl, type CanvasBox } from './canvas-geom'
 import { liveLayer, liveLayerSnapshot, subscribeLiveLayer } from './ui'
 import { useEditor } from './store'
 import {
@@ -109,7 +109,7 @@ function GlyphField({ glyph, children }: { glyph: string; children: React.ReactN
 }
 
 /** 文字层属性面板(替换 TextStyleEditor;数据=styles[layerId],layerStyle 直投模板节点) */
-export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: string; baseFontSize: number; tplWidth: number }): React.ReactElement {
+export function TextProperties({ layerId, baseFontSize }: { layerId: string; baseFontSize: number }): React.ReactElement {
   const tpl = getTemplate(useEditor((s) => s.templateId))
   type Sel = { dx?: number; dy?: number; scale?: number; gscale?: number; width?: number; lineHeight?: number; tracking?: number; hscale?: number; vscale?: number; baseline?: number; rotate?: number; caseTransform?: string; align?: string; font?: string; color?: string; weight?: number; italic?: boolean; locked?: boolean; shadow?: { dx: number; dy: number; blur: number; color: string }; stroke?: { width: number; color: string } }
   const styles = useEditor((s) => (s.props.styles as Record<string, Sel | undefined> | undefined)?.[layerId])
@@ -132,16 +132,15 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
      动作类(对齐/X/Y 提交)不用快照,点击时现场 measureNow。 */
   const [measureTick, force] = React.useReducer((n: number) => n + 1, 0)
   React.useLayoutEffect(() => { force() }, [styles, selectedLayer, live.v])
-  const measureNow = (): { left: number; top: number; w: number; h: number } | null => {
-    const el = layerEl(layerId)
-    const comp = compRectRef.current
-    if (!(el instanceof HTMLElement) || !comp || comp.width <= 0) return null
-    const scale = Math.max(comp.width / tplWidth, 0.05)
+  const measureNow = (): CanvasBox | null => {
+    const frame = canvasFrameNow()
+    const el = layerEl(layerId, frame?.root)
+    if (!(el instanceof HTMLElement) || !frame || frame.rect.width <= 0) return null
     const r = el.getBoundingClientRect()
-    return { left: (r.left - comp.left) / scale, top: (r.top - comp.top) / scale, w: r.width / scale, h: r.height / scale }
+    return { left: (r.left - frame.rect.left) / frame.scale, top: (r.top - frame.rect.top) / frame.scale, w: r.width / frame.scale, h: r.height / frame.scale }
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const measure = React.useMemo(measureNow, [layerId, tplWidth, styles, selectedLayer, live.v, measureTick])
+  const measure = React.useMemo(measureNow, [layerId, styles, selectedLayer, live.v, measureTick])
   const patch = (p: Record<string, unknown>): void => setLayerStyle(layerId, p)
   const num = (k: keyof NonNullable<typeof styles>): number | undefined => {
     const v = styles?.[k]
@@ -156,7 +155,7 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
   const scaleText = (f: number): void => {
     if (!Number.isFinite(f) || f <= 0) return
     const cur = typeof styles?.gscale === 'number' ? styles.gscale : 1
-    patch({ gscale: Math.round(Math.min(3, Math.max(0.3, cur * f)) * 1000) / 1000 })
+    useEditor.getState().applyGeom([{ id: layerId, custom: false, gscale: Math.round(Math.min(3, Math.max(0.3, cur * f)) * 1000) / 1000 }]) // 几何统一入口(§7.27)
   }
   const setWidth = (v: number | undefined): void => {
     if (v === undefined || !measure) return
@@ -167,17 +166,17 @@ export function TextProperties({ layerId, baseFontSize, tplWidth }: { layerId: s
     if (v === undefined || !measure) return
     scaleText(v / Math.max(1, measure.h))
   }
-  /* 变换 X/Y: 画布绝对位 → dx/dy 平移(锁层拒绝;与画布微调同一拒绝面) */
+  /* 变换 X/Y: 画布绝对位 → dx/dy 平移(锁层拒绝;与画布微调同一拒绝面);统一走 applyGeom(§7.27) */
   const locked = styles?.locked === true
   const setPosX = (v: number | undefined): void => {
     const m = measureNow()
     if (v === undefined || !m || locked) return
-    patch({ dx: Math.round((styles?.dx as number ?? 0) + (v - m.left)) })
+    useEditor.getState().applyGeom([{ id: layerId, custom: false, x: Math.round((styles?.dx as number ?? 0) + (v - m.left)) }])
   }
   const setPosY = (v: number | undefined): void => {
     const m = measureNow()
     if (v === undefined || !m || locked) return
-    patch({ dy: Math.round((styles?.dy as number ?? 0) + (v - m.top)) })
+    useEditor.getState().applyGeom([{ id: layerId, custom: false, y: Math.round((styles?.dy as number ?? 0) + (v - m.top)) }])
   }
   /* 六向对齐(相对画布;多选=选区内每层各自对齐,实现在 align-row=现场量 DOM) */
   const align = (mode: AlignMode): void => {

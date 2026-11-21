@@ -56,7 +56,7 @@ export function useCanvasShortcuts(blocked: () => { all: boolean; layer: boolean
       const d = ({ ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] } as Record<string, [number, number]>)[e.key]
       if (!d || mod) return
       take()
-      /* R9a: 一次 set 提交全部微调(单条撤销) */
+      /* R9a: 一次 set 提交全部微调(单条撤销);几何变更统一走 applyGeom(§7.27) */
       const moveIds = [...new Set([id, ...s.multiSelected])]
       const entries: Array<{ id: string; custom: boolean; x: number; y: number }> = []
       for (const mid of moveIds) {
@@ -69,7 +69,7 @@ export function useCanvasShortcuts(blocked: () => { all: boolean; layer: boolean
           entries.push({ id: mid, custom: false, x: (st?.dx ?? 0) + d[0], y: (st?.dy ?? 0) + d[1] })
         }
       }
-      if (entries.length) s.applyLayerGeometry(entries)
+      if (entries.length) s.applyGeom(entries)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

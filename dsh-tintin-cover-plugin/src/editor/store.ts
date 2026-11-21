@@ -7,6 +7,7 @@ import type { CustomLayer } from '../../templates/CustomLayers'
 import type { ImageLook } from '../../templates/image-style'
 import type { TextStyleOverride } from '../../templates/text-style'
 import { arrangeOrder, clampScale, cloneLayer, type Arrange } from './image-ops'
+import type { GeomEntry } from './layer-geom'
 
 /** 图层组归属净化(2026-10-31 阶段2):只认模板存在的图片组槽位(product/bgImage),
     其余(未知槽位/文字组/装饰组)剥除——组里只能放对应类型的图层。 */
@@ -35,7 +36,7 @@ export interface EditorState {
   clearMultiSelect: () => void
   /** R9a 批量几何(2026-11-11 §6.5): 一次 set 提交多层的 x/y(自定义层)或 dx/dy(固定层)
    *  ——多选整体移/组对齐/组微调=单条撤销记录(此前逐层 set=N 条) */
-  applyLayerGeometry: (entries: Array<{ id: string; custom: boolean; x: number; y: number }>) => void
+  applyGeom: (entries: GeomEntry[]) => void
   /** R9a 批量删除自由图层(一次 set,一条撤销) */
   removeCustomLayers: (ids: string[]) => void
   /** R9b 用户参考线(2026-11-11 §6.5,对照 PS 标尺拖出): 画布 px 位置;会话内存态
@@ -171,18 +172,38 @@ export const useEditor = create<EditorState>()(
           return { multiSelected: rest.filter((v) => v !== id), selectedLayer: id }
         }),
       clearMultiSelect: () => set({ multiSelected: [] }),
-      applyLayerGeometry: (entries) =>
+      /* 统一几何提交(路线 v2 步骤3,§7.27):全部几何变更唯一入口——画布拖动/方向键/
+         对齐分布/Ctrl 缩放/手柄会话/面板数值字段全走这里;一次 set=一条撤销;
+         条目语义见 layer-geom.ts GeomEntry(undefined 字段=保留现值)。 */
+      applyGeom: (entries) =>
         set((s) => {
           let customLayers = Array.isArray(s.props.customLayers) ? [...(s.props.customLayers as CustomLayer[])] : []
-          let styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
+          const styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
+          let touchedStyles = false
           for (const e of entries) {
             if (e.custom) {
-              customLayers = customLayers.map((l) => (l.id === e.id ? { ...l, x: Math.round(e.x), y: Math.round(e.y) } : l))
+              customLayers = customLayers.map((l) => {
+                if (l.id !== e.id) return l
+                const next = { ...l }
+                if (e.x !== undefined) next.x = Math.round(e.x)
+                if (e.y !== undefined) next.y = Math.round(e.y)
+                if (e.width !== undefined) next.width = Math.max(20, Math.round(e.width))
+                if (e.height !== undefined) next.height = Math.max(20, Math.round(e.height))
+                return next
+              })
             } else {
-              styles[e.id] = { ...styles[e.id], dx: Math.round(e.x), dy: Math.round(e.y) }
+              const cur = styles[e.id] ?? {}
+              const patch: TextStyleOverride & ImageLook = { ...cur }
+              if (e.x !== undefined) patch.dx = Math.round(e.x)
+              if (e.y !== undefined) patch.dy = Math.round(e.y)
+              if (e.gscale !== undefined) patch.gscale = e.gscale
+              if (e.sx !== undefined) patch.sx = e.sx
+              if (e.sy !== undefined) patch.sy = e.sy
+              styles[e.id] = patch
+              touchedStyles = true
             }
           }
-          return { props: { ...s.props, customLayers, styles } }
+          return touchedStyles ? { props: { ...s.props, customLayers, styles } } : { props: { ...s.props, customLayers } }
         }),
       userGuides: { h: [], v: [] } as { h: number[]; v: number[] },
       addUserGuide: (axis, pos) =>
