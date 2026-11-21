@@ -429,6 +429,8 @@ export const EditorApp: React.FC = () => {
   ensurePjStyle()
   useChatContextPush()
   useAgentPropsSync(() => canvasDragFreeze.active)
+  /* P1-9(2026-11-21):PhotoCraft 镜像态(画布面板轮询提升到 store)→中栏横幅+面板禁用 */
+  const pcRunning = useEditor((s) => s.pcRunning)
   /* 技能管理大弹窗(2026-10-30 用户裁决:形态=视频剪辑 Skill 弹窗;聊天 ▦ 经 postMessage 请求打开) */
   const [showSkills, setShowSkills] = React.useState(false)
   /* 模板管理弹窗(2026-11-13 用户裁决:服务端封面模板/渲染预览/上传 PSD 建模板;
@@ -585,9 +587,16 @@ export const EditorApp: React.FC = () => {
               重拉——此前它只靠 3 秒轮询,切完最慢 3 秒才出新项目素材 */}
           <AssetsPanel key={projectEpoch} project={currentProject} />
         </div>
-        {/* 中栏 = 图层+编辑整栏(横向兄弟,全高;2026-11-02 用户裁决:下延至窗口底) */}
+        {/* 中栏 = 图层+编辑整栏(横向兄弟,全高;2026-11-02 用户裁决:下延至窗口底)。
+            P1-9(2026-11-21):PhotoCraft 镜像模式下画布树不渲染,本栏全部量真实 DOM=静默
+            no-op——出可见横幅+整体禁用(pointer-events none+降不透明度),消灭「点了没反应」。 */}
         <div style={{ width: 260, flexShrink: 0, background: 'var(--bg-panel)', borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)', padding: 12, display: 'flex', flexDirection: 'column', minHeight: 0, overflowX: 'hidden', gap: 10 }}>
-          <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          {pcRunning ? (
+            <div data-pc-mirror-banner style={{ flexShrink: 0, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--accent-soft)', background: 'var(--bg-field)', color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.6 }}>
+              🖌 PhotoCraft 精修进行中——编辑面板暂停。图层与变换在 PhotoCraft 窗口完成（会话可直接驱动）；镜像停止后自动恢复。
+            </div>
+          ) : null}
+          <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', flexDirection: 'column', pointerEvents: pcRunning ? 'none' : undefined, opacity: pcRunning ? 0.5 : undefined }}>
             <LayersPanel project={currentProject} />
           </div>
         </div>

@@ -6,7 +6,9 @@
 //   不要此功能」)。保留:点选/Shift 多选/拖动+智能吸附/Alt 循环选层/Alt 复制/快捷键/
 //   就地编辑/拖放建层/智能参考线/用户参考线/标尺/网格/纯净预览;尺寸/位置/缩放/旋转/对齐
 //   编辑走属性面板数值字段与对齐按钮(align-row;画布浮动对齐条 R15 随裁决删除)。
-//   几何数学(sel-geom/image-ops resize 族/text-scale)留档不删,待整套重设计后复用;
+//   2026-11-21 清偿:几何数学(sel-geom/image-ops resize 族/text-scale/use-group-scale)
+//   已按路线 v2 步骤2 删除(git 历史留档;重设计=路线 v2 步骤4,PhotoCraft 四约束在新
+//   几何入口上重建);
 // · 拖动/吸附/读数/Alt 循环/空格纯净预览/快捷键/就地编辑/拖放=原行为零改动;
 // · 顺手修: 旧 App 级 Ctrl+滚轮监听与 useCanvasZoom 重复挂载(每次滚轮 1.21 倍),
 //   本文件只留 useCanvasZoom 锚点缩放。
@@ -155,6 +157,12 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   // PhotoCraft 为主(2026-10-27 15:09 裁决):画布 = PhotoCraft 截图轮询
   const [pcRunning, setPcRunning] = React.useState<boolean | null>(null) // null=未探测
   const [shot, setShot] = React.useState<string | null>(null)
+  /* P1-9:镜像态提升到 store(App 据此出可见横幅+禁用中栏编辑面板;卸载回 false) */
+  const setPcRunningStore = useEditor((s) => s.setPcRunning)
+  React.useEffect(() => {
+    setPcRunningStore(pcRunning === true)
+    return () => setPcRunningStore(false)
+  }, [pcRunning, setPcRunningStore])
   React.useEffect(() => {
     if (pcRunning === false) return
     let stop = false

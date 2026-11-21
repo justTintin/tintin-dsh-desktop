@@ -38,9 +38,6 @@ export interface EditorState {
   applyLayerGeometry: (entries: Array<{ id: string; custom: boolean; x: number; y: number }>) => void
   /** R9a 批量删除自由图层(一次 set,一条撤销) */
   removeCustomLayers: (ids: string[]) => void
-  /** R9c 组缩放提交(一次 set,一条撤销): 条目=groupScaleEntries 输出——
-   *  custom=x/y/width/height;fixed=x/y→dx/dy+gscale 或 sx/sy(条目键位同 applyLayerGeometry) */
-  applyGroupScale: (entries: Array<{ id: string; custom: boolean; x: number; y: number; width?: number; height?: number | null; gscale?: number; sx?: number; sy?: number }>) => void
   /** R9b 用户参考线(2026-11-11 §6.5,对照 PS 标尺拖出): 画布 px 位置;会话内存态
    *  (拖入/拖动/拖删各一条撤销);吸附与画布渲染共用 */
   userGuides: { h: number[]; v: number[] }
@@ -70,6 +67,11 @@ export interface EditorState {
   /** 生图引擎(2026-10-27 裁决:server=TinTin 服务端默认 | jimeng=即梦) */
   genEngine: 'server' | 'jimeng'
   setGenEngine: (engine: 'server' | 'jimeng') => void
+  /** PhotoCraft 镜像进行中(2026-11-21 P1-9:画布=镜像截图时,中栏编辑面板依赖量真实
+   *  DOM=全部静默 no-op,提升到 store 让 App 出可见横幅+面板禁用,消灭「点了没反应」)。
+   *  会话视图态,不入撤销域(undoDomain 只收文档域四键)。 */
+  pcRunning: boolean
+  setPcRunning: (v: boolean) => void
   /** 自定义图片图层(2026-10-28):新增(置顶)/删除/局部改(x/y/width/opacity/rotate);
    *  2026-10-31 阶段2:新增可携带组归属(仅图片组,非法剥除) */
   addCustomLayer: (image: string, x: number, y: number, width?: number, group?: string) => string
@@ -217,30 +219,6 @@ export const useEditor = create<EditorState>()(
         }),
       selectedGuide: null,
       setSelectedGuide: (g) => set({ selectedGuide: g }),
-      applyGroupScale: (entries) =>
-        set((s) => {
-          const customEntries = entries.filter((e) => e.custom)
-          const fixedEntries = entries.filter((e) => !e.custom)
-          let customLayers = Array.isArray(s.props.customLayers) ? [...(s.props.customLayers as CustomLayer[])] : []
-          for (const e of customEntries) {
-            customLayers = customLayers.map((l) => {
-              if (l.id !== e.id) return l
-              const next = { ...l, x: e.x, y: e.y, width: e.width ?? l.width }
-              if (e.height !== undefined) next.height = e.height === null ? undefined : e.height
-              return next
-            })
-          }
-          const styles = { ...(s.props.styles as Record<string, TextStyleOverride & ImageLook> | undefined) }
-          for (const e of fixedEntries) {
-            const cur = styles[e.id] ?? {}
-            const patch: TextStyleOverride & ImageLook = { ...cur, dx: e.x, dy: e.y }
-            if (e.gscale !== undefined) patch.gscale = e.gscale
-            if (e.sx !== undefined) patch.sx = e.sx
-            if (e.sy !== undefined) patch.sy = e.sy
-            styles[e.id] = patch
-          }
-          return { props: { ...s.props, customLayers, styles } }
-        }),
       removeCustomLayers: (ids) =>
         set((s) => {
           const drop = new Set(ids)
@@ -265,6 +243,8 @@ export const useEditor = create<EditorState>()(
       lastExport: null as EditorState['lastExport'],
       genEngine: 'server',
       setGenEngine: (engine) => set({ genEngine: engine }),
+      pcRunning: false,
+      setPcRunning: (v) => set({ pcRunning: v }),
       setTemplate: (id) =>
         set({
           /* 模板切换=换文档:参考线是画布脚手架(文档域),随旧模板作废;多选/主选同清。

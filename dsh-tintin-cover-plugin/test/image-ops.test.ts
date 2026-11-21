@@ -1,37 +1,12 @@
 // 选中图片图层基本操作(2026-11-01 对齐 PhotoCraft)的纯逻辑与 store 动作回归面。
+// 2026-11-21 清偿(路线 v2 步骤2):cornerResize/centerResize/rotatedEdgeResize/
+// rotatedCornerResize/groupScaleEntries 及其用例随死代码一并删除(零运行时引用;
+// git 历史留档),本文件只保留活函数(被 edit-canvas/image-props/canvas-keys/
+// align-row/layers-panel/store 消费)与 store 动作用例。
 import { beforeEach, describe, expect, it } from 'vitest'
-import { arrangeOrder, centerResize, clampScale, cloneLayer, cornerResize, groupScaleEntries, rotatedCornerResize, rotatedEdgeResize, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
+import { arrangeOrder, clampScale, cloneLayer, flipPatch, lockedOf, resizeWH, rotatePatch } from '../src/editor/image-ops'
 import { effectiveOrder, useEditor } from '../src/editor/store'
 import { backdropStyle, lookBlend, lookOpacity, lookTransform } from '../templates/image-style'
-
-describe('cornerResize (PhotoCraft 四角柄,2026-11-02)', () => {
-  const box = { left: 100, top: 200, w: 300, h: 200 }
-  it('SE 角拖大:对角(左上)为锚,x/y 不动', () => {
-    const f = Math.hypot(500, 350) / Math.hypot(300, 150)
-    const r = cornerResize(box, 'se', Math.hypot(500, 350), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: 200 })
-    expect(r.x).toBe(100)
-    expect(r.y).toBe(200)
-    expect(r.width).toBe(Math.round(300 * f))
-  })
-  it('NW 角向左上拖:对角(右下)为锚,x/y 随锚补正', () => {
-    const f = Math.hypot(150, 250) / Math.hypot(300, 150)
-    const r = cornerResize(box, 'nw', Math.hypot(150, 250), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: 200 })
-    expect(r.x).toBe(400 - r.width)
-    expect(r.y).toBe(400 - (r.height ?? 0))
-    expect(r.width).toBe(Math.round(300 * f))
-  })
-  it('显式高同比缩放;未显式高返回 null(随原图比例)', () => {
-    const fh = Math.hypot(450, 300) / Math.hypot(300, 150)
-    const withH = cornerResize(box, 'se', Math.hypot(450, 300), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: 200 })
-    expect(withH.height).toBe(Math.round(200 * fh))
-    const noH = cornerResize(box, 'se', Math.hypot(450, 300), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: null })
-    expect(noH.height).toBeNull()
-  })
-  it('最小值钳制 20px', () => {
-    const r = cornerResize(box, 'se', Math.hypot(12, 12), Math.hypot(300, 150), { x: 100, y: 200, w: 300, h: 200 })
-    expect(r.width).toBe(20)
-  })
-})
 
 describe('arrangeOrder (Layer › Arrange)', () => {
   const order = ['a', 'b', 'c', 'd']
@@ -150,76 +125,6 @@ describe('store actions: duplicate + arrange', () => {
   })
 })
 
-describe('centerResize (旋转层中心锚,2026-11-11 WP-A3)', () => {
-  it('视觉中心不动:x/y 随新宽高补偿', () => {
-    const r = centerResize({ x: 100, y: 80, w: 200, h: 100 }, 1.5, 100)
-    expect(r).toEqual({ x: 50, y: 55, width: 300, height: 150 })
-    expect(r.x + r.width / 2).toBe(200)
-    expect(r.y + (r.height ?? 0) / 2).toBe(130)
-  })
-  it('未显式高: 高随比例,y 补偿按视觉高', () => {
-    const r = centerResize({ x: 100, y: 100, w: 200, h: null }, 2, 100)
-    expect(r).toEqual({ x: 0, y: 50, width: 400, height: null })
-  })
-})
-
-describe('rotatedEdgeResize (边柄,2026-11-11 R2: 旋转层同样适用,锚=对侧视觉边)', () => {
-  it('deg=0 退化为轴对齐:e 右拉加宽,x 不动(左锚)', () => {
-    expect(rotatedEdgeResize({ x: 100, y: 80, w: 200, h: 100 }, 'e', { x: 50, y: 0 }, 0)).toEqual({ width: 250, x: 100, y: 80 })
-  })
-  it('deg=0 w 左拉:左缘左移加宽,右缘锚定(300 不动)', () => {
-    expect(rotatedEdgeResize({ x: 100, y: 80, w: 200, h: 100 }, 'w', { x: -30, y: 0 }, 0)).toEqual({ width: 230, x: 70, y: 80 })
-  })
-  it('旋转 90°:e 柄在视觉下缘,下拉加宽,锚=视觉上缘(世界 y 不动)', () => {
-    const p = rotatedEdgeResize({ x: 100, y: 80, w: 200, h: 100 }, 'e', { x: 0, y: 40 }, 90)
-    // 老视觉盒(90°): 顶缘 y=cy-w/2=130-100=30;新 cy=(100+50)+... 顶缘必须仍=30
-    const cyOld = 80 + 100 / 2
-    const cyNew = p.y! + 100 / 2
-    expect(cyOld - 200 / 2).toBeCloseTo(30)
-    expect(cyNew - p.width! / 2).toBeCloseTo(30)
-    expect(p.width).toBe(240)
-  })
-  it('min 钳制穿越锚点:w 右拉收窄到 20,右缘不动', () => {
-    const p = rotatedEdgeResize({ x: 100, y: 80, w: 200, h: 100 }, 'w', { x: 500, y: 0 }, 0)
-    expect(p.width).toBe(20)
-    expect(p.x! + p.width!).toBe(300)
-  })
-})
-
-describe('rotatedCornerResize (旋转层角柄精确锚定,2026-11-11 §6.4 R6)', () => {
-  it('deg=0 与 cornerResize 逐值一致:nw 拖拽=右下锚', () => {
-    const p = rotatedCornerResize({ x: 100, y: 80, w: 200, h: 100 }, 'nw', { x: 40, y: 40 }, 0, { hExplicit: 100 })
-    const ref = cornerResize({ left: 100, top: 80, w: 200, h: 100 }, 'nw', Math.hypot(40 - 300, 40 - 180), Math.hypot(100 - 300, 80 - 180), { x: 100, y: 80, w: 200, h: 100 })
-    expect(p).toEqual(ref)
-  })
-  it('deg=90:内容角 nw 拖拽,对侧内容角 se 世界位不动(R6 精确锚定)', () => {
-    const p = rotatedCornerResize({ x: 100, y: 80, w: 200, h: 100 }, 'nw', { x: 0, y: 0 }, 90, { hExplicit: 100 })
-    // 起始: C=(200,130), nw=(250,30), se=Q=(150,230);f=|P−Q|/|P0−Q| → w=246,h=123
-    expect(p.width).toBe(246)
-    expect(p.height).toBe(123)
-    // 由返回布局重构 se 内容角,应回到 Q(±0.6 舍入容差)
-    const u = { x: 0, y: 1 }
-    const v = { x: -1, y: 0 }
-    const ncx = p.x + p.width / 2
-    const ncy = p.y + (p.height ?? 0) / 2
-    const qNew = { x: ncx + (p.width / 2) * u.x + ((p.height ?? 0) / 2) * v.x, y: ncy + (p.width / 2) * u.y + ((p.height ?? 0) / 2) * v.y }
-    expect(Math.abs(qNew.x - 150)).toBeLessThanOrEqual(0.6)
-    expect(Math.abs(qNew.y - 230)).toBeLessThanOrEqual(0.6)
-  })
-  it('未显式高:height=null,y 补偿按布局高同比', () => {
-    const p = rotatedCornerResize({ x: 100, y: 80, w: 200, h: 100 }, 'nw', { x: 40, y: 40 }, 0, { hExplicit: null })
-    expect(p.height).toBeNull()
-    expect(p.x + p.width).toBe(300) // 右缘锚定
-    expect(p.y + 100 * (p.width / 200)).toBeCloseTo(180) // 下缘锚定(同比)
-  })
-  it('min 钳制(deg=0):拖到锚点,收窄到 20 且锚定边不动', () => {
-    const p = rotatedCornerResize({ x: 100, y: 80, w: 200, h: 100 }, 'nw', { x: 300, y: 180 }, 0, { hExplicit: 100 })
-    expect(p.width).toBe(20)
-    expect(p.x + p.width).toBe(300)
-    expect(p.y + (p.height ?? 0)).toBe(180)
-  })
-})
-
 describe('多选撤销粒度(2026-11-11 §6.5 R9a: 批量动作=单条撤销)', () => {
   it('applyLayerGeometry 三层一次提交,撤销栈只进一条,undo 一次全还原', () => {
     const s0 = useEditor.getState()
@@ -247,42 +152,5 @@ describe('多选撤销粒度(2026-11-11 §6.5 R9a: 批量动作=单条撤销)', 
     const after = useEditor.getState()
     expect((after.props.customLayers as unknown[]).length).toBe(0)
     expect(after.multiSelected.length).toBe(0)
-  })
-})
-
-describe('groupScaleEntries (多选组缩放,2026-11-11 §6.5 R9c)', () => {
-  it('自定义层: 视觉中心绕选区中心缩放,布局宽高同比', () => {
-    // 选区中心 (200,150);成员视觉盒中心 (150,120) → 新中心 (100,90)
-    const e = groupScaleEntries(
-      { cx: 200, cy: 150 },
-      [{ id: 'a', custom: true, box: { left: 100, top: 70, w: 100, h: 100 }, layout: { x: 100, y: 70, w: 100, h: 100 } }],
-      0.5,
-    )
-    expect(e[0]).toEqual({ id: 'a', custom: true, x: 125, y: 85, width: 50, height: 50 })
-  })
-  it('文字层: dx/dy 平移 + gscale×f', () => {
-    const e = groupScaleEntries(
-      { cx: 0, cy: 0 },
-      [{ id: 't', custom: false, box: { left: 300, top: 200, w: 100, h: 40 }, dx: 10, dy: 20, gscale: 1 }],
-      2,
-    )
-    expect(e[0]?.x).toBe(360) // 视觉中心 (350,220) → (700,440): dx(条目 x) += 350
-    expect(e[0]?.y).toBe(240)
-    expect(e[0]?.gscale).toBe(2)
-  })
-  it('gscale 夹取 0.3..3', () => {
-    const e = groupScaleEntries({ cx: 0, cy: 0 }, [
-      { id: 't', custom: false, box: { left: 10, top: 10, w: 10, h: 10 }, gscale: 2.5 },
-    ], 0.1)
-    expect(e[0]?.gscale).toBe(0.3)
-  })
-  it('产品槽位: sx/sy×f 夹取', () => {
-    const e = groupScaleEntries(
-      { cx: 100, cy: 100 },
-      [{ id: 'p', custom: false, box: { left: 50, top: 50, w: 100, h: 100 }, dx: 0, dy: 0, sx: 1, sy: 1 }],
-      0.5,
-    )
-    expect(e[0]?.sx).toBe(0.5)
-    expect(e[0]?.sy).toBe(0.5)
   })
 })

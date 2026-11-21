@@ -25,6 +25,7 @@ describe('撤销域(文档域快照)', () => {
     s.setSelectedAsset('a.png')
     s.renameLayer('title', '主标题')
     s.setLastExport({ ok: true, file: 'x.png' })
+    s.setPcRunning(true) // P1-9 PhotoCraft 镜像态(2026-11-21):会话视图态,不入域
     expect(peek().pastStates.length).toBe(base)
 
     /* 二、文档域动作:四类,各入一条 */

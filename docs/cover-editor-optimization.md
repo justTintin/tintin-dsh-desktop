@@ -657,3 +657,15 @@ PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑�
 
 - 预览区底部「✓ 路径行+📂 打开目录」结果块整体撤除(导出反馈由底栏「已导出 N 个文件」汇总承担;encodeErr+重新编码保留)。
 - 底栏「已导出」左边新增「📂 打开目录」钮:导出成功后出现(reveal 首个成功文件的目录),几何=导出钮同款(40px 高/圆角 12),ghost 描边不抢主钮。
+
+### 7.26 死代码清偿 + PhotoCraft 镜像态面板可见禁用(2026-11-21;路线 v2 步骤2——2026-11-20 用户批准「按 PhotoCraft 对照修订路线修改」后令「实施」;§路线表第 326 行「留档不删」处置由本条废止)
+
+- **背景**:本日整体审计(用户「封面制作整体实现有问题」)三 P0=撤销域污染/双图层表示/死代码假覆盖;用户指定 `D:\Project\photocraft`(Rust 重写 Photoshop,封面编辑器 Move 控件对标源)对照校准出路线 v2。步骤1(撤销域=文档域快照,zundo partialize+equality)已提交 12f1a3fecb;本条=步骤2。
+- **死代码清偿**(全树零运行时引用,git 历史留档;对照 PhotoCraft 全树仅 36 处 `allow(dead_code)` 且几乎全是平台条件编译的死代码纪律):
+  - 删文件:`src/editor/sel-geom.ts`(151)/`text-scale.ts`(180)/`use-group-scale.ts`(150)+`test/sel-geom.test.ts`(10 例)——2026-11-11 画布 chrome 三建三拆后留档不删的几何/手柄数学;
+  - `image-ops.ts` 257→76 行:删 centerResize/rotatedEdgeResize/rotatedCornerResize/cornerResize+Corner/groupScaleEntries+GroupScaleMember/GroupScaleEntry(保留 arrangeOrder/flipPatch/rotatePatch/resizeWH/clampScale/cloneLayer/lockedOf 七个活函数);
+  - `store.ts`:删 `applyGroupScale` 动作(唯一调用方=use-group-scale;接口+实现+R9c 注释);
+  - `canvas-aux.ts`:删 updateHover/HoverDeps(T3.6 悬停预亮随 chrome 拆除后无引用;保留 usePurePreview/cycleLayerSelection);
+  - `test/image-ops.test.ts` 288→192 行:删五组死函数用例(28 例),保留七组活用例(155 全绿=183−28 精确对账,含 sel-geom 10)。
+- **P1-9 PhotoCraft 镜像态面板失效面**:镜像模式下画布树不渲染(580-585)而中栏图层面板/对齐/属性卡照常操作 store、全靠 `layerEl`/compRectRef 量真实 DOM=全部静默 no-op。修=①`pcRunning` 提升到 store(会话视图态,undoDomain 四键外=不入撤销域;CanvasPanel 轮询本地三态镜像进 store,卸载回 false)②App 中栏镜像时出**可见横幅**(「🖌 PhotoCraft 精修进行中——编辑面板暂停…自动恢复」)+面板容器 `pointer-events:none`+降不透明度 0.5。canvas 快捷键本就 `blocked().all` 让行(canvas-keys.ts),无需改。
+- **验证**:插件 155 用例绿(唯一套件失败 cover-tools.test.ts=stash 实证既有漂移:跨包裸导入 `dsh-tintin-bundle/lib/film-tools.js` 解析不过,与本批无关);typecheck 42 红与基线逐字节一致零新增;check:tintin 146 锚+15 基线+载荷新鲜全绿。**教训:①「留档不删」是行数债+假覆盖的温床(288 行测试里约 200 行测死函数,活交互零测试),清偿=删码+删死测试一起走,对账公式(155=183−28)写进台账防漏;②提升 store 的会话视图态要先过 undoDomain 口径,防重蹈步骤1 前的撤销污染**。

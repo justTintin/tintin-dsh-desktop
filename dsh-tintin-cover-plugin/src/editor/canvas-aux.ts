@@ -1,32 +1,8 @@
-// canvas-aux — 画布指针辅助三件(2026-11-10 P2 批,自 CanvasPanel 提取付账):
-// 悬停预亮(T3.6)/空格纯净预览(T3.9)/Alt+点击循环选层(T3.7)。live 信号走 ui.ts liveLayer。
+// canvas-aux — 画布指针辅助(2026-11-10 P2 批,自 CanvasPanel 提取付账):
+// 空格纯净预览(T3.9)/Alt+点击循环选层(T3.7)。live 信号走 ui.ts liveLayer。
+// 2026-11-21 清偿:T3.6 悬停预亮(updateHover/HoverDeps)随 2026-11-11 画布 chrome
+// 整体拆除后无运行时引用,按路线 v2 步骤2 清偿(git 历史留档)。
 import React from 'react'
-import { liveLayer, notifyLiveLayer } from './ui'
-
-export interface HoverDeps {
-  hoverRef: React.RefObject<HTMLDivElement | null>
-  hostRef: React.RefObject<HTMLDivElement | null>
-  playerWrapRef: React.RefObject<HTMLDivElement | null>
-  pcRunning: boolean | null
-  purePreview: boolean
-}
-
-/** T3.6 悬停预亮(ref 直写零重渲染;隐藏=拖动/缩放/旋转进行中或 PhotoCraft/Space) */
-export function updateHover(deps: HoverDeps, dragActive: boolean, clientX: number, clientY: number): void {
-  const { hoverRef, hostRef, playerWrapRef, pcRunning, purePreview } = deps
-  const hv = hoverRef.current
-  if (!hv) return
-  if (pcRunning || purePreview || dragActive || liveLayer.scaleId !== null) { hv.style.display = 'none'; return }
-  const el = document.elementFromPoint(clientX, clientY)?.closest('[data-cover-layer]') as Element | null
-  const pr = playerWrapRef.current?.getBoundingClientRect()
-  if (!el || !pr || !hostRef.current?.contains(el)) { hv.style.display = 'none'; return }
-  const r = el.getBoundingClientRect()
-  hv.style.display = 'block'
-  hv.style.left = `${r.left - pr.left - 2}px`
-  hv.style.top = `${r.top - pr.top - 2}px`
-  hv.style.width = `${r.width + 4}px`
-  hv.style.height = `${r.height + 4}px`
-}
 
 /** T3.9 空格纯净预览: 按住 Space(非输入焦点)隐藏全部辅助件;返回卸载清理 */
 export function usePurePreview(onChange: (v: boolean) => void): void {
