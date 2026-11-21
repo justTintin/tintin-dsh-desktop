@@ -23,7 +23,7 @@ type DreaminaStatus = {
   userId?: string
   error?: string
 }
-type DreaminaLoginFlow = { verificationUri: string; userCode: string; deviceCode: string; checking: boolean; failed?: string }
+type DreaminaLoginFlow = { verificationUri: string; userCode: string; deviceCode: string; expiresAt?: string; expired?: boolean; checking: boolean; failed?: string }
 
 /** 系统浏览器外开(2026-11-19 即梦登录事故):桌面壳 Studio 视图的 window.open 恒 deny,
  *  target=_blank 授权链接点击被吞——授权流程「无法打开」。编辑器 iframe(同源 loopback)
@@ -129,6 +129,16 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
    *  轮询窗,checklogin 超时退出后 UI 把 device_code 丢了——device_code 在有效期内仍可
    *  单次 checklogin 补收。修=失败保留材料+「我已授权,完成登录」单查补收(poll=10),
    *  不必整套重走(重走=新 device_code,网页还要重新授权)。 */
+  /* CLI 真实死因(2026-11-21 实测:dreamina login-check 失败走 stderr;pending=「等待登录超时」,
+     过期=「登录已过期」;原实现吞成猜测文案=用户与支持侧都看不到死因) */
+  const cliLoginError = (done: Record<string, unknown> | null): string => {
+    const raw = `${String(done?.stderr ?? '')}\nn${String(done?.stdout ?? '')}`
+    const line = raw.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? ''
+    return line || 'checklogin 失败（CLI 无输出）'
+  }
+  const cliLoginExpired = (done: Record<string, unknown> | null): boolean =>
+    /登录已过期|会话过期|expired/i.test(`${String(done?.stderr ?? '')}${String(done?.stdout ?? '')}`)
+
   const dreaminaLogin = (): void => {
     setJmBusy('login')
     dreaminaCall({ action: 'login-headless' })
@@ -137,10 +147,16 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
         const userCode = String(j?.userCode ?? '')
         const deviceCode = String(j?.deviceCode ?? '')
         if (!j?.ok || !verificationUri || !deviceCode) throw new Error(String(j?.error ?? '未取得设备码材料'))
-        setJmFlow({ verificationUri, userCode, deviceCode, checking: true })
+        const expiresAt = String(j?.expiresAt ?? '')
+        setJmFlow({ verificationUri, userCode, deviceCode, expiresAt, checking: true })
         openVerificationUri(verificationUri)
-        return dreaminaCall({ action: 'login-check', deviceCode, poll: 90 }).then((done) => {
-          if (!done?.ok) throw new Error('90 秒内未确认授权——若网页已显示「授权成功」，点下方「我已授权，完成登录」补收')
+        // 2026-11-21:自动轮询窗 90s→300s(实测 device_code TTL=15 分钟,输码+网页确认常超 90s;
+        // CLI 全程轮询=网页点确认的瞬间 token 即收下,补收仅剩兜底场景)
+        return dreaminaCall({ action: 'login-check', deviceCode, poll: 300 }).then((done) => {
+          if (!done?.ok) {
+            setJmFlow((f) => (f ? { ...f, checking: false, expired: cliLoginExpired(done) } : f))
+            throw new Error(`${cliLoginError(done)}——若网页已显示「授权成功」，点下方「我已授权，完成登录」补收`)
+          }
           setJmFlow(null)
           return loadDreamina()
         })
@@ -155,9 +171,12 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
     const deviceCode = jmFlow?.deviceCode
     if (!deviceCode) return
     setJmFlow((f) => (f ? { ...f, checking: true, failed: undefined } : f))
-    dreaminaCall({ action: 'login-check', deviceCode, poll: 10 })
+    dreaminaCall({ action: 'login-check', deviceCode, poll: 60 })
       .then((done) => {
-        if (!done?.ok) throw new Error('仍未查到授权结果——device_code 可能已过期，请重新登录')
+        if (!done?.ok) {
+          setJmFlow((f) => (f ? { ...f, checking: false, expired: cliLoginExpired(done) } : f))
+          throw new Error(cliLoginError(done)) // 透传 CLI 真实死因,不再吞成猜测文案
+        }
         setJmFlow(null)
         return loadDreamina()
       })
@@ -255,6 +274,17 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
                   }}
                   style={{ fontSize: 12, color: 'var(--accent)', wordBreak: 'break-all' }}>{jmFlow.verificationUri}</a>
                 <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 2, fontFamily: 'var(--font-mono)', color: 'var(--text)', background: 'var(--bg-field)', borderRadius: 8, padding: '6px 10px', textAlign: 'center' }}>{jmFlow.userCode}</div>
+                {jmFlow.expiresAt ? (() => {
+                  const exp = Date.parse(jmFlow.expiresAt)
+                  if (!Number.isFinite(exp)) return null
+                  const left = Math.max(0, Math.round((exp - Date.now()) / 60000))
+                  return (
+                    <div style={{ fontSize: 11.5, color: left > 2 ? 'var(--text-faint)' : 'var(--err)' }}>
+                      设备码有效期至 {new Date(exp).toLocaleTimeString('zh-Hans-CN', { hour12: false })}{left > 0 ? `（约剩 ${left} 分钟）` : '——已过期'}
+                      {left <= 2 ? '；过期后网页授权结果无法兑换，请重新登录' : ''}
+                    </div>
+                  )
+                })() : null}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button onClick={() => openVerificationUri(jmFlow.verificationUri)} style={{ ...btn('ghost'), flex: 'none', padding: '5px 12px', fontSize: 12 }}>重新打开链接</button>
                   <button onClick={() => navigator.clipboard?.writeText(jmFlow.verificationUri).catch(() => {})} style={{ ...btn('ghost'), flex: 'none', padding: '5px 12px', fontSize: 12 }}>复制链接</button>
@@ -264,7 +294,9 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
                 </div>
                 {jmFlow.failed ? (
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button onClick={dreaminaConfirmAuthorized} disabled={jmFlow.checking} style={{ ...btn('primary'), flex: 'none' }}>{jmFlow.checking ? '收尾中…' : '我已授权，完成登录'}</button>
+                    {!jmFlow.expired ? (
+                      <button onClick={dreaminaConfirmAuthorized} disabled={jmFlow.checking} style={{ ...btn('primary'), flex: 'none' }}>{jmFlow.checking ? '收尾中…' : '我已授权，完成登录'}</button>
+                    ) : null}
                     <button onClick={dreaminaLogin} disabled={jmFlow.checking} style={{ ...btn('ghost'), flex: 'none' }}>重新登录</button>
                   </div>
                 ) : null}

@@ -690,3 +690,9 @@ PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑�
 - **配套**:编辑器轮询 tick 挂 `document.hidden` 短路(最小化/切走=轮询挂起);`lib/photocraft.d.ts`+`lib/cover-photocraft-routes.d.ts` 类型声明(对齐 psd-png.d.ts 先例,新测试不再添 TS7016)。
 - **测试 5 例(真 TCP 模拟控制协议)**:同目标复用同连接鉴权一次/缓存废弃重连/无效令牌结构化失败/screenshot 带 focus:false/路由条件 GET 三段式(全量→unchanged→帧变新 seq)。**坑:mock server close 不杀活连接=server.close 等到钩子超时——close 先 destroy 全部 socket;计数跨用例累积→reset()**。
 - **验证**:测试 177 过(172+5);typecheck 42 红与基线逐字节一致零新增;check:lint 0 error;check:tintin 146 锚全绿。教训:**审计结论也要回到真源对账——步骤5 的「切控制通道」原方案建立在误判上,查 dispatch.rs 后改为修调用姿势;ui.screenshot 是沉降式捕获(8s 死限+3 次沉降+MAX_PENDING=4),更适合低频+条件取帧,不适合做高帧率镜像**。
+
+### 7.29 即梦登录三连报障根治:真实死因透传+有效期展示+轮询窗加长(2026-11-21;用户报「网页授权成功后补收仍查不到结果」)
+
+- **本机 CLI 实测(dreamina 1.4.21)拿铁证**:①device_code **TTL=15 分钟**(login --headless expires_at 实证);②pending 态 checklogin poll 超时=stderr「等待登录超时，请重试」exit 1;③**过期态=stderr「登录已过期，请重新执行 dreamina login --headless」exit 1**(后台等 code 过期实测);④失败消息走 **stderr**。二进制内含分级文案(登录已过期/登录尚未完成/用户已取消授权/登录已被拒绝/等待登录超时)。**网页「授权成功」≠登录完成**:token 兑换靠 CLI 持 device_code 轮询,code 过期=永久失效,网页结果无法追认——用户场景即此(TTL 15 分钟内未走完「点登录→浏览器输码授权→回客户端补收」全链)。
+- **三修**:①**真实死因透传**——login-check 失败原实现吞成猜测文案「device_code 可能已过期」(支持侧不可诊断);修=stderr/stdout 首行直出+分类(登录已过期→隐藏「我已授权，完成登录」补收只留重新登录;等待登录超时→引导再点补收;被拒绝/取消→如实转述);②**有效期可见**——login-headless 本就返回 expiresAt,展示「有效期至 HH:MM:SS（约剩 N 分钟）」,剩≤2 分钟转红并预告过期后果;③**自动轮询窗 90s→300s**——CLI 全程轮询=网页点确认瞬间 token 即收下,补收退化为兜底;补收 poll 10→60(网页侧提交有延迟,10s 太短)。
+- **验证**:typecheck 42 红基线一致零新增;测试 177 过。**教训:①错误信息是诊断的血液——吞真实死因换猜测文案,三次报障三次盲修;②设备码流 UI 必须把 TTL 摆在用户眼前,「有效期至」比任何提示语都有效;③超窗兜底按钮(poll=10)窗口比网页侧确认延迟还短=兜不住**。
