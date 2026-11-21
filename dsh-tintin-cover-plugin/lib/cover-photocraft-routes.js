@@ -4,16 +4,18 @@
 // tpl-list/tpl-preview/tpl-delete(服务端封面模板管理,preview=PNG 字节直出)、
 // psd-import(PSD 上传建模板:cli convert 优先,内置纯 JS 解析兜底)、
 // inspect/screenshot/execute(控制通道)、export(导出)。
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { mergeTintinConfigStore } from 'dsh-tintin-shared/lib/tintin-config-store.js'
-import { cliConvert, configuredDir, connectControl, launchApp, resolveCli, resolvePhotocraftDir } from './photocraft.js'
+import { cliConvert, configuredDir, connectControl, disposeControlCache, launchApp, resolveCli, resolvePhotocraftDir } from './photocraft.js'
 
 /** 注册 PhotoCraft 路由族,返回 disposables(与主路由 cleanup 合并)。
  *  deps 与主路由同款原语:registeringWebServer/isTrustedRequest/sendJson(主路由同款)、
  *  loadEngine(引擎单例)、getServerUrl(服务端地址解析)。 */
 export function registerCoverPhotocraftRoutes({ registeringWebServer, isTrustedRequest, sendJson, loadEngine, getServerUrl }) {
   const pcDisposes = []
+  pcDisposes.push(() => disposeControlCache()) // 插件清理:废弃暖连接(步骤5)
   const pcRoute = (sub, method, handler) => pcDisposes.push(registeringWebServer.register({
     kind: 'exact', path: `/tintin/cover/api/pc/${sub}`,
     handler: async (req, res) => {
@@ -28,7 +30,7 @@ export function registerCoverPhotocraftRoutes({ registeringWebServer, isTrustedR
       }
       try {
         const p = body ? JSON.parse(body) : {}
-        sendJson(res, 200, await handler(p))
+        sendJson(res, 200, await handler(p, req))
       } catch (err) {
         sendJson(res, 400, { ok: false, error: err instanceof Error ? err.message : String(err) })
       }
@@ -225,11 +227,27 @@ export function registerCoverPhotocraftRoutes({ registeringWebServer, isTrustedR
     const r = await conn.request('engine.execute', { command: 'document.inspect' })
     return { ok: !!r.ok, doc: r.result ?? null, error: r.error }
   })
-  pcRoute('screenshot', 'GET', async () => {
+  /* 镜像截图(2026-11-21 步骤5 改造,源码实证=crates/ui-egui/src/control/dispatch.rs:225):
+     ①focus:false——ui.screenshot 缺省每次抬窗(ViewportCommand::Focus),镜像 2s 轮询
+       原实现 {} 会把 PhotoCraft 窗口每 2s 抢到前台=真 bug;
+     ②条件 GET:服务端记最近帧 sha256,编辑器带 seq 命中同帧回 {unchanged:true}
+       (稳态零传输;内容变化才全量 base64);
+     ③暖连接(connectControl 缓存):轮询/inspect/execute 共用同连接,鉴权一次。 */
+  let shotSeq = 0
+  let shotHash = ''
+  pcRoute('screenshot', 'GET', async (_p, req) => {
     const conn = await connectControl()
     if (!conn.ok) return conn
-    const r = await conn.request('ui.screenshot', {})
-    return { ok: !!r.ok, data: r.result?.data ?? null, error: r.error }
+    const r = await conn.request('ui.screenshot', { focus: false })
+    if (!r.ok) return { ok: false, error: r.error }
+    const data = r.result?.data ?? null
+    if (!data) return { ok: false, error: r.error ?? '无截图数据' }
+    const hash = createHash('sha256').update(data).digest('hex')
+    const clientSeq = Number(new URL(req.url, 'http://localhost').searchParams.get('seq') || 0)
+    if (clientSeq && clientSeq === shotSeq && hash === shotHash) return { ok: true, unchanged: true, seq: shotSeq }
+    shotSeq += 1
+    shotHash = hash
+    return { ok: true, data, seq: shotSeq }
   })
   pcRoute('execute', 'POST', async (p) => {
     const conn = await connectControl()

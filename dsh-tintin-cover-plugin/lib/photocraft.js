@@ -118,12 +118,34 @@ export function controlTarget(env = process.env) {
 /**
  * 环回控制通道客户端(协议:docs/control-protocol.md)。
  * 连接 → 首帧 auth(token) → 暴露 request(method, params)。
- * 每次调用新建连接(环回开销可忽略;常驻桥接走官方 `photocraft-cli mcp --bridge`)。
+ *
+ * 暖连接缓存(2026-11-21 步骤5):同端口+令牌文件在空闲窗(20s)内复用同一 TCP 连接
+ * (鉴权一次),消灭截图轮询每 2s 的 connect+auth 抖动;应用 30s 关空闲连接,连接
+ * 关闭/请求失败即废弃缓存,下次调用重连;每请求独立死限(socket 级超时与长连不兼容)。
+ * disposeControlCache 供路由清理钩子与测试复位。
  */
-export function connectControl({ port, tokenFile, timeoutMs = 30_000 } = {}) {
+const CONTROL_IDLE_MS = 20_000
+let controlCache = null
+
+export function disposeControlCache() {
+  if (controlCache) {
+    try { controlCache.raw.destroy() } catch { /* ignore */ }
+    controlCache = null
+  }
+}
+
+export function connectControl({ port, tokenFile, timeoutMs = 30_000, warm = true } = {}) {
   const target = controlTarget()
   const usePort = port ?? target.port
   const useTokenFile = tokenFile ?? target.tokenFile
+  if (warm) {
+    const c = controlCache
+    if (c && c.port === usePort && c.tokenFile === useTokenFile && Date.now() - c.lastUse < CONTROL_IDLE_MS) {
+      c.lastUse = Date.now()
+      return Promise.resolve({ ok: true, request: c.request, warm: true })
+    }
+    if (c) disposeControlCache()
+  }
   return new Promise((resolvePromise) => {
     let token = ''
     try { token = readFileSync(useTokenFile, 'utf8').trim() } catch { /* 缺失按空 */ }
@@ -134,15 +156,25 @@ export function connectControl({ port, tokenFile, timeoutMs = 30_000 } = {}) {
     const socket = net.createConnection({ host: '127.0.0.1', port: usePort })
     let buffer = ''
     let ready = false
+    let settled = false
     const pending = new Map()
     let nextId = 1
     const finish = (fn, error) => {
+      if (settled) return
+      settled = true
       try { socket.destroy() } catch { /* ignore */ }
       resolvePromise(fn ? { ok: true, request } : { ok: false, error })
     }
     const fail = (error) => finish(null, error)
-    socket.setTimeout(timeoutMs, () => fail(`控制通道超时(${Math.round(timeoutMs / 1000)}s)——窗口可能被遮挡/休眠`))
+    // 连接建立死限(显式计时器,socket.setTimeout 与长连空闲不兼容)
+    const connectDeadline = setTimeout(() => fail(`控制通道连接超时(${Math.round(timeoutMs / 1000)}s)`), timeoutMs)
     socket.on('error', (e) => fail(`PhotoCraft 控制通道未就绪:${errText(e)}(先「启动 PhotoCraft」)`))
+    socket.on('close', () => {
+      clearTimeout(connectDeadline)
+      if (controlCache && controlCache.raw === socket) controlCache = null // 应用 30s 关空闲连接/异常断开
+      for (const res of pending.values()) res({ ok: false, error: '控制通道连接已关闭' })
+      pending.clear()
+    })
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8')
       let i
@@ -155,14 +187,19 @@ export function connectControl({ port, tokenFile, timeoutMs = 30_000 } = {}) {
         if (!ready) {
           if (!frame.ok) { fail(`鉴权失败:${frame.error || '?'}`); return }
           ready = true
-          resolvePromise({
-            ok: true,
-            request: (m, prm) => new Promise((res) => {
-              const id = `r${nextId++}`
-              pending.set(id, res)
-              socket.write(JSON.stringify({ id, method: m, params: prm ?? {} }) + '\n')
-            }),
+          clearTimeout(connectDeadline)
+          socket.setTimeout(0) // 长连不做空闲杀(应用侧 30s 自关,close 事件清缓存)
+          const request = (m, prm, reqTimeoutMs) => new Promise((res) => {
+            const id = `r${nextId++}`
+            const deadline = setTimeout(() => {
+              pending.delete(id)
+              res({ ok: false, error: `控制通道请求超时(${Math.round((reqTimeoutMs ?? timeoutMs) / 1000)}s):${m}` })
+            }, reqTimeoutMs ?? timeoutMs)
+            pending.set(id, (frame2) => { clearTimeout(deadline); res(frame2) })
+            socket.write(JSON.stringify({ id, method: m, params: prm ?? {} }) + '\n')
           })
+          controlCache = { port: usePort, tokenFile: useTokenFile, raw: socket, request, lastUse: Date.now() }
+          resolvePromise({ ok: true, request })
           continue
         }
         const res = pending.get(frame.id)

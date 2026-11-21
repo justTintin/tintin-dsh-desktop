@@ -159,6 +159,7 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   // PhotoCraft 为主(2026-10-27 15:09 裁决):画布 = PhotoCraft 截图轮询
   const [pcRunning, setPcRunning] = React.useState<boolean | null>(null) // null=未探测
   const [shot, setShot] = React.useState<string | null>(null)
+  const shotSeqRef = React.useRef(0)
   /* P1-9:镜像态提升到 store(App 据此出可见横幅+禁用中栏编辑面板;卸载回 false) */
   const setPcRunningStore = useEditor((s) => s.setPcRunning)
   React.useEffect(() => {
@@ -168,11 +169,15 @@ export function CanvasPanel({ project }: { project: string }): React.ReactElemen
   React.useEffect(() => {
     if (pcRunning === false) return
     let stop = false
+    /* 条件 GET(§7.28):带 seq 轮询,服务端同帧回 {unchanged:true}——稳态零传输;
+       页面不可见(document.hidden)不取帧,最小化/切走=轮询挂起,可见后下一 tick 恢复。 */
     const tick = async (): Promise<void> => {
-      if (canvasDragFreeze.active) return // 拖动中冻结:props 回流会触发整树重渲(抖动源),拖完下个轮询自然追上
+      if (canvasDragFreeze.active) return // 拖动/手柄会话中冻结:props 回流会触发整树重渲(抖动源),拖完下个轮询自然追上
+      if (document.hidden) return
       try {
-        const r = await fetch('/tintin/ipc/cover/pc/screenshot').then((resp) => resp.json())
-        if (!stop && r.ok && r.data) { setPcRunning(true); setShot(`data:image/png;base64,${r.data}`) }
+        const r = await fetch(`/tintin/ipc/cover/pc/screenshot${shotSeqRef.current ? `?seq=${shotSeqRef.current}` : ''}`).then((resp) => resp.json())
+        if (!stop && r.ok && r.unchanged) { shotSeqRef.current = Number(r.seq ?? shotSeqRef.current); if (pcRunning === null) setPcRunning(true) }
+        else if (!stop && r.ok && r.data) { shotSeqRef.current = Number(r.seq ?? 0); setPcRunning(true); setShot(`data:image/png;base64,${r.data}`) }
         else if (!stop && pcRunning === null) setPcRunning(false)
       } catch { if (!stop) setPcRunning(false) }
     }

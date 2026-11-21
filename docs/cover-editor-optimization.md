@@ -680,3 +680,13 @@ PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑�
 - **v1 边界(诚实声明)**:仅未旋转层(|norm180(rotate)|<0.5)出手柄,旋转层=仅框提示(旋转缩放需 quad→Homography 会话,超出 v1;rotate 数字字段照旧);框=主选单层(多选组柄=v2);rotate 手柄不在 v1(数字入口已有);**Ctrl+拖缩放保留**(R18/R20 裁决不撤销,与手柄并存)。
 - **测试先行**:layer-geom 纯函数全测(corner/edge 盒数学+三 kind 提交换算+钳制+cursor 表,corner 用例自 git 历史 12f1a3fecb^ 移植);applyGeom 单撤销+异构混合;undo-domain 增补。
 - **交付与验证(同日)**:新增 `layer-geom.ts`(176 行纯函数:GeomEntry 契约/HANDLES 单表/角柄等比+边柄单轴盒数学/三 kind 提交换算+中心缩放位移补偿/会话纯数据)+17 例纯测试(corner/edge 用例自 git 历史 12f1a3fecb^ 移植对拍;变异面=盒数学/补偿公式/钳制);`transform-frame.tsx`(226 行,四约束落地);canvas-geom 重写(CanvasFrame 外部存储,panel 订阅+canvasFrameNow 现场量双通道);store.applyGeom 替换 applyLayerGeometry(修多选整体移/对齐/分布=N 条撤销为 1 条);迁移消费方=edit-canvas(拖动提交/Ctrl 缩放)/canvas-keys(方向键)/align-row(对齐+分布)/text-properties(X/Y/等比缩放)/image-props(W🔗H/X/Y)。**会话期两坑实修**:①手柄会话期间卸载组件=pointer capture 随之丢失会话卡死 → 会话期保持挂载;②会话期 agent 回流扰动预览 → 复用 canvasDragFreeze 冻结(与体拖同语义)。**测试 172 过(155+17 精确对账);typecheck 42 红与基线逐字节一致零新增;check:lint 0 error;check:tintin 146 锚全绿**。真机待验:手柄拖拽/边柄/Esc 取消/旋转层框提示(打包/热刷后人工过一遍,交付说明随批)。
+
+### 7.28 PhotoCraft 整合步骤5:镜像轮询三改造(2026-11-21;路线 v2 步骤5,用户令「步骤5」)
+
+- **审计修正先行**:步骤5 原提案「/pc/screenshot 是 TinTin 包装层自制低效通道」**前提部分错误**——现状已走原生控制通道(connectControl→TCP JSON-lines→`ui.screenshot`,photocraft.js 既有);真正的差距在调用姿势。源码实证三个真问题:
+  1. **每 2s 抢焦点(真 bug)**:`ui.screenshot {path?, focus?}` 缺省每次抬窗(`dispatch.rs:225` `if focus.unwrap_or(true) { ViewportCommand::Focus }`)——镜像轮询原实现传 `{}`=PhotoCraft 窗口每 2s 被抢到前台。修=**`{focus:false}`**(Windows 遮挡不渲染问题不存在,macOS 语义见协议文档)。
+  2. **每 2s 重连+鉴权**:connectControl 每调用新建 TCP+auth;应用 30s 关空闲连接(协议文档 L370)。修=**暖连接缓存**(同端口+令牌文件 20s 空闲窗内复用同一连接,鉴权一次;close/请求失败即废弃缓存,下次重连;每请求独立死限——socket 级超时与长连不兼容,connect 级显式计时器);`disposeControlCache` 入路由 disposables。
+  3. **稳态全量传输**:全分辨率 PNG base64 每 2s 全量推。修=**条件 GET**:服务端记最近帧 sha256,编辑器带 `?seq=N` 命中同帧回 `{unchanged:true,seq}`(零 payload),内容变化才全量+新 seq。
+- **配套**:编辑器轮询 tick 挂 `document.hidden` 短路(最小化/切走=轮询挂起);`lib/photocraft.d.ts`+`lib/cover-photocraft-routes.d.ts` 类型声明(对齐 psd-png.d.ts 先例,新测试不再添 TS7016)。
+- **测试 5 例(真 TCP 模拟控制协议)**:同目标复用同连接鉴权一次/缓存废弃重连/无效令牌结构化失败/screenshot 带 focus:false/路由条件 GET 三段式(全量→unchanged→帧变新 seq)。**坑:mock server close 不杀活连接=server.close 等到钩子超时——close 先 destroy 全部 socket;计数跨用例累积→reset()**。
+- **验证**:测试 177 过(172+5);typecheck 42 红与基线逐字节一致零新增;check:lint 0 error;check:tintin 146 锚全绿。教训:**审计结论也要回到真源对账——步骤5 的「切控制通道」原方案建立在误判上,查 dispatch.rs 后改为修调用姿势;ui.screenshot 是沉降式捕获(8s 死限+3 次沉降+MAX_PENDING=4),更适合低频+条件取帧,不适合做高帧率镜像**。
