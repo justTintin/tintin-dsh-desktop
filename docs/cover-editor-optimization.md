@@ -696,3 +696,10 @@ PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑�
 - **本机 CLI 实测(dreamina 1.4.21)拿铁证**:①device_code **TTL=15 分钟**(login --headless expires_at 实证);②pending 态 checklogin poll 超时=stderr「等待登录超时，请重试」exit 1;③**过期态=stderr「登录已过期，请重新执行 dreamina login --headless」exit 1**(后台等 code 过期实测);④失败消息走 **stderr**。二进制内含分级文案(登录已过期/登录尚未完成/用户已取消授权/登录已被拒绝/等待登录超时)。**网页「授权成功」≠登录完成**:token 兑换靠 CLI 持 device_code 轮询,code 过期=永久失效,网页结果无法追认——用户场景即此(TTL 15 分钟内未走完「点登录→浏览器输码授权→回客户端补收」全链)。
 - **三修**:①**真实死因透传**——login-check 失败原实现吞成猜测文案「device_code 可能已过期」(支持侧不可诊断);修=stderr/stdout 首行直出+分类(登录已过期→隐藏「我已授权，完成登录」补收只留重新登录;等待登录超时→引导再点补收;被拒绝/取消→如实转述);②**有效期可见**——login-headless 本就返回 expiresAt,展示「有效期至 HH:MM:SS（约剩 N 分钟）」,剩≤2 分钟转红并预告过期后果;③**自动轮询窗 90s→300s**——CLI 全程轮询=网页点确认瞬间 token 即收下,补收退化为兜底;补收 poll 10→60(网页侧提交有延迟,10s 太短)。
 - **验证**:typecheck 42 红基线一致零新增;测试 177 过。**教训:①错误信息是诊断的血液——吞真实死因换猜测文案,三次报障三次盲修;②设备码流 UI 必须把 TTL 摆在用户眼前,「有效期至」比任何提示语都有效;③超窗兜底按钮(poll=10)窗口比网页侧确认延迟还短=兜不住**。
+
+### 7.30 即梦登录定罪:偏离官方 SKILL.md 默认语义(2026-11-21;用户怒指官方文档 https://jimeng.jianying.com/ai-tool/install →安装器下载的 ~/.dreamina_cli/dreamina/SKILL.md)
+
+- **官方口径逐字**(SKILL.md L36-46):登录官方用法=`dreamina login`;**"Default login waits for authorization to complete"**(默认=CLI 阻塞等授权完成,自己轮询自己收 token 自己退出);`--headless`+`checklogin` 是"finish the login **later**"的 agent 例外形态;即便 headless 也要求"keep the login command running... read stdout to the end, then confirm"。**「以前可以」=创作模式走的就是官方默认阻塞语义;Cover 集成自造了 90s 窗口模拟轮询+10s 补收=窗口远小于用户操作时间,三连报障全源于偏离默认**。
+- **修=回到官方语义**(不进 --headless 例外形态的深水区):取码展示链接(即时反馈)后,`checklogin --device_code=X --poll=600` **一条命令拉满官方 poll 上限**——CLI 自己持续轮询,网页点「授权成功」瞬间 token 即收下自动完成;TTL 15 分钟,余 5 分钟给兜底补收。UI 撤两步教学文案,回归「在网页完成授权即可——客户端持续等待并自动完成登录」。
+- 铁律新条(**官方文档在安装器里,不在网页上**):即梦 CLI 的"文档"=install 脚本下载的 SKILL.md(https://jimeng.jianying.com/cli 脚本内 SKILL_URL);网页 install 页是 JS 渲染空壳,WebFetch 只回标题。**接外部工具第一步=找它的安装器/包内文档,不是网页**。doc §7.27-7.29 的三轮修补(poll 90→300→600/死因透传/有效期展示)都是偏离默认后的代偿;定罪文档一条就够。
+- 验证:177 过;typecheck 42 红基线一致零新增;stage+热同步 AppData+1508/1555/1749/1941/**2005(并行会话今日 20:05 新归档,1058 已被 preclean 清掉属正常)**。待用户实机:点登录→网页授权→自动完成。

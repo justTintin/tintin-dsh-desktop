@@ -150,9 +150,10 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
         const expiresAt = String(j?.expiresAt ?? '')
         setJmFlow({ verificationUri, userCode, deviceCode, expiresAt, checking: true })
         openVerificationUri(verificationUri)
-        // 2026-11-21:自动轮询窗 90s→300s(实测 device_code TTL=15 分钟,输码+网页确认常超 90s;
-        // CLI 全程轮询=网页点确认的瞬间 token 即收下,补收仅剩兜底场景)
-        return dreaminaCall({ action: 'login-check', deviceCode, poll: 300 }).then((done) => {
+        // 官方 SKILL.md 语义(2026-11-21 定罪:默认 login=阻塞等授权完成;headless+checklogin
+        // 是官方补完机制,--poll=N waits for up to N seconds):poll=600 拉满=CLI 自己轮询,
+        // 网页点「授权成功」的瞬间 token 即收下自动完成;TTL 15 分钟,余 5 分钟给兜底补收。
+        return dreaminaCall({ action: 'login-check', deviceCode, poll: 600 }).then((done) => {
           if (!done?.ok) {
             setJmFlow((f) => (f ? { ...f, checking: false, expired: cliLoginExpired(done) } : f))
             throw new Error(`${cliLoginError(done)}——若网页已显示「授权成功」，点下方「我已授权，完成登录」补收`)
@@ -264,7 +265,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
               <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>正在检测即梦 CLI…</div>
             ) : jmFlow ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text)' }}>登录分两步：① 在网页点「授权成功」＝<b>批准这台电脑</b>（只是同意，还没完成）；② 回到本客户端<b>自动领取凭证</b>（设备码 15 分钟内有效）——两步都完成才算登录成功。</div>
+                <div style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text)' }}>在网页完成授权即可——客户端会<b>持续等待并自动完成登录</b>（官方设备码流程；设备码 15 分钟内有效，无需其他操作）。</div>
                 <a href={jmFlow.verificationUri} target="_blank" rel="noreferrer"
                   onClick={(e) => {
                     // 桌面壳 window.open 恒 deny(Studio 视图),点击改走系统浏览器桥;
@@ -290,7 +291,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
                   <button onClick={() => navigator.clipboard?.writeText(jmFlow.verificationUri).catch(() => {})} style={{ ...btn('ghost'), flex: 'none', padding: '5px 12px', fontSize: 12 }}>复制链接</button>
                 </div>
                 <div style={{ fontSize: 12, color: jmFlow.failed ? 'var(--err)' : 'var(--text-faint)' }}>
-                  {jmFlow.failed ? `✗ ${jmFlow.failed}` : jmFlow.checking ? '第②步进行中：已批准的话，客户端正在自动领取凭证…（最长等 5 分钟）' : ''}
+                  {jmFlow.failed ? `✗ ${jmFlow.failed}` : jmFlow.checking ? '等待你完成网页授权…授权完成会自动登录（CLI 持续轮询，最长 10 分钟；设备码 15 分钟内有效）' : ''}
                 </div>
                 {jmFlow.failed ? (
                   <div style={{ display: 'flex', gap: 8 }}>
