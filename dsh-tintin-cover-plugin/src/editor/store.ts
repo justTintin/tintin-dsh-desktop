@@ -126,6 +126,24 @@ function withOrder(state: EditorState, order: string[]): Pick<EditorState, 'prop
   return { props: { ...state.props, layerOrder: order } }
 }
 
+/** 撤销域(2026-11-21 PhotoCraft 对照修订): 历史快照只收文档域四键——模板/props
+ *  (含 customLayers/layerOrder/styles)/隐藏层/用户参考线。选中、多选、缩放、显示
+ *  开关、会话命名、导出结果都是会话视图态(PhotoCraft DocState「view state, not
+ *  history」口径),不进栈:点选图层/拨开关不再冲掉真实编辑历史,撤销也不再回滚
+ *  选中与缩放。userGuides 保留=画布脚手架属文档域(拖入/拖动/拖删各一条撤销是
+ *  既有设计;PhotoCraft 的 guides 同在 Document 历史域内)。
+ *  机制(zundo 2.3.0 实证): undo/redo 走 zustand 原生 set 的合并语义——快照外
+ *  字段保留现值;partialize 后的快照经 equality 引用判等,不入域动作产出同快照,
+ *  跳过入栈。agent 回流(useEditor.setState({props}))仍在域内=智能体改动可撤销。 */
+type UndoDomain = Pick<EditorState, 'templateId' | 'props' | 'hiddenLayers' | 'userGuides'>
+function undoDomain(s: EditorState): UndoDomain {
+  return { templateId: s.templateId, props: s.props, hiddenLayers: s.hiddenLayers, userGuides: s.userGuides }
+}
+/** 快照去重: 四键引用全等=同一文档态(引用不变性由各 set 动作保证:只在真改域键时换引用) */
+function sameUndoDomain(a: UndoDomain, b: UndoDomain): boolean {
+  return a.templateId === b.templateId && a.props === b.props && a.hiddenLayers === b.hiddenLayers && a.userGuides === b.userGuides
+}
+
 export const useEditor = create<EditorState>()(
   temporal(
     (set) => ({
@@ -442,7 +460,7 @@ export const useEditor = create<EditorState>()(
         return done ? nid : null
       },
     }),
-    { limit: 50 },
+    { limit: 50, partialize: undoDomain, equality: sameUndoDomain },
   ),
 )
 
