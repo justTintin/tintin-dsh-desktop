@@ -89,7 +89,7 @@ export const VERBS = /** @type {Record<string, VerbSpec>} */ ({
   },
   music: {
     help: 'Music. Returns src and its measured dur. --sec is a request and the track is often longer: play the part you need with a media fragment on the clip\'s src (#t=in,out).',
-    dir: 'assets/audio/music', timeoutSec: 300,
+    dir: 'assets/audio/music', timeoutSec: 600,
     options: { out, prompt, sec: { value: 'seconds', min: 3, max: 300 } },
   },
   asr: {
@@ -115,7 +115,10 @@ export const VERBS = /** @type {Record<string, VerbSpec>} */ ({
   },
   image: {
     help: 'Make one picture, or a new one from pictures in the project (--ref, up to 16; with --mask, a PNG whose transparent part is what is redrawn of the first; or --markup, a transparent PNG the size of the first with what to change drawn or written on it). --quality low is quick and costs least, max is finest and slowest; --size 1k, 2k or 4k. --format gif makes a looping animation of --frames (2 to 16) frames of --frame-ms each: a GIF clip plays its frames by the film\'s time, looping, so one round lasts frames × frame-ms. --format svg makes a vector picture from the prompt alone, its shapes elements a page can change. Returns its path and size.',
-    dir: 'assets/image', timeoutSec: 300,
+    /* 2026-11-21: 300→900 —— TinTin 服务端链（upload+引擎排队+生成）实测含排队可达数分钟,
+       360s 窗口把进行中的任务掐断在 Studio 侧(产物服务端落地但画布不再接收)。900+60=960s,
+       盖过 provider 15 分钟死限, 让 provider 自己的超时先到。 */
+    dir: 'assets/image', timeoutSec: 900,
     options: { out, prompt, ratio: { value: 'ratio', choices: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3', '21:9'], default: '3:2' },
       quality: { value: 'level', choices: ['low', 'medium', 'high', 'xhigh', 'max'], default: 'low' },
       size: { value: 'size', choices: ['1k', '2k', '4k'], default: '1k' }, transparent: {},
