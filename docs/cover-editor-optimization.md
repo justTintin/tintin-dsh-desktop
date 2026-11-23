@@ -712,3 +712,9 @@ PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑�
 - **打包链事实修正**:staging(`tintin-resources/cover-plugin/`)**不含 lib/**(stage.mjs 只同步 dist/public/chat-shell/skills)——插件 lib 经 yarn workspace 依赖进载荷 `resources/app/node_modules/dsh-tintin-cover-plugin/lib/`;热同步 lib 的真身位=此路径,非 `resources/cover-plugin/lib`(不存在)。verify-cover-payload 只比 dist/public/chat-shell/skills,lib 不在其比对域。
 - **验证**:本地探针(真 CLI spawn)login-start 材料 2s 返回/login-status active/cancel 清理全绿;typecheck 42 红基线一致零新增;测试 177 过;lint 0 error(顺手修 self-assign);check:tintin 146 锚+载荷新鲜全绿;热同步 AppData(app/node_modules lib+cover-plugin/dist/editor)+1749/1941/2005 归档。**待用户实机:重启客户端(lib 需重启)→登录→网页授权→自动完成**。
 - **教训:①官方默认链=一条进程等到完成,任何"UI 模拟轮询+补收"都是代偿,代偿会自己长出 bug(✗ n);②探针失败先怀疑探针(路由是 end 回调 fire-and-forget 契约,handler promise 先于 sendJson resolve,等 sendJson 才对);③热同步前先 `ls` 真身已入 AGENTS.md,但 staging 不含 lib 这层只有走到"file not found"才暴露——lib 真身位=app/node_modules/<pkg>/lib**。
+
+### 7.32 即梦登录过渡态补全:授权完成→读取账户信息的空窗(2026-11-23;用户实测 §7.31 链路已通——已登录 · 积分 11875——但授权完成后数秒闪回「未登录+登录即梦按钮」再变已登录)
+
+- **根因**:CLI 进程退出 0 后 tick 先 `setJmFlow(null)` 清卡、再 `loadDreamina()`(dreamina:status=--version+user_credit 两次 CLI 调用,数秒)——两步之间 jmFlow=null 且 jm 未刷新=渲染落到「已安装·未登录」分支(图1),读完才变已登录(图2)。
+- **修**:授权完成不清卡——`setJmFlow({checking:false, doneOk:true})` 亮「✓ 授权成功，正在读取账户信息…」→ `await loadDreamina()` → `setJmFlow(null)` 切已登录卡。全过程显示闭环:未登录按钮→「取设备码…」(login-start 1-2s)→链接+授权码+「等待网页授权中…」→「✓ 授权成功，正在读取账户信息…」→已登录卡(用户ID·积分)。
+- 验证:177 过;typecheck 42 红基线一致零新增;lint 0 error;check:tintin 146 锚全绿;热同步 AppData+1749/1941/2005(dist/editor,特征串核验)。

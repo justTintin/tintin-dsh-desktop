@@ -23,7 +23,7 @@ type DreaminaStatus = {
   userId?: string
   error?: string
 }
-type DreaminaLoginFlow = { verificationUri: string; userCode: string; expiresAt?: string; checking: boolean; failed?: string }
+type DreaminaLoginFlow = { verificationUri: string; userCode: string; expiresAt?: string; checking: boolean; doneOk?: boolean; failed?: string }
 
 /** 系统浏览器外开(2026-11-19 即梦登录事故):桌面壳 Studio 视图的 window.open 恒 deny,
  *  target=_blank 授权链接点击被吞——授权流程「无法打开」。编辑器 iframe(同源 loopback)
@@ -138,7 +138,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
         openVerificationUri(verificationUri)
         // 轮询登录进程状态:授权完成=CLI 进程自己退出 0;失败=透传 stderr 首行
         const tick = (): Promise<void> =>
-          dreaminaCall({ action: 'login-status' }).then((st) => {
+          dreaminaCall({ action: 'login-status' }).then(async (st) => {
             const m = st?.materials as { verificationUri?: string; userCode?: string; expiresAt?: string } | undefined
             if (m?.verificationUri) {
               setJmFlow((f) => (f ? { ...f, verificationUri: String(m.verificationUri), userCode: String(m.userCode ?? ''), expiresAt: String(m.expiresAt ?? '') } : f))
@@ -146,8 +146,10 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
             const d = st?.done as { ok?: boolean; error?: string } | undefined
             if (!d) return // 仍在等待授权:继续轮询
             if (!d.ok) throw new Error(String(d.error || '登录未完成'))
+            // 授权完成:先亮成功态再读账户(status=两次 CLI 调用需数秒,先清卡会闪回「未登录+登录即梦按钮」空窗)
+            setJmFlow((f) => (f ? { ...f, checking: false, doneOk: true } : f))
+            await loadDreamina()
             setJmFlow(null)
-            return loadDreamina()
           })
         const poll = (): void => {
           void tick()
@@ -277,7 +279,9 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
                   <button onClick={() => navigator.clipboard?.writeText(jmFlow.verificationUri).catch(() => {})} style={{ ...btn('ghost'), flex: 'none', padding: '5px 12px', fontSize: 12 }}>复制链接</button>
                 </div>
                 <div style={{ fontSize: 12, color: jmFlow.failed ? 'var(--err)' : 'var(--text-faint)' }}>
-                  {jmFlow.failed ? `✗ ${jmFlow.failed}` : jmFlow.checking ? '等待网页授权中…授权完成会自动登录（最长 15 分钟）' : ''}
+                  {jmFlow.failed ? `✗ ${jmFlow.failed}`
+                    : jmFlow.doneOk ? '✓ 授权成功，正在读取账户信息…'
+                    : jmFlow.checking ? '等待网页授权中…授权完成会自动登录（最长 15 分钟）' : ''}
                 </div>
                 {jmFlow.failed ? (
                   <div style={{ display: 'flex', gap: 8 }}>
