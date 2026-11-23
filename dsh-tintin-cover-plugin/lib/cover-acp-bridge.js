@@ -15,6 +15,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable, Writable } from 'node:stream'
 import { migrateCoverSkillsHome } from 'dsh-tintin-shared/lib/skills-install.js'
+import { resolveDreaminaBin } from 'dsh-tintin-shared/lib/dreamina.js'
+import { readTintinConfigStore } from 'dsh-tintin-shared/lib/tintin-config-store.js'
 
 const require_ = createRequire(import.meta.url)
 const here = dirname(fileURLToPath(import.meta.url))
@@ -257,6 +259,25 @@ function syncUserSkills(state, homeName = 'cover-agent-home') {
   return count
 }
 
+/** 即梦优先附录(2026-11-23 §7.33 用户裁决):开关(config dreamina.preferInSkills 缺省开)
+ *  +CLI 二进制存在 → 指示智能体生图/图片处理优先 mcp__cover-tools__dreamina_image(登录态
+ *  由智能体 dreamina user_credit 现查,附录组装保持同步零子进程);关=明示一律服务端。 */
+function dreaminaAppendix() {
+  let on = true
+  try {
+    const doc = readTintinConfigStore(process.env.DSH_HOME)
+    on = doc?.dreamina?.preferInSkills !== false
+  } catch { /* 缺配置=默认开 */ }
+  if (!on) {
+    return '- 即梦优先已关闭(封面设置「即梦 CLI」开关):图片生成/图片处理一律走服务端 create_image,不要调用 dreamina。'
+  }
+  const bin = resolveDreaminaBin()
+  if (!existsSync(bin)) {
+    return '- 即梦 CLI 未安装:图片生成/图片处理走服务端 create_image;用户问起即梦时告知安装命令(curl -s https://jimeng.jianying.com/cli | bash)与登录入口(封面设置「即梦 CLI」)。'
+  }
+  return '- 即梦优先(2026-11-23 用户裁决):图片生成/图片处理(文生图/参考图编辑/超分)优先 mcp__cover-tools__dreamina_image(text2image/image2image/upscale,产物自动落素材区);调用前先 dreamina user_credit 验证登录态,未登录则引导用户到封面设置「即梦 CLI」登录,本次回落服务端 create_image。官方 Dreamina CLI 技能(dreamina-cli,含视频生成)已装技能位,视频/会话管理按其文档用 Bash 直跑 dreamina 命令。'
+}
+
 /** 技能注入:skills/cover/SKILL.md → agent home;动态附录(服务端/编辑器 API/令牌)拼在文末。
  *  2026-11-01 用户裁决:封面协议技能随场景走 —— 默认角色 deepseek 同样注入(没有它任何
  *  角色都不知道 cover.props.json 图层协议与编辑器 API,封面会话退化为裸编码智能体)。 */
@@ -277,6 +298,7 @@ function ensureCoverSkill(state, homeName = 'cover-agent-home') {  const sources
        2026-11-01 会话生成统一走 MCP create_image 后, 此基址的会话用途只剩导出 render。 */
     `- 渲染/导出/看图一律走本地工具 MCP mcp__cover-tools__*(render_preview/read_image/matting);编辑器 HTTP API 对智能体已关闭(非浏览器 POST 一律 403,2026-11-05),不要用 curl 调它`,
     `- 会话工作目录 = 封面工作目录(cover/);图层状态读 cover.props.json`,
+    dreaminaAppendix(),
     '',
   ].join('\n')
   writeFileSync(join(target, 'SKILL.md'), base + appendix, 'utf8')

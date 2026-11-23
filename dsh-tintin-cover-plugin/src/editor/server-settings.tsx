@@ -69,6 +69,20 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
       .catch(() => setJm({ available: false, error: '即梦状态获取失败' }))
       .finally(() => setJmLoaded(true))
 
+  /* 即梦优先开关(2026-11-23 §7.33 用户裁决):config dreamina.preferInSkills 缺省开——
+     开+已登录=封面制作全链(编辑器生成/技能/会话)优先即梦 CLI;关=一律服务端兜底。 */
+  const [jmPrefer, setJmPrefer] = React.useState(true)
+  const loadDreaminaPref = (): Promise<void> =>
+    dreaminaCall({ action: 'get-pref' })
+      .then((j) => setJmPrefer(j?.preferInSkills !== false))
+      .catch(() => {})
+  const setDreaminaPrefer = (on: boolean): void => {
+    setJmPrefer(on)
+    dreaminaCall({ action: 'set-pref', preferInSkills: on })
+      .then((j) => { if (!j?.ok) setJmPrefer(!on) })
+      .catch(() => setJmPrefer(!on))
+  }
+
   const discoverInto = (target: string, quiet: boolean): Promise<void> =>
     new Promise((resolve) => {
       fetch('/tintin/ipc/cover/mcp/discover', {
@@ -118,6 +132,7 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
       .catch(() => {})
       .finally(() => setLoaded(true))
     void loadDreamina()
+    void loadDreaminaPref()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -300,6 +315,15 @@ export const ServerSettingsModal: React.FC<{ onClose: () => void }> = ({ onClose
                   已登录{jm.userId ? ` · ${jm.userId}` : ''}{typeof jm.credit === 'number' ? ` · 积分 ${jm.credit}` : ''}{jm.vipLevel ? ` · ${jm.vipLevel}` : ''}
                 </div>
                 <div style={{ fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-faint)' }}>封面生图与图片编辑已自动优先即梦 CLI；未登录时自动落服务端文生图。</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--text)', flexShrink: 0 }}>封面技能优先用即梦</span>
+                  <button
+                    onClick={() => setDreaminaPrefer(!jmPrefer)}
+                    title={jmPrefer ? '已开启：编辑器生成与封面技能/会话优先即梦 CLI（点关闭回落服务端）' : '已关闭：生图一律走服务端（点开启恢复即梦优先）'}
+                    style={{ width: 34, height: 20, borderRadius: 999, border: `1px solid ${jmPrefer ? 'var(--accent)' : 'var(--border-strong)'}`, background: jmPrefer ? 'var(--accent)' : 'var(--bg-field)', cursor: 'pointer', position: 'relative', flexShrink: 0, padding: 0 }}
+                  ><span style={{ position: 'absolute', top: 2, left: jmPrefer ? 16 : 2, width: 14, height: 14, borderRadius: '50%', background: '#fff', transition: 'left .15s' }} /></button>
+                  <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{jmPrefer ? '开' : '关'}</span>
+                </div>
                 <button onClick={dreaminaLogout} disabled={jmBusy !== null} style={{ ...btn('ghost'), flex: 'none' }}>{jmBusy === 'logout' ? '退出中…' : '退出登录'}</button>
               </div>
             ) : (

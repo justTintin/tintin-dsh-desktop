@@ -32,7 +32,9 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [installed, setInstalled] = React.useState<InstalledSkill[]>([])
   const [serverError, setServerError] = React.useState('')
   const [loaded, setLoaded] = React.useState(false)
-  const [tab, setTab] = React.useState<'installed' | 'discover'>('installed')
+  const [tab, setTab] = React.useState<'installed' | 'discover' | 'dreamina'>('installed')
+  type DreaminaSkill = { available: boolean; installed: boolean; upToDate: boolean; cliVersion: string; name: string; description: string; source: string; installedDir: string }
+  const [dreamina, setDreamina] = React.useState<DreaminaSkill | null>(null)
   const [query, setQuery] = React.useState('')
   const [addOpen, setAddOpen] = React.useState(false)
   const [addId, setAddId] = React.useState('')
@@ -47,6 +49,10 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       else setServerError('')
       setRegistry(Array.isArray(r?.registry) ? r.registry : [])
       setInstalled(Array.isArray(r?.installed) ? r.installed : [])
+      try {
+        const d = await fetch('/tintin/ipc/cover/dreamina', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'skill-get' }) }).then((x) => x.json())
+        if (d?.ok) setDreamina(d as DreaminaSkill)
+      } catch { /* 即梦态获取失败不阻塞技能列表 */ }
     } catch (e) {
       setServerError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -68,6 +74,22 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       await load()
     } catch (e) {
       setStatus((action === 'install' ? '安装失败：' : '删除失败：') + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const dreaminaAct = async (action: 'skill-install' | 'skill-remove'): Promise<void> => {
+    setBusy('dreamina' + action)
+    setStatus(action === 'skill-install' ? '安装「即梦创作 CLI」技能中…' : '删除「即梦创作 CLI」技能中…')
+    try {
+      const r = await fetch('/tintin/ipc/cover/dreamina', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) }).then((x) => x.json())
+      if (!r?.ok) throw new Error(r?.error || 'HTTP 失败')
+      setStatus(action === 'skill-install' ? '已安装「即梦创作 CLI」技能——封面 / 菜单即可引用；当前会话若未见新技能，新开会话即生效。' : '已删除「即梦创作 CLI」技能')
+      const d = await fetch('/tintin/ipc/cover/dreamina', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'skill-get' }) }).then((x) => x.json())
+      if (d?.ok) setDreamina(d as DreaminaSkill)
+    } catch (e) {
+      setStatus((action === 'skill-install' ? '安装失败：' : '删除失败：') + (e instanceof Error ? e.message : String(e)))
     } finally {
       setBusy('')
     }
@@ -152,6 +174,7 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             {([
               ['installed', `已安装（${installed.length}）`],
               ['discover', `发现（${registry.length}）`],
+              ['dreamina', '即梦'],
             ] as Array<[typeof tab, string]>).map(([key, label]) => (
               <button
                 key={key}
@@ -199,7 +222,7 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   })
                 })}
             </>
-          ) : (
+          ) : tab === 'discover' ? (
             <>
               <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>服务端技能库（{registry.length}）—— 安装后落到技能主目录，封面 / 菜单可引用{serverError ? <span style={{ color: '#ff8f8f' }}> · 清单刷新失败：{serverError}</span> : null}</div>
               {!loaded ? <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: 14 }}>加载中…</div>
@@ -223,7 +246,31 @@ export const SkillsModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                   })
                 })}
             </>
-          )}
+          ) : tab === 'dreamina' ? (
+            <>
+              <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>即梦创作 CLI 官方技能 —— 图片与视频生成/登录/会话管理（安装器自带；默认安装进封面装位，封面 / 菜单可引用）</div>
+              {!dreamina ? <div style={{ fontSize: 12, color: 'var(--text-faint)', padding: 14 }}>加载中…</div>
+                : !dreamina.available ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-faint)', border: '1px dashed var(--border-strong)', borderRadius: 10, padding: '16px 18px' }}>
+                    未找到即梦官方技能——先安装即梦创作 CLI（<code style={{ fontFamily: 'var(--font-mono)' }}>curl -s https://jimeng.jianying.com/cli | bash</code>），安装器会自带本技能；装完点「安装」。
+                  </div>
+                ) : (
+                  row({
+                    key: 'dreamina', name: '即梦创作 CLI（Dreamina）', version: dreamina.cliVersion || '', description: dreamina.description || '即梦官方 CLI 技能：登录、图片/视频生成（text2image/image2image/upscale、text2video/image2video/frames2video/multiframe2video/multimodal2video）、会话与任务历史。',
+                    installed: dreamina.installed, update: Boolean(dreamina.installed && !dreamina.upToDate), meta: '',
+                    detailFields: [['id', 'dreamina'], ['版本', dreamina.cliVersion || '—'], ['装位', '%DSH_HOME%\cover-skills\dreamina'], ['官方源', dreamina.source || '—'], ['描述', dreamina.description]],
+                    buttons: (
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        {dreamina.installed && dreamina.upToDate ? <span style={{ fontSize: 10, fontWeight: 700, color: '#8fd6a4', border: '1px solid rgba(143,214,164,.4)', background: 'rgba(143,214,164,.12)', borderRadius: 999, padding: '1px 8px' }}>✓ 已安装（官方默认）</span> : null}
+                        {dreamina.installed && !dreamina.upToDate ? <button onClick={() => void dreaminaAct('skill-install')} disabled={busy !== ''} style={btn('primary')}>{busy === 'dreaminaskill-install' ? '更新中…' : '更新'}</button> : null}
+                        {!dreamina.installed ? <button onClick={() => void dreaminaAct('skill-install')} disabled={busy !== ''} style={btn('primary')}>{busy === 'dreaminaskill-install' ? '安装中…' : '安装'}</button> : null}
+                        {dreamina.installed ? <button onClick={() => void dreaminaAct('skill-remove')} disabled={busy !== ''} style={btn('danger')}>删除</button> : null}
+                      </div>
+                    ),
+                  })
+                )}
+            </>
+          ) : null}
         </div>
         <div style={{ padding: '6px 18px 12px', fontSize: 11, color: 'var(--text-faint)', flexShrink: 0, whiteSpace: 'pre-wrap' }}>{status || '安装=下载技能包落盘并注册到封面 / 菜单；当前会话若未见新技能，新开会话即生效。'}</div>
       </div>

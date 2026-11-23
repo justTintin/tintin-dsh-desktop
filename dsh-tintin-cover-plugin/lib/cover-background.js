@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { absoluteUrl, taskStatusOf, taskIdOf } from 'dsh-tintin-shared/lib/server-gen.js'
 import { createDreaminaApi, dreaminaDownloadRoot, extractMediaUrls } from 'dsh-tintin-shared/lib/dreamina.js'
+import { readTintinConfigStore } from 'dsh-tintin-shared/lib/tintin-config-store.js'
 
 const errText = (e) => (e instanceof Error ? e.message : String(e))
 const DONE = new Set(['completed', 'succeeded', 'success', 'done'])
@@ -18,6 +19,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  *  opts.jimengReady 可注入(测试确定性;真身每次现查,装完 CLI 无需重启)。 */
 async function jimengReadyProbe() {
   try {
+    // 即梦优先开关(2026-11-23 用户裁决 §7.33: dreamina.preferInSkills 缺省开)——关=编辑器
+    // 生成也回落服务端,与技能/会话侧同一开关同一语义。
+    const doc = readTintinConfigStore(process.env.DSH_HOME)
+    if (doc?.dreamina?.preferInSkills === false) return false
     const api = createDreaminaApi()
     const status = await api['dreamina:status']()
     if (!status || status.error) return false

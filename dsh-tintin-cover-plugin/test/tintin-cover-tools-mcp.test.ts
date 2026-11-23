@@ -92,7 +92,7 @@ describe('cover tools mcp endpoint', () => {
     expect(resultOf(init).serverInfo.name).toBe('cover-tools')
     const list = await call(rpc(2, 'tools/list'))
     const names = resultOf(list).tools.map((t: { name: string }) => t.name)
-    expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'imitate_cover_wait', 'ocr_image', 'text_remove'])
+    expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'imitate_cover_wait', 'ocr_image', 'dreamina_image', 'text_remove'])
     const bad = await call(rpc(3, 'no/such'))
     expect((bad.body as Record<string, any>).error.code).toBe(-32601)
     const note = await call({ jsonrpc: '2.0', method: 'notifications/initialized' })
@@ -468,7 +468,7 @@ describe('cover tools mcp endpoint', () => {
       await fetch(server.url, { method: 'POST', headers: { ...h, 'mcp-session-id': sid! }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) })
       const list = await fetch(server.url, { method: 'POST', headers: { ...h, 'mcp-session-id': sid! }, body: JSON.stringify(rpc(2, 'tools/list')) })
       const names = ((await list.json()) as { result?: { tools?: Array<{ name: string }> } }).result?.tools?.map((t) => t.name)
-      expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'imitate_cover_wait', 'ocr_image', 'text_remove'])
+      expect(names).toEqual(['read_image', 'matting', 'render_preview', 'imitate_cover', 'imitate_cover_wait', 'ocr_image', 'dreamina_image', 'text_remove'])
     } finally {
       await server.dispose()
     }

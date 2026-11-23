@@ -40,6 +40,8 @@ import { createServer } from 'node:http'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, isAbsolute, join, resolve as resolvePath, sep } from 'node:path'
 import { MODEL_SAFE_RAW_BYTES, imageMetaText, modelTooLargeText, shrinkForModelRead } from './cover-image-resize.js'
+import { createDreaminaApi, extractMediaUrls } from 'dsh-tintin-shared/lib/dreamina.js'
+import { readTintinConfigStore } from 'dsh-tintin-shared/lib/tintin-config-store.js'
 
 const MCP_PATH = '/tintin/cover/api/tools-mcp'
 const MATTING_CHAIN = ['isnet-general-use', 'u2net', 'isnet-anime']
@@ -582,6 +584,77 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     }
   }
 
+  const writeAssetBytes = async (bytes, outName) => {
+    const { writeCoverAsset } = await import('./cover-asset.js')
+    const pluginDir = resolvePluginDir()
+    if (pluginDir) writeCoverAsset(pluginDir, outName, bytes)
+    const engine2 = await loadEngine()
+    const coverDir2 = await engine2.resolveCoverDir()
+    const { mkdirSync } = await import('node:fs')
+    mkdirSync(coverDir2, { recursive: true })
+    writeFileSync(join(coverDir2, outName), bytes)
+    return join(coverDir2, outName)
+  }
+
+  /* dreamina_image(2026-11-23 §7.33 用户裁决): 即梦 CLI 生图直通——开关开+已登录时,
+     技能/会话侧生图与图片处理优先走本工具(text2image/image2image/upscale),未登录/关闭
+     时返回明确指引(调用方回落服务端 create_image)。提交(CLI 自轮询 poll 110s)→
+     query_result 补收(download)→产物写素材三写位+项目目录,与编辑器生成同一落盘口径。 */
+  const dreaminaPrefOn = () => {
+    try {
+      const doc = readTintinConfigStore(process.env.DSH_HOME)
+      return doc?.dreamina?.preferInSkills !== false
+    } catch { return true }
+  }
+  const dreaminaImage = async (args) => {
+    if (!dreaminaPrefOn()) {
+      return { content: [{ type: 'text', text: '即梦优先已关闭(封面设置「即梦 CLI」开关)——本次生图/图片处理请走服务端 create_image。' }] }
+    }
+    const mode = String(args?.mode ?? 'text2image')
+    const prompt = String(args?.prompt ?? '').trim()
+    if (!prompt && mode !== 'upscale') throw new Error('prompt 必填(text2image/image2image)')
+    const engine = await loadEngine()
+    const coverDir = await engine.resolveCoverDir()
+    const srcImage = args?.image ? resolveImagePath(String(args.image), coverDir, resolvePluginDir()) : ''
+    if (mode === 'image2image' && (!srcImage || !existsSync(srcImage))) throw new Error('image2image 需要可用的本地参考图(args.image,项目目录/素材位文件名或绝对路径)')
+    const api = createDreaminaApi({ warn: () => {} })
+    const command = mode === 'image2image' ? 'image2image' : mode === 'upscale' ? 'image_upscale' : 'text2image'
+    const genArgs = [{ command, prompt, images: srcImage ? [srcImage] : [], poll: 110 }]
+    if (args?.ratio) genArgs[0].ratio = String(args.ratio)
+    if (args?.resolution_type) genArgs[0].resolutionType = String(args.resolution_type)
+    const gen = await api['dreamina:generate'](genArgs)
+    if (gen.error) throw new Error(`即梦通道不可用:${gen.error}`)
+    let urls = []
+    try { urls = extractMediaUrls(gen.parsed) } catch { urls = [] }
+    let localDir = ''
+    const submitId = String(gen.submitId || '')
+    const deadline = Date.now() + 240_000
+    while ((!urls || urls.length === 0) && submitId && Date.now() < deadline) {
+      if (gen.failReason) throw new Error(`即梦生成失败:${gen.failReason}`)
+      const q = await api['dreamina:query']([{ submitId, download: true }])
+      if (q.mediaUrls?.length) { urls = q.mediaUrls; localDir = String(q.localDir || '') }
+      if (q.failReason) throw new Error(`即梦任务失败:${q.failReason}`)
+      if (!urls.length) await new Promise((r) => setTimeout(r, 8000))
+    }
+    if (!urls.length) throw new Error('即梦未返回产物——可能未登录(封面设置「即梦 CLI」登录后重试)或任务超时')
+    let bytes = null
+    if (localDir && existsSync(localDir)) {
+      const hit = readdirSync(localDir).find((f) => /\.(png|jpe?g|webp)$/i.test(f))
+      if (hit) bytes = readFileSync(join(localDir, hit))
+    }
+    if (!bytes) {
+      const response = await fetch(urls[0], { signal: AbortSignal.timeout(300_000) })
+      if (!response.ok) throw new Error(`产物下载失败 HTTP ${response.status}`)
+      bytes = Buffer.from(await response.arrayBuffer())
+    }
+    if (!bytes || bytes.length === 0 || bytes.length > 15 * 1024 * 1024) throw new Error(`产物大小异常(${bytes ? bytes.length : 0}B)`)
+    const outName = `dreamina-${Date.now()}.png`
+    await writeAssetBytes(bytes, outName)
+    const engineLabel = `dreamina-${command}`
+    const filePath = join(coverDir, outName)
+    return { content: [{ type: 'text', text: JSON.stringify({ ok: true, name: outName, file: filePath, asset: '素材区(三写位)', engine: engineLabel, url: urls[0], note: '即梦 CLI 产物已落素材区。上图由用户/排版决定;封面组装请写 cover.props.json 后 render_preview 回看。' }, null, 1) }] }
+  }
+
   const tools = [
     {
       name: 'read_image',
@@ -627,6 +700,17 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
       inputSchema: { type: 'object', properties: { image: { type: 'string', description: '图片绝对路径(项目目录内)或素材文件名' } }, required: ['image'] },
     },
     {
+      name: 'dreamina_image',
+      description: '即梦 CLI 生图/图片处理(用户已登录即梦时优先用本工具,2026-11-23 用户裁决):mode=text2image(缺省,文生图)/image2image(参考图编辑,1..10 张本地图)/upscale(超分 2k/4k/8k)。异步任务自动等待并落盘(素材区+项目目录,约数十秒到数分钟,消耗即梦积分);返回 file=本地路径。开关关闭或未登录时返回指引(改走服务端 create_image)。ratio 如 16:9/1:1/9:16;resolution_type 如 2k/4k(text2image/image2image 必传给 CLI,缺省 2k 档由 CLI 默认)。',
+      inputSchema: { type: 'object', properties: {
+        mode: { type: 'string', enum: ['text2image', 'image2image', 'upscale'], description: '缺省 text2image' },
+        prompt: { type: 'string', description: '画面描述(text2image/image2image 必填)' },
+        image: { type: 'string', description: 'image2image/upscale 的源图(项目目录/素材位文件名或绝对路径);image2image 可多次传' },
+        ratio: { type: 'string', description: '可选,如 16:9 / 1:1 / 9:16(封面竖屏用 9:16)' },
+        resolution_type: { type: 'string', description: '可选,2k/4k(image2image 5.0Pro 另支持 1.5k)' },
+      } },
+    },
+    {
       name: 'text_remove',
       description: '去字(服务端 /image/text-remove,LaMa 质量档约 6s):把参考封面里的原字抹掉,得到干净底图——拆解链第三步(ocr 取框→去字→干净底图+排版层重打)。boxes 缺省=自动先 OCR 取全部字框;显式传 [[x1,y1,x2,y2],...](绝对像素,即 ocr_image 的 lines[].box)只抹指定框;fast=true 仅适合纯色/渐变底小字。产物 PNG 落素材区+项目目录。',
       inputSchema: { type: 'object', properties: {
@@ -645,6 +729,7 @@ export function createCoverTools({ getServerUrl, loadEngine, resolvePluginDir, p
     if (name === 'imitate_cover_wait') return imitateCoverWait(args, { pollIntervalMs })
     if (name === 'ocr_image') return ocrImage(args)
     if (name === 'text_remove') return textRemove(args)
+    if (name === 'dreamina_image') return dreaminaImage(args)
     return { isError: true, content: [{ type: 'text', text: `未知工具:${name}` }] }
   }
 

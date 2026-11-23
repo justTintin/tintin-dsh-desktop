@@ -331,6 +331,21 @@ export const EditorApp: React.FC = () => {
     const host = rootRef.current?.parentElement
     if (host && host.hasAttribute('data-tintin-cover-scope')) host.setAttribute('data-theme', theme)
   }, [isDark])
+  /* 官方即梦技能默认安装(2026-11-23 §7.33 用户裁决):编辑器挂载时静默检查——
+     CLI 自带 SKILL.md 存在且未装/过期 → 幂等安装进 cover-skills/dreamina
+     (装完 / 菜单与技能管理「即梦」tab 即可见;失败静默,技能管理 tab 可手动装)。 */
+  React.useEffect(() => {
+    const run = async (): Promise<void> => {
+      try {
+        const base = { method: 'POST', headers: { 'content-type': 'application/json' } }
+        const st = await fetch('/tintin/ipc/cover/dreamina', { ...base, body: JSON.stringify({ action: 'skill-get' }) }).then((x) => x.json())
+        if (st?.ok && st.available && (!st.installed || !st.upToDate)) {
+          await fetch('/tintin/ipc/cover/dreamina', { ...base, body: JSON.stringify({ action: 'skill-install' }) }).catch(() => {})
+        }
+      } catch { /* 静默:技能管理「即梦」tab 可手动装 */ }
+    }
+    void run()
+  }, [])
   /* 封面项目制(2026-10-30 用户裁决):tab=项目;切换=目录+会话(iframe 按纪元重挂)跟随。
      tab × 关闭=仅移出栏(项目目录与数据保留在磁盘,可从「打开项目」重新打开);
      关闭当前项目自动切到剩余项目,无剩余则新建。 */
