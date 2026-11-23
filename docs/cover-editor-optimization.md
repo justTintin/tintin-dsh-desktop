@@ -703,3 +703,12 @@ PSD 本体同时上传服务端并在模板记录 `cover.psd` 引用(可编辑�
 - **修=回到官方语义**(不进 --headless 例外形态的深水区):取码展示链接(即时反馈)后,`checklogin --device_code=X --poll=600` **一条命令拉满官方 poll 上限**——CLI 自己持续轮询,网页点「授权成功」瞬间 token 即收下自动完成;TTL 15 分钟,余 5 分钟给兜底补收。UI 撤两步教学文案,回归「在网页完成授权即可——客户端持续等待并自动完成登录」。
 - 铁律新条(**官方文档在安装器里,不在网页上**):即梦 CLI 的"文档"=install 脚本下载的 SKILL.md(https://jimeng.jianying.com/cli 脚本内 SKILL_URL);网页 install 页是 JS 渲染空壳,WebFetch 只回标题。**接外部工具第一步=找它的安装器/包内文档,不是网页**。doc §7.27-7.29 的三轮修补(poll 90→300→600/死因透传/有效期展示)都是偏离默认后的代偿;定罪文档一条就够。
 - 验证:177 过;typecheck 42 红基线一致零新增;stage+热同步 AppData+1508/1555/1749/1941/**2005(并行会话今日 20:05 新归档,1058 已被 preclean 清掉属正常)**。待用户实机:点登录→网页授权→自动完成。
+
+### 7.31 即梦登录第四报障根治:整体回到官方默认链——一条进程等到授权完成(2026-11-23;用户第四报「网页授权后仍未登录成功+还要手动点已授权」)
+
+- **官方默认链本机实测**(不带 --headless 的 `dreamina login`,spawn+pipe):材料(verification_uri/user_code/device_code/expires_at)~0.4s 打到 stdout 后 **CLI 自己每秒轮询(poll_interval:1s)直到授权完成**——用户网页点授权的瞬间,这条进程自己收 token 自己退出 0。这就是「原来可以」的机制。
+- **架构重写(cover-dreamina-routes.js)**:`login-start` 拉起阻塞 `dreamina login` 常驻(单例幂等,16min kill 兜底),实时读 stdout——材料一到先回 HTTP 响应(UI 即时展示+拉浏览器),**进程继续跑**;`login-status` 给 UI 每 3s 问一次(done.ok=授权完成自动登录;失败=stderr 首行透传);`login-cancel`(弹窗卸载/重新登录/logout 先取消)。**UI 撤 checklogin/补收/手动点击——「我已授权，完成登录」按钮整体删除**。`login-headless`/`login-check` 通道保留(共享门未动)但 UI 不再用。
+- **「✗ n」怪象根因**(上轮截图即此):7.29 的 cliLoginError 模板串在 heredoc 转义 repair 时混入字面 `n`(stderr 为空时首行=n)——本轮整段重写顺带根除。
+- **打包链事实修正**:staging(`tintin-resources/cover-plugin/`)**不含 lib/**(stage.mjs 只同步 dist/public/chat-shell/skills)——插件 lib 经 yarn workspace 依赖进载荷 `resources/app/node_modules/dsh-tintin-cover-plugin/lib/`;热同步 lib 的真身位=此路径,非 `resources/cover-plugin/lib`(不存在)。verify-cover-payload 只比 dist/public/chat-shell/skills,lib 不在其比对域。
+- **验证**:本地探针(真 CLI spawn)login-start 材料 2s 返回/login-status active/cancel 清理全绿;typecheck 42 红基线一致零新增;测试 177 过;lint 0 error(顺手修 self-assign);check:tintin 146 锚+载荷新鲜全绿;热同步 AppData(app/node_modules lib+cover-plugin/dist/editor)+1749/1941/2005 归档。**待用户实机:重启客户端(lib 需重启)→登录→网页授权→自动完成**。
+- **教训:①官方默认链=一条进程等到完成,任何"UI 模拟轮询+补收"都是代偿,代偿会自己长出 bug(✗ n);②探针失败先怀疑探针(路由是 end 回调 fire-and-forget 契约,handler promise 先于 sendJson resolve,等 sendJson 才对);③热同步前先 `ls` 真身已入 AGENTS.md,但 staging 不含 lib 这层只有走到"file not found"才暴露——lib 真身位=app/node_modules/<pkg>/lib**。
