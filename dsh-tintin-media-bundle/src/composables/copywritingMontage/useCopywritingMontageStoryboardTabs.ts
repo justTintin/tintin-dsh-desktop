@@ -77,7 +77,7 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
   function nextStoryboardName(): string {
     let max = 0
     for (const s of storyboards.value) {
-      const m = /^(?:\d{4}-\d{2}-\d{2}\s+)?脚本(\d+)$/.exec(s.name)
+      const m = /^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s+)?脚本(\d+)$/.exec(s.name)
       if (m) max = Math.max(max, Number(m[1]))
     }
     return `脚本${max + 1}`

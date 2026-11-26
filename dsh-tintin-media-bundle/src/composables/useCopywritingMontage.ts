@@ -593,6 +593,7 @@ export function useCopywritingMontage() {
     // 逐镜逐轨生成状态 + 批量入口（2026-11-26 四源四轨裁决：产物写 shot.slots 各轨占位）
     shotGenStates: shotMat.states, shotGenActiveOf: shotMat.active, shotGenStateOf: shotMat.stateOf,
     shotBatchAI: shotMat.batchGenerateAI, shotBatchARoll: shotMat.batchGenerateARoll, shotBatchProgressOf: shotMat.batchProgressOf,
+    shotSplitVoiceByScript: shotMat.splitVoiceByScript,
     scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript,
     scanVoiceDir, enterStepVoice, loadRefSamples, refPreviewUrl,
     nsFilePath, nsName, nsText, nsError, nsSuccess, nsBusy, nsTranscribing,

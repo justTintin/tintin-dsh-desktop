@@ -822,9 +822,9 @@
     "minCount": 2
   },
   {
-    "comment": "four-track shot card (2026-11-26): per-shot radio marks + search button + track tiles",
+    "comment": "four-track shot card (2026-11-26): per-shot checkbox marks + search button + track tiles",
     "path": "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStoryboard.vue",
-    "pattern": "toggleGenMode",
+    "pattern": "setMark",
     "minCount": 1
   },
   {

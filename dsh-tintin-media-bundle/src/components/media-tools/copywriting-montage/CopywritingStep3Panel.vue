@@ -11,6 +11,7 @@ import TSelect from '@/components/common/TSelect.vue'
 import VdStepBar from '../VdStepBar.vue'
 import { useFilePicker } from '@/composables/useFilePicker'
 import { toFileUrl, acceptFileDragOver } from '@/utils/fileUrl'
+import { notify } from '@/composables/copywritingMontage/context'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 import CopywritingStoryboard from './CopywritingStoryboard.vue'
 
@@ -48,7 +49,49 @@ const {
   startSynthesizeVoice,
   fmtDur,
   pathBasename,
+  storyboards,
+  shotSplitVoiceByScript,
 } = shell.s
+
+// ── 拆分声音到分镜脚本（2026-11-26 用户裁决：克隆组下方按钮——服务端把各脚本绑定的
+//    整段克隆口播按镜时长拆分（契约 POST /audio/voice/split-by-shots {script_id} →
+//    [{shot_index,audio_id}]，服务端按该契约实现），返回的逐镜音频即绑回分镜
+//    （shot.splitAudioId），各分镜卡顶部「拆分口播」就地回显）──
+const splitVoiceBusy = ref(false)
+const splitVoiceMsg = ref('')
+async function splitVoiceToShots(): Promise<void> {
+  if (splitVoiceBusy.value) return
+  const tabs = storyboards.value.filter((t) => t.scriptId && t.voiceAudioId && t.shots.length)
+  if (!tabs.length) {
+    splitVoiceMsg.value = '先完成批量克隆：克隆完成会自动同步脚本并上传口播音频，之后才能拆分。'
+    return
+  }
+  splitVoiceBusy.value = true
+  splitVoiceMsg.value = '正在请求服务端按分镜拆分口播音频…'
+  try {
+    let okTabs = 0
+    let bound = 0
+    const missTabs: string[] = []
+    for (const tab of tabs) {
+      const map = await shotSplitVoiceByScript(tab.scriptId)
+      if (!map) { missTabs.push(tab.name); continue }
+      okTabs += 1
+      let tabBound = 0
+      tab.shots.forEach((s, i) => {
+        const audioId = map.get(Number(s.index) || i + 1)
+        if (audioId) { s.splitAudioId = audioId; bound += 1; tabBound += 1 }
+      })
+      if (!tabBound) missTabs.push(tab.name)
+    }
+    if (!okTabs) {
+      splitVoiceMsg.value = ''
+      notify('服务端未部署', '服务端未部署「声音按镜拆分」（/audio/voice/split-by-shots）——请升级服务端后再试。')
+      return
+    }
+    splitVoiceMsg.value = `拆分完成：${okTabs}/${tabs.length} 个脚本成功，绑定 ${bound} 镜${missTabs.length ? `；未拿到音频：${missTabs.join('、')}` : ''}（各分镜卡顶部可见）。`
+    notify('拆分完成', splitVoiceMsg.value)
+  } finally { splitVoiceBusy.value = false }
+}
 
 /** 本地路径 → 可播放 URL（2026-09-24：统一走 utils/fileUrl 的 toFileUrl——
  *  移植版 http 页面禁止 file:/// 子资源，本地媒体经宿主 /tintin/media 流式供给） */
@@ -172,6 +215,16 @@ const tabVoices = computed(() => {
           <TButton v-if="lastCloneFailedIds.length" label="只重试失败项" variant="secondary"
             :loading="voiceBusy" title="仅重新克隆上一轮失败的分镜声音（已成功的不重克）"
             @click="retryFailedClones" />
+        </div>
+
+        <!-- 拆分声音到分镜脚本（2026-11-26 用户裁决：红框位——服务端按契约把各脚本整段
+             克隆口播按镜拆分，返回的逐镜音频绑回分镜（卡顶「拆分口播」回显）。
+             服务端未部署时明确提示升级） -->
+        <div class="row split-voice-row">
+          <TButton label="拆分声音到分镜脚本" variant="secondary" size="small" :loading="splitVoiceBusy"
+            title="把每个分镜脚本绑定的整段克隆口播按镜时长拆分，逐镜绑定（A-Roll 数字人读该镜音频）"
+            @click="splitVoiceToShots" />
+          <span v-if="splitVoiceMsg" class="muted">{{ splitVoiceMsg }}</span>
         </div>
 
         <!-- 7. 配音动作已迁 Step4 统一合成（2026-09-09 用户裁决：Step3 只合成口播声音，
@@ -414,6 +467,8 @@ const tabVoices = computed(() => {
 /* 引擎选择+设置按钮同行不换行（2026-11-05 用户裁定：设置声音克隆放在引擎下拉后的
    空位，不单独换行） */
 .clone-eng-row { flex-wrap: nowrap; }
+/* 拆分声音到分镜脚本行（2026-11-26 用户裁决：克隆组下方；结果文案就地回显） */
+.split-voice-row { margin-top: 2px; }
 .clone-row :deep(.t-button) { height: var(--size-input-height); }
 /* TTS 引擎下拉（表格标题行内，不占满） */
 .tts-engine-select { width: 220px; flex: none; }

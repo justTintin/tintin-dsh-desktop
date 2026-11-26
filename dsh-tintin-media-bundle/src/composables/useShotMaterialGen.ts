@@ -39,7 +39,7 @@ export function useShotMaterialGen(deps: {
   splitsJobId: Ref<string>
   activeLayout: Ref<string>
   productBrief: Ref<unknown>
-  /** 激活 tab 的分镜数组（轨道产物写 shot.slots；批量按 genMode 标记过滤） */
+  /** 激活 tab 的分镜数组（轨道产物写 shot.slots；批量按 markARoll/markAI 复选过滤） */
   activeShots: () => StoryboardShot[]
   /** 激活 tab 的服务端身份（A-Roll 数字人：脚本已同步 + 口播音频已克隆） */
   digitalHuman: () => { scriptId: string; voiceAudioId: string }
@@ -86,13 +86,14 @@ export function useShotMaterialGen(deps: {
   }
 
   /** 批量进度汇总（组进度行数据源）：total=标记数，done=已有轨产物或终态 done；
-   *  genMode 'ai' 对应 slots.gen 键、'aroll' 对应 slots.aroll */
+   *  markAI 对应 slots.gen 键、markARoll 对应 slots.aroll */
   function batchProgressOf(mode: 'ai' | 'aroll'): { total: number; done: number; failed: number; active: number } {
     const slotKey = (mode === 'ai' ? 'gen' : mode) as ShotTrackKey
+    const marked = mode === 'ai' ? 'markAI' : 'markARoll'
     const shots = deps.activeShots()
     let total = 0, done = 0, failed = 0, activeN = 0
     shots.forEach((s, i) => {
-      if (s.genMode !== mode) return
+      if (!s[marked]) return
       total += 1
       if (s.slots?.[slotKey]?.local) { done += 1; return }
       const st = states.value[keyOf(i, slotKey)]
@@ -200,9 +201,10 @@ export function useShotMaterialGen(deps: {
     }
   }
 
-  /** 服务端声音按镜拆分（2026-11-26 用户裁决：拆分在服务端；契约见 A-Roll 组注释）。
-   *  返回 {shot_index → audio_id}；端点未部署/失败 → null（批量拒绝并提示）。 */
-  async function splitVoiceByShots(scriptId: string): Promise<Map<number, string> | null> {
+  /** 服务端声音按镜拆分（2026-11-26 用户裁决：拆分在服务端；契约 POST
+   *  /audio/voice/split-by-shots {script_id} → [{shot_index,audio_id}]，段入音频库）。
+   *  返回 {shot_index → audio_id}；端点未部署/失败 → null（调用方拒绝并提示）。 */
+  async function splitVoiceByScript(scriptId: string): Promise<Map<number, string> | null> {
     try {
       const res = await window.tintin.server.post<unknown>('/audio/voice/split-by-shots', { script_id: scriptId }, {}, 60_000)
       if (!res || (typeof res === 'object' && 'error' in res)) return null
@@ -210,9 +212,10 @@ export function useShotMaterialGen(deps: {
       if (!Array.isArray(list)) return null
       const map = new Map<number, string>()
       for (const row of list as Array<Record<string, unknown>>) {
+        // 服务端 shot_index 为 0-based（2026-11-26 实测：首镜 shot_index=0）
         const idx = Number(row.shot_index)
         const audioId = String(row.audio_id ?? row.audioId ?? '')
-        if (Number.isInteger(idx) && idx > 0 && audioId) map.set(idx, audioId)
+        if (Number.isInteger(idx) && idx >= 0 && audioId) map.set(idx, audioId)
       }
       return map.size ? map : null
     } catch { return null } // 404/网络错误/未部署 → 统一走批量拒绝提示
@@ -221,7 +224,7 @@ export function useShotMaterialGen(deps: {
   /** 单镜 A-Roll（数字人读该镜拆分音频）：提交 scheduled stage=aroll 任务 → 轮询 →
    *  下载 → 写 A-Roll 轨。产物地址双通道：任务 result.material_id/output_url 优先。 */
   async function generateARollOne(idx: number, shot: StoryboardShot, opts: {
-    scriptId: string; personImageId: number; audioId: string
+    scriptId: string; arollImage: string; audioId: string
   }): Promise<boolean> {
     const k = keyOf(idx, 'aroll')
     if (active(idx, 'aroll')) return false
@@ -230,7 +233,7 @@ export function useShotMaterialGen(deps: {
     try {
       const submitted = await window.tintin.server.post<Record<string, unknown>>(
         '/scheduled/tasks',
-        { task_type: 'storyboard_generate', params: { script_id: opts.scriptId, stage: 'aroll', aroll_image: `material://${opts.personImageId}`, aroll_audio_id: opts.audioId, aroll_shot_index: shot.index, auto_montage: false } },
+        { task_type: 'storyboard_generate', params: { script_id: opts.scriptId, stage: 'aroll', aroll_image: opts.arollImage, aroll_audio_id: opts.audioId, aroll_shot_index: shot.index, auto_montage: false } },
         {}, 30_000,
       )
       if (!submitted) throw new Error('服务端不可达')
@@ -298,21 +301,25 @@ export function useShotMaterialGen(deps: {
     } finally { busy.value = false }
   }
 
-  /** 批量 A-Roll（2026-11-26 用户裁决：A-Roll 组共用一个人物图；勾选 aroll 的分镜
-   *  批量生成，每镜绑定服务端拆分出的该镜口播音频。拆分端点未部署 → 整批拒绝。 */
-  async function batchGenerateARoll(personImageIdText: string): Promise<void> {
+  /** 批量 A-Roll（2026-11-26 用户裁决：A-Roll 组共用一个人物图（上传的服务端路径或
+   *  素材 ID 均可——数字为素材库 id 走 material:// 形态，路径直接透传）；勾选 aroll 的
+   *  分镜批量生成，每镜绑定服务端拆分出的该镜口播音频。拆分端点未部署 → 整批拒绝。 */
+  async function batchGenerateARoll(personImageRef: string): Promise<void> {
     const shots = deps.activeShots()
     const idxs = markedShotIdxs(shots, 'aroll')
     if (!idxs.length) { msg.value = '没有勾选「生成A-Roll」的分镜（或勾选分镜已全部有产物）。'; return }
     const { scriptId, voiceAudioId } = deps.digitalHuman()
     if (!scriptId) { msg.value = '该分镜脚本尚未同步到服务端：请先在第 2 步完成口播配音（克隆完成会自动同步）。'; return }
     if (!voiceAudioId) { msg.value = '数字人读的是拆分后的该镜口播音频：请先在第 2 步完成口播配音。'; return }
-    const personImageId = Number(String(personImageIdText || '').trim())
-    if (!Number.isInteger(personImageId) || personImageId <= 0) { msg.value = 'A-Roll 组需要先填「人物图素材 ID」（素材库图片）。'; return }
+    const ref = String(personImageRef || '').trim()
+    if (!ref) { msg.value = 'A-Roll 组需要先上传人物图。'; return }
+    const personImageId = Number(ref)
+    // 双形态：纯数字=素材库 id 走 material://；服务器路径/其他形态原样透传
+    const arollImage = Number.isInteger(personImageId) && personImageId > 0 ? `material://${personImageId}` : ref
     busy.value = true
     try {
       msg.value = '正在请求服务端按分镜拆分口播音频…'
-      const audioMap = await splitVoiceByShots(scriptId)
+      const audioMap = await splitVoiceByScript(scriptId)
       if (!audioMap) {
         msg.value = '服务端未部署「声音按镜拆分」能力（/audio/voice/split-by-shots）——请升级服务端后再用 A-Roll 批量。'
         return
@@ -321,7 +328,8 @@ export function useShotMaterialGen(deps: {
       const missing: number[] = []
       for (const i of idxs) {
         const shot = shots[i]!
-        const audioId = audioMap.get(Number(shot.index) || i + 1)
+        // 服务端 shot_index 为 0-based（2026-11-26 实测：shot_index 0 ↔ 脚本第 1 镜）
+        const audioId = audioMap.get((Number(shot.index) || i + 1) - 1)
         if (audioId) {
           // 拆分即绑定并回显（2026-11-26 用户裁决：卡顶「拆分口播」行先于生成落值）
           shot.splitAudioId = audioId
@@ -329,11 +337,11 @@ export function useShotMaterialGen(deps: {
         } else missing.push(i + 1)
       }
       if (missing.length) msg.value = `第 ${missing.join('、')} 镜未拿到拆分音频（该镜将失败，其余照常）。`
-      const results = await Promise.all(jobs.map((j) => generateARollOne(j.idx, j.shot, { scriptId, personImageId, audioId: j.audioId })))
+      const results = await Promise.all(jobs.map((j) => generateARollOne(j.idx, j.shot, { scriptId, arollImage, audioId: j.audioId })))
       const ok = results.filter(Boolean).length
       msg.value = `A-Roll 批量生成完成：成功 ${ok}/${jobs.length}。`
     } finally { busy.value = false }
   }
 
-  return { busy, msg, states, active, stateOf, batchProgressOf, addOnline, generate, batchGenerateAI, batchGenerateARoll }
+  return { busy, msg, states, active, stateOf, batchProgressOf, addOnline, generate, batchGenerateAI, batchGenerateARoll, splitVoiceByScript }
 }

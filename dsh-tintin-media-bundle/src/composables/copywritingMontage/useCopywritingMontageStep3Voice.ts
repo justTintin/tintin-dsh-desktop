@@ -844,13 +844,14 @@ function clearVoiceProgressListener(): void {
           })
           attachClipGroups(payload, tab)
           attachVoiceRef(payload, tab)
-          // 轨道产物随脚本透传（2026-11-26 四源四轨裁决：genMode/slots 不入 toServerShot
+          // 轨道产物随脚本透传（2026-11-26 四源四轨裁决：复选标记/slots 不入 toServerShot
           // 白名单，按 clip_groups 同款 attach——服务端原样透传已实证）
           const payShots = (payload.shots ?? []) as Array<Record<string, unknown>>
           tab.shots.forEach((s, i) => {
             const row = payShots[i]
             if (!row) return
-            if (s.genMode) row.gen_mode = s.genMode
+            if (s.markARoll) row.mark_aroll = true
+            if (s.markAI) row.mark_ai = true
             if (s.slots && (s.slots.stock || s.slots.gen || s.slots.aroll)) row.slots = s.slots
             if (s.splitAudioId) row.split_audio_id = s.splitAudioId
           })
@@ -1054,8 +1055,8 @@ function clearVoiceProgressListener(): void {
             // 轨道产物/标记回填（2026-11-26 四源四轨：clip_groups 同款——normalizeShot
             // 白名单不带，从原始 shots 提取 gen_mode/slots）
             const raw = (s ?? {}) as Record<string, unknown>
-            const mode = String(raw.gen_mode || '')
-            if (mode === 'aroll' || mode === 'ai') n.genMode = mode
+            if (raw.mark_aroll) n.markARoll = true
+            if (raw.mark_ai) n.markAI = true
             if (raw.slots && typeof raw.slots === 'object') n.slots = raw.slots as StoryboardShot['slots']
             if (raw.split_audio_id) n.splitAudioId = String(raw.split_audio_id)
             return n

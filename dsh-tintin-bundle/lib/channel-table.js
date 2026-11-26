@@ -532,6 +532,24 @@ export function createChannelTable(deps) {
         return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
       }
     },
+    // server:uploadImage — 图片上传入服务端图库（2026-11-26 用户裁决：A-Roll 人物图改为
+    // 上传而非手输素材 ID）。端点=/api/storyboard/scripts/product-upload，multipart 字段
+    // 名 files（复数，服务端实测）；返回 {paths:[服务端绝对路径], count}——路径形态直接
+    // 可作 aroll_image（material://id 之外的路径形态，worker 兼容性由服务端渠道确认）。
+    'server:uploadImage': async (args) => {
+      const [path] = args ?? []
+      try {
+        if (!path) throw new Error('server:uploadImage requires path')
+        if (!existsSync(path)) throw new Error(`文件不存在: ${path}`)
+        const ext = extname(String(path)).toLowerCase()
+        const imageMime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/jpeg'
+        return await multipartPost(API_ENDPOINTS.storyboard.productUpload, [
+          { name: 'files', path: String(path), contentType: imageMime },
+        ])
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
+      }
+    },
     // server:downloadResult — 服务端文件下载落盘（SRC server-proxy.js:545；超时 600s
     // 对齐原版长任务产物）。位置参数 [path, savePath]（preload downloadResult 契约）。
     'server:downloadResult': async (args) => {

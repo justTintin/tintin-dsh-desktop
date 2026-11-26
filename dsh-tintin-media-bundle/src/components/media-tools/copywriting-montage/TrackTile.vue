@@ -12,6 +12,8 @@ const props = defineProps<{
   state?: ShotGenState
   /** 占位文案（无产物且无任务时） */
   fallback?: string
+  /** 瓦片媒体区宽高比（2026-11-26 用户裁决：默认随分镜脚本输出画幅，如 '9 / 16'） */
+  aspect?: string
 }>()
 
 const PHASE_TEXT: Record<string, string> = {
@@ -25,20 +27,21 @@ const subLine = computed(() => {
   const p = s.progress >= 0 ? `${s.progress}%` : '进行中'
   return s.elapsedSec > 0 ? `${p} · ${s.elapsedSec}s` : p
 })
+const mediaStyle = computed(() => (props.aspect ? { aspectRatio: props.aspect } : {}))
 </script>
 
 <template>
   <div class="track-tile">
     <span class="track-lbl">{{ label }}</span>
-    <video v-if="videoSrc" controls preload="metadata" :src="videoSrc" class="track-video" />
-    <div v-else-if="state && state.phase !== 'done'" class="track-gen" :class="{ 'is-failed': state.phase === 'failed' }">
+    <video v-if="videoSrc" controls preload="metadata" :src="videoSrc" class="track-video" :style="mediaStyle" />
+    <div v-else-if="state && state.phase !== 'done'" class="track-gen" :class="{ 'is-failed': state.phase === 'failed' }" :style="mediaStyle">
       <span class="track-gen-phase">{{ phaseText }}</span>
       <div v-if="state.phase !== 'failed'" class="iv-bar" :class="{ 'is-indeterminate': state.progress < 0 }">
         <div v-if="state.progress >= 0" class="iv-bar-fill" :style="{ width: state.progress + '%' }"></div>
       </div>
       <span class="track-gen-sub">{{ subLine }}</span>
     </div>
-    <div v-else class="track-ph">
+    <div v-else class="track-ph" :style="mediaStyle">
       <svg class="track-ph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="5" width="18" height="14" rx="2" />
         <circle cx="9" cy="10" r="1.6" />
@@ -52,7 +55,7 @@ const subLine = computed(() => {
 <style scoped>
 .track-tile { width: 104px; flex: 0 0 104px; display: flex; flex-direction: column; gap: 3px; }
 .track-lbl { font-size: 11px; color: var(--muted-foreground); text-align: center; }
-.track-video { width: 100%; height: auto; object-fit: contain; display: block; background: #101010; border-radius: var(--radius-sm); }
+.track-video { width: 100%; height: auto; object-fit: cover; display: block; background: #101010; border-radius: var(--radius-sm); }
 /* 进行中/失败进度卡 */
 .track-gen { width: 100%; padding: 8px 4px; display: flex; flex-direction: column; gap: 4px; align-items: stretch; background: #101010; border-radius: var(--radius-sm); min-height: 58px; justify-content: center; }
 .track-gen-phase { font-size: 11px; color: var(--foreground); text-align: center; }

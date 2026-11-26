@@ -5,21 +5,28 @@ import { describe, expect, it } from 'vitest'
 import { markedShotIdxs, resolveShotTrack } from '../src/composables/copywritingMontageTrackLogic'
 import type { StoryboardShot } from '../src/composables/opsStoryboardLogic'
 
-const shot = (over: Partial<Pick<StoryboardShot, 'genMode' | 'slots'>> = {}): StoryboardShot =>
-  ({ index: 1, genMode: undefined, slots: undefined, ...over }) as unknown as StoryboardShot
+const shot = (over: Partial<Pick<StoryboardShot, 'markARoll' | 'markAI' | 'slots'>> = {}): StoryboardShot =>
+  ({ index: 1, markARoll: undefined, markAI: undefined, slots: undefined, ...over }) as unknown as StoryboardShot
 
 describe('resolveShotTrack 四源四轨解析', () => {
   it('标记轨优先：aroll/ai 标记且有产物 → 各自轨道', () => {
-    expect(resolveShotTrack(shot({ genMode: 'aroll', slots: { aroll: { local: 'a.mp4' } } }), true))
+    expect(resolveShotTrack(shot({ markARoll: true, slots: { aroll: { local: 'a.mp4' } } }), true))
       .toEqual({ track: 'aroll', local: 'a.mp4' })
-    expect(resolveShotTrack(shot({ genMode: 'ai', slots: { gen: { local: 'g.mp4' } } }), true))
+    expect(resolveShotTrack(shot({ markAI: true, slots: { gen: { local: 'g.mp4' } } }), true))
+      .toEqual({ track: 'gen', local: 'g.mp4' })
+  })
+
+  it('两复选互不排斥：同时标记时 A-Roll 优先（有产物），A-Roll 缺产物落 AI 轨', () => {
+    expect(resolveShotTrack(shot({ markARoll: true, markAI: true, slots: { aroll: { local: 'a.mp4' } } }), false))
+      .toEqual({ track: 'aroll', local: 'a.mp4' })
+    expect(resolveShotTrack(shot({ markARoll: true, markAI: true, slots: { gen: { local: 'g.mp4' } } }), false))
       .toEqual({ track: 'gen', local: 'g.mp4' })
   })
 
   it('标记轨缺产物回落：标记 ai 但无产物、素材轨有 → material', () => {
-    expect(resolveShotTrack(shot({ genMode: 'ai' }), true)).toEqual({ track: 'material' })
+    expect(resolveShotTrack(shot({ markAI: true }), true)).toEqual({ track: 'material' })
     // 标记 aroll 无产物，AI 轨有 → 兜底 gen（素材轨为空时）
-    expect(resolveShotTrack(shot({ genMode: 'aroll', slots: { gen: { local: 'g.mp4' } } }), false))
+    expect(resolveShotTrack(shot({ markARoll: true, slots: { gen: { local: 'g.mp4' } } }), false))
       .toEqual({ track: 'gen', local: 'g.mp4' })
   })
 
@@ -40,11 +47,11 @@ describe('resolveShotTrack 四源四轨解析', () => {
 })
 
 describe('markedShotIdxs 批量标记过滤', () => {
-  it('只取 genMode 命中且该轨尚无产物的镜下标', () => {
+  it('只取复选命中且该轨尚无产物的镜下标', () => {
     const shots = [
-      shot({ genMode: 'ai' }),
-      shot({ genMode: 'ai', slots: { gen: { local: 'done.mp4' } } }), // 已有产物不重做
-      shot({ genMode: 'aroll' }),
+      shot({ markAI: true }),
+      shot({ markAI: true, slots: { gen: { local: 'done.mp4' } } }), // 已有产物不重做
+      shot({ markARoll: true }),
       shot(),
     ]
     expect(markedShotIdxs(shots, 'ai')).toEqual([0])

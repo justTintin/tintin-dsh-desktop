@@ -805,3 +805,15 @@ composer 工具条「选择产品」面板三处对齐官方质感:
 - **§16.67 发布构建模式 3 默认离线(2026-11-25 用户裁决「保持模式 3 输出但离线」)**: 外部构建器 `TinTin_DSH_Release_Builder/build.js` 的模式 3(仅 win-unpacked)此前因「同 1 但跳 NSIS」继承 `aa:prepare-release` 的 GitHub `ls-remote` 新鲜度检查,GitHub ETIMEDOUT 时前置检查即失败;改为模式 3 默认 `AA_LOCAL`(vendored provenance commit + tarball sha256 校验,实测当前 c53305b9…/产物匹配),跳过 GitHub 探测,输出仍是仅 win-unpacked;新增 `--aa-online` 显式切回联网核对,菜单/速查表同步。`--aa-local` 仍供模式 1/4 使用。代价=不发现官方 main 前进(build-info.json 记 anchor=local-vendored),正式发布若要核对上游用模式 1/4 或 `--aa-online`。
 
 - **§16.68 文案输入框加倍 + 分镜脚本名日期开头并完整显示(2026-11-26 用户裁决)**: ①Step1「输入文案」textarea `rows` 6→12(默认高度翻倍,`.gen-textarea` 无高度上限,rows 决定)。②新增 `datedStoryboardName`/`storyboardDatePrefix` 纯函数(置于 `copywritingMontageStep3VoiceLogic`),`addStoryboardTab` 统一给新建 tab 名加 `YYYY-MM-DD ` 前缀(已是日期或 `分镜脚本_YYYYMMDD` 不重复加);自增正则与 `isAutoStoryboardName`/voiceSync 回学同步改为容忍日期前缀,去掉 20 字截断以便全名保存。`CopywritingStoryboard` 的 `.sb-tab-name` 改 `white-space:normal;overflow-wrap:anywhere`、`.sb-tab` 固定高 30px 改 `min-height:30px;height:auto`,父级已 flex-wrap,长名完整换行显示。测试补日期前缀/回学 4 例(229 绿)、typecheck 零新增红、dist/client.js 重建、check:tintin(141 锚)绿。
+
+- **§16.69 文案输入框/脚本名行口径更正(2026-11-26)**: §16.68 中「输入文案 textarea rows 6→12」系误解用户原意,已恢复 `rows=6`(高度不变)。用户实际诉求是「整个脚本名称所在行,按上限 10 个等分占用,每个名称能显示多少显示多少」:`CopywritingStoryboard` 的 `.sb-tabs` 改 `flex-wrap:nowrap`、`.sb-tab` 改 `flex:1 1 0;min-width:0`(10 个 tab 平分该行)。`.sb-tab-name` 保持可换行不截断,`.sb-flex` 不再抢占伸缩,重命名框 `max-width:100%`。229 用例绿、check:tintin(141 锚)绿、dist/client.js 重建。
+
+- **§16.70 口径再更正(2026-11-26)**: §16.69 把输入框 `rows` 恢复为 6 属误解——用户明确是两个独立需求:①「输入文案」输入框高度确实要翻倍(`rows=12`,已恢复);②分镜脚本名显示不全属另一件事(§16.69 的 `.sb-tabs` 十等分/nowrap/名称可换行改动保留)。两处同时生效。
+
+- **§16.71 脚本名显示再更正(2026-11-26)**: 分镜脚本名保持**单行不换行**(`.sb-tab-name` 恢复 `white-space:nowrap;overflow:visible`,不做省略号/截断),tab 仍按上限 10 等分同一行;名字过长时整名横向完整显示,不折行也不裁切。
+
+- **§16.72 脚本名最终显示规则(2026-11-26)**: tab 保持上限 10 单行等分(`flex:1 1 0;min-width:0`),名称单行不换行;超出自己份额时用省略号裁切(`.sb-tab-name { min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }`),完整名字仍挂在 `:title` 悬停可见。覆盖 §16.69-§16.71 的中间口径。
+
+- **§16.73 输入文案 textarea 高度不生效根因(2026-11-26)**: `rows=12` 与 `.gen-textarea{height:auto}` 源码都在,但 Vite 打包后同作用域内 `.input[data-v]{height:32px}` 排在 `.gen-textarea[data-v]{height:auto}` 之后且**特异性相同**, cascade 后者被前者覆盖,输入框实际保持 32px——截图看到「高度没变」即此因,非产物未热刷(运行实例 client.js 与工作区 dist hash 一致)。修=选择器升特异性为 `textarea.gen-textarea{...}`(元素+类+属性),`.input` 不再覆盖;重建 dist/client.js 并手工热刷全部 5 个 release 归档的 `win-unpacked/resources/app/node_modules/dsh-tintin-media-bundle/dist/client.js`(hash 已对齐)。需重启客户端让渲染层重新加载 JS 才可见。
+
+- **§16.74 脚本名带时分 + tab 严格十分之一(2026-11-26 用户裁决)**: `storyboardDatePrefix` 改为 `YYYY-MM-DD HH:mm`(本地时间),`datedStoryboardName`/`isAutoStoryboardName`/`nextStoryboardName` 的正则与测试同步(231 绿)。`CopywritingStoryboard` 的 tab 由 `flex:1 1 0`(单个 tab 会占满整行)改为 `flex:0 1 calc(10% - 4px);max-width:calc(10% - 4px)`,`.sb-flex` 恢复吸收剩余空间——每个脚本严格占行宽 1/10(最多 10 个),名称超出仍省略号,完整名在 title。dist/client.js 重建并热刷 5 个 release 归档;需重启客户端生效。

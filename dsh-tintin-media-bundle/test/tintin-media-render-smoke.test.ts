@@ -56,6 +56,7 @@ function fakeShell() {
       copyShotsStale: ref(false),
       genStoryboard: async () => {}, storyboardBusy: ref(false),
       scenes: ref([]), shotClipGroup: ref<number[][]>([]),
+      splitResolution: ref(''),
       bindShotMaterial: () => {}, removeShotClipAt: () => {}, unbindShotMaterial: () => {},
       // 逐镜逐轨生成状态（2026-11-26 四源四轨：fake shell 同步补成员）
       shotMatMsg: ref(''),
@@ -163,6 +164,9 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     // 文案绑定脚本：edit 态脚本顶部显示视频文案框（2026-11-05 用户裁定迁入分镜顶部）
     expect(html).toContain('口播文案（可选）')
     expect(html).toContain('sb-copy-edit')
+    // 输出画幅选择随脚本信息行（2026-11-26 用户裁决：第一步红框位，选完贯穿各步）
+    expect(html).toContain('输出画幅')
+    expect(html).toContain('竖屏 (1080x1920 抖音流)')
     expect(html).not.toContain('>文案：旁白<') // sb-copy 只读行仅非编辑态
     expect(html).not.toContain('sb-voice-row') // 无克隆产物不显示声音行
     expect(html).toContain('画面描述（视频生成提示词）')

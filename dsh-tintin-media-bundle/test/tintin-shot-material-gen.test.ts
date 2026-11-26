@@ -1,7 +1,7 @@
 // test/tintin-shot-material-gen.test.ts — 分镜轨道生产（在线搜索/AI生成/A-Roll）逐镜逐轨回归
 // （2026-11-25 用户报障：原全局单 busy/msg——看不出哪个镜在生成、无进度、导致重复
 //  点击。2026-11-26 四源四轨裁决：产物写 shot.slots 各轨占位（不再入绑定池）、
-//  状态按 `${idx}:${track}` 隔离、批量两入口按 genMode 标记过滤。
+//  状态按 `${idx}:${track}` 隔离、批量两入口按 markARoll/markAI 复选标记过滤。
 //  A-Roll=仿爆款 stage=aroll 同管线 + 服务端按镜拆分音频（探针 2026-11-26 实证：
 //  submit 零校验直接入队、worker 快速失败、产物回填任务 result.material_id）。
 //  测试坑（沿用）：假定时器相位二象性——推进一律有界循环到目标态，不钉 advance 次数；
@@ -138,11 +138,11 @@ describe('useShotMaterialGen 逐镜逐轨状态（2026-11-25 报障修复 + 1126
 })
 
 describe('批量入口（2026-11-26 四源四轨裁决）', () => {
-  it('batchGenerateAI：只跑 genMode=ai 且无产物的镜；产物写 slots.gen', async () => {
+  it('batchGenerateAI：只跑勾选 AI生成 且无产物的镜；产物写 slots.gen', async () => {
     const shots = [shot('a'), shot('b'), shot('c')]
-    shots[0]!.genMode = 'ai'
-    shots[1]!.genMode = 'ai'
-    shots[2]!.genMode = 'aroll' // 非本批
+    shots[0]!.markAI = true
+    shots[1]!.markAI = true
+    shots[2]!.markARoll = true // 非本批
     shots[1]!.slots = { gen: { local: 'C:/cache/already.mp4', taskId: 'done-1' } } // 已有产物不重做
     const gen = makeGen(shots)
     downloadOk = true // 前面用例的失败下载残留会毒化本链（模块态泄漏防）
@@ -161,7 +161,7 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
 
   it('batchGenerateARoll：拆分端点缺失整批拒绝并明示「未部署」', async () => {
     const shots = [shot()]
-    shots[0]!.genMode = 'aroll'
+    shots[0]!.markARoll = true
     const gen = makeGen(shots)
     splitPostResult = { detail: 'Not Found' }
     await gen.batchGenerateARoll('42')
@@ -173,8 +173,8 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
     const shots = [shot('开场'), shot('第二镜')]
     shots[0]!.index = 1
     shots[1]!.index = 2
-    shots[0]!.genMode = 'aroll'
-    shots[1]!.genMode = 'ai' // 非本批
+    shots[0]!.markARoll = true
+    shots[1]!.markAI = true // 非本批
     const gen = makeGen(shots)
     scheduledPostResult = { id: 'ah-b1' }
     downloadOk = true // 前面用例的失败下载残留会毒化本链（模块态泄漏防）
@@ -183,7 +183,7 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
       polls += 1
       return polls < 2 ? { status: 'running', progress: 0.5 } : { status: 'done', result: { material_id: 77 } }
     }
-    splitPostResult = { items: [{ shot_index: 1, audio_id: 'aud-1' }, { shot_index: 2, audio_id: 'aud-2' }] }
+    splitPostResult = { items: [{ shot_index: 0, audio_id: 'aud-1' }, { shot_index: 1, audio_id: 'aud-2' }] }
     downloads.length = 0
     posts.length = 0
     const p = gen.batchGenerateARoll('42')
@@ -198,7 +198,7 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
 
   it('三道闸：未同步脚本 / 无口播音频 / 人物图 ID 非法 各自拒绝且不提交', async () => {
     const shots = [shot()]
-    shots[0]!.genMode = 'aroll'
+    shots[0]!.markARoll = true
     const gen = makeGen(shots, () => ({ scriptId: '', voiceAudioId: '' }))
     await gen.batchGenerateARoll('12')
     expect(gen.msg.value).toContain('尚未同步到服务端')
@@ -206,13 +206,13 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
     await gen2.batchGenerateARoll('12')
     expect(gen2.msg.value).toContain('口播配音')
     const gen3 = makeGen(shots)
-    await gen3.batchGenerateARoll('abc')
-    expect(gen3.msg.value).toContain('人物图')
+    await gen3.batchGenerateARoll('')
+    expect(gen3.msg.value).toContain('上传人物图')
   })
 
   it('worker 失败透传：scheduled 任务 failed 落该镜 A-Roll 轨 failed 态', async () => {
     const shots = [shot()]
-    shots[0]!.genMode = 'aroll'
+    shots[0]!.markARoll = true
     const gen = makeGen(shots)
     scheduledPostResult = { id: 'ah-err' }
     scheduledTaskNode = () => ({ status: 'failed', error_msg: '脚本不存在: sb_1' })
@@ -222,5 +222,15 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
     expect(gen.stateOf(0, 'aroll')?.phase).toBe('failed')
     expect(gen.stateOf(0, 'aroll')?.msg).toContain('脚本不存在')
     expect(gen.active(0, 'aroll')).toBe(false)
+  })
+
+  it('splitVoiceByScript 解析：数组形态/items 包裹/audioId 别名；端点缺失返回 null', async () => {
+    const gen = makeGen()
+    splitPostResult = [{ shot_index: 3, audio_id: 'aud-3' }]
+    expect((await gen.splitVoiceByScript('sb_x'))?.get(3)).toBe('aud-3')
+    splitPostResult = { items: [{ shot_index: 2, audioId: 'aud-2' }] }
+    expect((await gen.splitVoiceByScript('sb_x'))?.get(2)).toBe('aud-2')
+    splitPostResult = null
+    expect(await gen.splitVoiceByScript('sb_x')).toBeNull()
   })
 })

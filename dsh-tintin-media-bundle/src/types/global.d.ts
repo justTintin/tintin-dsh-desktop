@@ -115,6 +115,8 @@ declare interface TintinBridgeServer {
     onError?: (err: any) => void
   ): () => void
   downloadResult(path: string, savePath: string): Promise<string | null>
+  /** 图片上传入服务端图库（product-upload，multipart files 字段）→ {paths:[服务端绝对路径]} */
+  uploadImage(path: string): Promise<{ paths?: string[]; count?: number } | { error: string } | null>
 
   // ---------- health / stats ----------
   // healthCapabilities 已移除（/health/capabilities 服务端从未实现，声明即陷阱）

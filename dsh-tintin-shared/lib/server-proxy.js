@@ -137,7 +137,7 @@ export const API_ENDPOINTS = {
   rembg: { matting: '/matting', models: '/matting/models' },
   vision: { reversePrompt: '/vision/reverse-prompt' },
   digitalHuman: { generate: '/digital-human/generate', listModels: '/digital-human/models' },
-  storyboard: { scripts: '/api/storyboard/scripts', scriptItem: (id) => `/api/storyboard/scripts/${id}` },
+  storyboard: { scripts: '/api/storyboard/scripts', scriptItem: (id) => `/api/storyboard/scripts/${id}`, productUpload: '/api/storyboard/scripts/product-upload' },
   // /agent/* 编排已于 2026-09-25 服务端退役（chat/tasks/sessions/artifacts 全部
   // 下线，调用一律 404）；仅能力目录 registry 保留（MCP 与仪表盘仍在消费，
   // 后续 P2 defineTool 工具化的数据源）。与 SRC 的 API_PATHS 同步在此处有意分叉。

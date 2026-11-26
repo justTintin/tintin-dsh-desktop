@@ -16,6 +16,9 @@ const SOURCES = [
   { name: 'dsh-tintin-shared/lib(js)', srcDir: join(root, 'dsh-tintin-shared', 'lib'), test: /\.js$/, targets: (res) => [join(res, 'app', 'node_modules', 'dsh-tintin-shared', 'lib')], cleanJs: true },
   { name: 'film shell dist(两副本)', srcDir: join(root, 'dsh-tintin-bundle', 'openfilm-shell', 'dist'), test: null, targets: (res) => [join(res, 'app', 'node_modules', 'dsh-tintin-bundle', 'openfilm-shell', 'dist'), join(res, 'openfilm', 'node_modules', 'openfilm', 'studio', 'ui', 'dist')], mirror: true },
   { name: '媒体包 dist(client.js+css)', srcDir: join(root, 'dsh-tintin-media-bundle', 'dist'), test: null, targets: (res) => [join(res, 'app', 'node_modules', 'dsh-tintin-media-bundle', 'dist')], mirror: true },
+  // 宿主桥 bundle（2026-11-26 四源四轨批：人物图上传新通道 server:uploadImage 落在此包）
+  { name: '桥 bundle 根脚本(client/index)', srcDir: join(root, 'dsh-tintin-bundle'), test: /^(client|index)\.js$/, targets: (res) => [join(res, 'app', 'node_modules', 'dsh-tintin-bundle')], cleanJs: true },
+  { name: '桥 bundle lib(js)', srcDir: join(root, 'dsh-tintin-bundle', 'lib'), test: /\.js$/, targets: (res) => [join(res, 'app', 'node_modules', 'dsh-tintin-bundle', 'lib')], cleanJs: true },
 ]
 
 /** 递归收集目录下全部文件(相对路径) */

@@ -241,7 +241,7 @@ function fillSample(): void {
    二改：提示红色、输入框两行） */
 .gen-block { display: flex; flex-direction: column; gap: 6px; } /* 与方案一平级：外框删除（2026-11-05 用户裁定） */
 /* textarea：源序在 .input 之后覆盖其 height:32px / padding:0 10px */
-.gen-textarea { height: auto; min-height: 56px; padding: 8px 10px; line-height: 1.6; font-family: inherit; resize: vertical; }
+textarea.gen-textarea { height: auto; min-height: 56px; padding: 8px 10px; line-height: 1.6; font-family: inherit; resize: vertical; }
 .gen-actions { display: flex; align-items: center; justify-content: flex-start; gap: var(--space-3); }
 .gen-actions .scene-select { min-width: 96px; width: 96px; }
 /* 2026-11-05 用户裁定：生成按钮占用该行剩余空间（平台之后的全部宽度） */

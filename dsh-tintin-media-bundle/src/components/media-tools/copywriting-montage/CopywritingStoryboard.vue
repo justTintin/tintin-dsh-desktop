@@ -30,6 +30,7 @@ const {
   copyShots, copyShotsStale, genStoryboard, storyboardBusy, activeNarrative,
   scenes, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, toAbsolute,
   storyboards, activeStoryboardId, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, COPY_STORYBOARD_MAX,
+  splitResolution,
   shotMatMsg, addOnlineShotMaterial,
   shotGenActiveOf, shotGenStateOf,
 } = shell.s
@@ -42,11 +43,12 @@ function onShotOnlineAdd(items: OnlineItem[]): void {
   shotOnlineIdx.value = -1
 }
 
-// ── 四源四轨（2026-11-26 用户裁决）：右列单选标记驱动批量（生成A-Roll/AI生成互斥、
-//    可再点取消）；产物各归各轨占位（素材/AI/搜索/A-Roll 瓦片，TrackTile 三态渲染）──
+// ── 四源四轨（2026-11-26 用户裁决）：右列两复选框互不排斥（markARoll/markAI 分别
+//    驱动两批量）；产物各归各轨占位（素材/AI/搜索/A-Roll 瓦片，TrackTile 三态渲染）──
 const TRACK_KEYS = ['gen', 'stock', 'aroll'] as const
-function toggleGenMode(shot: StoryboardShot, mode: 'aroll' | 'ai'): void {
-  shot.genMode = shot.genMode === mode ? undefined : mode
+function setMark(shot: StoryboardShot, kind: 'aroll' | 'ai', on: boolean): void {
+  if (kind === 'aroll') shot.markARoll = on || undefined
+  else shot.markAI = on || undefined
 }
 function slotLocal(i: number, track: 'gen' | 'stock' | 'aroll'): string {
   const local = copyShots.value[i]?.slots?.[track]?.local || ''
@@ -55,6 +57,22 @@ function slotLocal(i: number, track: 'gen' | 'stock' | 'aroll'): string {
 /** 是否有任一镜任一轨在生成（顶部全局状态行的新旧样式判据） */
 const shotGenAnyActive = computed(() => copyShots.value.some((_, i) =>
   TRACK_KEYS.some((t) => shotGenActiveOf(i, t))))
+/** 轨道瓦片占位比例（2026-11-26 用户裁决：默认按分镜脚本输出画幅——竖屏 9:16 /
+ *  横屏 16:9 /「与分割视频一致」按分割分辨率换算，解析失败回落竖屏） */
+const tileAspect = computed(() => {
+  const layout = activeMeta.value?.layout || 'vertical'
+  if (layout === 'horizontal') return '16 / 9'
+  if (layout === 'vertical') return '9 / 16'
+  const m = /(\d+)\s*[x×]\s*(\d+)/.exec(splitResolution.value || '')
+  return m ? `${m[1]} / ${m[2]}` : '9 / 16'
+})
+/** 输出画幅下拉（2026-11-26 用户裁决：第一步信息行红框位——与第三步参数区同一
+ *  layout 字段，选完贯穿各步；选项口径对齐 Step2Panel LAYOUTS） */
+const LAYOUT_OPTIONS = computed(() => [
+  { label: splitResolution.value ? `与分割视频一致 (${splitResolution.value})` : '与分割视频一致', value: 'source' },
+  { label: '竖屏 (1080x1920 抖音流)', value: 'vertical' },
+  { label: '横屏 (1920x1080 宽屏)', value: 'horizontal' },
+])
 
 const editable = computed(() => props.mode === 'edit')
 /** 激活分镜 tab（脚本基本信息来源：topic/scriptId 均为服务端原值字段，2026-09-22
@@ -200,6 +218,13 @@ const EMPTY_HINT: Record<string, string> = {
       <!-- 2026-09-22 用户裁决：脚本头部显示服务端脚本基本信息（选题/脚本库 id）——
            取回分镜脚本后基本信息随 tab 保存，不再只显示镜数/时长 -->
       <span class="sb-info">分镜脚本{{ copyShots.length ? `：共 ${copyShots.length} 镜 ｜ 总时长 ${shotsTotalSec} 秒` : '' }}<template v-if="activeMeta && copyShots.length"> ｜ 选题：{{ activeMeta.topic || '—' }}</template><template v-if="activeMeta?.scriptId"> ｜ 脚本 {{ activeMeta.scriptId }}</template>
+        <!-- 输出画幅随脚本（2026-11-26 用户裁决：第一步信息行红框位直接选，选完贯穿
+             各步——第三步参数区/四轨瓦片/AI 生成比例同一 layout 字段自动跟随） -->
+        <template v-if="editable && activeMeta"> ｜ 输出画幅：
+          <select v-model="activeMeta.layout" class="input w150" title="本脚本输出画幅（生成视频素材前选定，各步跟随）">
+            <option v-for="o in LAYOUT_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+        </template>
         <span v-if="copyShotsStale" class="sb-stale">⚠ 分镜基于旧版文案（文案已修改），克隆将使用当前旁白全文；请重新生成分镜</span>
       </span>
       <span v-if="mode !== 'edit'" class="sb-info">{{ MODE_STATUS[mode] }}</span>
@@ -308,22 +333,24 @@ const EMPTY_HINT: Record<string, string> = {
         </template>
           </div><!-- /seg-main -->
           <!-- 2026-11-26 四源四轨裁决：material 态右列=四轨占位瓦片（素材/AI/搜索/A-Roll，
-               各轨产物视频/进度卡/占位三态，TrackTile 渲染）+ 最右控制列（单选 生成A-Roll /
-               单选 AI生成 / 按钮在线搜索素材）；其余态保留单预览列 -->
+               各轨产物视频/进度卡/占位三态，TrackTile 渲染，比例随分镜脚本输出画幅）+
+               最右控制列（两复选框互不排斥 + 在线搜索素材按钮）；其余态保留单预览列 -->
           <div v-if="mode === 'material'" class="seg-right">
             <div class="seg-tracks">
-              <TrackTile label="素材" :video-src="previewSrc(i)" fallback="未绑定素材" />
-              <TrackTile label="AI" :video-src="slotLocal(i, 'gen')" :state="shotGenStateOf(i, 'gen')" fallback="AI 生成" />
-              <TrackTile label="搜索" :video-src="slotLocal(i, 'stock')" :state="shotGenStateOf(i, 'stock')" fallback="在线搜索" />
-              <TrackTile label="A-Roll" :video-src="slotLocal(i, 'aroll')" :state="shotGenStateOf(i, 'aroll')" fallback="A-Roll" />
+              <TrackTile label="素材" :aspect="tileAspect" :video-src="previewSrc(i)" fallback="未绑定素材" />
+              <TrackTile label="AI" :aspect="tileAspect" :video-src="slotLocal(i, 'gen')" :state="shotGenStateOf(i, 'gen')" fallback="AI 生成" />
+              <TrackTile label="搜索" :aspect="tileAspect" :video-src="slotLocal(i, 'stock')" :state="shotGenStateOf(i, 'stock')" fallback="在线搜索" />
+              <TrackTile label="A-Roll" :aspect="tileAspect" :video-src="slotLocal(i, 'aroll')" :state="shotGenStateOf(i, 'aroll')" fallback="A-Roll" />
             </div>
             <div class="seg-ctl">
-              <button type="button" class="ctl-mark" :class="{ on: copyShots[i]?.genMode === 'aroll' }"
-                title="勾选后由上方 A-Roll 组批量生成数字人（读该镜拆分口播音频）"
-                @click="toggleGenMode(copyShots[i]!, 'aroll')">生成A-Roll</button>
-              <button type="button" class="ctl-mark" :class="{ on: copyShots[i]?.genMode === 'ai' }"
-                title="勾选后由「AI生成」组批量生成视频"
-                @click="toggleGenMode(copyShots[i]!, 'ai')">AI生成</button>
+              <label class="ctl-check" title="勾选后由上方 A-Roll 组批量生成数字人（读该镜拆分口播音频）">
+                <input type="checkbox" :checked="!!copyShots[i]?.markARoll" @change="setMark(copyShots[i]!, 'aroll', ($event.target as HTMLInputElement).checked)" />
+                <span>生成A-Roll</span>
+              </label>
+              <label class="ctl-check" title="勾选后由「AI生成」组批量生成视频（两勾互不影响，可同时）">
+                <input type="checkbox" :checked="!!copyShots[i]?.markAI" @change="setMark(copyShots[i]!, 'ai', ($event.target as HTMLInputElement).checked)" />
+                <span>AI生成</span>
+              </label>
               <button type="button" class="ctl-mark" :disabled="shotGenActiveOf(i, 'stock')"
                 title="在线搜索素材到该镜搜索轨" @click="shotOnlineIdx = i">在线搜索素材</button>
             </div>
@@ -420,17 +447,19 @@ const EMPTY_HINT: Record<string, string> = {
 .spacer { flex: 1; }
 
 /* ── 分镜 tab 条（多分镜：切换/双击重命名/删除二次确认，上限 10） ── */
-.sb-tabs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+/* 脚本名行：按上限 10 个等分占用，单行不换行；每个名称在自己份额内尽量完整显示 */
+.sb-tabs { display: flex; align-items: stretch; gap: 4px; flex-wrap: nowrap; }
 /* 行尾弹性占位（收起/展开钮推到最右——2026-11-05 用户裁定） */
-.sb-flex { flex: 1 1 auto; min-width: 8px; }
+.sb-flex { flex: 1 1 auto; min-width: 0; }
 .sb-tab {
-  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; height: auto; padding: 4px 10px;
+  display: inline-flex; align-items: center; gap: 6px; flex: 0 1 calc(10% - 4px); max-width: calc(10% - 4px); min-width: 0;
+  min-height: 30px; height: auto; padding: 4px 10px;
   background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md);
   cursor: pointer; font-size: 12px; color: var(--muted-foreground);
 }
 .sb-tab.active { color: var(--primary); font-weight: 600; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface-container)); }
-.sb-tab-name { white-space: normal; overflow-wrap: anywhere; }
-.sb-rename { width: 90px; height: 22px; padding: 0 6px; font-size: 12px; }
+.sb-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-rename { width: 90px; max-width: 100%; box-sizing: border-box; height: 22px; padding: 0 6px; font-size: 12px; }
 .sb-tab-close {
   width: 18px; height: 18px; padding: 0; line-height: 1; font-size: 12px; flex: none;
   background: transparent; color: var(--muted-foreground); border: none; border-radius: 50%; cursor: pointer;
@@ -452,7 +481,7 @@ const EMPTY_HINT: Record<string, string> = {
 .seg-field .lbl { font-size: 12px; color: var(--muted-foreground); flex: none; }
 .seg-field .input { width: 100%; }
 .seg-field.head-field .input { width: auto; }
-.w70 { width: 90px; }
+.w70 { width: 90px; } .w150 { width: 150px; }
 .w60 { width: 64px; }
 
 .input { height: 32px; padding: 0 10px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--foreground); outline: none; font-size: 13px; }

@@ -71,8 +71,10 @@ export interface StoryboardShot {
    *  AI生成/在线搜索/A-Roll 三轨产物挂 slots；同步走 attach/extract（clip_groups 同款，
    *  服务端原样透传），不入 toServerShot/normalizeShot 白名单 */
   slots?: ShotTrackSlots
-  /** 右列单选标记（驱动批量生成：'aroll'=生成A-Roll / 'ai'=AI生成；无标记=素材轨） */
-  genMode?: 'aroll' | 'ai'
+  /** 右列复选标记（2026-11-26 用户裁决：两复选框互不排斥——可同时勾选，分别驱动
+   *  A-Roll 批量与 AI 批量；都不勾=素材轨） */
+  markARoll?: boolean
+  markAI?: boolean
   /** 服务端按镜拆分出的该镜口播音频 id（2026-11-26 用户裁决：A-Roll 组拆分后逐镜绑定
    *  并在卡顶回显；attach/extract 同步） */
   splitAudioId?: string
