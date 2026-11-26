@@ -17,6 +17,7 @@ import { fmtDur } from '@/composables/copywritingMontageLogic'
 import { toFileUrl } from '@/utils/fileUrl'
 import type { StoryboardShot } from '@/composables/opsStoryboardLogic'
 import type { OnlineItem } from '@/composables/useOnlineStock'
+import { useHostDark } from '@/composables/hostTheme'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 import OnlineStockPanel from './OnlineStockPanel.vue'
 import TrackTile from './TrackTile.vue'
@@ -25,6 +26,7 @@ import TrackBatchBar from './TrackBatchBar.vue'
 const props = defineProps<{ mode: 'edit' | 'voice' | 'material' | 'fx'; sfxBusy?: boolean; singleScript?: boolean }>()
 const emit = defineEmits<{ (e: 'sfx-regen', shot: StoryboardShot): void; (e: 'sfx-remove', shot: StoryboardShot): void }>()
 
+const isDark = useHostDark() // 弹窗 teleport 到 body（App 根外），暗色类需显式绑定（2026-11-05 白弹窗同款）
 const shell = inject(copywritingMontageShellKey)!
 const {
   copyShots, copyShotsStale, genStoryboard, storyboardBusy, activeNarrative,
@@ -386,19 +388,21 @@ const EMPTY_HINT: Record<string, string> = {
     </div>
 
     <!-- 单镜在线搜索弹窗（2026-11-26 四源四轨：产物进该镜搜索轨占位） -->
-    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
+    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
       <div v-if="shotOnlineIdx >= 0" class="modal-mask" @click.self="shotOnlineIdx = -1">
         <div class="modal" style="width:min(960px,94vw)">
-          <span class="modal-title">为分镜 #{{ shotOnlineIdx + 1 }} 在线搜索素材（按画面描述匹配）</span>
+          <div class="modal-head">
+            <span class="modal-title">为分镜 #{{ shotOnlineIdx + 1 }} 在线搜索素材（按画面描述匹配）</span>
+            <button type="button" class="modal-x" title="关闭" @click="shotOnlineIdx = -1">×</button>
+          </div>
           <OnlineStockPanel :initial-query="copyShots[shotOnlineIdx]?.visual || ''" :single="true" @add="onShotOnlineAdd" />
-          <div class="modal-actions"><TButton label="关闭" plain @click="shotOnlineIdx = -1" /></div>
         </div>
       </div>
     </div></teleport>
 
     <!-- 删除分镜确认弹窗（2026-09-22 用户裁决：删除确认改大弹窗——原「确认」挤在
          × 图标上重叠不可读；分镜内容已同步服务端脚本库的仍保留在库中） -->
-    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
+    <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
       <div v-if="delDlg.show" class="modal-mask" @click.self="delDlg.show = false">
         <div class="modal">
           <span class="modal-title">删除分镜脚本</span>

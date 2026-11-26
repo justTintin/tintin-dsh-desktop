@@ -11,7 +11,7 @@ import TSelect from '@/components/common/TSelect.vue'
 import VdStepBar from '../VdStepBar.vue'
 import { useFilePicker } from '@/composables/useFilePicker'
 import { toFileUrl, acceptFileDragOver } from '@/utils/fileUrl'
-import { notify } from '@/composables/copywritingMontage/context'
+import { notify, errText } from '@/composables/copywritingMontage/context'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 import CopywritingStoryboard from './CopywritingStoryboard.vue'
 
@@ -59,6 +59,9 @@ const {
 //    （shot.splitAudioId），各分镜卡顶部「拆分口播」就地回显）──
 const splitVoiceBusy = ref(false)
 const splitVoiceMsg = ref('')
+const splitDone = ref(0)
+const splitTotal = ref(0)
+const splitProgress = computed(() => splitTotal.value ? Math.round(splitDone.value / splitTotal.value * 100) : 0)
 async function splitVoiceToShots(): Promise<void> {
   if (splitVoiceBusy.value) return
   const tabs = storyboards.value.filter((t) => t.scriptId && t.voiceAudioId && t.shots.length)
@@ -67,23 +70,40 @@ async function splitVoiceToShots(): Promise<void> {
     return
   }
   splitVoiceBusy.value = true
-  splitVoiceMsg.value = '正在请求服务端按分镜拆分口播音频…'
+  splitTotal.value = tabs.length
+  splitDone.value = 0
+  splitVoiceMsg.value = '正在请求服务端按分镜拆分口播音频…（首次拆分走 whisper 对齐，分钟级耗时）'
   try {
     let okTabs = 0
     let bound = 0
+    let firstError = ''
     const missTabs: string[] = []
     for (const tab of tabs) {
-      const map = await shotSplitVoiceByScript(tab.scriptId)
+      let map: Map<number, string> | null
+      try {
+        map = await shotSplitVoiceByScript(tab.scriptId)
+      } catch (e) {
+        if (!firstError) firstError = errText(e) // 超时/网络等真实原因；404 才是未部署
+        missTabs.push(tab.name)
+        continue
+      }
       if (!map) { missTabs.push(tab.name); continue }
       okTabs += 1
       let tabBound = 0
       tab.shots.forEach((s, i) => {
-        const audioId = map.get(Number(s.index) || i + 1)
+        // 服务端 shot_index 0-based（2026-11-26 实测对齐）
+        const audioId = map.get((Number(s.index) || i + 1) - 1)
         if (audioId) { s.splitAudioId = audioId; bound += 1; tabBound += 1 }
       })
       if (!tabBound) missTabs.push(tab.name)
+      splitDone.value += 1
     }
     if (!okTabs) {
+      if (firstError && !firstError.includes('HTTP 404')) {
+        splitVoiceMsg.value = `拆分失败：${firstError}`
+        notify('拆分失败', firstError)
+        return
+      }
       splitVoiceMsg.value = ''
       notify('服务端未部署', '服务端未部署「声音按镜拆分」（/audio/voice/split-by-shots）——请升级服务端后再试。')
       return
@@ -217,16 +237,6 @@ const tabVoices = computed(() => {
             @click="retryFailedClones" />
         </div>
 
-        <!-- 拆分声音到分镜脚本（2026-11-26 用户裁决：红框位——服务端按契约把各脚本整段
-             克隆口播按镜拆分，返回的逐镜音频绑回分镜（卡顶「拆分口播」回显）。
-             服务端未部署时明确提示升级） -->
-        <div class="row split-voice-row">
-          <TButton label="拆分声音到分镜脚本" variant="secondary" size="small" :loading="splitVoiceBusy"
-            title="把每个分镜脚本绑定的整段克隆口播按镜时长拆分，逐镜绑定（A-Roll 数字人读该镜音频）"
-            @click="splitVoiceToShots" />
-          <span v-if="splitVoiceMsg" class="muted">{{ splitVoiceMsg }}</span>
-        </div>
-
         <!-- 7. 配音动作已迁 Step4 统一合成（2026-09-09 用户裁决：Step3 只合成口播声音，
              配音+特效烧制+BGM 混音在第四步点「开始混音合成」一键完成） -->
 
@@ -241,6 +251,19 @@ const tabVoices = computed(() => {
           <div class="clone-progress-bar"><div class="clone-progress-fill" :style="{ width: voiceProgress + '%' }"></div></div>
         </template>
       </section>
+
+        <!-- 拆分声音到分镜脚本（2026-11-26 用户裁决：独立成行、主按钮样式；
+             服务端按契约把各脚本整段克隆口播按镜拆分，逐镜绑定（卡顶「拆分口播」回显）） -->
+        <div class="row split-voice-row">
+          <TButton label="拆分声音到分镜脚本" :loading="splitVoiceBusy"
+            title="把每个分镜脚本绑定的整段克隆口播按镜时长拆分，逐镜绑定（A-Roll 数字人读该镜音频）"
+            @click="splitVoiceToShots" />
+          <span v-if="splitVoiceMsg" class="muted">{{ splitVoiceMsg }}</span>
+        </div>
+        <template v-if="splitVoiceBusy">
+          <div class="concat-status-line">正在拆分声音 {{ splitDone }}/{{ splitTotal }}：逐镜对齐口播（首次走 whisper 对齐，分钟级）</div>
+          <div class="clone-progress-bar"><div class="clone-progress-fill" :style="{ width: splitProgress + '%' }"></div></div>
+        </template>
 
         <!-- 导航行（2026-09-10 用户裁决：上/下步按钮属操作区；2026-09-09 裁决：合成声音即可跳第四步） -->
         <div class="row between">
@@ -467,8 +490,9 @@ const tabVoices = computed(() => {
 /* 引擎选择+设置按钮同行不换行（2026-11-05 用户裁定：设置声音克隆放在引擎下拉后的
    空位，不单独换行） */
 .clone-eng-row { flex-wrap: nowrap; }
-/* 拆分声音到分镜脚本行（2026-11-26 用户裁决：克隆组下方；结果文案就地回显） */
-.split-voice-row { margin-top: 2px; }
+/* 拆分声音到分镜脚本（2026-11-26 用户裁决：克隆组外独占一行、主按钮样式、运行时进度条） */
+.split-voice-row { margin-top: 2px; flex-wrap: wrap; }
+.split-voice-row :deep(.t-button) { flex: 1 1 0; height: var(--size-input-height); }
 .clone-row :deep(.t-button) { height: var(--size-input-height); }
 /* TTS 引擎下拉（表格标题行内，不占满） */
 .tts-engine-select { width: 220px; flex: none; }

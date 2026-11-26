@@ -202,23 +202,29 @@ export function useShotMaterialGen(deps: {
   }
 
   /** 服务端声音按镜拆分（2026-11-26 用户裁决：拆分在服务端；契约 POST
-   *  /audio/voice/split-by-shots {script_id} → [{shot_index,audio_id}]，段入音频库）。
-   *  返回 {shot_index → audio_id}；端点未部署/失败 → null（调用方拒绝并提示）。 */
+   *  /audio/voice/split-by-shots {script_id} → [{shot_index,audio_id}]，段入音频库。
+   *  首次拆分走服务端 whisper 词级对齐——服务端要求客户端超时 ≥600s）。
+   *  返回 {shot_index(0-based) → audio_id}；**端点未部署(HTTP 404) → null**；
+   *  其他失败（超时/网络）原样上抛，调用方显示真实原因——不与「未部署」混谈。 */
   async function splitVoiceByScript(scriptId: string): Promise<Map<number, string> | null> {
+    let res: unknown
     try {
-      const res = await window.tintin.server.post<unknown>('/audio/voice/split-by-shots', { script_id: scriptId }, {}, 60_000)
-      if (!res || (typeof res === 'object' && 'error' in res)) return null
-      const list = Array.isArray(res) ? res : (res as { items?: unknown[] })?.items
-      if (!Array.isArray(list)) return null
-      const map = new Map<number, string>()
-      for (const row of list as Array<Record<string, unknown>>) {
-        // 服务端 shot_index 为 0-based（2026-11-26 实测：首镜 shot_index=0）
-        const idx = Number(row.shot_index)
-        const audioId = String(row.audio_id ?? row.audioId ?? '')
-        if (Number.isInteger(idx) && idx >= 0 && audioId) map.set(idx, audioId)
-      }
-      return map.size ? map : null
-    } catch { return null } // 404/网络错误/未部署 → 统一走批量拒绝提示
+      res = await window.tintin.server.post<unknown>('/audio/voice/split-by-shots', { script_id: scriptId }, {}, 600_000)
+    } catch (e) {
+      if ((e as { status?: number })?.status === 404) return null
+      throw e
+    }
+    if (!res || (typeof res === 'object' && 'error' in res)) return null
+    const list = Array.isArray(res) ? res : (res as { items?: unknown[] })?.items
+    if (!Array.isArray(list)) return null
+    const map = new Map<number, string>()
+    for (const row of list as Array<Record<string, unknown>>) {
+      // 服务端 shot_index 为 0-based（2026-11-26 实测：首镜 shot_index=0）
+      const idx = Number(row.shot_index)
+      const audioId = String(row.audio_id ?? row.audioId ?? '')
+      if (Number.isInteger(idx) && idx >= 0 && audioId) map.set(idx, audioId)
+    }
+    return map.size ? map : null
   }
 
   /** 单镜 A-Roll（数字人读该镜拆分音频）：提交 scheduled stage=aroll 任务 → 轮询 →
@@ -319,7 +325,13 @@ export function useShotMaterialGen(deps: {
     busy.value = true
     try {
       msg.value = '正在请求服务端按分镜拆分口播音频…'
-      const audioMap = await splitVoiceByScript(scriptId)
+      let audioMap: Map<number, string> | null
+      try {
+        audioMap = await splitVoiceByScript(scriptId)
+      } catch (e) {
+        msg.value = `拆分请求失败：${errMsg(e)}` // 超时/网络等真实原因（404 才是未部署）
+        return
+      }
       if (!audioMap) {
         msg.value = '服务端未部署「声音按镜拆分」能力（/audio/voice/split-by-shots）——请升级服务端后再用 A-Roll 批量。'
         return
