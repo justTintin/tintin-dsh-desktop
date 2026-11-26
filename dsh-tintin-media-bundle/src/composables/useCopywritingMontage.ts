@@ -420,7 +420,7 @@ export function useCopywritingMontage() {
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,
     storyboards, activeStoryboardId, activeStoryboard, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, activeNarrative, COPY_STORYBOARD_MAX,
     loadCopyCandidateTabs, addStoryboardTab, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
-    scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript, syncStoryboardsToServer,
+    scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript, syncStoryboardsToServer, syncScriptsWithArollPerShot,
     refreshTabNamesFromServer,
     loadLuts, loadCatalogLanes, resolveKeywordHits,
     currentMatchTemplateIds, refreshTextFxTracks, loadTextTemplates, ensureTtsApiUrl,
@@ -518,11 +518,14 @@ export function useCopywritingMontage() {
     // 轨道产物写激活 tab 的 shot.slots（2026-11-26 四源四轨裁决）
     activeShots: () => activeStoryboard.value?.shots || [],
     // 数字人 A-Roll：取激活 tab 的脚本同步 id、口播音频 id 与本地克隆口播 wav 路径
-    // （2026-11-26 一次上传直生成：multipart 直接传本地文件，无需预上传）
+    // （2026-11-26 最终契约：scheduled stage=aroll 单任务触发，切分/对齐/逐镜生成/
+    //  回写全服务端包干；per_shot 模式经 syncArollPerShot PUT 预置）
     digitalHuman: () => {
       const t = activeStoryboard.value
       return { scriptId: t?.scriptId || '', voiceAudioId: t?.voiceAudioId || '', voiceWav: t?.voiceWav || '' }
     },
+    syncArollPerShot: async () => { await syncScriptsWithArollPerShot() },
+    hasMaterial: (i: number) => (activeStoryboard.value?.clipGroups[i]?.length ?? 0) > 0,
   })
 
   return {

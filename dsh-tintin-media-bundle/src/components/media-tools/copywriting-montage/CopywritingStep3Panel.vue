@@ -51,6 +51,7 @@ const {
   pathBasename,
   storyboards,
   shotSplitVoiceByScript,
+  serverUrl,
 } = shell.s
 
 // ── 拆分声音到分镜脚本（2026-11-26 用户裁决：克隆组下方按钮——服务端把各脚本绑定的
@@ -81,20 +82,30 @@ async function splitVoiceToShots(): Promise<void> {
     let firstError = ''
     const missTabs: string[] = []
     for (const tab of tabs) {
-      let map: Map<number, string> | null
+      let split: { map: Map<number, string>; detail: string; undeployed: boolean }
       try {
-        map = await shotSplitVoiceByScript(tab.scriptId)
+        split = await shotSplitVoiceByScript(tab.scriptId)
       } catch (e) {
         if (!firstError) firstError = errText(e) // 超时/网络等真实原因；404 才是未部署
+        missTabs.push(`${tab.name}（${errText(e).slice(0, 60)}）`)
+        continue
+      }
+      if (split.undeployed) {
+        if (!firstError) firstError = split.detail
         missTabs.push(tab.name)
         continue
       }
-      if (!map) { missTabs.push(tab.name); continue }
+      if (!split.map.size) {
+        // 服务端业务明细逐字上屏（如「各镜 shot.audio 全空——先 distribute-voiceover 铺旁白再切分」）
+        if (!firstError) firstError = split.detail
+        missTabs.push(`${tab.name}（${split.detail.slice(0, 60)}）`)
+        continue
+      }
       okTabs += 1
       let tabBound = 0
       tab.shots.forEach((s, i) => {
         // 服务端 shot_index 0-based（2026-11-26 实测对齐）
-        const audioId = map.get((Number(s.index) || i + 1) - 1)
+        const audioId = split.map.get((Number(s.index) || i + 1) - 1)
         if (audioId) { s.splitAudioId = audioId; bound += 1; tabBound += 1 }
       })
       if (!tabBound) missTabs.push(tab.name)
@@ -107,7 +118,7 @@ async function splitVoiceToShots(): Promise<void> {
         return
       }
       splitVoiceMsg.value = ''
-      notify('服务端未部署', '服务端未部署「声音按镜拆分」（/audio/voice/split-by-shots）——请升级服务端后再试。')
+      notify('服务端未部署', `当前服务端 ${serverUrl.value || '（默认地址）'} 未部署「声音按镜拆分」（/audio/voice/split-by-shots）——请检查服务端地址设置或升级服务端。`)
       return
     }
     splitVoiceMsg.value = `拆分完成：${okTabs}/${tabs.length} 个脚本成功，绑定 ${bound} 镜${missTabs.length ? `；未拿到音频：${missTabs.join('、')}` : ''}（各分镜卡顶部可见）。`

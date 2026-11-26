@@ -27,6 +27,7 @@ import { storyboardNameAfterSave, cloneProgressLabelOf, cloneDisplayProgress } f
 import { notify, errText, joinPath } from './context'
 import { attachVoiceRef, voiceRefFromScriptDetail } from '../copywritingMontageVoiceRefLogic'
 import { uploadTabVoiceWav, restoreTabVoiceFromLibrary, refreshTabNamesFromServer as refreshTabNamesFromServerImpl } from './useCopywritingMontageVoiceSync'
+import { createArollPerShotSync } from './useCopywritingMontageArollPerShotSync'
 // 分镜 tab 生命周期与多稿装载（2026-11-05 迁出以控本文件行数，铁律 10；宿主只留接缝）
 import {
   COPY_STORYBOARD_MAX, createStoryboardTabs, productBriefOf,
@@ -825,6 +826,14 @@ function clearVoiceProgressListener(): void {
     }
   }
 
+  /** A-roll per_shot 预置（2026-11-26 用户转述服务端契约）：实现抽出独立模块，此处只留接缝。 */
+  const syncScriptsWithArollPerShot = createArollPerShotSync({
+    storyboards,
+    sharedProductInfo: sharedProductInfo as unknown as Ref<Record<string, unknown>>,
+    post: (path, body, headers, timeout) => window.tintin.server.post(path, body, headers, timeout),
+    onError: (e) => clientError('copywriting-montage', 'A-roll per_shot 预置失败', errText(e)), attachClipGroups,
+  })
+
   async function syncStoryboardsToServer(): Promise<void> {
     if (!storyboards.value.length) return
     if (scriptSyncing.value) { scriptSyncQueued = true; return }
@@ -1601,7 +1610,7 @@ function clearVoiceProgressListener(): void {
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial,
     storyboards, activeStoryboardId, activeStoryboard, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, activeNarrative, COPY_STORYBOARD_MAX,
     loadCopyCandidateTabs, addStoryboardTab, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
-    scriptSyncing, syncStoryboardsToServer,
+    scriptSyncing, syncStoryboardsToServer, syncScriptsWithArollPerShot,
     refreshTabNamesFromServer,
     genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,
     scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript,

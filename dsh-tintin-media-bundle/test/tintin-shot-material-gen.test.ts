@@ -17,34 +17,37 @@ const shot = (visual = '实验室走廊，服务器机柜蓝绿灯闪烁'): Stor
 let postResult: unknown = { task_id: 't-A' }        // /generate/video
 let scheduledPostResult: unknown = { id: 'ah-1' }   // /scheduled/tasks
 let splitPostResult: unknown = { items: [{ shot_index: 1, audio_id: 'aud-1' }] } // /audio/voice/split-by-shots
+let splitPostThrow: Error | null = null // 置非 null=该端点直接 reject（模拟 HTTP 404 等）
 let taskNode: () => unknown = () => ({ status: 'done', result: { output_url: 'http://srv/v.mp4' } })
 let scheduledTaskNode: () => unknown = () => ({ status: 'queued' })
 let scriptDetail: unknown = {}
+let scheduledTaskBody: Record<string, unknown> | null = null
 let downloadOk = true
 const downloads: string[] = []
 const posts: string[] = []
-const arollCalls: Array<{ imagePath: string; audioPath: string }> = []
-let arollPostResult: unknown = { task_id: 'ah-1' }
+const puts: string[] = []
 
 beforeAll(() => {
   vi.useFakeTimers()
   ;(globalThis as unknown as { window: unknown }).window = {
     tintin: {
       server: {
-        post: async (path: string) => {
+        post: async (path: string, body?: Record<string, unknown>) => {
           posts.push(path)
-          if (path === '/scheduled/tasks') return scheduledPostResult
-          if (path === '/audio/voice/split-by-shots') return splitPostResult
+          if (path === '/scheduled/tasks') {
+            scheduledTaskBody = (body ?? null) as Record<string, unknown> | null
+            return scheduledPostResult
+          }
+          if (path === '/audio/voice/split-by-shots') {
+            if (splitPostThrow) throw splitPostThrow
+            return splitPostResult
+          }
           return postResult
         },
         get: async (path: string) => (path.startsWith('/scheduled/tasks/')
           ? scheduledTaskNode()
           : path.startsWith('/api/storyboard/scripts/') ? scriptDetail : null),
-        arollGenerate: async (p: { imagePath: string; audioPath: string }) => {
-          posts.push('/digital-human/aroll')
-          arollCalls.push({ imagePath: p.imagePath, audioPath: p.audioPath })
-          return arollPostResult
-        },
+        put: async (path: string) => { puts.push(path); return { ok: true } },
         tasksUnifiedItem: async () => taskNode(),
         downloadResult: async (_u: string, local: string) => {
           downloads.push(String(local))
@@ -58,12 +61,20 @@ beforeAll(() => {
 })
 afterAll(() => { vi.useRealTimers() })
 
+let syncCalls = 0
+let syncFail: Error | null = null
+let hasMaterialFrom = -1 // >= 该下标的镜视为素材轨有货（-1=都没有）
 function makeGen(shots: StoryboardShot[], dh?: () => { scriptId: string; voiceAudioId: string; voiceWav: string }) {
   const gen = useShotMaterialGen({
     imageDuration: ref(5), splitsJobId: ref('job1'),
     activeLayout: ref('vertical'), productBrief: ref({}),
     activeShots: () => shots,
     digitalHuman: dh ?? (() => ({ scriptId: 'sb_1', voiceAudioId: 'audio_1', voiceWav: 'C:/cache/voice.wav' })),
+    syncArollPerShot: async () => {
+      syncCalls += 1
+      if (syncFail) throw syncFail
+    },
+    hasMaterial: (i: number) => hasMaterialFrom >= 0 && i >= hasMaterialFrom,
   })
   return gen
 }
@@ -166,61 +177,90 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
     expect(shots[2]!.slots?.gen).toBeUndefined()
   })
 
-  it('batchGenerateARoll happy path（一次上传直生成）：multipart 图+声 → 单任务轮询 → 镜级产物回 slots.aroll', async () => {
+  it('batchGenerateARoll v3：per_shot 预置→scheduled(aroll_image=服务端路径)→脚本回写逐镜下载', async () => {
     const shots = [shot('开场'), shot('第二镜')]
     shots[0]!.index = 1
     shots[1]!.index = 2
     shots[0]!.markARoll = true
     shots[1]!.markAI = true // 非本批
     const gen = makeGen(shots)
-    downloadOk = true // 前面用例的失败下载残留会毒化本链（模块态泄漏防）
-    posts.length = 0
-    downloads.length = 0
-    arollCalls.length = 0
-    arollPostResult = { task_id: 'ah-b1' }
+    downloadOk = true
+    posts.length = 0; puts.length = 0; downloads.length = 0
+    scheduledPostResult = { id: 'ah-v3' }
     let polls = 0
-    taskNode = () => {
+    scheduledTaskNode = () => {
       polls += 1
-      return polls < 2 ? { status: 'running', progress: 0.5 } : { status: 'done', result: { shots: [{ name: 'shot_1', material_id: 77 }] } }
+      return polls < 2 ? { status: 'running', progress: 40 } : { status: 'completed' }
     }
-    const p = gen.batchGenerateARoll('C:/pic/person.png')
-    // 假定时器持续推进（轮询 setTimeout 不自然触发）；有界次数兜底防挂
+    // 脚本回写：每镜 aroll_material_id（2026-11-26 用户转述契约）
+    scriptDetail = { shots: [ { index: 1, aroll_material_id: 881 }, { index: 2, aroll_material_id: 882 } ] }
+    const p = gen.batchGenerateARoll('/home/srv/product_images/person.png')
     for (let k = 0; k < 20; k++) await vi.advanceTimersByTimeAsync(3000)
     await p
-    // 一次上传：multipart 图+声直传，无 product-upload 预上传/无 scheduled 拆步编排
-    expect(arollCalls.length).toBe(1)
-    expect(arollCalls[0]).toEqual({ imagePath: 'C:/pic/person.png', audioPath: 'C:/cache/voice.wav' })
-    expect(posts.filter((p) => p === '/scheduled/tasks').length).toBe(0)
-    // 镜级产物对位（name shot_1 ↔ index 1）→ 下载 /material/serve → slots.aroll
-    expect(downloads.some((d) => d.includes('ah-b1_1.mp4'))).toBe(true)
-    expect(shots[0]!.slots?.aroll?.local).toContain('ah-b1_1.mp4')
+    expect(syncCalls).toBe(1) // per_shot 模式预置执行过
+    // 单次 scheduled 触发，params 契约=script_id+stage+aroll_image（无 audio_id/shot_index）
+    expect(posts.filter((p) => p === '/scheduled/tasks').length).toBe(1)
+    const body = scheduledTaskBody as { params?: Record<string, unknown> }
+    expect(body?.params?.script_id).toBe('sb_1')
+    expect(body?.params?.stage).toBe('aroll')
+    expect(body?.params?.aroll_image).toBe('/home/srv/product_images/person.png')
+    expect(body?.params?.aroll_audio_id).toBeUndefined()
+    expect(body?.params?.aroll_shot_index).toBeUndefined()
+    // 逐镜产物=脚本回写 aroll_material_id → /material/serve 下载 → slots.aroll
+    expect(downloads.some((d) => d.includes('ah-v3_1.mp4'))).toBe(true)
+    expect(shots[0]!.slots?.aroll?.local).toContain('ah-v3_1.mp4')
     expect(shots[1]!.slots?.aroll).toBeUndefined() // 未勾选不跑
     expect(gen.msg.value).toContain('A-roll 批量生成完成：成功 1/1')
   })
 
-  it('三道闸：未同步脚本 / 未克隆口播 / 人物图未选 各自拒绝且不提交', async () => {
+  it('有素材镜自动跳过：未回写产物但素材轨有货=done（跳过口径）', async () => {
+    const shots = [shot('开场')]
+    shots[0]!.markARoll = true
+    hasMaterialFrom = 0
+    const gen = makeGen(shots)
+    scheduledPostResult = { id: 'ah-skip' }
+    scheduledTaskNode = () => ({ status: 'completed' })
+    scriptDetail = { shots: [ { index: 1 } ] } // 无 aroll_material_id
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
+    for (let k = 0; k < 20; k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    hasMaterialFrom = -1
+    expect(gen.stateOf(0, 'aroll')?.phase).toBe('done')
+    expect(gen.stateOf(0, 'aroll')?.msg).toContain('自动跳过')
+  })
+
+  it('per_shot 预置失败=中断且不提交任务', async () => {
+    const shots = [shot()]
+    shots[0]!.markARoll = true
+    const gen = makeGen(shots)
+    syncFail = new Error('PUT 500')
+    posts.length = 0
+    await gen.batchGenerateARoll('/home/srv/person.png')
+    syncFail = null
+    expect(gen.msg.value).toContain('PUT 500')
+    expect(posts.filter((p) => p === '/scheduled/tasks').length).toBe(0)
+  })
+
+  it('三道闸：未同步脚本 / 人物图未选 拒绝且不提交', async () => {
     posts.length = 0
     const shots = [shot()]
     shots[0]!.markARoll = true
     const gen = makeGen(shots, () => ({ scriptId: '', voiceAudioId: '', voiceWav: '' }))
-    await gen.batchGenerateARoll('C:/pic/a.png')
+    await gen.batchGenerateARoll('C:/srv/a.png')
     expect(gen.msg.value).toContain('尚未同步到服务端')
-    const gen2 = makeGen(shots, () => ({ scriptId: 'sb_2', voiceAudioId: 'a', voiceWav: '' }))
-    await gen2.batchGenerateARoll('C:/pic/a.png')
-    expect(gen2.msg.value).toContain('口播配音')
     const gen3 = makeGen(shots)
     await gen3.batchGenerateARoll('')
     expect(gen3.msg.value).toContain('上传人物图')
-    expect(posts.filter((p) => p === '/digital-human/aroll').length).toBe(0)
+    expect(posts.filter((p) => p === '/scheduled/tasks').length).toBe(0)
   })
 
   it('worker 失败透传：任务 failed 落该镜 A-Roll 轨 failed 态', async () => {
     const shots = [shot()]
     shots[0]!.markARoll = true
     const gen = makeGen(shots)
-    arollPostResult = { task_id: 'ah-err' }
-    taskNode = () => ({ status: 'failed', error_msg: '第 3 镜未铺旁白' })
-    const p = gen.batchGenerateARoll('C:/pic/person.png')
+    scheduledPostResult = { id: 'ah-err' }
+    scheduledTaskNode = () => ({ status: 'failed', error_msg: '第 3 镜未铺旁白' })
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
     for (let k = 0; k < 20; k++) await vi.advanceTimersByTimeAsync(3000)
     await p
     expect(gen.stateOf(0, 'aroll')?.phase).toBe('failed')
@@ -228,13 +268,25 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
     expect(gen.active(0, 'aroll')).toBe(false)
   })
 
-  it('splitVoiceByScript 解析：数组形态/items 包裹/audioId 别名；端点缺失返回 null', async () => {
+  it('splitVoiceByScript 富结果：数组/items/audioId 别名解析；404=undeployed；业务 detail 逐字透出', async () => {
     const gen = makeGen()
-    splitPostResult = [{ shot_index: 3, audio_id: 'aud-3' }]
-    expect((await gen.splitVoiceByScript('sb_x'))?.get(3)).toBe('aud-3')
+    splitPostResult = [{ shot_index: 0, audio_id: 'aud-0' }, { shot_index: 3, audio_id: 'aud-3' }]
+    const r1 = await gen.splitVoiceByScript('sb_x')
+    expect(r1.map.get(0)).toBe('aud-0')
+    expect(r1.map.get(3)).toBe('aud-3')
+    expect(r1.detail).toContain('2/2')
+    expect(r1.undeployed).toBe(false)
     splitPostResult = { items: [{ shot_index: 2, audioId: 'aud-2' }] }
-    expect((await gen.splitVoiceByScript('sb_x'))?.get(2)).toBe('aud-2')
+    expect((await gen.splitVoiceByScript('sb_x')).map.get(2)).toBe('aud-2')
+    splitPostResult = { detail: '各镜 shot.audio 全空——先 distribute-voiceover 铺旁白再切分' }
+    const r3 = await gen.splitVoiceByScript('sb_x')
+    expect(r3.map.size).toBe(0)
+    expect(r3.detail).toContain('各镜 shot.audio 全空')
+    expect(r3.undeployed).toBe(false)
+    splitPostThrow = Object.assign(new Error('HTTP 404：{"detail":"Not Found"}'), { status: 404 })
+    expect((await gen.splitVoiceByScript('sb_x')).undeployed).toBe(true)
+    splitPostThrow = null
     splitPostResult = null
-    expect(await gen.splitVoiceByScript('sb_x')).toBeNull()
+    expect((await gen.splitVoiceByScript('sb_x')).detail).toContain('响应为空')
   })
 })

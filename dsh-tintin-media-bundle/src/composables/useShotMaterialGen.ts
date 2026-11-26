@@ -43,9 +43,13 @@ export function useShotMaterialGen(deps: {
   productBrief: Ref<unknown>
   /** 激活 tab 的分镜数组（轨道产物写 shot.slots；批量按 markARoll/markAI 复选过滤） */
   activeShots: () => StoryboardShot[]
-  /** 激活 tab 的服务端身份（A-Roll 数字人：脚本已同步 + 本地克隆口播 wav 路径——
-   *  一次上传直生成流 multipart 直接传本地文件） */
+  /** 激活 tab 的服务端身份（A-Roll 数字人：脚本已同步即可） */
   digitalHuman: () => { scriptId: string; voiceAudioId: string; voiceWav: string }
+  /** A-roll per_shot 预置：把脚本 PUT 回写 aroll.mode='per_shot'（2026-11-26 用户转述
+   *  服务端契约：stage=aroll 一次触发，切分/对齐/逐镜生成/回写全服务端包干） */
+  syncArollPerShot: () => Promise<void>
+  /** 该镜素材绑定轨是否有货（A-Roll 跳过镜的判定口径与合成一致） */
+  hasMaterial: (idx: number) => boolean
 }) {
   const busy = ref(false)
   const msg = ref('')
@@ -206,15 +210,23 @@ export function useShotMaterialGen(deps: {
 
   /** 服务端声音按镜拆分（契约 POST /audio/voice/split-by-shots {script_id} →
    *  [{shot_index(0-based),audio_id,...}]，段入音频库；首次走 whisper 对齐，服务端
-   *  要求客户端超时 ≥600s）。返回富结果：**detail 逐字透出服务端返回**（业务 400 的
-   *  detail/空音频行统计等），undeployed 仅 HTTP 404；其他失败原样上抛。 */
+   *  要求客户端超时 ≥600s）。返回富结果：**detail 逐字透出服务端返回**（业务 400/404
+   *  的 detail——如「脚本不存在」「各镜 shot.audio 全空」）；undeployed 仅裸
+   *  「Not Found」（该服务端真没部署此路由）；其他失败原样上抛。 */
   async function splitVoiceByScript(scriptId: string): Promise<{ map: Map<number, string>; detail: string; undeployed: boolean }> {
     const empty = (detail: string, undeployed = false) => ({ map: new Map<number, string>(), detail, undeployed })
     let res: unknown
     try {
       res = await window.tintin.server.post<unknown>('/audio/voice/split-by-shots', { script_id: scriptId }, {}, 600_000)
     } catch (e) {
-      if ((e as { status?: number })?.status === 404) return empty('HTTP 404（端点未部署）', true)
+      const status = (e as { status?: number })?.status
+      const body = String((e as { message?: string })?.message || '').replace(/^HTTP \d+：/, '')
+      if (status === 404) {
+        // 服务端对存在路由的业务 404 带 JSON detail（「脚本不存在: xxx」）；
+        // 裸 Not Found 才是路由未部署（FastAPI 缺路由缺省体）
+        if (/Not Found/.test(body) && !/脚本|各镜|audio/.test(body)) return empty('HTTP 404（该服务端未部署声音按镜拆分接口）', true)
+        return empty(body || 'HTTP 404', false)
+      }
       throw e
     }
     if (!res) return empty('服务端响应为空')
@@ -250,40 +262,47 @@ export function useShotMaterialGen(deps: {
     } finally { busy.value = false }
   }
 
-  /** 批量 A-Roll（2026-11-26 用户裁决二稿：**一次上传直接生成**——multipart 人物图+
-   *  整段克隆口播+script_id 一次收齐（POST /digital-human/aroll mode=per_shot），
-   *  服务端内部按镜拆分对齐并逐镜生成（有素材镜自动跳过）、镜级回写脚本；客户端单任务
-   *  轮询 → 完成后回读脚本逐镜产物 → 下载 → 写各镜 A-Roll 轨。要求各镜 shot.audio 已
-   *  铺旁白（服务端文档：未铺则任务失败暴露）。 */
+  /** 批量 A-Roll（2026-11-26 用户转述服务端最终契约：切分/对齐/逐镜生成/回写全在
+   *  stage=aroll 任务内部自动完成（cut_wav_window），客户端只触发**一次**任务——
+   *  ①脚本预置 aroll.mode='per_shot'（syncArollPerShot PUT 回写）②POST /scheduled
+   *  /tasks {script_id, stage:'aroll', aroll_image: 人物图服务端路径} ③轮询到 completed
+   *  → 每镜脚本回写 aroll_material_id → 逐镜下载 → 写各镜 A-Roll 轨（有素材镜服务端
+   *  自动跳过=保留素材轨）。人物图必须先经 product-upload 落到服务端路径。 */
   async function batchGenerateARoll(personImagePath: string): Promise<void> {
     const shots = deps.activeShots()
     const idxs = markedShotIdxs(shots, 'aroll')
     if (!idxs.length) { msg.value = '没有勾选「生成A-Roll」的分镜（或勾选分镜已全部有产物）。'; return }
-    const { scriptId, voiceWav } = deps.digitalHuman()
+    const { scriptId } = deps.digitalHuman()
     if (!scriptId) { msg.value = '该分镜脚本尚未同步到服务端：请先在第 2 步完成口播配音（克隆完成会自动同步）。'; return }
-    if (!voiceWav) { msg.value = '数字人读整段克隆口播：请先在第 2 步完成口播配音。'; return }
     const imagePath = String(personImagePath || '').trim()
     if (!imagePath) { msg.value = 'A-Roll 组需要先上传人物图。'; return }
     busy.value = true
     const startedAt = Date.now()
     try {
-      for (const i of idxs) setState(keyOf(i, 'aroll'), { phase: 'submitting', progress: -1, msg: '正在上传并提交数字人任务…', startedAt, elapsedSec: 0 })
-      msg.value = '正在一次上传人物图与整段口播，提交 A-roll 生成…'
-      const submitted = await window.tintin.server.arollGenerate({
-        imagePath, audioPath: voiceWav, scriptId, mode: 'per_shot',
-      })
+      // ①脚本预置 per_shot 模式（失败=中断，缺模式 worker 会走整条旧语义）
+      msg.value = '正在把脚本置为 A-roll 按镜生成模式…'
+      await deps.syncArollPerShot()
+      // ②一次触发 stage=aroll 任务（切分/对齐/逐镜生成/回写全服务端包干）
+      for (const i of idxs) setState(keyOf(i, 'aroll'), { phase: 'submitting', progress: -1, msg: '正在提交 A-roll 任务…', startedAt, elapsedSec: 0 })
+      msg.value = '正在提交 A-roll 任务…'
+      const submitted = await window.tintin.server.post<Record<string, unknown>>(
+        '/scheduled/tasks',
+        { task_type: 'storyboard_generate', params: { script_id: scriptId, stage: 'aroll', aroll_image: imagePath, auto_montage: false } },
+        {}, 30_000,
+      )
       if (!submitted) throw new Error('服务端不可达')
-      if (typeof submitted === 'object' && 'error' in submitted) throw new Error(String(submitted.error || '提交失败'))
-      const taskId = String(submitted.task_id ?? '')
-      if (!taskId) throw new Error('A-roll 提交响应缺 task_id')
+      if (submitted.error) throw new Error(String(submitted.error))
+      const taskId = String(submitted.task_id ?? submitted.id ?? '')
+      if (!taskId) throw new Error('A-roll 提交响应缺 id/task_id')
       for (const i of idxs) setState(keyOf(i, 'aroll'), { phase: 'generating', taskId, msg: '数字人生成中…' })
-      msg.value = `A-roll 已提交（任务 ${taskId}，${idxs.length} 镜逐镜生成）…`
+      msg.value = `A-roll 已提交（任务 ${taskId}，逐镜生成有素材镜自动跳过）…`
 
+      // ③轮询到 completed（逐镜生成可达小时级，预算 120 分钟）
       const started = Date.now()
-      let entries: Array<Record<string, unknown>> = []
       while (Date.now() - started < AROLL_POLL_BUDGET) {
         await new Promise((r) => setTimeout(r, POLL_INTERVAL))
-        const node = await window.tintin.server.tasksUnifiedItem(taskId)
+        const node = await window.tintin.server.get(`/scheduled/tasks/${taskId}`)
+        if (node === null || node === undefined) throw new Error('任务通道不可达')
         if (node && typeof node === 'object' && 'error' in node) throw new Error(String((node as { error: unknown }).error))
         const task = extractTaskObj(node)
         const phase = mapTaskStatus(task?.status ?? task?.state, task).phase
@@ -292,53 +311,43 @@ export function useShotMaterialGen(deps: {
           setState(keyOf(i, 'aroll'), { phase: 'generating', progress: progressOf(task), elapsedSec, msg: '数字人生成中…' })
         }
         if (phase === 'failed') throw new Error(String(task?.error_message ?? task?.error_msg ?? task?.error ?? task?.last_message ?? 'A-roll 生成失败'))
-        if (phase === 'done') {
-          // 逐镜产物双通道：任务 result.shots 优先，回落脚本回写 aroll.shots
-          const result = (task?.result ?? {}) as Record<string, unknown>
-          entries = Array.isArray(result.shots) ? result.shots as Array<Record<string, unknown>> : []
-          if (!entries.length) {
-            const detail = await window.tintin.server.get<Record<string, unknown>>(`/api/storyboard/scripts/${scriptId}`)
-            const s = ((detail && typeof detail === 'object' && 'script' in detail ? (detail as { script?: Record<string, unknown> }).script : detail) ?? {}) as Record<string, unknown>
-            const aroll = (s.aroll ?? {}) as Record<string, unknown>
-            entries = Array.isArray(aroll.shots) ? aroll.shots as Array<Record<string, unknown>> : []
-          }
-          break
-        }
+        if (phase === 'done') break
       }
-      if (!entries.length) throw new Error('A-roll 生成超时或未返回逐镜产物')
-
-      // 镜级产物对位：条目 name="shot_N"（N=脚本 1-based 镜 index）；无 name 按 pos 对位
-      const productBy = new Map<number, { materialId: number; url: string }>()
-      entries.forEach((e, pos) => {
-        const mid = Number(e.material_id ?? 0)
-        const url = String(e.output_url ?? e.output_path ?? e.url ?? '')
-        if (!mid && !url) return
-        const named = Number(String(e.name ?? '').replace(/^shot_/i, ''))
-        const byName = Number.isInteger(named) && named > 0
-          ? idxs.filter((i) => Number(shots[i]!.index) === named || i + 1 === named)
-          : []
-        const target = byName[0] ?? idxs[pos] ?? idxs[0]
-        if (target === undefined) return
-        productBy.set(target, { materialId: mid, url })
-      })
+      // ④逐镜产物=脚本回写 aroll_material_id（2026-11-26 用户转述契约）：回读脚本 detail
+      msg.value = 'A-roll 任务完成，正在回读逐镜产物…'
+      const detail = await window.tintin.server.get<Record<string, unknown>>(`/api/storyboard/scripts/${scriptId}`)
+      const s = ((detail && typeof detail === 'object' && 'script' in detail ? (detail as { script?: Record<string, unknown> }).script : detail) ?? {}) as Record<string, unknown>
+      const rawShots = Array.isArray(s.shots) ? s.shots as Array<Record<string, unknown>> : []
       const dir = joinPath(await readCacheDir(), 'montage_cache', deps.splitsJobId.value || 'session', 'generated')
       let okCount = 0
+      let skipCount = 0
       for (const i of idxs) {
-        const got = productBy.get(i)
+        const shot = shots[i]!
         const k = keyOf(i, 'aroll')
-        setState(k, { phase: 'downloading', progress: -1, msg: got ? '生成完成，正在下载产物…' : '未返回该镜产物', elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
-        if (!got) { setState(k, { phase: 'failed', msg: 'A-roll 未返回该镜产物' }); continue }
-        const url = got.url || `/material/serve?material_id=${got.materialId}`
+        // 对位：优先按脚本镜 index 匹配，退回数组位
+        const raw = rawShots.find((r) => Number(r.index) === Number(shot.index)) ?? rawShots[i]
+        const mid = Number(raw?.aroll_material_id ?? 0)
+        const bound = deps.hasMaterial(i)
+        if (!mid) {
+          if (bound) {
+            // 有素材镜服务端自动跳过（保留素材轨）——终态 done 计入
+            setState(k, { phase: 'done', progress: 100, msg: '已绑定素材，自动跳过' })
+            okCount += 1; skipCount += 1; continue
+          }
+          setState(k, { phase: 'failed', msg: '服务端未回写该镜 A-roll 产物' }); continue
+        }
+        setState(k, { phase: 'downloading', progress: -1, msg: '生成完成，正在下载产物…' })
         const local = joinPath(dir, `${taskId}_${i + 1}.mp4`)
-        const res = await window.tintin.server.downloadResult(url, local)
-        if (res === null || (res && typeof res === 'object' && 'error' in res)) {
+        const res = await window.tintin.server.downloadResult(`/material/serve?material_id=${mid}`, local)
+        if (res === null) { setState(k, { phase: 'failed', msg: '产物下载通道不可达' }); continue }
+        if (res && typeof res === 'object' && 'error' in res) {
           setState(k, { phase: 'failed', msg: `产物下载失败：${errMsg(res)}` }); continue
         }
         setSlot(i, 'aroll', { local, taskId })
         setState(k, { phase: 'done', progress: 100, msg: '数字人已生成', elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
         okCount += 1
       }
-      if (!okCount) throw new Error('A-roll 生成完成但无一镜产物落盘')
+      if (!okCount && !skipCount) throw new Error('A-roll 生成完成但无一镜产物落盘')
       msg.value = `A-roll 批量生成完成：成功 ${okCount}/${idxs.length}。`
     } catch (e) {
       msg.value = `A-roll 生成失败：${errMsg(e)}`
