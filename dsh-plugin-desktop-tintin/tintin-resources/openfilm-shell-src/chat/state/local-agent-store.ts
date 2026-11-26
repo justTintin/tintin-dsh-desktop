@@ -18,6 +18,7 @@ import {
   type LocalAgentSessionInfo,
   type RosterAgent,
 } from '@/lib/desktop-bridge';
+import { flattenSessionConfigOptions } from '@/lib/session-config-options';
 import { forgetLocalAgentSessions } from '@/lib/local-agent-run';
 
 export type AgentPick = LocalAgentId;
@@ -263,6 +264,9 @@ export const useLocalAgents = create<LocalAgentStore>((set, get) => ({
   },
   noteOptions(agent, options) {
     if (!options) return;
+    /* ACP groups model choices by provider (dsh packages/acp model-control.ts); the UI reads
+       leaves flat — flatten on ingestion (2026-11-23 报障:供应商组名 TinTin 被当成模型)。 */
+    options = flattenSessionConfigOptions(options);
     let prefs = get().prefs;
     /* Before Cursor's parameterized picker, a model id included effort/speed/context in brackets. Keep that
        selection when replacing the old catalog with the model and its separately configurable parameters. */

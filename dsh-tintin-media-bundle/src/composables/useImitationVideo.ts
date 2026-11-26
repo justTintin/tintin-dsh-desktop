@@ -85,17 +85,17 @@ export function useImitationVideo() {
 
   // ── 平台字典（2026-10-03 用户裁决：仿写文案对齐文案混剪——GET /copywriting/platforms，
   //    platform 直传服务端，平台指引由服务端织入；拉取失败保留当前值）──
-  const ivPlatformOptions = ref<Array<{ name: string; guide: string }>>([])
+  const ivPlatformOptions = ref<Array<{ name: string }>>([])
   const ivPlatform = ref('抖音')
   async function loadIvPlatforms(): Promise<void> {
     try {
       const res = await serverBridge().get(API_PATHS.copywriting.platforms)
-      const data = (res && typeof res === 'object' ? res : null) as { default?: string; platforms?: Array<{ name?: string; guide?: string }> } | null
+      const data = (res && typeof res === 'object' ? res : null) as { default?: string; platforms?: Array<{ name?: string }> } | null
       const list = Array.isArray(data?.platforms) ? data!.platforms! : []
       if (list.length) {
         ivPlatformOptions.value = list
           .filter((x) => x && typeof x.name === 'string' && x.name)
-          .map((x) => ({ name: String(x.name), guide: String(x.guide || '') }))
+          .map((x) => ({ name: String(x.name) }))
         if (typeof data?.default === 'string' && data.default) ivPlatform.value = data.default
         clientInfo(TAG, `平台字典已加载 n=${ivPlatformOptions.value.length} default=${ivPlatform.value}`)
       }
@@ -130,6 +130,8 @@ export function useImitationVideo() {
   let part1StartedAt = 0
   /** Part 1 源素材 id（预上传回填 / material:// 输入解析；供后续产品图等引用） */
   const part1MaterialId = ref('')
+  /** Part 1 源视频展示名（提交时固化；拆解完成后第 1 步仍显示所选原片） */
+  const part1VideoLabel = ref('')
   /** Part 1 完整结果（shots[] + 提示词字段——拆解接口=脚本+反推提示词唯一来源） */
   const part1Result = ref<Record<string, unknown>>({})
   const scriptId = ref('')
@@ -145,6 +147,11 @@ export function useImitationVideo() {
   async function submitImitate(input: ImitateSubmitInput): Promise<boolean> {
     let video: unknown = input.video
     part1Note.value = ''
+    const materialRefInput = /^material:\/\/(\d+)/.exec(String(video))
+    part1VideoLabel.value = typeof File !== 'undefined' && video instanceof File
+      ? video.name
+      : materialRefInput ? `素材库视频 #${materialRefInput[1]}`
+        : /^https?:\/\//i.test(String(video)) ? String(video) : ''
     // File/Blob → 先经 imitate/upload 入素材库，拿 material_id 转成 material:// URI
     if (typeof File !== 'undefined' && (input.video instanceof File || input.video instanceof Blob)) {
       try {
@@ -529,7 +536,7 @@ export function useImitationVideo() {
     // Seedance 交付包（九宫格图+提示词）
     storyboardPack, loadStoryboardPack,
     // Part 1
-    part1TaskId, part1Phase, part1Error, part1Note, part1MaterialId, part1Result, scriptId, scriptVersion, shotCount,
+    part1TaskId, part1Phase, part1Error, part1Note, part1MaterialId, part1VideoLabel, part1Result, scriptId, scriptVersion, shotCount,
     part1Progress, part1ElapsedSec, part1Message,
     submitImitate,
     // 脚本（HumanGate①）

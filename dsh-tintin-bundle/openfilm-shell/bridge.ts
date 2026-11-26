@@ -99,6 +99,11 @@ function place() {
   column.hidden = !layout.open;
   column.style.width = `${shownWidth()}px`;
   column.style.top = `${workspaceBounds?.top ?? TOP_BAR}px`;
+  /* 上游 place() 同款:分割线把手(shell.css .workspace-chat-divider right:-5px)与 1px 分界线
+     (border-right)的 CSS 规则都挂在 data-side/data-workspace-bounds 上——2026-11-24 用户报障
+     「会话和画面之间没有分割线,不可拖动」的根因即 vendor 跟线时丢了这两处 */
+  column.toggleAttribute('data-workspace-bounds', workspaceBounds !== null);
+  column.dataset.side = layout.side;
   column.toggleAttribute('data-assets-open', overlay());
   assetsOverlaySignal.set(overlay());
   const state = panelState();

@@ -18,7 +18,6 @@ const tintinClient = (() => {
         // 素材创作(creation)已整体移除（2026-11-20 用户裁决,git 历史 ≤4976a1f7c4 可考）
         { id: 'ops', label: '运营工具' },
         { id: 'media', label: '媒体工具' }, // 技能管理侧栏入口已随 2026-10-30 用户裁决移除(封面插件自带技能管理,各插件自管)
-        { id: 'cover', label: '封面制作', glyph: '<rect x="2" y="3" width="12" height="10" rx="1.5"/><circle cx="5.4" cy="6" r="1.2"/><path d="M4 11.4 7.6 8.2l2.6 2.1 2-1.7 2.8 2.6"/>' }, // 封面制作(2026-10-27 用户裁决:独立菜单置于视频剪辑上方;封面编辑器 dsh-tintin-cover-plugin)
         { id: 'openfilm', label: '视频剪辑', glyph: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2 6.2h12"/><path d="M4.6 4.85h.01M7 4.85h.01M9.4 4.85h.01M11.8 4.85h.01"/><path d="M6.9 8.3v3.1l2.9-1.55z"/>' }, // 视频剪辑（2026-10-19 用户裁决：原「OpenFilm」改名）
       ]
       let activeId = 'workbench'
@@ -31,9 +30,6 @@ const tintinClient = (() => {
         register(id, provider) { this.providers.set(id, provider); try { window.__tintinChrome?.onProvider?.(id) } catch { /* 未就绪 */ } },
         unregister(id) { this.providers.delete(id) },
       }
-      // 封面视图提供方已迁入 dsh-tintin-cover-plugin 的 client 入口自注册(2026-10-30
-      // 插件化裁决,同 creation/ops/media 模式);侧栏行仍集中列在本 chrome 的 VIEWS
-      // (行=宿主展示面,提供方=包边界)。
 
       // ── 左侧「插件」区入口（2026-09-28 用户裁决：撤顶部 Tab 栏；入口行克隆插件面板行同层注入）──
       let entryButtons = []
@@ -124,7 +120,7 @@ const tintinClient = (() => {
           }
           b.onclick = (ev) => {
             ev.stopPropagation()
-            setActive(activeId === v.id ? 'workbench' : v.id)
+            setActive(v.id)
             b.blur() // 失焦（2026-10-19 报障）：行按钮留焦点时，视图内按空格=HTML 语义再点一次按钮→被切回工作台
           }
           entryButtons.push([v.id, b]) // 浏览器行也入册：收起态隐藏标题要覆盖全部克隆行（2026-10-19 报障）
@@ -261,7 +257,6 @@ const tintinClient = (() => {
       // 插件重启/HMR 重求值时旧 overlay 仍挂 body（拆载不清 DOM）→ 残壳顶行叠在新聊天列上方（2026-10-19 报障）；安装即清残核
       for (const stale of [...document.querySelectorAll('#tintin-view-overlay')]) stale.remove()
       document.body.appendChild(overlay)
-      for (const stale of [...document.querySelectorAll('#tintin-strip-cover')]) stale.remove()
       // 拖放隔离（2026-10-21 用户报障：视频拖不进工具页）：上游聊天组合器在 document 上
       // 全局监听四类 drag 事件，覆盖层里的拖入区冒泡上去会被接管——dragover 按聊天框状态改写
       // dropEffect（锁定时置 none，Chromium 之后不再派发 drop），drop 把文件塞进聊天草稿。

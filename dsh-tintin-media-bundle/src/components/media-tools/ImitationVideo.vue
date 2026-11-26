@@ -107,6 +107,7 @@ async function reloadScript(): Promise<void> {
     // 且闸门恒拦——product_id 随 meta 持久化，加载后按它自动回填）
     const pid = String(imitateMeta.value.product_id ?? '')
     if (productPicked() && pid) void populateFromProductSixViews(pid)
+    else clearSixViewState()
   }
 }
 
@@ -179,8 +180,7 @@ function clearScriptProduct(): void {
   record.value.products = []
   writeImitateMeta({ product_selected: false })
   productSelectionDirty.value = true // 未落库期间回读不得把服务端残留绑定带回（清品即保存随下一次保存落库）
-  void iv.refreshProductSixViews('') // 清产品=清空六视图槽位与直传 meta
-  clearProductImages()
+  clearSixViewState()
 }
 
 // ── 产品图（选完产品即带出六视图；product_images=生成任务直传，服务端产品锚定 ≤6 张）──
@@ -246,6 +246,10 @@ async function populateFromProductSixViews(itemId: string): Promise<void> {
 function clearProductImages(): void {
   writeImitateMeta({ product_images: [], product_image_names: [], product_image_ids: [] })
   productImgNote.value = ''
+}
+function clearSixViewState(): void {
+  void iv.refreshProductSixViews('')
+  clearProductImages()
 }
 /** 六视图槽位上传/删除（上传弹「选择产品图」双 tab；绑定走 views 端点纯替换+回读刷新） */
 const productSixSlots = computed(() => productSixViewSlots(iv.productSixViews.value))
@@ -588,6 +592,7 @@ function goBack(): void {
 
 /** 重新走一遍：清选择与脚本态，停留在第 1 步 */
 function resetFlow(): void {
+  clearSixViewState()
   montage.stopPolling()
   montage.montagePhase.value = ''
   montage.montageTaskId.value = ''
@@ -596,6 +601,7 @@ function resetFlow(): void {
   record.value = null
   iv.part1Phase.value = ''
   iv.part1Note.value = ''
+  iv.part1VideoLabel.value = ''
   iv.part1Error.value = ''
   iv.genPhase.value = ''
   iv.genError.value = ''

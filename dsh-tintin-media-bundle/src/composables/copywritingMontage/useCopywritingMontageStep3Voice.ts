@@ -20,6 +20,7 @@ import {
   buildSubtitleRows, buildTextFxTracks, textFxStyleOf, rewriteTemperature,
   buildRewriteSystemPrompt, cleanRewriteContent, resolveOutMontageDir, pathBasename,
   shotsNarrationText, buildCopywritingStoryboardPrompt,
+  STORYBOARD_LLM_MAX_TOKENS, STORYBOARD_LLM_TIMEOUT_MS,
   type TextFxTrack, type SubtitleStylePreset, type PrecomposePlan, type VoiceRow,
 } from '../copywritingMontageLogic'
 import { storyboardNameAfterSave, cloneProgressLabelOf, cloneDisplayProgress } from '../copywritingMontageStep3VoiceLogic'
@@ -843,6 +844,16 @@ function clearVoiceProgressListener(): void {
           })
           attachClipGroups(payload, tab)
           attachVoiceRef(payload, tab)
+          // 轨道产物随脚本透传（2026-11-26 四源四轨裁决：genMode/slots 不入 toServerShot
+          // 白名单，按 clip_groups 同款 attach——服务端原样透传已实证）
+          const payShots = (payload.shots ?? []) as Array<Record<string, unknown>>
+          tab.shots.forEach((s, i) => {
+            const row = payShots[i]
+            if (!row) return
+            if (s.genMode) row.gen_mode = s.genMode
+            if (s.slots && (s.slots.stock || s.slots.gen || s.slots.aroll)) row.slots = s.slots
+            if (s.splitAudioId) row.split_audio_id = s.splitAudioId
+          })
           // 与 saveStoryboard 同接口同忙场景（分割/合成排队时实测 68s 才返回）：2026-09-21
           // 用户裁决同步一并放宽 120s。2026-11-05 用户报障「老是提示分镜同步失败 Request
           // timeout」：放宽至 300s + 失败自动重试 1 次（多 tab 串行回传时服务端排队
@@ -901,17 +912,22 @@ function clearVoiceProgressListener(): void {
     try {
       statusText.value = '正在根据旁白生成分镜脚本...'
       const { systemPrompt, userPrompt } = buildCopywritingStoryboardPrompt(copy)
-      const res = await window.tintin.server.llmChat({
+      // 显式 max_tokens + 放宽超时（2026-11-25 长文案截断修复，参数注释见常量出处）
+      const res = await window.tintin.server.post('/llm/chat/completions', {
         model: '',
+        max_tokens: STORYBOARD_LLM_MAX_TOKENS,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-      })
+      }, undefined, STORYBOARD_LLM_TIMEOUT_MS)
       if (res && 'error' in res) throw new Error(String(res.error) || '服务端返回空错误')
+      const finish = String(res?.choices?.[0]?.finish_reason ?? '')
       const content = String(res?.choices?.[0]?.message?.content ?? '')
       const parsed = parseStoryboardShots(content)
-      if (parsed.fallback || !parsed.shots.length) throw new Error('分镜解析失败（模型未返回 JSON 数组），请重试')
+      if (parsed.fallback || !parsed.shots.length) {
+        throw new Error(finish === 'length' ? '分镜解析失败（模型输出被 max_tokens 截断，请精简文案后重试）' : '分镜解析失败（模型未返回 JSON 数组），请重试')
+      }
       const tab = addStoryboardTab({ narrative: copy, shots: parsed.shots, productBrief: productBriefOf(sharedProductInfo.value) })
       if (!tab) {
         notify('分镜数量已达上限', `最多支持 ${COPY_STORYBOARD_MAX} 个分镜脚本，请先删除部分分镜。`)
@@ -1033,7 +1049,17 @@ function clearVoiceProgressListener(): void {
             category: String(script.product.category || ''),
             name: String(script.product.name || ''),
           },
-          shots: script.shots.map((s, i) => normalizeShot(s, i + 1)),
+          shots: script.shots.map((s, i) => {
+            const n = normalizeShot(s, i + 1)
+            // 轨道产物/标记回填（2026-11-26 四源四轨：clip_groups 同款——normalizeShot
+            // 白名单不带，从原始 shots 提取 gen_mode/slots）
+            const raw = (s ?? {}) as Record<string, unknown>
+            const mode = String(raw.gen_mode || '')
+            if (mode === 'aroll' || mode === 'ai') n.genMode = mode
+            if (raw.slots && typeof raw.slots === 'object') n.slots = raw.slots as StoryboardShot['slots']
+            if (raw.split_audio_id) n.splitAudioId = String(raw.split_audio_id)
+            return n
+          }),
           // 2026-09-29 跨机绑定恢复：从原始 shots 提取 clip_groups（normalizeShot 白名单不带它）
           clipGroups: clipGroupsFromScriptShots((data as { shots?: unknown }).shots),
           // 2026-09-30 跨机口播恢复：根字段 voice_audio_id/voice_dur_sec（兼容 script 包裹）
@@ -1571,7 +1597,7 @@ function clearVoiceProgressListener(): void {
     currentMatchTemplateIds, refreshTextFxTracks, loadTextTemplates, ensureTtsApiUrl,
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial,
     storyboards, activeStoryboardId, activeStoryboard, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, activeNarrative, COPY_STORYBOARD_MAX,
-    loadCopyCandidateTabs, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
+    loadCopyCandidateTabs, addStoryboardTab, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
     scriptSyncing, syncStoryboardsToServer,
     refreshTabNamesFromServer,
     genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,

@@ -85,15 +85,17 @@ async function uploadOne(path, ctx) {
 
 /** One MCP tools/call：mode 契约——'strict'=会话（纯 JSON）；'annotated'=画布（JSON+尾注，
  *  Studio 画面 create_image/edit_image 的服务端返回形态）。 */
-async function mcpCall(tool, args, ctx, mode = 'strict') {
+async function mcpCall(tool, args, ctx, mode = 'strict', netMs = 120_000) {
   /* patience 30s（2026-11-20 报障 create_music fetch failed）：缺省 patience=0=不重试，
      公网网关间歇抖动一次即抛「could not be reached」；30s 窗口内 1s/2s/4s…指数退避
-     自动穿越抖动（call 内建机制，此前未启用）。 */
+     自动穿越抖动（call 内建机制，此前未启用）。netMs：单次网络超时（2026-11-21 实测：
+     upload/submit 无界挂起 6 分钟撞 360s 窗——挂起必须响亮失败重试，不许无声等死；
+     music 同步生成走 600s 长档）。 */
   const res = await call(NAME, `${base()}/mcp`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }),
-  }, ctx, { patience: 30_000 });
+  }, { ...ctx, networkTimeoutMs: netMs }, { patience: 30_000 });
   const raw = await res.text();
   let payload = null;
   try { payload = JSON.parse(raw); } catch {
@@ -112,10 +114,13 @@ async function generate(tool, args, what, ctx) {
   const { said, out } = await mcpCall(tool, args, ctx, 'annotated')
   const taskId = String(out?.task_id ?? out?.taskId ?? '');
   if (!taskId) throw new Error(`${NAME} 的 ${tool} 没有返回任务 id：${said.slice(0, 200)}`);
-  const deadline = Date.now() + 15 * 60_000;
+  /* 预算分档（2026-11-21 实测：画布 1080p 5s 视频单渲染段 ~21 分钟）：视频 45 分钟
+     （引擎排队+渲染都要盖住；film-acp 同款 30 分钟预算先例再放宽），图片 15 分钟。 */
+  const budgetMin = tool === 'create_video' ? 45 : 15;
+  const deadline = Date.now() + budgetMin * 60_000;
   for (;;) {
     if (ctx.signal.aborted) throw new Error('stopped');
-    const res = await call(NAME, `${base()}/tasks/unified/${encodeURIComponent(taskId)}`, { headers: { accept: 'application/json' } }, ctx);
+    const res = await call(NAME, `${base()}/tasks/unified/${encodeURIComponent(taskId)}`, { headers: { accept: 'application/json' } }, { ...ctx, networkTimeoutMs: 120_000 });
     const body = /** @type {any} */ (await res.json());
     const status = String(body?.status ?? '').toLowerCase();
     if (status === 'completed') {
@@ -126,7 +131,7 @@ async function generate(tool, args, what, ctx) {
     if (status === 'failed' || status === 'error' || body?.error) {
       throw new Error(`${NAME} 的 ${what}任务失败了：${String(body?.error ?? body?.last_message ?? '未知原因').slice(0, 300)}`);
     }
-    if (Date.now() > deadline) throw new Error(`${NAME} 的 ${what}任务超时（15 分钟）：${taskId}`);
+    if (Date.now() > deadline) throw new Error(`${NAME} 的 ${what}任务超时（${budgetMin} 分钟）：${taskId}`);
     await sleep(3000, ctx.signal);
   }
 }
@@ -204,7 +209,7 @@ export default {
       const prompt = needed(args, 'prompt');
       const duration = clamp(Math.round(number(args.sec) ?? 20), 3, 30);
       ctx.say(`音乐（MusicGen BGM，${duration}s）…`);
-      const { said, out } = await mcpCall('create_music', { style: 'auto', prompt, duration: String(duration) }, ctx, 'annotated')
+      const { said, out } = await mcpCall('create_music', { style: 'auto', prompt, duration: String(duration) }, ctx, 'annotated', 600_000)
       const url = String(out?.url ?? out?.audio_url ?? '') || (said.match(/https?:\/\/\S+/)?.[0] ?? '');
       if (!url) throw new Error(`${NAME} 的音乐生成没有返回音频地址：${said.slice(0, 200)}`);
       const path = landing('audio/music', args.out, 'mp3');
@@ -265,7 +270,7 @@ export default {
       }
       const url = await generate('create_image', body, '图片', ctx);
       const path = landing('image', args.out, 'png');
-      const { bytes } = await download(NAME, url, ctx);
+      const { bytes } = await download(NAME, url, { ...ctx, networkTimeoutMs: 300_000 });
       const made = madePicture({ path, bytes, prompt, provider: 'tintin', model: 'comfygen-image', notes: [] });
       return { ...made, receipt: { ...made.receipt, aspect, ...(refs.length ? { mode: 'i2i', refs: refs.length } : {}) } };
     }
@@ -290,7 +295,7 @@ export default {
       if ((body.image || body.reference_images) && aspect !== '16:9' && aspect !== '9:16') body.resolution = '720p';
       const url = await generate('create_video', body, '视频', ctx);
       const path = landing('video', args.out, 'mp4');
-      const { bytes } = await download(NAME, url, ctx);
+      const { bytes } = await download(NAME, url, { ...ctx, networkTimeoutMs: 300_000 });
       return {
         files: [{ path, bytes }],
         index: [{ src: path, kind: 'video', dur: duration, from: { mode: 'generate', prompt, provider: 'tintin', model: 'comfygen-video' } }],

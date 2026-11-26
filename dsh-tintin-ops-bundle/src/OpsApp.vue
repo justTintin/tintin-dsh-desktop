@@ -169,13 +169,12 @@ const isDark = useHostDark()
             :disabled="t.disabled || undefined"
             :tabindex="t.id === 'kb-qa' ? 0 : undefined"
             :role="t.id === 'kb-qa' ? 'button' : undefined"
-            @click="t.id === 'kb-qa' ? openTool(t) : undefined"
+            @click="openTool(t)"
             @keydown.enter="t.id === 'kb-qa' ? openTool(t) : undefined"
           >
           <span v-if="t.disabled" class="badge">建设中</span>
-          <!-- 问答地址设置(2026-11-15 用户裁决:问答系统卡右上角加设置,地址可配置)——
-               卡是 button 不能嵌 button,故 kb-qa 卡渲染为 div[role=button],齿轮
-               @click.stop 独立弹地址设置;其余卡保持原生 button 不散发 -->
+          <!-- 问答地址设置(2026-11-15 用户裁决:问答系统卡右上角加设置,地址可配置)——卡是 button 不能嵌 button,故 kb-qa 卡渲染为 div[role=button],齿轮 @click.stop 独立弹地址设置;
+               卡片 @click 须对全部卡 openTool(原生 button 的 Enter/空格由浏览器合成 click;keydown.enter 只补给 div 卡)——2026-11-23 报障:ee78ed8f84 把 click 也写成仅 kb-qa,产品资料卡入口断 -->
           <button
             v-if="t.id === 'kb-qa'"
             type="button"

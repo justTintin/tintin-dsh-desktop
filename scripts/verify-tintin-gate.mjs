@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
  * Enforced today:
  * - governance documents keep their load-bearing anchors (rule 15),
  * - any dsh-tintin-* workspace package is registered in the root workspaces,
- * - handwritten TinTin source files stay under the 1000-line baseline that
+ * - handwritten TinTin source files stay under the upstream-derived line baseline that
  *   only ever decreases (rule 4).
  *
  * The registries live next to this script so the gate has no hidden state:
@@ -22,7 +22,6 @@ const TINTIN_WORKSPACE_GLOBS = [
   'dsh-tintin-media-bundle',
   'dsh-tintin-ops-bundle',
   'dsh-tintin-browser',
-  'dsh-tintin-cover-plugin',
   'dsh-tintin-shared',
   'dsh-plugin-desktop-tintin',
 ]
@@ -41,7 +40,10 @@ const BUILD_OUTPUT_PARTS_BY_PACKAGE = new Map([
   // 构建产物不适用手写源千行红线；2026-11-08 dist-unminified 入扫致红后补登记）
   ['dsh-tintin-bundle', new Set(['dist-unminified'])],
 ])
-const MAX_SOURCE_LINES = 1000
+/* 单文件行数上限(铁律 4;2026-11-24 用户裁决改为上游基准):实测上游 D:/Project/openfilm
+   手写源最大=ProjectView.tsx 5915 行(其次 Timeline.tsx 5339)——高于本仓旧限 1000,以
+   上游为准,防止为凑行数拆分把原来集成好的代码搞坏;基线锁定(已登记文件只减不增)不变。 */
+const MAX_SOURCE_LINES = 5915
 const MAX_BASELINE_LINES = 3528
 
 const toPosix = path => path.replaceAll(sep, '/')
@@ -143,17 +145,20 @@ export function checkLineGate({ root, baseline, listFiles, readText, fileExists 
         violations.push(`tintin source file is unreadable: ${key}`)
         continue
       }
-      if (lines <= MAX_SOURCE_LINES) continue
+      /* 基线锁定(已登记文件只减不增)独立于通用上限生效——上限提到上游基准后,
+         大量文件不再需要基线,但已锁文件的既有天花板必须继续拦增长(2026-11-24) */
       const ceiling = ceilings.get(key)
-      if (ceiling === undefined) {
-        violations.push(
-          `tintin source file exceeds ${String(MAX_SOURCE_LINES)} lines without a baseline entry: ${key} (${String(lines)})`,
-        )
+      if (ceiling !== undefined) {
+        if (lines > ceiling) {
+          violations.push(
+            `tintin source file grew beyond its locked baseline: ${key} is ${String(lines)} lines, ceiling ${String(ceiling)}`,
+          )
+        }
         continue
       }
-      if (lines > ceiling) {
+      if (lines > MAX_SOURCE_LINES) {
         violations.push(
-          `tintin source file grew beyond its locked baseline: ${key} is ${String(lines)} lines, ceiling ${String(ceiling)}`,
+          `tintin source file exceeds ${String(MAX_SOURCE_LINES)} lines without a baseline entry: ${key} (${String(lines)})`,
         )
       }
     }

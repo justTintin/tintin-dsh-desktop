@@ -403,11 +403,12 @@ export function buildVoiceoverPayload(opts: {
   brand?: string
   product?: string
   modelName?: string
+  model?: string
   extra?: string
   totalDuration?: number
 }): { product_desc: string; duration_s: number; hint?: string } {
   const s = (v: unknown) => String(v ?? '').trim()
-  const parts = [s(opts.brand), s(opts.product), s(opts.modelName)].filter(Boolean)
+  const parts = [s(opts.brand), s(opts.product), s(opts.modelName || opts.model)].filter(Boolean)
   const extra = s(opts.extra)
   const product_desc = parts.join('，') || extra
   if (!product_desc) throw new Error('产品描述为空：请至少填写品牌/产品/型号之一')
@@ -509,9 +510,9 @@ export function voiceoverCandidatesFromResponse(resp: unknown): VoiceoverCandida
 
 /** 产品描述组包（Step1 生成入参 product_desc；与 buildVoiceoverPayload 同口径：
  *  品牌/产品/型号「，」连接，全空时回退补充卖点，再空返回 '' 由调用方校验报错） */
-export function productDescFromInfo(info: { brand?: string; product?: string; modelName?: string; extra?: string }): string {
+export function productDescFromInfo(info: { brand?: string; product?: string; modelName?: string; model?: string; extra?: string }): string {
   const s = (v: unknown) => String(v ?? '').trim()
-  const parts = [s(info?.brand), s(info?.product), s(info?.modelName)].filter(Boolean)
+  const parts = [s(info?.brand), s(info?.product), s(info?.modelName || info?.model)].filter(Boolean)
   return parts.join('，') || s(info?.extra)
 }
 
@@ -636,6 +637,15 @@ export function buildCopywritingStoryboardPrompt(copyText: string, ratio = 'vert
     userPrompt: `请把以下口播文案（旁白）翻译成${orient}分镜脚本：\n${String(copyText || '').trim()}`,
   }
 }
+
+/** 分镜生成 LLM 调用参数（2026-11-25 长文案截断修复，探针实锤）：服务端
+ *  /llm/chat/completions 在客户端未传 max_tokens 时默认 4096——长口播文案的分镜
+ *  JSON 输出（约 10 倍文案字数）超帽被硬截断（finish_reason=length，响应体恒
+ *  ≈16.9KB，实机两次失败 16975B/16601B 同量级），客户端 parseStoryboardShots
+ *  报「模型未返回 JSON 数组」。显式放大上限（deepseek-v4-flash 实测传 30000 可用）
+ *  并放宽超时（生成 ≈160 token/s，16384 帽最坏 ≈106s，桥默认 30s 同样掐长文案）。 */
+export const STORYBOARD_LLM_MAX_TOKENS = 16384
+export const STORYBOARD_LLM_TIMEOUT_MS = 300_000
 
 /** 关键词响应 → 展示文本：剥 markdown 代码块/序号/引号，分隔符统一为「，」单行。
  *  序号形态「1. kw1，2、kw2」须在切分前剥（序号自带分隔符，切分后再剥会残留裸数字） */

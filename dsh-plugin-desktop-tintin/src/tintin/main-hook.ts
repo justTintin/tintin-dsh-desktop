@@ -13,6 +13,7 @@ import { installReapOnQuit } from 'dsh-tintin-shared/lib/external-child-reaper.j
 import { ensureFilmBrowsersAsync, resolveFilmBrowsersDir } from './film-browsers.ts'
 import { FilmAgentManager, dshBinExists, filmAgentHomeDir, filmAgentPersona } from './film-acp.ts'
 import { filmChat } from './film-chat.ts'
+import { registerLibraryProxy } from './library-proxy.ts'
 import { registerNativeShellChannels } from './native-shell-channels.ts'
 import { createTurnChangesTracker } from './film-turn-changes.ts'
 import { resolveDesktopChannelHome } from '../desktop-channel-home.ts'
@@ -465,64 +466,6 @@ export function installTinTinMainHook(): void {
   }
   app.on('will-quit', teardownStudioSync)
   process.on('exit', teardownStudioSync)
-  // ── 在线素材库(2026-10-24 用户要求): 主进程代理服务端 /material/*, 供 shell 页抽屉 ──
-  ipcMain.handle('openfilm:library:list', async (_event, payload: unknown) => {
-    const q = (payload ?? {}) as { page?: unknown; size?: unknown; mediaType?: unknown; search?: unknown }
-    const serverUrl = tinServerUrl()
-    if (!serverUrl) return { error: '服务端未配置' }
-    try {
-      const url = new URL(serverUrl + '/material/list')
-      url.searchParams.set('page', String(Number(q.page) || 1))
-      url.searchParams.set('size', String(Number(q.size) || 24))
-      if (typeof q.mediaType === 'string' && q.mediaType) url.searchParams.set('media_type', q.mediaType)
-      if (typeof q.search === 'string' && q.search.trim()) url.searchParams.set('search', q.search.trim())
-      const res = await fetch(url)
-      /* 实测(2026-10-24 铁律 14): /material/list 返回顶层 items, 不包 data */
-      const body = await res.json() as { items?: unknown[]; data?: { items?: unknown[] } }
-      const items = Array.isArray(body.items) ? body.items : Array.isArray(body.data?.items) ? body.data.items : []
-      return { serverUrl, items }
-    } catch (error) { return { error: error instanceof Error ? error.message : String(error) } }
-  })
-  ipcMain.handle('openfilm:library:download', async (_event, payload: unknown) => {
-    const p = (payload ?? {}) as { project?: unknown; materialId?: unknown; filename?: unknown; serverUrl?: unknown; target?: unknown }
-    const target: 'project' | 'downloads' = p.target === 'downloads' ? 'downloads' : 'project'
-    let project = typeof p.project === 'string' && p.project ? p.project.replace(/[\\/]+$/, '') : ''
-    const id = String(p.materialId ?? '')
-    const filename = String(p.filename ?? `material-${id}`)
-    /* 页面拿不到影片目录时, 主进程自己从 studio.json 解析(2026-10-24 报障: 页面侧
-       openfilm:currentProject 偶发为空 → 下载直接失败且磁盘无文件)。 */
-    if (target === 'project' && !project) {
-      try {
-        const raw = JSON.parse(readFileSync(join(channelHome(), 'openfilm-studio', 'studio.json'), 'utf8')) as { recent?: Array<{ path?: unknown }> }
-        const first = raw.recent?.[0]?.path
-        if (typeof first === 'string' && first) {
-          project = first.replace(/[\\/]+$/, '')
-          diagnosticLog({ source: 'tintin-main', event: 'library-download-project-fallback', level: 'info', developer: false, fields: { project } })
-        }
-      } catch { /* 无 studio.json: 下面的参数校验报错 */ }
-    }
-    if (!id || (target === 'project' && !project)) {
-      diagnosticLog({ source: 'tintin-main', event: 'library-download', level: 'error', developer: false, fields: { reason: '参数缺失', id, project } })
-      return { error: '参数缺失(项目/素材 id)' }
-    }
-    const serverUrl = typeof p.serverUrl === 'string' && p.serverUrl ? p.serverUrl.replace(/\/+$/, '') : tinServerUrl()
-    if (!serverUrl) return { error: '服务端未配置' }
-    try {
-      const res = await fetch(serverUrl + '/material/serve?material_id=' + encodeURIComponent(id))
-      if (!res.ok) throw new Error('HTTP ' + res.status)
-      const dir = target === 'downloads' ? app.getPath('downloads') : join(project, 'assets', 'download')
-      mkdirSync(dir, { recursive: true })
-      const safe = filename.replace(/[/:*?"<>|]/g, '-').slice(0, 100) || `material-${id}`
-      const file = join(dir, safe)
-      writeFileSync(file, Buffer.from(await res.arrayBuffer()))
-      diagnosticLog({ source: 'tintin-main', event: 'library-download', level: 'info', developer: false, fields: { ok: true, file, target } })
-      return target === 'downloads' ? { ok: true, path: file } : { ok: true, rel: 'assets/download/' + safe }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      diagnosticLog({ source: 'tintin-main', event: 'library-download', level: 'error', developer: false, fields: { ok: false, error: message, id, project } })
-      return { error: message }
-    }
-  })
   // ── 产品库选择(2026-10-24 用户要求): 仿视频流程的选择产品移植 — 代理 /api/product-library/* ──
   ipcMain.handle('openfilm:products', async (_event, payload: unknown) => {
     const p = (payload ?? {}) as { op?: unknown; q?: unknown; limit?: unknown; id?: unknown; project?: unknown }
@@ -658,13 +601,12 @@ export function installTinTinMainHook(): void {
   })
 
   // Settings → Agents(阶段 2; 2026-10-30 新增「TinTin智能体」行并置首)。
-  // 2026-11-01 用户裁决: TinTin智能体定位=服务端编排智能体, 服务端该功能尚在观察期 ——
-  // 行禁用不可选(行保留, 恢复时去掉 disabled 即可); 默认角色改回 deepseek(客户端 dsh
-  // 智能体) —— deepseek 置首, 选择器的默认=首个可选 ready 行。
+  // 2026-11-01 用户裁决: TinTin智能体=服务端编排智能体观察期, 行禁用不可选; 默认改回 deepseek 置首。
+  // 2026-11-23 用户裁决: TinTin智能体可选(观察期结束, disabled 摘除) —— deepseek=客户端模型链路, tintin-agent=服务端模型链路(详见 docs/tintin-openfilm-port.md §16.43)。
   let filmAgentsShown = true
   const filmAgentRows = (): Array<Record<string, unknown>> => [
     { id: 'deepseek', name: 'DeepSeek Harness', shown: filmAgentsShown, status: dshBinExists() ? 'ready' : 'missing', install: 'https://github.com/deepseek-ai/deepseek-harness' },
-    { id: 'tintin-agent', name: 'TinTin智能体', shown: filmAgentsShown, status: dshBinExists() ? 'ready' : 'missing', install: null, disabled: '服务端智能体观察期,暂不可用' },
+    { id: 'tintin-agent', name: 'TinTin智能体', shown: filmAgentsShown, status: dshBinExists() ? 'ready' : 'missing', install: null },
   ]
   const notifyFilmAgents = (): void => {
     try { studioView?.webContents.send(OPENFILM_AGENT_CHANGED, filmAgentRows()) } catch { /* 视图未开 */ }
@@ -689,6 +631,8 @@ export function installTinTinMainHook(): void {
       return typeof raw.server?.url === 'string' && raw.server.url ? raw.server.url.replace(/\/+$/, '') : ''
     } catch { return '' }
   }
+  // ── 在线素材库代理(openfilm:library:*;2026-11-24 迁出 library-proxy.ts——铁律 4 行数门,含 list 15s/download 流式落盘超时收口)──
+  registerLibraryProxy({ ipcMain, channelHome, tinServerUrl })
   const openfilmSkillsDir = (): string | null => {
     if (process.resourcesPath) {
       const packaged = join(process.resourcesPath, 'skills', 'openfilm')
@@ -981,7 +925,7 @@ const installedServerSkillVersion = (dir: string): string => {
 
   // ── openfilmNative 的文件/外开/截帧面(2026-11-19 迁出至 native-shell-channels.ts,
   //    铁律 4 行数只减不增;含即梦外开通道 open-external 的 https/http 白名单)──
-  registerNativeShellChannels({ ipcMain, shell, dialog, getStudioView: () => studioView })
+  registerNativeShellChannels({ ipcMain, shell, dialog, getStudioView: () => studioView, channelHome })
 
   // Embedded browser view (2026-10-19 方案 4, OpenFilm native-view pattern): the chrome
   // hosts a placeholder and drives the browser UI view lifecycle; platform partition

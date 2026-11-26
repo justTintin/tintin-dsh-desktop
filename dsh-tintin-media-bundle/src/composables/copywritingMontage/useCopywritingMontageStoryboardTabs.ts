@@ -12,8 +12,9 @@
 import { ref } from 'vue'
 import type { Ref } from 'vue'
 import { notify, errText } from './context'
-import { buildCopywritingStoryboardPrompt } from '../copywritingMontageLogic'
+import { buildCopywritingStoryboardPrompt, STORYBOARD_LLM_MAX_TOKENS, STORYBOARD_LLM_TIMEOUT_MS } from '../copywritingMontageLogic'
 import { parseStoryboardShots, type StoryboardShot } from '../opsStoryboardLogic'
+import { datedStoryboardName } from '../copywritingMontageStep3VoiceLogic'
 
 /** 分镜 tab 上限（2026-09-21 用户裁决：最多 10 个分镜脚本） */
 export const COPY_STORYBOARD_MAX = 10
@@ -76,7 +77,7 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
   function nextStoryboardName(): string {
     let max = 0
     for (const s of storyboards.value) {
-      const m = /^脚本(\d+)$/.exec(s.name)
+      const m = /^(?:\d{4}-\d{2}-\d{2}\s+)?脚本(\d+)$/.exec(s.name)
       if (m) max = Math.max(max, Number(m[1]))
     }
     return `脚本${max + 1}`
@@ -86,7 +87,7 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
     if (storyboards.value.length >= COPY_STORYBOARD_MAX) return null
     const tab: StoryboardTab = {
       id: `sb_${Date.now()}_${Math.floor(Math.random() * 1e6)}`,
-      name: (init.name || '').trim() || nextStoryboardName(),
+      name: datedStoryboardName((init.name || '').trim() || nextStoryboardName()),
       scriptId: init.scriptId || '',
       topic: init.topic || '',
       narrative: init.narrative,
@@ -115,7 +116,7 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
   }
   function renameStoryboardTab(id: string, name: string): void {
     const tab = storyboards.value.find((s) => s.id === id)
-    if (tab && name.trim()) tab.name = name.trim().slice(0, 20)
+    if (tab && name.trim()) tab.name = name.trim()
   }
   function setActiveStoryboard(id: string): void {
     if (storyboards.value.some((s) => s.id === id)) activeStoryboardId.value = id
@@ -181,17 +182,22 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
         deps.statusText.value = `正在为「${tab.name}」生成分镜脚本（${i + 1}/${tabs.length}）...`
         try {
           const { systemPrompt, userPrompt } = buildCopywritingStoryboardPrompt(copy)
-          const res = await window.tintin.server.llmChat({
+          // 显式 max_tokens + 放宽超时（2026-11-25 长文案截断修复，参数注释见常量出处）
+          const res = await window.tintin.server.post('/llm/chat/completions', {
             model: '',
+            max_tokens: STORYBOARD_LLM_MAX_TOKENS,
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt },
             ],
-          })
+          }, undefined, STORYBOARD_LLM_TIMEOUT_MS)
           if (res && 'error' in res) throw new Error(String(res.error) || '服务端返回空错误')
+          const finish = String(res?.choices?.[0]?.finish_reason ?? '')
           const content = String(res?.choices?.[0]?.message?.content ?? '')
           const parsed = parseStoryboardShots(content)
-          if (parsed.fallback || !parsed.shots.length) throw new Error('分镜解析失败（模型未返回 JSON 数组）')
+          if (parsed.fallback || !parsed.shots.length) {
+            throw new Error(finish === 'length' ? '分镜解析失败（模型输出被 max_tokens 截断，请精简文案后重试）' : '分镜解析失败（模型未返回 JSON 数组）')
+          }
           const live = storyboards.value.find((t) => t.id === tab.id)
           if (!live) continue // 生成期间被用户删除的 tab 跳过
           live.shots = parsed.shots

@@ -34,6 +34,8 @@ import {
 } from '../copywritingMontageLogic'
 import { notify, unwrapIpc, errText, joinPath, POLL_INTERVAL_MS, type MontageSharedRuntime } from './context'
 import { pathBasename } from '../copywritingMontageCommonLogic.ts'
+import { resolveShotTrack } from '../copywritingMontageTrackLogic'
+import type { StoryboardShot } from '../opsStoryboardLogic'
 
 /** TSelect 选项最小结构（避免组件层依赖方向反转） */
 export interface SelectOptionLite {
@@ -184,18 +186,24 @@ export function useCopywritingMontageStep2Concat(ctx: MontageStep2Context) {
    *  按序进入方案，组内 useDurs 按镜标分配（末端超长裁剪）；任一分镜绑定不完整则整体拦截点名）。
    *  返回是否成功出方案（供确认合成串联） */
   async function runConcatFromAllStoryboards(
-    tabs: Array<{ id: string; name: string; narrative: string; voiceDurSec?: number; shots: Array<{ duration: number }>; clipGroups: number[][] }>,
+    tabs: Array<{ id: string; name: string; narrative: string; voiceDurSec?: number; shots: StoryboardShot[]; clipGroups: number[][] }>,
   ): Promise<boolean> {
     if (concatBusy.value) return false
     if (!tabs.length) { concatError.value = '尚未生成分镜脚本，无法预合成。请回第一步「AI 生成分镜」。'; return false }
-    // 全部 tab 绑定齐全才允许合成（用户裁决 4：必须全部 tab 绑定全）
+    // 每镜至少一条轨道有视频源才允许合成（2026-11-26 四源四轨裁决：素材/AI/搜索/A-Roll
+    // 至少一项——标记轨优先，无标记素材轨兜底，全空报缺）
     const incomplete = tabs
-      .map((tab, i) => ({ tab, i }))
-      .filter(({ tab }) => tab.clipGroups.length !== tab.shots.length || tab.clipGroups.some((g) => !g.length))
-      .map(({ tab, i }) => `第${i + 1} 个分镜「${tab.name}」`)
+      .map((tab) => {
+        const missing = tab.shots
+          .map((s, si) => ({ s, si }))
+          .filter(({ s, si }) => !resolveShotTrack(s, (tab.clipGroups[si] || []).length > 0))
+          .map(({ si }) => si + 1)
+        return missing.length ? `「${tab.name}」第 ${missing.join('、')} 镜` : ''
+      })
+      .filter(Boolean)
     if (incomplete.length) {
-      concatError.value = `以下分镜未绑定完整素材，不能预合成：${incomplete.join('、')}。请在分镜卡上为每个镜头选择素材。`
-      notify('有分镜未绑定素材', concatError.value)
+      concatError.value = `以下分镜四轨均无视频源（素材/AI生成/在线搜索/A-Roll 至少一项），不能预合成：${incomplete.join('、')}。`
+      notify('有分镜缺视频源', concatError.value)
       return false
     }
     concatBusy.value = true
@@ -203,18 +211,38 @@ export function useCopywritingMontageStep2Concat(ctx: MontageStep2Context) {
     statusText.value = `正在按分镜生成预合成方案（${tabs.length} 个分镜脚本）…`
     const plans: PrecomposePlan[] = []
     let failed = ''
+    let syntheticSeq = 0
     await Promise.resolve().then(() => {
       for (const tab of tabs) {
         // 空 tab（无镜头）不出方案——否则产出零片段方案卡死确认队列（2026-09-22 修复）
-        if (!tab.shots.length || !tab.clipGroups.length) continue
+        if (!tab.shots.length) continue
         const sceneGroups: SplitSceneRow[][] = []
         let stale = false
-        for (const g of tab.clipGroups) {
-          const rows = g
-            .map((idx) => scenes.value.find((s) => s.idx === idx))
-            .filter((s): s is SplitSceneRow => !!s)
-          if (rows.length !== g.length || !rows.length) { stale = true; break }
-          sceneGroups.push(rows)
+        for (let si = 0; si < tab.shots.length; si++) {
+          const shot = tab.shots[si]!
+          const bound = tab.clipGroups[si] || []
+          const resolved = resolveShotTrack(shot, bound.length > 0)
+          if (!resolved) continue // 预检已拦截，防御
+          if (resolved.track === 'material') {
+            const rows = bound
+              .map((idx) => scenes.value.find((s) => s.idx === idx))
+              .filter((s): s is SplitSceneRow => !!s)
+            if (rows.length !== bound.length || !rows.length) { stale = true; break }
+            sceneGroups.push(rows)
+          } else {
+            // 轨道产物合成行（2026-11-26）：单片段组，clipLocalPath=该轨产物本地路径——
+            // plan 级覆盖自动传播到两个导出器（它们只读 plan，不回读 clipGroups）
+            const dur = Math.max(1, Number(shot.duration) || 3)
+            syntheticSeq -= 1 // 负 idx 与真实素材池隔离（合成行不参与 scenes 查找/下载）
+            const label = resolved.track === 'aroll' ? 'A-Roll' : resolved.track === 'gen' ? 'AI生成' : '在线搜索'
+            sceneGroups.push([{
+              idx: syntheticSeq, name: `${label}·第${si + 1}镜`, sourceName: `${label}·第${si + 1}镜`,
+              startSec: 0, endSec: dur, duration: dur, description: '', analysis: '',
+              clipUrl: '', serverPath: `track:${resolved.track}`, downloadState: 'ok',
+              clipLocalPath: resolved.local, checked: true, mediaType: 'video',
+              shotType: shot.shot_type || undefined,
+            } as SplitSceneRow])
+          }
         }
         if (stale) {
           failed += `「${tab.name}」绑定的素材已失效；`

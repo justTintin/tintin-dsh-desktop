@@ -432,29 +432,28 @@ function fmtElapsed(sec: number): string {
         </div>
       </div>
 
-      <!-- A-roll 卡（可选）：2026-10-08 用户裁决——A-roll 生成暂时禁用（卡片保留、
-           交互全关；解禁时删掉各 disabled 与徽标即可恢复） -->
+      <!-- A-roll 卡（可选）：2026-10-08 用户裁决禁用 → 2026-11-25 用户裁决解禁
+           （原「删掉各 disabled 与徽标即可恢复」按预案执行） -->
       <div class="seg-card aroll-card">
         <div class="seg-head">
           <span class="seg-no">可选</span>
           <span class="sb-info">A-roll 开场（数字人=人物图+口播音频 / 实拍=已入库素材；依赖第 2 步口播音频先行）</span>
-          <span class="iv-badge iv-badge--mat" title="2026-10-08 用户裁决：暂时禁用">暂时禁用</span>
           <span class="spacer"></span>
           <span v-if="arollStatus" class="iv-badge iv-badge--ai">{{ arollStatus }}</span>
-          <TButton label="生成 A-roll" :loading="arollBusy === 'aroll'" :disabled="true" title="A-roll 生成暂时禁用" @click="submitAroll" />
+          <TButton label="生成 A-roll" :loading="arollBusy === 'aroll'" @click="submitAroll" />
         </div>
         <div class="row">
           <label class="seg-field head-field"><span class="lbl">方式</span>
-            <select v-model="arollForm.source" class="input w110" disabled>
+            <select v-model="arollForm.source" class="input w110">
               <option value="digital_human">数字人</option>
               <option value="material">实拍素材</option>
             </select>
           </label>
           <label v-if="arollForm.source === 'digital_human'" class="seg-field head-field"><span class="lbl">人物图素材 ID</span>
-            <input v-model="arollForm.imageMaterialId" class="input w110" placeholder="素材库图片 ID" disabled />
+            <input v-model="arollForm.imageMaterialId" class="input w110" placeholder="素材库图片 ID" />
           </label>
           <label v-else class="seg-field head-field"><span class="lbl">A-roll 素材 ID</span>
-            <input v-model="arollForm.materialId" class="input w110" placeholder="已入库素材 ID" disabled />
+            <input v-model="arollForm.materialId" class="input w110" placeholder="已入库素材 ID" />
           </label>
         </div>
         <div v-if="ivRef<string>('genPhase').value === 'running' && ivRef<string>('genStage').value === 'aroll'" class="seg-field">

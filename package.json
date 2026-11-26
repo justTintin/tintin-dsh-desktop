@@ -18,7 +18,6 @@
     "dsh-tintin-media-bundle",
     "dsh-tintin-ops-bundle",
     "dsh-tintin-browser",
-    "dsh-tintin-cover-plugin",
     "dsh-tintin-shared",
     "dsh-plugin-desktop-tintin"
   ],
@@ -826,7 +825,10 @@
     "test:architecture-gates": "node --test scripts/market-dependency-direction.test.mjs",
     "check:architecture": "yarn test:architecture-gates && node scripts/verify-market-dependency-direction.mjs",
     "test:tintin-gate": "node --test scripts/tintin-gate.test.mjs",
-    "check:tintin": "yarn test:tintin-gate && node scripts/verify-tintin-gate.mjs && node scripts/verify-cover-payload.mjs",
+    "check:tintin": "yarn test:tintin-gate && node scripts/verify-tintin-gate.mjs",
+    "check:handoff": "node scripts/check-handoff.mjs",
+    "hot-sync:archives": "node scripts/hot-sync-archives.mjs",
+    "hot-sync:verify": "node scripts/hot-sync-archives.mjs --verify",
     "test:bridge-surface": "node --test scripts/bridge-surface.test.mjs",
     "check:bridge-surface": "yarn test:bridge-surface && node scripts/verify-bridge-surface.mjs",
     "check:vendored-runtime": "node scripts/sync-vendored-runtime.mjs --check --channel stable && node scripts/sync-vendored-runtime.mjs --check --channel beta",
@@ -878,9 +880,9 @@
     "package:tintin:publish": "node dsh-plugin-desktop-tintin/scripts/publish-github-release.mjs",
     "package:tintin:release": "node scripts/release-tintin.mjs",
     "package:tintin:dir:hot": "yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin package:dir:hot",
-    "dev:tintin": "yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-ops-bundle build && node dsh-tintin-cover-plugin/scripts/stage.mjs && yarn workspace dsh-plugin-desktop-tintin dev",
-    "lint": "oxlint scripts dsh-tintin-shared/test dsh-tintin-bundle/lib dsh-tintin-bundle/test dsh-tintin-bundle/scripts dsh-tintin-browser/src dsh-tintin-browser/test dsh-tintin-browser/scripts dsh-tintin-cover-plugin/src dsh-tintin-cover-plugin/lib dsh-tintin-cover-plugin/test dsh-tintin-cover-plugin/scripts dsh-tintin-cover-plugin/chat-shell dsh-tintin-media-bundle/src dsh-tintin-media-bundle/test dsh-tintin-media-bundle/scripts dsh-tintin-ops-bundle/src dsh-tintin-ops-bundle/test dsh-community-market/src dsh-community-market/scripts dsh-plugin-desktop-tintin/src dsh-plugin-desktop-tintin/tests dsh-plugin-desktop/src dsh-plugin-desktop/tests dsh-plugin-desktop/scripts dsh-plugin-desktop-beta/src dsh-plugin-desktop-beta/tests dsh-plugin-desktop-beta/scripts dsh-desktop-next/src dsh-desktop-next/tests",
-    "check:lint": "oxlint scripts dsh-tintin-shared/test dsh-tintin-bundle/lib dsh-tintin-bundle/test dsh-tintin-bundle/scripts dsh-tintin-browser/src dsh-tintin-browser/test dsh-tintin-browser/scripts dsh-tintin-cover-plugin/src dsh-tintin-cover-plugin/lib dsh-tintin-cover-plugin/test dsh-tintin-cover-plugin/scripts dsh-tintin-cover-plugin/chat-shell dsh-tintin-media-bundle/src dsh-tintin-media-bundle/test dsh-tintin-media-bundle/scripts dsh-tintin-ops-bundle/src dsh-tintin-ops-bundle/test dsh-community-market/src dsh-community-market/scripts dsh-plugin-desktop-tintin/src dsh-plugin-desktop-tintin/tests dsh-plugin-desktop/src dsh-plugin-desktop/tests dsh-plugin-desktop/scripts dsh-plugin-desktop-beta/src dsh-plugin-desktop-beta/tests dsh-plugin-desktop-beta/scripts dsh-desktop-next/src dsh-desktop-next/tests"
+    "dev:tintin": "yarn market:prepare && yarn aa:prepare-release && yarn workspace dsh-community-market build && yarn workspace dsh-tintin-media-bundle build && yarn workspace dsh-tintin-ops-bundle build && yarn workspace dsh-plugin-desktop-tintin dev",
+    "lint": "oxlint scripts dsh-tintin-shared/test dsh-tintin-bundle/lib dsh-tintin-bundle/test dsh-tintin-bundle/scripts dsh-tintin-browser/src dsh-tintin-browser/test dsh-tintin-browser/scripts dsh-tintin-media-bundle/src dsh-tintin-media-bundle/test dsh-tintin-media-bundle/scripts dsh-tintin-ops-bundle/src dsh-tintin-ops-bundle/test dsh-community-market/src dsh-community-market/scripts dsh-plugin-desktop-tintin/src dsh-plugin-desktop-tintin/tests dsh-plugin-desktop/src dsh-plugin-desktop/tests dsh-plugin-desktop/scripts dsh-plugin-desktop-beta/src dsh-plugin-desktop-beta/tests dsh-plugin-desktop-beta/scripts dsh-desktop-next/src dsh-desktop-next/tests",
+    "check:lint": "oxlint scripts dsh-tintin-shared/test dsh-tintin-bundle/lib dsh-tintin-bundle/test dsh-tintin-bundle/scripts dsh-tintin-browser/src dsh-tintin-browser/test dsh-tintin-browser/scripts dsh-tintin-media-bundle/src dsh-tintin-media-bundle/test dsh-tintin-media-bundle/scripts dsh-tintin-ops-bundle/src dsh-tintin-ops-bundle/test dsh-community-market/src dsh-community-market/scripts dsh-plugin-desktop-tintin/src dsh-plugin-desktop-tintin/tests dsh-plugin-desktop/src dsh-plugin-desktop/tests dsh-plugin-desktop/scripts dsh-plugin-desktop-beta/src dsh-plugin-desktop-beta/tests dsh-plugin-desktop-beta/scripts dsh-desktop-next/src dsh-desktop-next/tests"
   },
   "devDependencies": {
     "oxlint": "^1.94.0"

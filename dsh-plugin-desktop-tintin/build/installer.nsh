@@ -91,13 +91,12 @@ Var pid
 
 ; ── lite 包装后补齐(2026-11-16 用户裁决: 最小包装后联网下载缺失大件)──
 ; 打包链在 lite 包里放置 .tintin-lite 标记与 download-binaries.ps1; full 包无标记, 整段跳过。
-; ⚠ 2026-11-17 事故修复: 打包链把标记放在 resources\cover-plugin\ 下,旧检查只看安装
-; 根目录 → 路径永远不匹配,装后下载段从未触发(用户只看到安装、无任何下载)。双路检测。
+; 2026-11-25 封面删除后:标记由 afterPack 直接写入产物 resources\,双路检测保留兼容。
 !macro customInstall
   IfFileExists "$INSTDIR\.tintin-lite" 0 dsh_lite_check_payload
     Goto dsh_lite_run
   dsh_lite_check_payload:
-  IfFileExists "$INSTDIR\resources\cover-plugin\.tintin-lite" 0 dsh_lite_skip
+  IfFileExists "$INSTDIR\resources\.tintin-lite" 0 dsh_lite_skip
   dsh_lite_run:
     DetailPrint "最小包:联网补齐附加组件(媒体三件 + OpenFilm 运行时)——下载内容见下方详情行..."
     nsExec::ExecToLog 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\resources\download-binaries.ps1"'

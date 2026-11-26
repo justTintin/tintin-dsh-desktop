@@ -15,14 +15,17 @@ import { markdownListLines, stripProductCodeFromModel, parseProductKeywords } fr
 import { useHostDark } from '@/composables/hostTheme'
 import { libMid, libName, libSub, srcSummaryOf, SPLIT_MODE_OPTIONS } from '@/composables/copywritingMontageStep1SplitLogic'
 import { parseScriptDetail } from '@/composables/opsStoryboardLogic'
+import { resolveShotTrack } from '@/composables/copywritingMontageTrackLogic'
 import { copyPreviewText, SHOT_TYPE_COLORS, SHOT_TYPE_LABELS, buildAssignPool } from '@/composables/copywritingMontageLogic'
 import { buildAssignCandidateSet, buildAssignMatchPrompt, parseAssignMatchResponse, mergeTabAssignment, planShotGroup, prefilterShotCandidates, topUpClipGroups } from '@/composables/copywritingMontageAssignLogic'
 import { fetchMaterialGrid, fetchMaterialDistinct, type PickerItem } from '@/composables/useWorkbenchPickers'
+
 import { buildMediaServeUrl, buildMediaThumbUrl } from '@/composables/workbenchChatContext'
 import { errText, notify } from '@/composables/copywritingMontage/context'
 import { clientError } from '@/utils/clientLog'
 import { acceptFileDragOver } from '@/utils/fileUrl'
 import CopywritingStoryboard from './CopywritingStoryboard.vue'
+import TrackBatchBar from './TrackBatchBar.vue'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 
 const shell = inject(copywritingMontageShellKey)!
@@ -58,7 +61,7 @@ const {
 
 // ── 素材来源 tabs（2026-09-21 用户裁决：本地上传/素材库/在线库/AI生成/混合；
 //    当前仅本地上传实装，其余占位）──
-const SOURCE_TABS = ['本地上传', '素材库', '在线搜索', 'AI生成', '混合']
+const SOURCE_TABS = ['本地上传', '素材库']
 const sourceTab = ref('本地上传')
 
 // ── 素材库 tab（2026-09-22 用户裁决：A1 落地——参考会话素材选择对话框界面：
@@ -333,7 +336,6 @@ function addLibToPool(): void {
     : '所选素材均已在素材池中（或缺少时长元数据）。'
 }
 
-
 // 2026-09-07 缩略图改主进程 ffmpeg 抽帧（dataURL <img>）：根治多路 <video> 解码器
 // 并发初始化崩溃，且全部素材行均有缩略图，抽帧失败行回退占位图标（自智能混剪 Step1 移植）
 const thumbs = reactive(new Map<string, string>())
@@ -570,11 +572,13 @@ async function onConfirmCompose(): Promise<void> {
   if (ok) await syncStoryboardsToServer()
 }
 
-/** 全部 tab 绑定齐全才允许预合成（用户裁决 4：必须全部 tab 绑定全——每镜至少 1 片） */
+/** 全部 tab 每镜至少一条轨道有视频源才允许预合成（2026-11-26 四源四轨裁决：
+ *  素材绑定/AI生成/在线搜索/A-Roll 至少一项；标记轨有货优先，无标记素材轨兜底） */
 const tabsAllBound = computed(() =>
   storyboards.value.length > 0 &&
   storyboards.value.every((tab) =>
-    tab.shots.length > 0 && tab.clipGroups.length === tab.shots.length && tab.clipGroups.every((g) => g.length >= 1)))
+    tab.shots.length > 0 && tab.shots.every((s, si) =>
+      !!resolveShotTrack(s, (tab.clipGroups[si] || []).length > 0))))
 
 /** 预合成完成标识（2026-09-22 用户裁决）：全部方案已确认合成 → 按钮前缀对号，
  *  同智能匹配完成形态；重新智能匹配生成新方案（未确认）后对号自然消失 */
@@ -784,7 +788,6 @@ function scoreClass(score: number | undefined): string {
           </div>
           <div v-if="libMsg" class="hint">{{ libMsg }}</div>
         </template>
-        <div v-else class="src-placeholder muted">「{{ sourceTab }}」素材来源暂不支持，当前仅支持本地上传</div>
 
         <!-- 分割工具行=左栏底部钉底一行（2026-11-13 用户裁决二次纠偏：「最小镜头到分割
              放到底部一行」指左栏自己的底部（选择池是独立栏有自己的按钮区）——列表
@@ -974,6 +977,10 @@ function scoreClass(score: number | undefined): string {
               原片: {{ splitFps > 0 ? splitFps + ' fps' : '未知（回退 30）' }}</span>
           </div>
         </div>
+
+        <!-- AI 生成组（2026-11-26 用户裁决：生成剪辑方案上方——批量跑所有勾选「AI生成」
+             的分镜，逐镜进度在分镜卡 AI 轨瓦片就地显示） -->
+        <TrackBatchBar kind="ai" />
 
         <!-- 确认行（2026-09-22 用户裁决·架构：预合成 mp4 移除——「生成剪辑方案」=
              虚拟时间轴就绪（秒级），导出草稿直接消费；完成对号=方案就绪标识） -->

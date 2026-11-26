@@ -16,7 +16,11 @@ import { storyboardShotsExpanded } from '@/composables/storyboardShotsState'
 import { fmtDur } from '@/composables/copywritingMontageLogic'
 import { toFileUrl } from '@/utils/fileUrl'
 import type { StoryboardShot } from '@/composables/opsStoryboardLogic'
+import type { OnlineItem } from '@/composables/useOnlineStock'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
+import OnlineStockPanel from './OnlineStockPanel.vue'
+import TrackTile from './TrackTile.vue'
+import TrackBatchBar from './TrackBatchBar.vue'
 
 const props = defineProps<{ mode: 'edit' | 'voice' | 'material' | 'fx'; sfxBusy?: boolean; singleScript?: boolean }>()
 const emit = defineEmits<{ (e: 'sfx-regen', shot: StoryboardShot): void; (e: 'sfx-remove', shot: StoryboardShot): void }>()
@@ -26,7 +30,31 @@ const {
   copyShots, copyShotsStale, genStoryboard, storyboardBusy, activeNarrative,
   scenes, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, toAbsolute,
   storyboards, activeStoryboardId, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, COPY_STORYBOARD_MAX,
+  shotMatMsg, addOnlineShotMaterial,
+  shotGenActiveOf, shotGenStateOf,
 } = shell.s
+
+const shotOnlineIdx = ref(-1)
+function onShotOnlineAdd(items: OnlineItem[]): void {
+  const i = shotOnlineIdx.value
+  if (i < 0 || !items.length) return
+  void addOnlineShotMaterial(i, items[0]) // 2026-11-26 四源四轨：产物写该镜搜索轨占位
+  shotOnlineIdx.value = -1
+}
+
+// ── 四源四轨（2026-11-26 用户裁决）：右列单选标记驱动批量（生成A-Roll/AI生成互斥、
+//    可再点取消）；产物各归各轨占位（素材/AI/搜索/A-Roll 瓦片，TrackTile 三态渲染）──
+const TRACK_KEYS = ['gen', 'stock', 'aroll'] as const
+function toggleGenMode(shot: StoryboardShot, mode: 'aroll' | 'ai'): void {
+  shot.genMode = shot.genMode === mode ? undefined : mode
+}
+function slotLocal(i: number, track: 'gen' | 'stock' | 'aroll'): string {
+  const local = copyShots.value[i]?.slots?.[track]?.local || ''
+  return local ? toFileUrl(local) : ''
+}
+/** 是否有任一镜任一轨在生成（顶部全局状态行的新旧样式判据） */
+const shotGenAnyActive = computed(() => copyShots.value.some((_, i) =>
+  TRACK_KEYS.some((t) => shotGenActiveOf(i, t))))
 
 const editable = computed(() => props.mode === 'edit')
 /** 激活分镜 tab（脚本基本信息来源：topic/scriptId 均为服务端原值字段，2026-09-22
@@ -92,8 +120,6 @@ function fillBadge(i: number): { cls: string; text: string } | null {
   if (ratio >= 0.5) return { cls: 'fill-warn', text: '欠装' }
   return { cls: 'fill-lack', text: '素材不足' }
 }
-/** 单镜选素材弹窗：目标分镜下标（-1=关闭） */
-const matPickIdx = ref(-1)
 /** 第 i 镜的视频预览地址 = 该镜首个绑定片段（相对路径拼服务端地址） */
 function previewSrc(i: number): string {
   const first = boundClips(i)[0]
@@ -178,6 +204,10 @@ const EMPTY_HINT: Record<string, string> = {
       </span>
       <span v-if="mode !== 'edit'" class="sb-info">{{ MODE_STATUS[mode] }}</span>
     </div>
+    <div v-if="shotMatMsg" class="sb-info" :class="shotGenAnyActive ? '' : 'sb-stale'">{{ shotGenAnyActive ? '生成中… ' : '' }}{{ shotMatMsg }}</div>
+    <!-- A-Roll 数字人组（2026-11-26 用户裁决：图2 红框位——分镜标签行下方独立分组；
+         人物图素材 ID 组内共用，批量生成所有勾选「生成A-Roll」的分镜） -->
+    <TrackBatchBar v-if="mode === 'material'" kind="aroll" />
 
     <template v-if="copyShots.length">
       <div v-for="(shot, i) in copyShots" :key="i" class="seg-card seg-card--row">
@@ -198,6 +228,10 @@ const EMPTY_HINT: Record<string, string> = {
             <span class="sb-info">{{ shot.shot_type || '未定镜别' }} ｜ {{ shot.duration }}s</span>
             <span class="spacer"></span>
           </template>
+        </div>
+        <!-- 拆分口播绑定回显（2026-11-26 用户裁决：A-Roll 组拆分后逐镜绑定，卡顶可见） -->
+        <div class="sb-line sb-split" :class="{ 'sb-split--none': !shot.splitAudioId }">
+          拆分口播：{{ shot.splitAudioId || '未绑定' }}
         </div>
 
         <label v-if="editable" class="seg-field"><span class="lbl">画面描述（视频生成提示词）</span>
@@ -266,13 +300,35 @@ const EMPTY_HINT: Record<string, string> = {
             </div>
             <div v-else class="muted">未绑定素材</div>
             <div v-if="mode === 'material'" class="row">
-              <TButton label="选择素材（追加）" variant="secondary" size="small" @click="matPickIdx = i" />
+              <!-- 2026-11-26 用户裁决：手动追加素材入口删除（四轨占位制，素材轨由智能匹配
+                   供给）；解绑保留用于清空素材轨 -->
               <TButton v-if="boundClips(i).length" label="解绑全部" variant="secondary" size="small" @click="unbindShotMaterial(i)" />
             </div>
           </div>
         </template>
           </div><!-- /seg-main -->
-          <div class="seg-video">
+          <!-- 2026-11-26 四源四轨裁决：material 态右列=四轨占位瓦片（素材/AI/搜索/A-Roll，
+               各轨产物视频/进度卡/占位三态，TrackTile 渲染）+ 最右控制列（单选 生成A-Roll /
+               单选 AI生成 / 按钮在线搜索素材）；其余态保留单预览列 -->
+          <div v-if="mode === 'material'" class="seg-right">
+            <div class="seg-tracks">
+              <TrackTile label="素材" :video-src="previewSrc(i)" fallback="未绑定素材" />
+              <TrackTile label="AI" :video-src="slotLocal(i, 'gen')" :state="shotGenStateOf(i, 'gen')" fallback="AI 生成" />
+              <TrackTile label="搜索" :video-src="slotLocal(i, 'stock')" :state="shotGenStateOf(i, 'stock')" fallback="在线搜索" />
+              <TrackTile label="A-Roll" :video-src="slotLocal(i, 'aroll')" :state="shotGenStateOf(i, 'aroll')" fallback="A-Roll" />
+            </div>
+            <div class="seg-ctl">
+              <button type="button" class="ctl-mark" :class="{ on: copyShots[i]?.genMode === 'aroll' }"
+                title="勾选后由上方 A-Roll 组批量生成数字人（读该镜拆分口播音频）"
+                @click="toggleGenMode(copyShots[i]!, 'aroll')">生成A-Roll</button>
+              <button type="button" class="ctl-mark" :class="{ on: copyShots[i]?.genMode === 'ai' }"
+                title="勾选后由「AI生成」组批量生成视频"
+                @click="toggleGenMode(copyShots[i]!, 'ai')">AI生成</button>
+              <button type="button" class="ctl-mark" :disabled="shotGenActiveOf(i, 'stock')"
+                title="在线搜索素材到该镜搜索轨" @click="shotOnlineIdx = i">在线搜索素材</button>
+            </div>
+          </div>
+          <div v-else class="seg-video">
             <video v-if="previewSrc(i)" controls preload="metadata" :src="previewSrc(i)"></video>
             <span v-else class="sb-info seg-video-empty">未绑定素材</span>
           </div>
@@ -302,21 +358,13 @@ const EMPTY_HINT: Record<string, string> = {
       <TButton label="✨ AI 生成分镜脚本" :loading="storyboardBusy" @click="genStoryboard" />
     </div>
 
-    <!-- 单镜选素材弹窗（material 态；素材池=本地上传分割出的镜头；2026-09-22 用户裁决：
-         一镜多片——点选即追加进该镜绑定组，组内已选片段自动去重跳过） -->
+    <!-- 单镜在线搜索弹窗（2026-11-26 四源四轨：产物进该镜搜索轨占位） -->
     <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
-      <div v-if="matPickIdx >= 0" class="modal-mask" @click.self="matPickIdx = -1">
-        <div class="modal">
-          <span class="modal-title">为分镜 #{{ matPickIdx + 1 }} 追加素材（点击追加，可多次选择）</span>
-          <div class="script-list">
-            <button v-for="s in scenes" :key="s.idx" class="script-row" :title="s.description"
-              @click="bindShotMaterial(matPickIdx, s.idx)">
-              <span class="script-topic">{{ s.idx }}. {{ s.name }}</span>
-              <span class="script-meta">{{ s.duration > 0 ? s.duration.toFixed(1) + 's' : '—' }}{{ s.description ? ` · ${s.description}` : '' }}</span>
-            </button>
-            <div v-if="!scenes.length" class="muted script-empty">暂无已分割镜头：请先在下方「本地上传」完成素材上传与镜头分割</div>
-          </div>
-          <div class="modal-actions"><TButton label="关闭" plain @click="matPickIdx = -1" /></div>
+      <div v-if="shotOnlineIdx >= 0" class="modal-mask" @click.self="shotOnlineIdx = -1">
+        <div class="modal" style="width:min(960px,94vw)">
+          <span class="modal-title">为分镜 #{{ shotOnlineIdx + 1 }} 在线搜索素材（按画面描述匹配）</span>
+          <OnlineStockPanel :initial-query="copyShots[shotOnlineIdx]?.visual || ''" :single="true" @add="onShotOnlineAdd" />
+          <div class="modal-actions"><TButton label="关闭" plain @click="shotOnlineIdx = -1" /></div>
         </div>
       </div>
     </div></teleport>
@@ -376,12 +424,12 @@ const EMPTY_HINT: Record<string, string> = {
 /* 行尾弹性占位（收起/展开钮推到最右——2026-11-05 用户裁定） */
 .sb-flex { flex: 1 1 auto; min-width: 8px; }
 .sb-tab {
-  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  display: inline-flex; align-items: center; gap: 6px; min-height: 30px; height: auto; padding: 4px 10px;
   background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md);
   cursor: pointer; font-size: 12px; color: var(--muted-foreground);
 }
 .sb-tab.active { color: var(--primary); font-weight: 600; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface-container)); }
-.sb-tab-name { white-space: nowrap; }
+.sb-tab-name { white-space: normal; overflow-wrap: anywhere; }
 .sb-rename { width: 90px; height: 22px; padding: 0 6px; font-size: 12px; }
 .sb-tab-close {
   width: 18px; height: 18px; padding: 0; line-height: 1; font-size: 12px; flex: none;
@@ -423,6 +471,22 @@ const EMPTY_HINT: Record<string, string> = {
 }
 .seg-video video { width: 100%; height: auto; object-fit: contain; display: block; }
 .seg-video-empty { padding: 12px; text-align: center; }
+/* 拆分口播绑定回显（2026-11-26：A-Roll 组拆分后逐镜绑定；未绑定时灰显） */
+.sb-split { font-size: 12px; color: var(--primary); }
+.sb-split--none { color: var(--muted-foreground); }
+/* ── 四源四轨（2026-11-26 用户裁决）：material 态右列=四轨占位瓦片（TrackTile 自带
+   三态样式）+ 最右控制列（单选 生成A-Roll/AI生成 + 在线搜索素材按钮，纵排） ── */
+.seg-right { display: flex; align-items: flex-start; gap: 8px; flex: 0 0 auto; align-self: flex-start; }
+.seg-tracks { display: flex; gap: 6px; }
+.seg-ctl { display: flex; flex-direction: column; gap: 6px; width: 96px; flex: none; }
+.ctl-mark {
+  height: 30px; padding: 0 8px; font-size: 12px; cursor: pointer; text-align: center;
+  background: var(--surface-container); color: var(--muted-foreground);
+  border: 1px solid var(--border); border-radius: var(--radius-md); white-space: nowrap;
+}
+.ctl-mark:hover { border-color: var(--primary); }
+.ctl-mark.on { color: var(--primary); font-weight: 600; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface-container)); }
+.ctl-mark:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── 弹窗通用 ── */
 .modal-mask {

@@ -67,6 +67,22 @@ export interface StoryboardShot {
   /** 生成的音效本地落盘路径（音效包装时经 downloadResult 落 copy-montage/sfx/；
    *  导出器只吃本地文件，音效轨按此路径落段；落盘失败为空=导出时该镜跳过音效轨） */
   sfxWavLocal?: string
+  /** 轨道视频源（2026-11-26 用户裁决：四源四轨各一占位——素材绑定轨=clipGroups 既有，
+   *  AI生成/在线搜索/A-Roll 三轨产物挂 slots；同步走 attach/extract（clip_groups 同款，
+   *  服务端原样透传），不入 toServerShot/normalizeShot 白名单 */
+  slots?: ShotTrackSlots
+  /** 右列单选标记（驱动批量生成：'aroll'=生成A-Roll / 'ai'=AI生成；无标记=素材轨） */
+  genMode?: 'aroll' | 'ai'
+  /** 服务端按镜拆分出的该镜口播音频 id（2026-11-26 用户裁决：A-Roll 组拆分后逐镜绑定
+   *  并在卡顶回显；attach/extract 同步） */
+  splitAudioId?: string
+}
+
+/** 逐轨产物（local=本地落盘路径，合成/预览直接吃；url=远端地址） */
+export interface ShotTrackSlots {
+  stock?: { url: string; local: string; taskId?: string }
+  gen?: { local: string; taskId?: string }
+  aroll?: { local: string; taskId?: string; audioId?: string }
 }
 
 /** 镜头默认值归一（对齐 _render_shots L2130-2142） */

@@ -63,7 +63,9 @@ describe('useServerTask pollOnce 完成判定', () => {
 })
 
 // ── 轮询瞬态重试约定（2026-10-13 用户裁定：轮询遇 5xx=重试而非停在旧态；
-//    服务端任务本体仍在运行，停刷会把可恢复抖动放大成「没生成/没完成」）──
+//    服务端任务本体仍在运行，停刷会把可恢复抖动放大成「没生成/没完成」。
+//    2026-11-24 重构：自调度不叠发+1.5× 退避（上限 30s）+放弃线=连续不可达
+//    60 分钟（真实时钟）或硬计数 1500；升级文案改「任务状态未知」不断言存活）──
 describe('useServerTask pollOnce 瞬态重试约定', () => {
   function stubFlaky(failTimes: number, msg = 'HTTP 500：内部错误'): void {
     let n = 0
@@ -94,11 +96,42 @@ describe('useServerTask pollOnce 瞬态重试约定', () => {
     expect(t.status.value).toBe('failed')
   })
 
-  it('连续失败达阈值（150）：升级失败并提示可稍后重进查看', async () => {
+  it('连续失败达硬计数（1500）：升级失败且文案为「任务状态未知」', async () => {
     stubFlaky(10_000)
     const t = makeTask()
-    for (let i = 0; i < 150; i++) await t.pollOnce('x')
+    for (let i = 0; i < 1500; i++) await t.pollOnce('x')
     expect(t.status.value).toBe('failed')
-    expect(t.errorMsg.value).toContain('连续失败 150 次')
+    expect(t.errorMsg.value).toContain('连续失败 1500 次')
+    expect(t.errorMsg.value).toContain('状态未知')
+  })
+
+  it('连续不可达满 60 分钟（真实时钟）：先于硬计数升级失败', async () => {
+    stubFlaky(10_000)
+    const realNow = Date.now
+    let fake = realNow()
+    Date.now = () => fake
+    try {
+      const t = makeTask()
+      for (let i = 0; i < 7; i++) {
+        await t.pollOnce('x')
+        fake += 10 * 60 * 1000 // 每轮推进 10 分钟；第 7 轮不可达恰满 60 分钟
+      }
+      expect(t.status.value).toBe('failed')
+      expect(t.errorMsg.value).toContain('不可达约 60 分钟')
+    } finally {
+      Date.now = realNow
+    }
+  })
+
+  it('离线 null：按瞬态失败计数达硬阈值即升级失败，不再静默永轮', async () => {
+    let n = 0
+    ;(globalThis as unknown as { window: unknown }).window = {
+      tintin: { server: { tasksProgress: async () => { n++; return null } }, shell: { showNotification: () => {} } },
+    }
+    const t = makeTask()
+    for (let i = 0; i < 1500; i++) await t.pollOnce('x')
+    expect(t.status.value).toBe('failed')
+    expect(t.errorMsg.value).toContain('连续失败 1500 次')
+    expect(n).toBe(1500)
   })
 })

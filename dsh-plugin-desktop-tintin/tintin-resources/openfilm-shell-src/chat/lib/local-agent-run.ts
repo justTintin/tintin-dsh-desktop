@@ -28,6 +28,7 @@ import type { Turn } from '@openfilm/shared';
 import type { Balance } from '@/lib/balance';
 import { chatTurns, putChatTurn, type SavedTurn } from '@/lib/chat-store';
 import { withConversationSoFar } from '@/lib/conversation-so-far';
+import { flattenSessionConfigOptions } from '@/lib/session-config-options';
 import { app } from '../app-bridge';
 import { translate } from '@/i18n';
 import { isEmptyBackgroundTurn, opensUnprompted } from '@/lib/unprompted';
@@ -676,7 +677,7 @@ function listen(): void {
     if (event.kind === 'update' && event.update.sessionUpdate === 'config_option_update' && Array.isArray(event.update.configOptions)) {
       const session = [...sessions.values()].find((s) => s.key === event.key);
       if (session) {
-        session.info.configOptions = event.update.configOptions as LocalAgentSessionInfo['configOptions'];
+        session.info.configOptions = flattenSessionConfigOptions(event.update.configOptions as LocalAgentSessionInfo['configOptions']);
         session.onOptions?.(session.info.configOptions);
       }
       return;
@@ -852,7 +853,7 @@ export async function runLocalAgentTurn({
           .replace('{error}', () => r.error ?? translate('agent.settingRejected')));
       }
       const answered = r.result?.configOptions;
-      if (Array.isArray(answered) && answered.length) live.info.configOptions = answered;
+      if (Array.isArray(answered) && answered.length) live.info.configOptions = flattenSessionConfigOptions(answered);
       else option.currentValue = value;
     };
     const picked = Object.entries(options);

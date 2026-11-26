@@ -4,9 +4,20 @@
  * 产品资料(品牌/型号/品类/货号/性能/卖点)以结构化文本注入会话输入框(@ 引用形态)。
  * 数据经 openfilmNative.products(主进程代理服务端 /api/product-library/*, 实测形状)。
  */
+import {
+  $createParagraphNode,
+  $createTextNode,
+  $getRoot,
+  $getSelection,
+  $insertNodes,
+  $isRangeSelection,
+  $setSelection,
+  type BaseSelection,
+  type LexicalEditor,
+} from 'lexical';
 import { bootFail } from './boot';
 
-type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: unknown; goods_no?: unknown; features?: unknown; selling_points?: unknown };
+type LexicalDom = HTMLElement & { __lexicalEditor?: LexicalEditor | null };
 
 const STYLE = [
   '.tintin-pd-fab{z-index:2147483000}',
@@ -28,7 +39,7 @@ const STYLE = [
 
 type ProductRow = { id?: unknown; category?: unknown; brand?: unknown; model?: unknown; goods_no?: unknown; spec_no?: unknown; features?: unknown; selling_points?: unknown; notes?: unknown; keywords?: unknown; barcode?: unknown; warehouse?: unknown };
 
-/** 产品资料的结构化文本(品牌·型号·品类·货号 + 性能参数 + 卖点逐条 + 备注/关键词/条码/仓库)。
+/** 产品资料的结构化文本(品牌·型号·品类·货号 + 性能参数 + 卖点逐条 + 备注/关键词)。
    面板注入与 @ 引用(壳桥 products.texts)共用这一份, 智能体拿到的上下文同源。 */
 export function productContextOf(item: Record<string, unknown>): string {
   const str = (keys: string[]): string => {
@@ -42,16 +53,11 @@ export function productContextOf(item: Record<string, unknown>): string {
   if (features) lines.push(`性能参数：${features}`);
   const selling = str(['selling_points']);
   if (selling) for (const line of selling.split('\n')) if (line.trim()) lines.push(`卖点：${line.trim()}`);
-  /* 资料补全(2026-10-25 报障: 部分产品 features/selling_points 为空): notes/keywords/
-     规格/条码/仓库一并带上, 智能体拿到的上下文尽量全。 */
+  /* 资料补全(2026-10-25 报障: 部分产品 features/selling_points 为空): notes/keywords/规格。 */
   const notes = str(['notes']);
   if (notes) lines.push(`备注：${notes}`);
   const keywords = item.keywords;
   if (Array.isArray(keywords) && keywords.length) lines.push(`关键词：${keywords.map(String).join('、')}`);
-  const barcode = str(['barcode']);
-  if (barcode) lines.push(`条码：${barcode}`);
-  const warehouse = str(['warehouse']);
-  if (warehouse) lines.push(`仓库：${warehouse}`);
   return lines.join('\n');
 }
 
@@ -119,24 +125,49 @@ const mount = (): void => {
     panel.append(head, search, list, status);
     document.body.append(panel);
 
+    let editorDom: LexicalDom | null = null;
+    let caretSelection: BaseSelection | null = null;
+    const findEditor = (): LexicalDom | null => {
+      if (editorDom?.isConnected && editorDom.__lexicalEditor) return editorDom;
+      editorDom = document.querySelector<LexicalDom>('[data-lexical-editor="true"]');
+      return editorDom;
+    };
+    document.addEventListener('selectionchange', () => {
+      const dom = findEditor();
+      const editor = dom?.__lexicalEditor;
+      if (!editor || !dom || document.activeElement !== dom) return;
+      editor.getEditorState().read(() => {
+        const sel = $getSelection();
+        if ($isRangeSelection(sel)) caretSelection = sel.clone();
+      });
+    });
+
     const inject = (text: string): void => {
-      const editor = document.querySelector<HTMLElement>('[data-lexical-editor="true"]');
+      const dom = findEditor();
+      const editor = dom?.__lexicalEditor;
       if (!editor) { status.textContent = '未找到会话输入框'; return }
-      /* 0.3 Lexical 注入(2026-11-09 CDP 实验矩阵): 合成 paste 无视; 合成 beforeinput 可用,
-         但**第一个必被丢弃**(selection 未从 DOM 同步), 从第二个起可靠 —— 先发一个零宽
-         字符热身(视觉无污染), 再逐行 insertText / 行间 insertParagraph。 */
+      editor.update(() => {
+        /* 插入点(2026-11-24 用户裁决「光标在插入点,不是最前面」): 优先用编辑器**当前实时选区**
+           (Lexical 失焦也保留选区=用户光标就在那);旧实现先用记忆克隆,克隆过期(内容变过)会
+           落到文档开头。克隆只作无实时选区时的兜底,且 try 包住(陈旧节点键=异常→落末尾)。 */
+        let sel = $getSelection();
+        if (!$isRangeSelection(sel) && caretSelection) {
+          try { $setSelection(caretSelection.clone()); sel = $getSelection() } catch { /* 陈旧克隆: 落兜底 */ }
+        }
+        if (!$isRangeSelection(sel)) $getRoot().selectEnd();
+        const empty = !$getRoot().getTextContent().trim();
+        if (!empty) $insertNodes([$createParagraphNode()]);
+        const lines = text.split('\n');
+        for (const [i, line] of lines.entries()) {
+          if (i > 0) $insertNodes([$createParagraphNode()]);
+          if (line) $insertNodes([$createTextNode(line)]);
+        }
+        $insertNodes([$createParagraphNode()]);
+      });
       editor.focus();
-      const fire = (inputType: string, data: string | null): void => {
-        editor.dispatchEvent(new InputEvent('beforeinput', { inputType, data, bubbles: true, cancelable: true }));
-      };
-      fire('insertText', '\u200b');
-      const lines = text.split('\n');
-      for (const [i, line] of lines.entries()) {
-        if (i > 0) fire('insertParagraph', null);
-        fire('insertText', line);
-      }
+      caretSelection = null;
       status.textContent = '已注入产品资料到会话输入框';
-      hide();
+      setOpen(false);
     };
 
     const rowOf = (item: Record<string, unknown>): HTMLElement => {
@@ -148,14 +179,25 @@ const mount = (): void => {
       meta.textContent = [item.category, item.goods_no ? `货号 ${item.goods_no}` : ''].map((v) => String(v)).filter(Boolean).join(' · ');
       main.append(name, meta); row.append(main);
       row.onclick = () => {
-        /* 注入 = 产品资料结构化文本进会话输入框(零宽热身 + 逐行 beforeinput, 2026-11-09) */
         void (async () => {
+          let item0: Record<string, unknown>;
           try {
             const detail = await native.products.call({ op: 'detail', id: item.id });
-            const item0 = (detail && typeof detail === 'object' && 'item' in detail ? (detail as { item?: Record<string, unknown> }).item : detail) ?? item;
-            inject(productContextOf(item0));
+            if (detail && typeof detail === 'object' && typeof (detail as { error?: unknown }).error === 'string') {
+              throw new Error(String((detail as { error?: string }).error));
+            }
+            item0 = (detail && typeof detail === 'object' && 'item' in detail ? (detail as { item?: Record<string, unknown> }).item : detail) ?? item;
           } catch (error) {
             status.textContent = '产品资料获取失败：' + (error instanceof Error ? error.message : String(error));
+            return;
+          }
+          /* 资料与注入分开归因(2026-11-24「hide is not defined」报障: 注入期异常带着出处,
+             状态栏多给两行栈,出问题能定位到是哪段代码) */
+          try {
+            inject(productContextOf(item0));
+          } catch (error) {
+            const stack = error instanceof Error ? (error.stack ?? '').split('\n').slice(0, 3).join(' ␤ ') : '';
+            status.textContent = `资料已取到但注入失败：${error instanceof Error ? error.message : String(error)}${stack ? ` ｜ ${stack}` : ''}`;
           }
         })();
       };
@@ -253,8 +295,10 @@ const mount = (): void => {
   }
 };
 
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
-else setTimeout(mount, 0);
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount);
+  else setTimeout(mount, 0);
+}
 
 /** The product row as the products.call channel returns it (TinTin panel + @ 引用同源). */
 export type TinTinProduct = ProductRow;

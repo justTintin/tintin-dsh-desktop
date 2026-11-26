@@ -82,7 +82,8 @@ test('checkLineGate blocks growth beyond the ceiling and stale baseline entries'
 
 test('checkLineGate rejects an oversized file that has no baseline entry', () => {
   const files = new Map([
-    [join(repoRoot(), 'dsh-tintin-media-bundle', 'big.vue'), 'x\n'.repeat(1001)],
+    /* 上限=上游基准 5915(2026-11-24 用户裁决):测试件取超限一行 */
+    [join(repoRoot(), 'dsh-tintin-media-bundle', 'big.vue'), 'x\n'.repeat(5916)],
   ])
   const violations = checkLineGate({
     root: repoRoot(),

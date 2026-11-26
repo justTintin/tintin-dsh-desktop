@@ -52,11 +52,11 @@ export function useServerTask(opts: UseServerTaskOptions) {
   const isProcessing = ref(false)
   const uploadPercent = ref(0)
 
-  let pollTimer: ReturnType<typeof setInterval> | null = null
+  let pollTimer: ReturnType<typeof setTimeout> | null = null
 
   function stopPolling(): void {
     if (pollTimer) {
-      clearInterval(pollTimer)
+      clearTimeout(pollTimer)
       pollTimer = null
     }
   }
@@ -111,21 +111,48 @@ export function useServerTask(opts: UseServerTaskOptions) {
   function startPolling(id: string): void {
     stopPolling()
     taskId.value = id
-    pollTimer = setInterval(() => pollOnce(id), opts.intervalMs ?? 2000)
+    pollFailStreak = 0
+    pollUnreachableSince = 0
+    pollDelayMs = opts.intervalMs ?? POLL_BASE_INTERVAL_MS
+    schedulePoll(id, pollDelayMs)
   }
 
-  /** 轮询失败连续计数（2026-10-13 客户端约定：轮询遇 5xx/网络错误=瞬态，重试
-   *  而非停在旧态——服务端任务本体仍在运行，停刷会把可恢复抖动放大成「没生成/没完成」。
-   *  仅连续失败超阈值或服务端终态才升级失败） */
-  const POLL_FAIL_STREAK_MAX = 150 // 2s 间隔 ≈ 容忍 5 分钟服务端抖动
+  // ── 轮询瞬态重试（2026-10-13 用户裁定：轮询遇 5xx/网络错误=瞬态，重试而非停在
+  //  旧态——服务端任务本体仍在运行，停刷会把可恢复抖动放大成「没生成/没完成」；
+  //  仅连续失败超阈值或服务端终态才升级失败）
+  // 2026-11-24 重构（用户质询「服务端不可达时 2s×150 疯狂轰炸 5 分钟就报失败」：
+  //  实测事故=去字幕提交后服务端全程无响应，旧实现 2s 定时器不退避不防叠发，
+  //  每发在代理层挂 30s 超时→同时堆积 ~15 个并发僵尸请求，150 次注定全败后盖
+  //  「失败」且文案断言「任务本体仍在服务端」=瞎猜）：
+  //   · setInterval → 自调度 setTimeout：上一发未返回不叠发
+  //   · 连续失败按 1.5× 退避（上限 30s）：服务端恢复自动续上，不可达时不再贴脸轰炸
+  //   · 放弃线双保险：连续不可达 60 分钟（真实时钟）或硬计数 1500（兜底）
+  //   · 升级文案改诚实：服务端长时间无响应时任务状态未知，不再断言任务仍存活
+  const POLL_BASE_INTERVAL_MS = 2000
+  const POLL_BACKOFF_MAX_MS = 30000
+  const POLL_FAIL_STREAK_MAX = 1500
+  const POLL_GIVE_UP_MS = 60 * 60 * 1000
   let pollFailStreak = 0
+  let pollUnreachableSince = 0
+  let pollDelayMs = POLL_BASE_INTERVAL_MS
+
+  /** 自调度下一次轮询：上一发 settle 后才排下一发，天然无叠发 */
+  function schedulePoll(id: string, delayMs: number): void {
+    stopPolling()
+    pollTimer = setTimeout(() => { void pollOnce(id) }, delayMs)
+  }
 
   /** 拉取一次任务进度并推进状态机 */
   async function pollOnce(id: string): Promise<void> {
     try {
       const data = (await window.tintin.server.tasksProgress(id)) as TaskProgressData | null
-      if (!data) return
+      if (!data) {
+        // 离线 null 同样按瞬态失败计（旧实现此处静默续轮=永不升级失败的暗洞）
+        throw new Error('离线：进度查询通道不可用')
+      }
       pollFailStreak = 0
+      pollUnreachableSince = 0
+      pollDelayMs = opts.intervalMs ?? POLL_BASE_INTERVAL_MS
       const st = (data.status ?? '') as TaskStatus
       status.value = st
       // 进度仅在处理态采信（服务端 2026-10-13 已对齐：排队报 0/处理态报真实
@@ -141,23 +168,31 @@ export function useServerTask(opts: UseServerTaskOptions) {
         isProcessing.value = false
         stopPolling()
         notify(opts.successTitle, opts.getSuccessBody?.() ?? '')
+        return
       } else if (data.status === 'failed') {
         // 2026-09-07：服务端 /tasks/{id} 错误字段为 error（error_message 不存在，
         // 旧代码只读后者致真实原因被「处理失败」吞掉，如「模型资源不可用: vsr」）
         failWith(data.error_message || data.error || '处理失败')
+        return
       } else if (st === 'cancelled') {
         failWith('已被用户终止。')
+        return
       }
+      schedulePoll(id, pollDelayMs) // queued/processing：按正常节拍续轮
     } catch (err) {
       pollFailStreak += 1
+      if (!pollUnreachableSince) pollUnreachableSince = Date.now()
       const transient = !/HTTP\s+4\d\d/.test(String((err as Error)?.message ?? err)) // 4xx=任务确实没了，瞬态豁免不适用
-      if (transient && pollFailStreak < POLL_FAIL_STREAK_MAX) {
-        // 约定：保持轮询不置失败（进度停在最后已知值），服务端恢复后自动续上
-        clientError('server-task', `轮询失败（连续第 ${pollFailStreak}/${POLL_FAIL_STREAK_MAX} 次，任务仍在服务端运行）——继续重试`, err)
+      const unreachableMs = Date.now() - pollUnreachableSince
+      if (transient && pollFailStreak < POLL_FAIL_STREAK_MAX && unreachableMs < POLL_GIVE_UP_MS) {
+        // 约定：保持轮询不置失败（进度停在最后已知值），退避重试，服务端恢复后自动续上
+        pollDelayMs = Math.min(Math.max(Math.round(pollDelayMs * 1.5), POLL_BASE_INTERVAL_MS), POLL_BACKOFF_MAX_MS)
+        clientError('server-task', `轮询失败（连续第 ${pollFailStreak} 次，已不可达 ${Math.round(unreachableMs / 1000)}s）——${Math.round(pollDelayMs / 1000)}s 后重试`, err)
+        schedulePoll(id, pollDelayMs)
         return
       }
       failWith(transient
-        ? `任务进度轮询连续失败 ${POLL_FAIL_STREAK_MAX} 次（约 5 分钟）——服务端可能重启或不可达；任务本体仍在服务端，可稍后重进查看结果`
+        ? `任务进度查询连续失败 ${pollFailStreak} 次（已不可达约 ${Math.max(1, Math.round(unreachableMs / 60000))} 分钟）——服务端长时间无响应；任务状态未知（可能仍在服务端运行，也可能已随服务中断丢失），可稍后重进查看结果`
         : (err instanceof Error ? err.message : String(err)))
     }
   }

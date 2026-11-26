@@ -24,6 +24,7 @@ In **this film-chat session** the server's capabilities are the **MCP tools** na
 |---|---|
 | text-to-image / cover image | `create_image` (mode=t2i / mode=cover) |
 | text-to-video | `create_video` (async → poll with `task_status_unified`) |
+| image / video generation (preferred when 即梦 CLI is enabled) | local `dreamina` CLI skill — `text2image`/`image2image`/`image_upscale`, `text2video`/`image2video`/`frames2video`/`multiframe2video`/`multimodal2video`; submit with `dreamina <command> --prompt=…`, then `dreamina query_result --submit_id=… --download_dir=<project>/assets/tintin` until `gen_status=success`. Only when the 即梦 skill is installed, its preference switch is on and you are logged in; otherwise use `create_image`/`create_video`. |
 | background music | `create_music` (sync, returns a URL) |
 | sound effects / voice-over | `create_audio` (kind=sfx / kind=tts; voices per the tool's own description) |
 | digital human | `create_digital_human` (async → poll) |
@@ -146,8 +147,10 @@ The same capabilities are reachable through OpenFilm's custom service while Stud
 `openfilm get call --service tintin --path <path> --method POST --json '<body>'`. Use it **only for non-generating
 lookups** (stock search, voices list, capability discovery) when the matching MCP tool is missing.
 **Never use `openfilm get call`, curl, or any HTTP call to generate media** (image/video/music/audio/digital
-human) — in this session generation goes through the `create_*` MCP tools only; if one is missing, say so plainly
-instead of working around it.
+human). The sole exception is the local `dreamina` CLI: when the 即梦 skill is installed, its preference switch is
+on and you are logged in, use `dreamina` for image/video generation per that skill's documentation (a `submit_id`
+with `gen_status=querying` is not success — wait for `gen_status=success` and a downloaded artifact). Otherwise
+generation goes through the `create_*` MCP tools only; if one is missing, say so plainly instead of working around it.
 
 **Do not explore this command.** `openfilm get call --help` prints the generic `get` help, not `call`'s options —
 trying `--json` / `--body` / `--service=` variants burns a full model round trip each time (measured: 20+ wasted

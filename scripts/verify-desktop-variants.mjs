@@ -26,6 +26,9 @@ const allowedTintinAdditions = new Set([
   // TinTin-only file/external-open/screenshot IPC face migrated out of main-hook
   // (2026-11-19 iron rule 4: baseline-locked files only shrink; see 16.39).
   'tintin/native-shell-channels.ts',
+  // TinTin-only online-library IPC proxy migrated out of main-hook
+  // (2026-11-24 iron rule 4 shrink + stream/timeout hardening; see 16.49).
+  'tintin/library-proxy.ts',
   'tintin/first-boot.ts',
   'tintin-main.ts',
   'tintin/studio-preload.ts',
@@ -34,7 +37,6 @@ const allowedTintinAdditions = new Set([
   'tintin/film-chat.ts',
   'tintin/film-model-calls.ts',
   'tintin/film-turn-changes.ts',
-  'tintin/cover-acp.ts',
   // TinTin channel-only update bridge: GitHub Releases check and installer
   // download (the shared fixed dshdesktop.cn endpoints do not serve tintin).
   'tintin/tintin-update-check.ts',
@@ -42,6 +44,8 @@ const allowedTintinAdditions = new Set([
   // TinTin channel-only first-run browser download (2026-11-13 slim-package
   // ruling: the 690MB playwright-browsers staging left the installer).
   'tintin/film-browsers.ts',
+  // TinTin-only 即梦 CLI 技能通道(视频剪辑技能管理页;独立开关 preferInFilm)。
+  'tintin/film-dreamina-channels.ts',
 ])
 const normalizeIdentity = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop').replaceAll('DSH Desktop Beta', 'DSH Desktop')
 const normalizeTintin = source => source.toString().replaceAll('dsh-plugin-desktop-beta', 'dsh-plugin-desktop-tintin').replaceAll('DSH Desktop Beta', 'TinTin')

@@ -110,4 +110,9 @@ describe('productDescFromInfo 产品描述组包（Step1 生成入参）', () =>
     expect(productDescFromInfo({ extra: '只有卖点' })).toBe('只有卖点')
     expect(productDescFromInfo({ brand: ' ', product: '', modelName: undefined, extra: '  ' })).toBe('')
   })
+
+  it('sharedProductInfo 的 model 字段也进 product_desc（applyScriptProduct 写入口径）', () => {
+    expect(productDescFromInfo({ brand: 'A牌', product: 'B品', model: 'C型', extra: '卖点' })).toBe('A牌，B品，C型')
+    expect(productDescFromInfo({ modelName: '优先型号', model: '兜底型号' })).toBe('优先型号')
+  })
 })

@@ -11,6 +11,7 @@ import { clientError } from '../../utils/clientLog'
 import { notify, errText, joinPath, unwrapIpc } from './context'
 import { readCacheDir } from '../useSettingsConfig'
 import { extractScriptItems } from '../opsStoryboardLogic'
+import { isAutoStoryboardName } from '../copywritingMontageStep3VoiceLogic'
 
 /** 编排壳所需的最小 tab 结构（StoryboardTab 结构性满足；voiceAudioId 由本模块维护） */
 export interface VoiceSyncTab {
@@ -112,8 +113,8 @@ export async function refreshTabNamesFromServer(
       const topic = String(hit.topic ?? '').trim()
       const dn = String(hit.display_name ?? '').trim()
       if (topic) t.topic = topic
-      if (dn) t.name = dn.slice(0, 20)
-      else if (topic && /^脚本\d+$/.test(t.name)) t.name = topic.slice(0, 20)
+      if (dn) t.name = dn
+      else if (topic && isAutoStoryboardName(t.name)) t.name = topic
     }
   } catch (_) { /* best-effort：失败保持本地名 */ }
 }

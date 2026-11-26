@@ -145,6 +145,17 @@ contextBridge.exposeInMainWorld('openfilmNative', {
   products: {
     call: (payload: unknown): Promise<unknown> => agentInvoke('openfilm:products', payload),
   },
+  /* 即梦 CLI 技能(视频剪辑技能管理页):状态/设备码登录/独立开关/官方技能安装。
+     独立通道,不经 window.tintin(Studio 页无此全局)。 */
+  dreamina: {
+    call: (payload: unknown): Promise<unknown> => nativeInvoke('openfilm:native:dreamina', payload),
+  },
+  /* 影片项目媒体文件(2026-11-24 用户报障「返回的视频/图片/音频无法查看、无法下载」):
+     聊天变更文件行的媒体产物预览(base64)与另存到电脑;主进程守卫=项目目录内+扩展白名单+64MB */
+  projectFile: {
+    read: (payload: unknown): Promise<unknown> => nativeInvoke('openfilm:native:project-file-read', payload),
+    saveAs: (payload: unknown): Promise<unknown> => nativeInvoke('openfilm:native:project-file-save-as', payload),
+  },
   /* 0.4 的连接器面(Studio 设置的 agent 连接器): 集成智能体走 DSH ACP, 不经 connectors ——
      空实现(空列表+如实报错), Studio 的连接器面板显示空态不炸。 */
   connectors: {

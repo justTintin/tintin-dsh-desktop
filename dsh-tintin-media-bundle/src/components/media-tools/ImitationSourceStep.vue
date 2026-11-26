@@ -46,6 +46,7 @@ const uploadRatio = ref(-1)
 // 对话框只给路径 → 经宿主 /tintin/media 代理（unlock 已由选择器触发）取回内容成 File。
 const VIDEO_PICK_EXTS = ['mp4', 'mov', 'mkv', 'avi', 'webm', 'flv', 'm4v']
 const sourceFile = ref<File | null>(null)
+const pickedName = ref('')
 const fileResolving = ref(false)
 const pickError = ref('')
 const videoPicker = useFilePicker({
@@ -72,6 +73,7 @@ async function enforceDurationLimit(file: File): Promise<boolean> {
   const sec = await probeDurationSec(file)
   if (sec !== null && sec > MAX_SOURCE_SEC) {
     sourceFile.value = null
+    pickedName.value = ''
     videoPicker.clearFile()
     pickError.value = `视频时长 ${Math.round(sec)} 秒，超过 ${MAX_SOURCE_SEC} 秒上限——请选择 ${MAX_SOURCE_SEC} 秒以内的原片（拆解链面向短视频）`
     clientError('imitation-video', pickError.value, { name: file.name, sec })
@@ -91,6 +93,7 @@ function onVideoDrop(e: DragEvent): void {
     pickError.value = `不支持的视频格式：${f.name}（支持 ${VIDEO_PICK_EXTS.join(' / ')}）`
     return
   }
+  pickedName.value = f ? f.name : ''
   if (f) sourceFile.value = f
   pickError.value = ''
   videoPicker.onDrop(e)
@@ -103,6 +106,7 @@ function onVideoDrop(e: DragEvent): void {
 async function resolveFileFromPath(path: string): Promise<void> {
   if (!isVideoName(path)) {
     sourceFile.value = null
+    pickedName.value = ''
     pickError.value = `不支持的视频格式：${path}`
     return
   }
@@ -120,9 +124,11 @@ async function resolveFileFromPath(path: string): Promise<void> {
     const file = new File([blob], name, { type: blob.type || 'video/mp4' })
     if (!(await enforceDurationLimit(file))) return
     sourceFile.value = file
+    pickedName.value = name
     pickError.value = ''
   } catch (err) {
     sourceFile.value = null
+    pickedName.value = ''
     pickError.value = `读取所选文件失败：${(err as Error).message}`
     clientError('imitation-video', pickError.value, err)
   } finally {
@@ -134,12 +140,15 @@ async function resolveFileFromPath(path: string): Promise<void> {
 watch(videoPicker.filePath, (p) => {
   if (!p) {
     sourceFile.value = null
+    pickedName.value = ''
     return
   }
   const base = p.split(/[\\/]/).pop()
   if (sourceFile.value && sourceFile.value.name === base) return
   void resolveFileFromPath(p)
 })
+
+const sourceDisplayName = computed(() => videoPicker.fileName.value || pickedName.value || props.iv.part1VideoLabel.value)
 
 const part1VideoInput = computed<unknown>(() => {
   if (sourceMode.value === 'file') return sourceFile.value
@@ -182,22 +191,22 @@ const rpShots = computed<Array<Record<string, unknown>>>(() => {
     </div>
 
     <div v-if="sourceMode === 'file'" class="iv-filepick">
-      <div class="dropzone" :class="{ 'is-active': videoPicker.isDragging.value, 'has-file': !!videoPicker.filePath.value }"
+      <div class="dropzone" :class="{ 'is-active': videoPicker.isDragging.value, 'has-file': !!sourceDisplayName }"
         @click="videoPicker.pickFile"
         @drop.prevent="onVideoDrop"
         @dragover.prevent="acceptFileDragOver($event); videoPicker.onDragOver()"
         @dragleave.prevent="videoPicker.onDragLeave">
-        <svg v-if="!videoPicker.filePath.value" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <svg v-if="!sourceDisplayName" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" />
         </svg>
         <div class="dropzone__text">
-          <template v-if="!videoPicker.filePath.value">
+          <template v-if="!sourceDisplayName">
             <span class="dropzone__main">点击选择原视频或拖拽到此处</span>
             <span class="dropzone__hint">支持 MP4 / MOV / MKV / AVI / WEBM / FLV / M4V，时长 ≤ {{ MAX_SOURCE_SEC }} 秒；自动上传入素材库后进入拆解</span>
           </template>
           <template v-else>
-            <span class="dropzone__main">{{ videoPicker.fileName.value }}</span>
-            <span class="dropzone__hint">{{ fileResolving ? '正在读取文件…' : sourceFile ? `${(sourceFile.size / 1024 / 1024).toFixed(1)} MB · 点击重新选择` : '正在读取文件…' }}</span>
+            <span class="dropzone__main">{{ sourceDisplayName }}</span>
+            <span class="dropzone__hint">{{ fileResolving ? '正在读取文件…' : sourceFile ? `${(sourceFile.size / 1024 / 1024).toFixed(1)} MB · 点击重新选择` : '已提交拆解的原片 · 点击重新选择' }}</span>
           </template>
         </div>
       </div>

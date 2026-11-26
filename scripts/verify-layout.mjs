@@ -49,7 +49,6 @@ if (JSON.stringify(workspace.workspaces) !== JSON.stringify([
   'dsh-tintin-media-bundle',
   'dsh-tintin-ops-bundle',
   'dsh-tintin-browser',
-  'dsh-tintin-cover-plugin',
   'dsh-tintin-shared',
   'dsh-plugin-desktop-tintin',
 ])) {

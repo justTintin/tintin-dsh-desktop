@@ -10,6 +10,7 @@ import {
   removeStaleUnpackedOutput,
   sweepUnpackedSelfHealHolders,
 } from './package-dir.mjs'
+import { packageNsisLocal } from './package-nsis-local.mjs'
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
@@ -116,4 +117,41 @@ test('removeStaleUnpackedOutput fails fast with guidance when a holder locks the
       }
     }
   }
+})
+
+// ═══ lite NSIS 的瞬态锁重试(2026-11-23 22:02/22:16 两轮 EBUSY 实证:--dir 有 3s 重试
+// 后通过,lite NSIS 无重试一碰即死 → lite Setup 缺席)。packageNsisLocal 与
+// packageDirectory 同缝(run 可注入),以下三例与上方 --dir 重试语义逐条对齐。
+test('nsis transient nonzero exit retries once and succeeds (antivirus scan lock)', () => {
+  let calls = 0
+  const flaky = () => {
+    calls++
+    return calls === 1 ? { status: 1 } : { status: 0 }
+  }
+  packageNsisLocal({ run: flaky })
+  assert.equal(calls, 2, '首败应恰好重试一次')
+})
+
+test('nsis persistent nonzero exit surfaces after the single retry', () => {
+  const alwaysFail = () => ({ status: 7 })
+  assert.throws(() => packageNsisLocal({ run: alwaysFail }), /exited with 7 \(重试后仍失败\)/)
+})
+
+test('nsis spawn-level errors are not retried (ENOENT-class, not a transient lock)', () => {
+  let calls = 0
+  const spawnError = () => {
+    calls++
+    return { error: new Error('cannot spawn') }
+  }
+  assert.throws(() => packageNsisLocal({ run: spawnError }), /cannot spawn/)
+  assert.equal(calls, 1, 'spawn 层失败不得重试')
+})
+
+test('nsis preclean is wired at the CLI entry only, never inside packageNsisLocal', () => {
+  const source = readFileSync(new URL('./package-nsis-local.mjs', import.meta.url), 'utf8')
+  const entry = source.slice(source.indexOf('const invokedPath'))
+  const wired = ['removeStaleUnpackedOutput()', 'packageNsisLocal()']
+  assert.ok(wired.every((line) => entry.includes(line)), 'CLI 入口必须先清场再打包')
+  const body = source.slice(source.indexOf('export function packageNsisLocal'), source.indexOf('const invokedPath'))
+  assert.ok(!body.includes('removeStaleUnpackedOutput'), 'packageNsisLocal 本体不得调用预清理')
 })

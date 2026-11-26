@@ -86,6 +86,8 @@ import { useCopywritingMontageStep1Split } from './copywritingMontage/useCopywri
 import { detectShotKeyword, filterMaterialsByDupMode, projectIdentityOf } from './copywritingMontageStep1SplitLogic'
 import { useCopywritingMontageStep2Concat } from './copywritingMontage/useCopywritingMontageStep2Concat'
 import { useCopywritingMontageStep3Voice } from './copywritingMontage/useCopywritingMontageStep3Voice'
+import { useShotMaterialGen } from './useShotMaterialGen'
+import { productBriefOf } from './copywritingMontage/useCopywritingMontageStoryboardTabs'
 import { useCopywritingMontageStep4Final } from './copywritingMontage/useCopywritingMontageStep4Final'
 
 export function useCopywritingMontage() {
@@ -210,23 +212,23 @@ export function useCopywritingMontage() {
   //    （localStorage 只存 copy）══
   // 投放平台（2026-10-03 用户裁决：场景后平台下拉，默认抖音）——字典/默认值均来自
   // 服务端 GET /copywriting/platforms；选中名随请求 platform 直传（指引由服务端织入）
-  interface PlatformItem { name: string; guide: string }
+  interface PlatformItem { name: string }
   const platformOptions = ref<PlatformItem[]>([])
   const platformDefault = ref('抖音')
   const scriptPlatform = ref('抖音')    // 选中平台名（恒非空——2026-11-05 用户报障空下拉）
   async function loadPlatforms(): Promise<void> {
     try {
       const res = await window.tintin.server.get(API_PATHS.copywriting.platforms)
-      const data = (res && typeof res === 'object' ? res : null) as { default?: string; platforms?: Array<{ name?: string; guide?: string }> } | null
+      const data = (res && typeof res === 'object' ? res : null) as { default?: string; platforms?: Array<{ name?: string }> } | null
       const list = Array.isArray(data?.platforms) ? data!.platforms! : []
       platformOptions.value = list
         .filter((x) => x && typeof x.name === 'string' && x.name)
-        .map((x) => ({ name: String(x.name), guide: String(x.guide || '') }))
+        .map((x) => ({ name: String(x.name) }))
       if (typeof data?.default === 'string' && data.default) platformDefault.value = data.default
       // 兜底：抖音恒在字典（2026-11-05 用户报障「默认平台没了」——服务端字典变更/缺项时
       // 选中值落空，下拉显示空白）
       if (!platformOptions.value.some((p) => p.name === '抖音')) {
-        platformOptions.value = [{ name: '抖音', guide: '' }, ...platformOptions.value]
+        platformOptions.value = [{ name: '抖音' }, ...platformOptions.value]
       }
       // 选中值优先保持用户已选；否则取服务端 default；default 也不在字典则取字典首项
       //（选中值恒有对应选项，下拉不再出现空白）
@@ -311,6 +313,23 @@ export function useCopywritingMontage() {
     const secs = picks.length > 1 ? `，共 ${picks.length} 份` : ''
     statusText.value = `完成：已装载 ${n} 份文案${secs}，点击「✨ AI 生成分镜脚本」为每份各生成一套分镜`
     notify('已装载文案', `已按勾选装载 ${n} 份文案（每份一个分镜标签）；点击「✨ AI 生成分镜脚本」将为每份文案各生成一套分镜。`)
+  }
+
+  /** 「输入文案」tab：直接把用户写的文案装载为一份口播文案 tab（与采用一份 AI 文案
+   *  等价），采用后清空输入框，便于连续输入再点、逐份追加。与 loadCopyCandidateTabs
+   *  不同——这里不替换已有纯文案 tab。 */
+  function appendManualCopy(text: string): boolean {
+    const narrative = String(text || '').trim()
+    if (!narrative) { notify('输入文案为空', '请输入文案后再点「使用文案」。'); return false }
+    const tab = addStoryboardTab({
+      name: '输入文案', narrative, shots: [],
+      productBrief: productBriefOf(sharedProductInfo.value),
+    })
+    if (!tab) { notify('无法添加文案', `分镜标签已达上限 ${COPY_STORYBOARD_MAX}。`); return false }
+    activeStoryboardId.value = tab.id
+    statusText.value = `完成：已追加 1 份输入文案（共 ${storyboards.value.length} 份），点击「✨ AI 生成分镜脚本」生成分镜`
+    notify('已使用文案', '已把输入文案追加为一份口播文案；可继续输入下一份。')
+    return true
   }
 
   /** ✨ 生成视频文案：POST /copywriting/voiceover 十稿全量（formula 缺省=每次 10 种）；
@@ -400,7 +419,7 @@ export function useCopywritingMontage() {
     editDlg, voiceBusy, rewriteBusy, voiceProgress,
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,
     storyboards, activeStoryboardId, activeStoryboard, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, activeNarrative, COPY_STORYBOARD_MAX,
-    loadCopyCandidateTabs, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
+    loadCopyCandidateTabs, addStoryboardTab, voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
     scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript, syncStoryboardsToServer,
     refreshTabNamesFromServer,
     loadLuts, loadCatalogLanes, resolveKeywordHits,
@@ -492,6 +511,19 @@ export function useCopywritingMontage() {
     return t && t.voiceDurSec > 0 ? Math.max(1, Math.round(t.voiceDurSec)) : Number(durationLimit.value)
   })
 
+  // 按镜头在线搜索 / AI生成素材（2026-11-25 用户裁决：与智能分配分离，按镜头分析）
+  const shotMat = useShotMaterialGen({
+    imageDuration, splitsJobId, activeLayout: activeTabLayout,
+    productBrief: sharedProductInfo,
+    // 轨道产物写激活 tab 的 shot.slots（2026-11-26 四源四轨裁决）
+    activeShots: () => activeStoryboard.value?.shots || [],
+    // 数字人 A-Roll：取激活 tab 的脚本同步 id 与口播音频 id
+    digitalHuman: () => {
+      const t = activeStoryboard.value
+      return { scriptId: t?.scriptId || '', voiceAudioId: t?.voiceAudioId || '' }
+    },
+  })
+
   return {
     // 共享
     serverUrl, polling, activeTaskId, statusText, cancelPolling, stopPolling,
@@ -509,7 +541,7 @@ export function useCopywritingMontage() {
     copyPrompt, resetScriptPageOnEnter,
     voiceDone, voiceTotal, cloneProgressLabel, lastCloneFailedIds, retryFailedClones,
     voiceoverCandidates, voiceoverFailedFormulas, voiceoverDlgOpen, voiceoverSelectedIdxs, closeVoiceoverDlg,
-    genVoiceoverCandidates, confirmVoiceoverCandidates,
+    genVoiceoverCandidates, confirmVoiceoverCandidates, appendManualCopy,
     updateSceneDesc, previewSourceVideo, previewScene, closePreview, clearSplitCache,
     previewUrl, previewTranscoding, openSplitsDir, splitsDownloading,
     // Step2 镜头重组
@@ -557,6 +589,10 @@ export function useCopywritingMontage() {
     rewriteTemp,
     voiceBusy, rewriteBusy,
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,
+    shotMatBusy: shotMat.busy, shotMatMsg: shotMat.msg, genShotMaterial: shotMat.generate, addOnlineShotMaterial: shotMat.addOnline,
+    // 逐镜逐轨生成状态 + 批量入口（2026-11-26 四源四轨裁决：产物写 shot.slots 各轨占位）
+    shotGenStates: shotMat.states, shotGenActiveOf: shotMat.active, shotGenStateOf: shotMat.stateOf,
+    shotBatchAI: shotMat.batchGenerateAI, shotBatchARoll: shotMat.batchGenerateARoll, shotBatchProgressOf: shotMat.batchProgressOf,
     scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript,
     scanVoiceDir, enterStepVoice, loadRefSamples, refPreviewUrl,
     nsFilePath, nsName, nsText, nsError, nsSuccess, nsBusy, nsTranscribing,

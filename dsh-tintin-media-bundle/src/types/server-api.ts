@@ -187,6 +187,10 @@ export const API_PATHS = {
     enhance: '/vsr/enhance',      // V3 S2
     remove:  '/vsr/remove',
   },
+  generate: {
+    // 视频素材生成（comfygen；2026-11-25 文案混剪按镜头 AI生成）
+    video: '/generate/video',
+  },
   viral: {
     // 仿爆款（Viral Clone）后端端点；请求/响应字段以原客户端 viral_clone_client.py 实际调用为准
     analyze:  '/viral/clone/analyze',   // 拆解爆款（同步）

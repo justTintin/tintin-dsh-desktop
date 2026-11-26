@@ -97,6 +97,17 @@ const drawer = document.createElement('div');
     let serverUrl = '';
     let exhausted = false;
     let busy = false;
+    /* 加载代令牌(2026-11-24 用户报障「下载失败后切换素材切换失败,素材界面无法使用」):
+       旧实现 busy 布尔锁 + IPC 挂起(主进程无超时)=busy 永真=切 tab/搜索/加载更多全死。
+       现在 reset 类加载(切 tab/搜索)发新令牌取代在途请求,陈旧回包直接丢弃;
+       调用再包一层超时,即使 IPC 挂死 busy 也必然释放,界面永可用。 */
+    let loadSeq = 0;
+    const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): Promise<T> => {
+      let timer = 0;
+      try {
+        return await Promise.race([p, new Promise<never>((_, reject) => { timer = window.setTimeout(() => reject(new Error(`${label}超时(${Math.round(ms / 1000)}s)——服务端未响应`)), ms) })]);
+      } finally { window.clearTimeout(timer) }
+    };
 
     const fmtSize = (bytes: unknown): string => {
       const n = Number(bytes);
@@ -159,7 +170,8 @@ const drawer = document.createElement('div');
       status.textContent = target === 'downloads' ? '正在下载到电脑…' : '正在下载到项目…';
       try {
         const project = target === 'project' ? await projectDir() : '';
-        const out = await native.library.download({ project, materialId: idOf(item), filename: nameOf(item), serverUrl, target });
+        /* 180s 兜底(主进程流式落盘无总时限):IPC 挂死时界面也要拿到失败并保持可用 */
+        const out = await withTimeout(native.library.download({ project, materialId: idOf(item), filename: nameOf(item), serverUrl, target }), 180_000, '下载') as { ok?: boolean; rel?: string; path?: string; error?: string };
         if (out.error) throw new Error(out.error);
         status.textContent = target === 'downloads'
           ? `已下载到电脑 ${out.path ?? ''}`
@@ -191,11 +203,13 @@ const drawer = document.createElement('div');
        入口=0.3 库面板素材侧栏的「在线素材」项。 */
 
     async function load(reset: boolean): Promise<void> {
-      if (busy) return;
+      if (busy && !reset) return;
+      const seq = ++loadSeq;
       busy = true;
       status.textContent = reset ? '加载中…' : '加载更多…';
       try {
-        const result = await native.library.list({ page: reset ? 1 : page, size: 24, mediaType: tab, search: search.value.trim() });
+        const result = await withTimeout(native.library.list({ page: reset ? 1 : page, size: 24, mediaType: tab, search: search.value.trim() }), 20_000, '素材列表加载') as { items?: LibraryItem[]; serverUrl?: string; error?: string };
+        if (seq !== loadSeq) return;
         if (result.error) throw new Error(result.error);
         serverUrl = result.serverUrl ?? serverUrl;
         const items = result.items ?? [];
@@ -254,9 +268,9 @@ const drawer = document.createElement('div');
            永远不出现, 只靠滚动事件会卡在第一页) */
         if (!exhausted) window.setTimeout(() => { if (!busy && !exhausted && list.scrollHeight <= list.clientHeight + 4) void load(false) }, 60);
       } catch (error) {
-        status.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
+        if (seq === loadSeq) status.textContent = `加载失败：${error instanceof Error ? error.message : String(error)}`;
       } finally {
-        busy = false;
+        if (seq === loadSeq) busy = false;
       }
     }
     /* 滚动到底自动翻页(2026-11-09 用户要求, 对齐官方面板的无限滚动): 距底 ≤120px 即续一页 */

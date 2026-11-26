@@ -18,7 +18,7 @@ import { Check, ChevronDown, ChevronRight, KeyRound, Settings } from 'lucide-rea
 import { keepFocus, Popover } from './Popover';
 import { useT } from '@/i18n';
 import { Tooltip } from '@/components/Tooltip';
-import { AgentIcon } from '@/components/AgentIcons';
+import { AgentIcon, hasAgentIcon } from '@/components/AgentIcons';
 import { BrandLogo } from '@/components/BrandLogo';
 import { POPOVER_CHROME } from '@/components/ComposerCard';
 import { desktopBridge, type LocalAgentId, type RosterAgent } from '@/lib/desktop-bridge';
@@ -56,9 +56,11 @@ function failureReason(error: { text: string } | undefined): string | null {
 }
 
 export function ChatAgentIcon({ id, size = 14 }: { id: LocalAgentId; size?: number }) {
-  if (id === 'openfilm') return <BrandLogo size={size} />;
+  if (id === 'openfilm' || id === 'tintin-agent') return <BrandLogo size={size} />;
   if (id === 'byok') return <KeyRound size={size} />;
-  return <AgentIcon id={id} size={size} />;
+  /* 智能体弹层/触发钮的图标兜底(2026-11-24 用户报障:TinTin智能体行无图标):识别不了的
+     id 也回客户端图标,不留空白(TurnLog/ProjectConversation 同款兜底口径) */
+  return hasAgentIcon(id) ? <AgentIcon id={id} size={size} /> : <BrandLogo size={size} />;
 }
 
 export function CanvasModelPicker({ triggerClassName }: { triggerClassName?: string }) {

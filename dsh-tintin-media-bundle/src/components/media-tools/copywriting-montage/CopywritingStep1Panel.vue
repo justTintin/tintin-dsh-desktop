@@ -31,8 +31,13 @@ const {
   manualCopy, manualCopyBusy, storyboards,
   scriptPlatform, platformOptions, loadPlatforms,
   voiceoverCandidates, voiceoverFailedFormulas, voiceoverDlgOpen, voiceoverSelectedIdxs, closeVoiceoverDlg,
-  genVoiceoverCandidates, confirmVoiceoverCandidates,
+  genVoiceoverCandidates, confirmVoiceoverCandidates, appendManualCopy,
 } = shell.s
+
+// 文案来源 tab：AI生成文案（原方案一/二 + 提示词）/ 输入文案（直接写稿，逐份追加）
+const copyTab = ref<'ai' | 'input'>('ai')
+const inputCopy = ref('')
+function useInputCopy(): void { if (appendManualCopy(inputCopy.value)) inputCopy.value = '' }
 
 /* ── 根据产品生成文案（公共弹窗；选中后显示在按钮后面，写入 sharedProductInfo 单一来源）── */
 const pickDlgVisible = ref(false)
@@ -106,6 +111,11 @@ function fillSample(): void {
       <VdStepBar :step="step" :steps="steps" @go="go" />
       <section class="card">
 
+        <div class="copy-tabs">
+          <button type="button" class="copy-tab" :class="{ on: copyTab === 'ai' }" @click="copyTab = 'ai'">AI生成文案</button>
+          <button type="button" class="copy-tab" :class="{ on: copyTab === 'input' }" @click="copyTab = 'input'">输入文案</button>
+        </div>
+        <template v-if="copyTab === 'ai'">
         <!-- 方案一=选择产品（2026-11-05 用户裁定：提示信息+与方案二同构胶囊标签；
              本按钮=纯产品选择入口，开公共弹窗、已选可重选，不触发生成） -->
         <div class="scheme-row">
@@ -155,6 +165,19 @@ function fillSample(): void {
             />
           </div>
         </div>
+        </template>
+        <template v-else>
+          <div class="gen-block">
+            <div class="scheme-row">
+              <span class="scheme-tag">输入文案</span>
+              <span class="scheme-hint">直接写下口播文案，点「使用文案」即追加一份；可反复输入、逐份追加</span>
+            </div>
+            <textarea v-model="inputCopy" class="input gen-textarea" rows="12" placeholder="在此输入口播文案（每点一次「使用文案」追加一份分镜标签）…"></textarea>
+            <div class="gen-actions">
+              <TButton label="使用文案" :disabled="!inputCopy.trim()" @click="useInputCopy" />
+            </div>
+          </div>
+        </template>
 
         <!-- 分镜脚本（2026-09-21 用户裁决：生成脚本的界面与逻辑自第二步移到本页文案下方；
              生成后作为四步公共显示组件，每步都有、只是状态不同——本步为编辑态） -->
@@ -195,6 +218,12 @@ function fillSample(): void {
 
 <style scoped>
 .card { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.copy-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.copy-tab {
+  padding: 6px 16px; border-radius: var(--radius-md); border: 1px solid transparent;
+  background: transparent; color: var(--muted-foreground); font-size: 13px; cursor: pointer;
+}
+.copy-tab.on { background: var(--primary); color: var(--primary-foreground); font-weight: 700; }
 
 /* 方案一/二（2026-11-05 用户裁定：两方案同构——同款胶囊标签+提示行；提示行文案色
    方案二为红（用户指定），方案一中性） */

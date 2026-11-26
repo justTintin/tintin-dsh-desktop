@@ -232,7 +232,23 @@ export const FANCY_POSITION_OPTIONS = [
  * （useCopywritingMontageStep3Voice `/^脚本(\d+)$/`）。
  */
 export function isAutoStoryboardName(name: string): boolean {
-  return /^脚本\d+$/.test(String(name || '').trim())
+  return /^(?:\d{4}-\d{2}-\d{2}\s+)?脚本\d+$/.test(String(name || '').trim())
+}
+
+/** 分镜脚本名默认日期前缀（YYYY-MM-DD，本地日期）；已是日期开头或服务端
+ *  「分镜脚本_YYYYMMDD」形态的不重复加。 */
+export function storyboardDatePrefix(d = new Date()): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+export function datedStoryboardName(name: string, d = new Date()): string {
+  const base = String(name || '').trim()
+  if (!base) return base
+  const prefix = storyboardDatePrefix(d)
+  if (base.startsWith(prefix) || /^分镜脚本_\d{8}/.test(base)) return base
+  return `${prefix} ${base}`
 }
 
 /**

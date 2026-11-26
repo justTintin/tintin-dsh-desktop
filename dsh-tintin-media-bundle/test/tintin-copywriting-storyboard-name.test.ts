@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   isAutoStoryboardName,
   storyboardNameAfterSave,
+  datedStoryboardName,
   cloneDisplayProgress,
 } from '../src/composables/copywritingMontageStep3VoiceLogic'
 
@@ -16,6 +17,7 @@ describe('isAutoStoryboardName（默认「脚本N」判定）', () => {
     expect(isAutoStoryboardName('脚本12')).toBe(true)
     expect(isAutoStoryboardName(' 脚本3 ')).toBe(true) // 首尾空白 trim 后命中
     expect(isAutoStoryboardName('脚本 1')).toBe(false) // 内嵌空格≠自增默认名（保守：视为用户命名不覆盖）
+    expect(isAutoStoryboardName('2026-11-26 脚本3')).toBe(true) // 日期前缀的默认名仍能保存回学
   })
 
   it('用户重命名/选题名/空值 不命中', () => {
@@ -32,6 +34,7 @@ describe('storyboardNameAfterSave（保存回学规则）', () => {
   it('默认名「脚本N」→ 回学选题', () => {
     expect(storyboardNameAfterSave('脚本1', topic)).toBe(topic)
     expect(storyboardNameAfterSave('脚本10', topic)).toBe(topic)
+    expect(storyboardNameAfterSave('2026-11-26 脚本3', topic)).toBe(topic)
   })
 
   it('用户重命名过 → 保留不覆盖', () => {
@@ -46,6 +49,20 @@ describe('storyboardNameAfterSave（保存回学规则）', () => {
 
   it('选题两端空白被裁掉后回学', () => {
     expect(storyboardNameAfterSave('脚本2', `  ${topic}  `)).toBe(topic)
+  })
+})
+
+describe('datedStoryboardName（分镜脚本名默认日期开头）', () => {
+  const d = new Date(2026, 10, 26)
+  it('新tab名自动加 YYYY-MM-DD 前缀', () => {
+    expect(datedStoryboardName('脚本1', d)).toBe('2026-11-26 脚本1')
+    expect(datedStoryboardName('价格冲击式', d)).toBe('2026-11-26 价格冲击式')
+    expect(datedStoryboardName('输入文案', d)).toBe('2026-11-26 输入文案')
+  })
+  it('已有日期或服务端选题形态不重复加', () => {
+    expect(datedStoryboardName('2026-11-26 脚本1', d)).toBe('2026-11-26 脚本1')
+    expect(datedStoryboardName('分镜脚本_20261126_1200', d)).toBe('分镜脚本_20261126_1200')
+    expect(datedStoryboardName('', d)).toBe('')
   })
 })
 

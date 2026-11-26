@@ -132,8 +132,8 @@
     "minCount": 1
   },
   {
-    "comment": "the main process proxies the online library over IPC",
-    "path": "dsh-plugin-desktop-tintin/src/tintin/main-hook.ts",
+    "comment": "the main process proxies the online library over IPC (2026-11-24 moved to library-proxy.ts)",
+    "path": "dsh-plugin-desktop-tintin/src/tintin/library-proxy.ts",
     "pattern": "openfilm:library:list",
     "minCount": 1
   },
@@ -420,84 +420,6 @@
     "minCount": 1
   },
   {
-    "comment": "cover plugin (2026-10-27 WP-1/WP-6): template registry stays (layer defs = props projection)",
-    "path": "dsh-tintin-cover-plugin/src/registry.ts",
-    "pattern": "TEMPLATES",
-    "minCount": 2
-  },
-  {
-    "comment": "cover render engine stays (renderStill flow, output to workspace cover/)",
-    "path": "dsh-tintin-cover-plugin/src/engine.ts",
-    "pattern": "renderCover",
-    "minCount": 2
-  },
-  {
-    "comment": "bundle route serving cover editor + render API stays",
-    "path": "dsh-tintin-cover-plugin/lib/cover-plugin-route.js",
-    "pattern": "/tintin/cover/api/render",
-    "minCount": 1
-  },
-  {
-    "comment": "cover image upload endpoint stays (product/bg image swap in editor)",
-    "path": "dsh-tintin-cover-plugin/lib/cover-plugin-route.js",
-    "pattern": "/tintin/cover/api/upload-image",
-    "minCount": 1
-  },
-  {
-    "comment": "cover agent tool group stays (session-driven cover generation, WP-7/WP-4)",
-    "path": "dsh-tintin-cover-plugin/lib/cover-tools.js",
-    "pattern": "cover_generate",
-    "minCount": 2
-  },
-  {
-    "comment": "cover AI background generation stays (WP-3 hybrid pipeline: server text2image → plugin public/; wired in index.js/route)",
-    "path": "dsh-tintin-cover-plugin/lib/cover-background.js",
-    "pattern": "generateCoverBackground",
-    "minCount": 1
-  },
-  {
-    "comment": "cover asset provenance ledger stays (§7 copyright trace: upload/ai records + export sidecar)",
-    "path": "dsh-tintin-cover-plugin/lib/cover-provenance.js",
-    "pattern": "appendAssetProvenance",
-    "minCount": 1
-  },
-  {
-    "comment": "cover output dir reveal endpoint stays (explorer open, cover dir only)",
-    "path": "dsh-tintin-cover-plugin/lib/cover-plugin-route.js",
-    "pattern": "/tintin/cover/api/reveal",
-    "minCount": 1
-  },
-  {
-    "comment": "film_render cover hook stays (WP-4: cover lands next to the rendered mp4, best-effort)",
-    "path": "dsh-tintin-bundle/lib/film-tools.js",
-    "pattern": "renderCover",
-    "minCount": 1
-  },
-  {
-    "comment": "cover product img2img stays (jimeng image2image, current product image as reference)",
-    "path": "dsh-tintin-cover-plugin/lib/cover-background.js",
-    "pattern": "generateCoverProductImage",
-    "minCount": 1
-  },
-  {
-    "comment": "sidebar menu entry for cover editor stays (above video editing, 2026-10-27 ruling)",
-    "path": "dsh-tintin-bundle/client.js",
-    "pattern": "封面制作",
-    "minCount": 2
-  },
-  {
-    "comment": "cover ACP session bridge stays (2026-10-28 session port: real agent loop, permission/question routed to chat cards)",
-    "path": "dsh-tintin-cover-plugin/lib/cover-acp-bridge.js",
-    "pattern": "startSession",
-    "minCount": 1
-  },
-  {
-    "comment": "cover session route family stays (editor right panel conversation over ACP; SSE + chat record + props sync)",
-    "path": "dsh-tintin-cover-plugin/lib/cover-acp-routes.js",
-    "pattern": "/tintin/cover/api/acp/",
-    "minCount": 1
-  },
-  {
     "comment": "replay: TinTin brand icon in the chat shell survives upgrades (upstream has no such file)",
     "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/components/BrandLogo.tsx",
     "pattern": "TinTin",
@@ -762,12 +684,6 @@
     "minCount": 1
   },
   {
-    "comment": "registry: the cover plugin keeps its dsh face",
-    "path": "dsh-tintin-cover-plugin/package.json",
-    "pattern": "\"dsh\": {",
-    "minCount": 1
-  },
-  {
     "comment": "registry: the ops bundle keeps its dsh face",
     "path": "dsh-tintin-ops-bundle/package.json",
     "pattern": "\"dsh\": {",
@@ -795,12 +711,6 @@
     "comment": "registry: the channel mounts the media bundle",
     "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
     "pattern": "tintin-media",
-    "minCount": 2
-  },
-  {
-    "comment": "registry: the channel mounts the cover plugin",
-    "path": "dsh-plugin-desktop-tintin/cordis.patch.yml",
-    "pattern": "tintin-cover",
     "minCount": 2
   },
   {
@@ -852,6 +762,30 @@
     "minCount": 1
   },
   {
+    "comment": "即梦 CLI 技能(视频剪辑技能管理页;独立开关 dreamina.preferInFilm)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/FilmDreaminaSkill.tsx",
+    "pattern": "useFilmDreamina",
+    "minCount": 1
+  },
+  {
+    "comment": "即梦 CLI 详情卡在技能页 Shelf 直排(我的页只放开关)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/PluginsPane.tsx",
+    "pattern": "DreaminaLine",
+    "minCount": 2
+  },
+  {
+    "comment": "即梦 CLI 独立主进程通道(开关 preferInFilm 与封面解耦)",
+    "path": "dsh-plugin-desktop-tintin/src/tintin/film-dreamina-channels.ts",
+    "pattern": "preferInFilm",
+    "minCount": 3
+  },
+  {
+    "comment": "Studio preload 暴露即梦 CLI 通道",
+    "path": "dsh-plugin-desktop-tintin/src/tintin/studio-preload.ts",
+    "pattern": "openfilm:native:dreamina",
+    "minCount": 1
+  },
+  {
     "comment": "在线素材嵌入缝 0.4 重放(window.tintinOnlineLibrary 页级桥,2026-11-19 用户裁决保留)",
     "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/LibraryDrawer.tsx",
     "pattern": "tintinOnlineLibrary",
@@ -873,6 +807,42 @@
     "comment": "0.4 connectors 空实现(集成智能体走 DSH ACP,连接器面板空态不炸)",
     "path": "dsh-plugin-desktop-tintin/src/tintin/studio-preload.ts",
     "pattern": "connectors",
+    "minCount": 2
+  },
+  {
+    "comment": "chat 媒体行预览/另存:空项目透传给主进程 studio.json 兜底(2026-11-25 报障)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/chat/components/FileChangesList.tsx",
+    "pattern": "projectFile.saveAs(payload)",
+    "minCount": 1
+  },
+  {
+    "comment": "我的页即梦 CLI 只放默认开关,登录/能力详情在技能页展开(2026-11-25)",
+    "path": "dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src/openfilm/studio/ui/src/components/library/PluginsPane.tsx",
+    "pattern": "DreaminaToggle",
+    "minCount": 2
+  },
+  {
+    "comment": "four-track shot card (2026-11-26): per-shot radio marks + search button + track tiles",
+    "path": "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStoryboard.vue",
+    "pattern": "toggleGenMode",
+    "minCount": 1
+  },
+  {
+    "comment": "per-shot material gen composable wired to shell",
+    "path": "dsh-tintin-media-bundle/src/composables/useCopywritingMontage.ts",
+    "pattern": "shotMatBusy",
+    "minCount": 1
+  },
+  {
+    "comment": "manual copy tab adds a voiceover tab per click",
+    "path": "dsh-tintin-media-bundle/src/components/media-tools/copywriting-montage/CopywritingStep1Panel.vue",
+    "pattern": "useInputCopy",
+    "minCount": 2
+  },
+  {
+    "comment": "append manual copy without replacing existing copy tabs",
+    "path": "dsh-tintin-media-bundle/src/composables/useCopywritingMontage.ts",
+    "pattern": "appendManualCopy",
     "minCount": 2
   }
 ]

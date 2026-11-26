@@ -1,41 +1,57 @@
 // Film agent ACP bridge (第三行形态, 2026-10-23 用户裁决): 每部影片一个
 // `dsh --profile acp` 子进程(DeepSeek Harness 的自动化 ACP stdio 面), 会话持久在
-// 隔离 home, 模型路由到 TinTin 服务端(--patch 生成的模型路由 + 占位 env
-// key). 对齐官方桌面 agents.mjs 的低层用法: initialize → session/new(或 resume)
+// 隔离 home. 对齐官方桌面 agents.mjs 的低层用法: initialize → session/new(或 resume)
 // → session/prompt, 语义更新经 onEvent 流向聊天, 审批/提问路由给聊天卡回答
 // (官方 `approve: true` 的口径由聊天 UI 承接; 无人应答时不自动放行).
+// 2026-11-23 用户裁决(智能体分链): 模型路由按角色分链 —— DeepSeek Harness=客户端
+// 配置(dsh acp 默认 deepseek-official, 补丁不改写路由); TinTin智能体=TinTin 服务端.
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Readable, Writable } from 'node:stream'
 import * as acp from '@agentclientprotocol/sdk'
+import { readClientDeepseekConfig } from 'dsh-tintin-shared/lib/profile-patch-rows.js'
+import { acpProfileMaterialized } from 'dsh-tintin-shared/lib/dsh-acp-home.js'
 import { fileOf, scheduleFilmModelLog } from './film-model-calls.ts'
+import { filmDreaminaPreferOn, filmDreaminaSkillsDir } from './film-dreamina-channels.ts'
 
 const require_ = createRequire(import.meta.url)
 
 /** 影片可用的服务端模型(id=请求用的模型名,name=选择器展示名). */
 export interface FilmAgentModels { id: string; name: string }
 
-/** 影片会话的角色(聊天选择器里的 agent 行; 2026-10-30 用户裁决: 新增「TinTin智能体」并设为默认).
-    deepseek=编导助手(原 DeepSeek Harness); tintin-agent=TinTin智能体(默认), 调度服务端子智能体
-    (视频/图片/音乐/音频/口播/数字人生成, 即服务端 /mcp 的 create_* 工具族)。角色=人设不同,
-    补丁与会话都按角色分文件。 */
+/** 影片会话的智能体(聊天选择器里的 agent 行)。
+    2026-11-24 用户裁决「检查原来 openfilm 的默认处理,再加自定义的 TinTin智能体」:
+    · deepseek(DeepSeek Harness,默认智能体)= 用户自己的 dsh —— 照上游 openfilm
+      (apps/desktop/src/agents.mjs:`dsh --profile acp`,用用户自己的 home):模型/凭据/账号
+      全用客户端的,补丁不改写模型路由,只挂 TinTin 的 MCP 工具箱与编排纪律。
+    · tintin-agent(TinTin智能体,自定义)= dsh + TinTin 服务端模型路由(/v1/models 实拉清单),
+      调度服务端子智能体(视频/图片/音乐/音频/口播/数字人生成,即服务端 /mcp 的 create_* 工具族)。
+    两个智能体是两条模型链路:补丁/home/会话都按智能体分键。 */
 export type FilmAgentPersona = 'deepseek' | 'tintin-agent'
 
-/** 影片可用的服务端模型(补丁与兜底清单;与首启 provisioning 的降级清单同源). */
-export const FILM_AGENT_MODELS: FilmAgentModels[] = [
-  { id: 'deepseek-v4-flash', name: 'DeepSeek-V4-Flash' },
-  { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+/** 服务端不可达时 TinTin 智能体补丁的兜底模型清单(正常以 GET /v1/models 实拉为准)。 */
+export const FILM_TINTIN_AGENT_MODELS: FilmAgentModels[] = [
+  { id: 'deepseek-v4-flash', name: 'deepseek-v4-flash' },
+  { id: 'deepseek-v4-pro', name: 'deepseek-v4-pro' },
 ]
 
-/** TinTin智能体角色的模型清单(2026-10-30): 路由同一个服务端模型, 显示名即角色名 ——
-    选择器按钮与模型行因此显示「TinTin智能体」而不是底层模型名。 */
-export const FILM_TINTIN_AGENT_MODELS: FilmAgentModels[] = [
-  { id: 'deepseek-v4-flash', name: 'TinTin智能体' },
-]
+/** TinTin 服务端模型清单(与封面侧 fetchStandardModels 同一接口:标准 GET /v1/models)。
+ *  失败返回 null,调用方用兜底清单。 */
+export async function fetchFilmServerModels(serverUrl: string): Promise<FilmAgentModels[] | null> {
+  try {
+    const res = await fetch(`${serverUrl.replace(/\/+$/, '')}/v1/models`, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const body = await res.json() as { data?: Array<{ id?: unknown; name?: unknown }> }
+    const models = (Array.isArray(body.data) ? body.data : [])
+      .filter((m) => typeof m?.id === 'string' && m.id)
+      .map((m) => ({ id: m.id as string, name: typeof m?.name === 'string' && m.name ? m.name : (m.id as string) }))
+    return models.length ? models : null
+  } catch { return null }
+}
 
 /** TinTin智能体角色的人设(补丁 system-prompt.personaPrefix, 叠在 acp bundle 层之后覆盖同 id 行):
     调度服务端子智能体(2026-10-30 /mcp tools/list 实测 7 工具: create_video/create_image/
@@ -52,7 +68,9 @@ export const FILM_TINTIN_AGENT_PERSONA = [
   '- 数字人 → create_digital_human: kind=image(人物图+驱动音频→口播视频, 缺省)或 kind=lipsync(视频+驱动音频→口型同步); 文件字段传 base64; 异步任务同上轮询。',
   '通用规则:',
   '1. 异步工具拿到 task_id 后用 task_status_unified 轮询到完成; 失败时把服务端错误原样转告用户, 并给一条修改建议。',
+  '1b. 等待纪律(2026-11-24 用户裁决, 成本红线): 等待异步任务期间严禁反复 Start-Sleep 短轮询——每多一步都会重发全部会话上下文计费。**首选服务端 SSE 终态推送**: 单条 pwsh 命令 curl.exe -N -sS "<服务端>/tasks/unified/<task_id>/events" 一直挂到任务到终态(流结束或事件出现 completed|failed|error 即止;视频与数字人可挂满 30 分钟预算),最后一条 data 即结果。服务端较旧无此端点(404)时, 回落单条命令内嵌轮询循环(do { curl 查询; Start-Sleep 20 } while 未终态且未超 8 分钟);两条路都超时=返回当前状态并结束本轮让用户决定。',
   '2. 每个产物取结果地址后用 curl 下载保存进当前影片项目目录 assets/tintin/(命名: 视频 vid-短时间戳.mp4 / 图片 img-*.png / 音乐 bgm-*.wav / 音效 sfx-*.wav / 口播 vo-*.wav), 回复里必须给出保存路径, 方便插入时间线。',
+  '2b. 落轨纪律(2026-11-24 用户裁决「会话生成的素材应放到剪辑轨道上」): 产物落盘后**必须立即插入时间线**(openfilm CLI/film.html 编辑), 禁止只落盘不上轨; 对效果不满意也要先插上让用户看到实际效果, 去留由用户决定——不得以「效果可能不好」为由替用户跳过。',
   '3. 用户要多个结果时逐个任务生成; 需求缺关键要素(画面主体/风格/时长/画幅/音色)时先问清再生成。',
   '4. 与生成无关的请求(剪辑/编排/改时间线)如实说明这不归你, 建议切到 DeepSeek Harness(编导)。',
   '回复用简短中文, 汇报每次调用的子智能体、参数与结果路径。',
@@ -66,7 +84,9 @@ export const FILM_AGENT_WORK_RULES = [
   '你是 TinTin 视频剪辑工作台的编导智能体。编排工作纪律(每轮遵守):',
   '1. 生成视频/图片/音乐/音频(音效、口播)/数字人, 唯一出口是服务端 MCP 工具 create_video / create_image / create_music / create_audio / create_digital_human; 禁止用代码、HTML/canvas、写文件等本地方式自制这些生成物。',
   '2. 异步工具(返回 task_id)必须用 task_status_unified 轮询到终态: 两次轮询间隔 ≥5 秒; 视频与数字人任务预算 30 分钟, 到终态或超预算即停, 超时如实报告 task_id 供续查; 终态 failed 时把服务端错误原样转告并给一条修改建议, 同一任务重试最多 2 次, 禁止无限重试。',
+  '2b. 等待纪律(2026-11-24 用户裁决, 成本红线): 等待异步任务期间严禁每 45 秒醒来查一次——每多一步都会重发全部会话上下文计费。**首选服务端 SSE 终态推送**: 单条 pwsh 命令 curl.exe -N -sS "<服务端>/tasks/unified/<task_id>/events" 一直挂到任务到终态(流结束或事件出现 completed|failed|error 即止;视频与数字人可挂满 30 分钟预算),最后一条 data 即结果。服务端较旧无此端点(404)时, 回落单条命令内嵌轮询循环(do { curl 查询; Start-Sleep 20 } while 未终态且未超 8 分钟);两条路都超时=返回当前状态并结束本轮让用户决定。',
   '3. 同步工具(音乐/音效/口播)直接使用返回的 URL; 需要进影片的产物下载保存进项目 assets/tintin/(vid-/img-/bgm-/sfx-/vo- 前缀), 回复里报告保存路径。',
+  '3b. 落轨纪律(2026-11-24 用户裁决「会话生成的素材应放到剪辑轨道上」): 产物落盘后**必须立即插入时间线**(openfilm CLI/film.html 编辑), 禁止只落盘不上轨; 对效果不满意也要先插上让用户看到实际效果, 去留由用户决定——不得以「效果可能不好」为由替用户跳过。',
   '4. 剪辑与项目操作遵循已注入的 openfilm 技能文档(openfilm CLI); 需求缺关键要素(主体/风格/时长/画幅/音色)先问清再动手。',
   '5. 与当前能力无关的请求如实说明, 不虚构能力; 始终用简短中文回复。',
 ].join('\n')
@@ -137,26 +157,91 @@ export function filmAgentHomeDir(persona: FilmAgentPersona): string {
   return persona === 'tintin-agent' ? 'film-tintin-agent-home' : 'film-agent-home'
 }
 
-/** 生成影片智能体的模型路由补丁(叠在 acp bundle 层之后生效).
+/** YAML 双引号字符串:JSON 转义即合法 YAML 双引号标量(Windows 路径的反斜杠/盘符冒号都安全)。 */
+const yamlText = (value: string): string => JSON.stringify(value.replaceAll('\\', '/'))
+
+/** DeepSeek Harness(默认智能体)的补丁行 —— 照上游 openfilm 的默认处理:它就是用户自己的 dsh,
+ *  模型/凭据/账号全用客户端的,这里不改写模型路由,只做三件事(与封面侧 cover-acp-bridge
+ *  的 deepseekRows 同构):
+ *  ① 默认模型跟随客户端(agent-default-model;没保存过=dsh 自身默认 deepseek-flash。acp-app 包给
+ *     ACP 钉的旧 id deepseek-v4-flash 不在 dsh 官方模型目录里,不沿用);
+ *  ② 客户端「设置→模型」自定义过 DeepSeek 目录/地址(2026-11-23 用户裁决②)→ 该配置行原文并入;
+ *  ③ 技能目录与会话目录经 dsh 插件配置项指回 TinTin 的智能体目录 —— DSH_HOME 是客户端的,不把影片
+ *     技能写进客户端技能库、不把智能体会话写进客户端会话列表,且旧会话路径不变照常续接。 */
+function filmDeepseekRows(channelHome: string): string[] {
+  const client = readClientDeepseekConfig(channelHome)
+  const agentDir = join(channelHome, filmAgentHomeDir('deepseek'))
+  return [
+    '# DeepSeek Harness = 客户端自己的 dsh(照上游 openfilm):模型/凭据/账号用客户端的,不改写模型路由.',
+    '# 默认模型跟随客户端;客户端「设置→模型」自定义过目录则随后并入.',
+    '- id: acp',
+    '  config:',
+    '    provider: deepseek-official',
+    `    model: ${yamlText(client.defaultModel)}`,
+    ...(client.catalogRow ? [client.catalogRow] : []),
+    '# 技能/会话留在 TinTin 的智能体目录(不进客户端的技能库与会话列表;旧会话路径不变):',
+    '- id: skill-filesystem',
+    '  config:',
+    '    customSkillDirs:',
+    `      - ${yamlText(join(agentDir, 'skills'))}`,
+    '- id: session-persistence-jsonl',
+    '  config:',
+    `    root: ${yamlText(join(agentDir, 'sessions'))}`,
+  ]
+}
+
+/** 生成影片智能体的补丁(叠在 acp bundle 层之后生效).
     插件 id 必须是 acp 组合实际存在的行(llm-pi-ai/acp, 见 dsh-base cordis.patch.yml 135 行)
     —— id 写错(如曾经的 llm-pi-ai)整行被静默忽略, 模型回落官方直连。
     personaPrefix 非空时叠加 system-prompt 行(覆盖 acp bundle 的部署人设)。
     2026-10-30:补 dsh-mcp-client 行挂服务端 MCP 工具箱 —— 实证 rc.2 的 acp 路径
     无视 session/new 的 mcpServers 参数(坏 URL 也不报错、子进程零连接, 当日探针),
-    会话参数挂载失效;补丁行按官方 README 最小配置进程级挂载, 工具名 mcp__tintin-server__*。 */
-export function filmAgentPatchText(serverUrl: string, models: FilmAgentModels[] = FILM_AGENT_MODELS, personaPrefix = ''): string {
+    会话参数挂载失效;补丁行按官方 README 最小配置进程级挂载, 工具名 mcp__tintin-server__*。
+    2026-11-24 按智能体分链:
+    · deepseek(DeepSeek Harness):personaPrefix=编排纪律;模型路由不改写(见 filmDeepseekRows)。
+    · tintin-agent(TinTin智能体):personaPrefix=角色人设;模型路由到 TinTin 服务端,models=GET
+      /v1/models 实拉清单、原生名(2026-10-30 的「首个模型显示名品牌化为 TinTin智能体」随
+      2026-11-23 用户裁决退役 —— 选择器里要看到服务端的模型清单)。 */
+export function filmAgentPatchText(serverUrl: string, models: FilmAgentModels[], personaPrefix: string, persona: FilmAgentPersona, channelHome: string): string {
   /* 2026-11-04 感知闭环:模型行声明 input:[text,image](llm-pi-ai schema `input`)——
      缺省=纯文本,会话不广播 inline image prompts,用户附图在协议层被拒
      (「inline image prompts were not advertised」,1104 事故同根因,与封面侧同修)。
      服务端 /llm 已 caption-then-main,声明即真。 */
   const rows = models.map((m) => `          - id: ${m.id}\n            name: ${m.name}\n            input: [text, image]`).join('\n')
-  const personaLines = personaPrefix
+  /* 即梦 CLI:开关开且技能已安装时,把"优先 CLI"写进本会话的人设前缀;
+     关或未装=不注入,生成仍走 create_image/create_video。 */
+  const dreaminaOn = filmDreaminaPreferOn() && existsSync(join(filmDreaminaSkillsDir(channelHome), 'SKILL.md'))
+  const effectivePrefix = `${personaPrefix}${dreaminaOn
+    ? '\n\n即梦 CLI 技能已启用:图片/视频生成优先用 dreamina CLI(按已装技能文档执行);未登录或 CLI 失败时回退 create_image / create_video。'
+    : ''}`
+  const personaLines = effectivePrefix
     ? ['- id: system-prompt', '  config:', '    personaPrefix: |-',
-      ...personaPrefix.split('\n').map((line) => `      ${line}`)]
+      ...effectivePrefix.split('\n').map((line) => `      ${line}`)]
     : []
+  const routeRows = persona === 'tintin-agent'
+    ? [
+      '- id: llm-pi-ai',
+      '  config:',
+      '    providers:',
+      '      tintin-server:',
+      '        displayName: TinTin',
+      '        apiKeyEnv: TINTIN_SERVER_API_KEY',
+      '        api: openai-completions',
+      `        baseURL: ${serverUrl.replace(/\/+$/, '')}/llm`,
+      '        models:',
+      rows,
+      '- id: acp',
+      '  config:',
+      '    provider: tintin-server',
+      `    model: ${models[0]?.id ?? 'deepseek-v4-flash'}`,
+    ]
+    : filmDeepseekRows(channelHome)
   const lines = [
-    '# TinTin 影片智能体: 模型路由到 TinTin 服务端(openai-completions, <server>/llm).',
-    '# 由桌面端生成; 手改会被下次启动覆盖. key 走 env TINTIN_SERVER_API_KEY(占位值).',
+    persona === 'tintin-agent'
+      ? '# TinTin 智能体(影片): 模型路由到 TinTin 服务端(openai-completions, <server>/llm).'
+      : '# TinTin 影片智能体(DeepSeek Harness): 模型走客户端自己的 dsh, 服务端只挂 MCP 工具箱.',
+    '# 由桌面端生成; 手改会被下次启动覆盖.',
+    ...(persona === 'tintin-agent' ? ['# key 走 env TINTIN_SERVER_API_KEY(占位值).'] : []),
     ...personaLines,
     '# 服务端 MCP 工具箱(rc.2 会话参数挂载失效, 补丁行挂载; 工具名 mcp__tintin-server__*):',
     '# 新行必须 insert: 顶层 - id: 行是"更新已存在条目"语义, 目标不存在=整行静默忽略。',
@@ -168,34 +253,24 @@ export function filmAgentPatchText(serverUrl: string, models: FilmAgentModels[] 
     '        transport: streamable-http',
     `        url: ${serverUrl.replace(/\/+$/, '')}/mcp`,
     '        failOnStartupError: true',
-    '- id: llm-pi-ai',
-    '  config:',
-    '    providers:',
-    '      tintin-server:',
-    '        displayName: TinTin',
-    '        apiKeyEnv: TINTIN_SERVER_API_KEY',
-    '        api: openai-completions',
-    `        baseURL: ${serverUrl.replace(/\/+$/, '')}/llm`,
-    '        models:',
-    rows,
-    '- id: acp',
-    '  config:',
-    '    provider: tintin-server',
-    `    model: ${models[0]?.id ?? 'deepseek-v4-flash'}`,
+    ...routeRows,
   ]
   lines.push('')
   return lines.join('\n')
 }
 
-/** 把补丁写到隔离 home 的固定位置(内容变化才写), 返回补丁绝对路径. */
-export function ensureFilmAgentPatch(channelHome: string, serverUrl: string, models?: FilmAgentModels[], persona: FilmAgentPersona = 'deepseek'): string {
+/** 把补丁写到 <channelHome>/tintin 的固定位置(内容变化才写), 返回补丁绝对路径.
+ *  models 只有 TinTin 智能体需要(服务端 GET /v1/models 实拉清单;缺省=兜底清单)。 */
+export function ensureFilmAgentPatch(channelHome: string, serverUrl: string, models: FilmAgentModels[] | undefined, persona: FilmAgentPersona): string {
   const dir = join(channelHome, 'tintin')
   mkdirSync(dir, { recursive: true })
   const path = join(dir, filmAgentPatchFile(persona))
   const text = filmAgentPatchText(
     serverUrl,
-    models ?? (persona === 'tintin-agent' ? FILM_TINTIN_AGENT_MODELS : FILM_AGENT_MODELS),
+    persona === 'tintin-agent' ? (models ?? FILM_TINTIN_AGENT_MODELS) : [],
     persona === 'tintin-agent' ? FILM_TINTIN_AGENT_PERSONA : FILM_AGENT_WORK_RULES,
+    persona,
+    channelHome,
   )
   if (!existsSync(path) || readFileSync(path, 'utf8') !== text) writeFileSync(path, text, 'utf8')
   return path
@@ -590,22 +665,35 @@ export class FilmAgentManager {
     this.options.onEvent?.({ project, event })
   }
 
-  private ensure(project: string, persona?: FilmAgentPersona, resume?: string | null): Promise<Handle> {
+  private async ensure(project: string, persona?: FilmAgentPersona, resume?: string | null): Promise<Handle> {
     const wanted = persona ?? this.personas.get(project) ?? 'deepseek'
     if (persona !== undefined) this.personas.set(project, persona)
     const existing = this.handles.get(project)
-    /* 角色切换 = 人设不同, 会话必须重建(补丁按角色分文件) */
-    if (existing && existing.child.exitCode === null && existing.agentId === wanted) return Promise.resolve(existing)
+    /* 切换智能体 = 换一条模型链路(DeepSeek Harness=客户端 / TinTin智能体=服务端),会话必须重建 */
+    if (existing && existing.child.exitCode === null && existing.agentId === wanted) return existing
     if (existing) this.stop(project)
-    const handle = this.start(project, wanted, resume)
+    const serverUrl = this.options.serverUrl().replace(/\/+$/, '')
+    /* DeepSeek Harness 跑在客户端 home:dsh 首次在该 home 物化 acp profile 的那一次启动,模型发现
+       早于凭据就绪,清单不全(见 dsh-tintin-shared/lib/dsh-acp-home.js)——未物化时先做一次丢弃式预热。
+       (2026-11-24 实测:同一 home 第二次启动起即报完整目录;TinTin 智能体的清单来自补丁,不受影响。) */
+    if (wanted === 'deepseek' && serverUrl && !acpProfileMaterialized(this.options.channelHome)) {
+      this.log('[film-agent] 客户端 home 首次物化 acp profile:先做一次丢弃式预热启动')
+      const warm = this.start(project, wanted, null)
+      this.handles.set(project, warm)
+      await warm.agent.then(() => undefined, () => undefined)
+      this.stop(project)
+    }
+    /* 模型清单只有 TinTin 智能体(服务端路由)需要:GET /v1/models 实拉,失败回落兜底清单 */
+    const models = wanted === 'tintin-agent' ? ((await fetchFilmServerModels(serverUrl)) ?? FILM_TINTIN_AGENT_MODELS) : undefined
+    const handle = this.start(project, wanted, resume, models)
     this.handles.set(project, handle)
     return handle.agent.then(() => handle)
   }
 
-  private start(project: string, agentId: FilmAgentPersona, resume?: string | null): Handle {
+  private start(project: string, agentId: FilmAgentPersona, resume?: string | null, models?: FilmAgentModels[]): Handle {
     const serverUrl = this.options.serverUrl().replace(/\/+$/, '')
     if (!serverUrl) throw new Error('server.url 未配置: 影片智能体无法启动')
-    const patchPath = ensureFilmAgentPatch(this.options.channelHome, serverUrl, undefined, agentId)
+    const patchPath = ensureFilmAgentPatch(this.options.channelHome, serverUrl, models, agentId)
     const home = join(this.options.channelHome, filmAgentHomeDir(agentId))
     mkdirSync(home, { recursive: true })
     /* 内置 openfilm 技能随包分发(2026-10-24): 同步进影片智能体的 home ——
@@ -620,8 +708,25 @@ export class FilmAgentManager {
         writeFileSync(join(target, 'SKILL.md'), readFileSync(source, 'utf8'))
       }
     } catch { /* 技能同步失败不阻断启动 */ }
+    /* 即梦 CLI 技能(视频剪辑技能管理页安装):随会话同步进本机 agent home;
+       开关关=撤下,让"优先 CLI"在下次会话真正失效。 */
+    try {
+      const installed = join(filmDreaminaSkillsDir(this.options.channelHome), 'SKILL.md')
+      const target = join(home, 'skills', 'dreamina')
+      if (filmDreaminaPreferOn() && existsSync(installed)) {
+        mkdirSync(target, { recursive: true })
+        writeFileSync(join(target, 'SKILL.md'), readFileSync(installed, 'utf8'))
+      } else {
+        rmSync(target, { recursive: true, force: true })
+      }
+    } catch { /* 同步失败不阻断启动 */ }
     const bin = resolveDshBin()
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_HOME: home,
+    /* DSH_HOME(2026-11-24,照上游 openfilm 的默认智能体处理):
+       · DeepSeek Harness = 客户端自己的 home —— 登录态/API 密钥/模型配置原样可用,不做任何拷贝;
+         技能目录与会话目录由补丁里的 dsh 插件配置项指回 home 目录(见 filmDeepseekRows)。
+       · TinTin 智能体(自定义)= 自己的隔离 home。 */
+    const dshHome = agentId === 'deepseek' ? this.options.channelHome : home
+    const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_HOME: dshHome,
       /* 2026-11-01 按入口分账:占位 key 按链路分值(服务端 /llm 无鉴权不校验值, 计量按 key 分账;
          同族标记: 封面=sk-tintin-local--cover, 页面 REST=sk-tintin-local--rest, 见 pipeline §6.7) */
       TINTIN_SERVER_API_KEY: 'sk-tintin-local--film',
@@ -712,9 +817,15 @@ export class FilmAgentManager {
         ?? (typeof resume === 'string' && resume !== '' ? resume : null)
       if (sessionId !== null) {
         /* 持久会话: resume 失败(如目录变更)回落新建 */
-        const resumed = await conn.agent.request(acp.methods.agent.session.resume, { ...params, sessionId }).then((r) => r as { sessionId: string } & Record<string, unknown>, () => null)
-        if (resumed) { sessionId = resumed.sessionId; handle.session = resumed }
-        else sessionId = null
+        /* 续接成功后会话 id = 回包给了新 id 用新的,否则沿用请求的 id。2026-11-24 实测修复(两工作台同款老 bug):
+           dsh 的 session/resume 回包只有 configOptions、不回 sessionId(harness acp index.ts resumeSession
+           返回 { configOptions }),旧代码无条件取 resumed.sessionId → 续接「成功」却把 id 记成 undefined:
+           setOption 判「会话未启动」切不了模型、内存会话表被写坏、聊天侧拿到空 id 判「未续接」。 */
+        const resumed = await conn.agent.request(acp.methods.agent.session.resume, { ...params, sessionId }).then((r) => r as { sessionId?: string } & Record<string, unknown>, () => null)
+        if (resumed) {
+          sessionId = typeof resumed.sessionId === 'string' && resumed.sessionId !== '' ? resumed.sessionId : sessionId
+          handle.session = resumed
+        } else sessionId = null
       }
       if (sessionId === null) {
         const created = await conn.agent.request(acp.methods.agent.session.new, params) as { sessionId: string } & Record<string, unknown>

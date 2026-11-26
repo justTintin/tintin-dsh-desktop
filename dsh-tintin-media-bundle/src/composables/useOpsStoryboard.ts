@@ -32,6 +32,8 @@ import {
   type ScriptSummary,
   type StoryboardShot,
 } from './opsStoryboardLogic'
+// 分镜 LLM 调用参数（2026-11-25 长文案截断修复，注释见常量出处）
+import { STORYBOARD_LLM_MAX_TOKENS, STORYBOARD_LLM_TIMEOUT_MS } from './copywritingMontageStep2ConcatLogic'
 
 /** /llm/chat/completions 响应 → 文本（choices[0].message.content，防御解析） */
 function pickLlmText(res: unknown): string {
@@ -137,7 +139,7 @@ export function useOpsStoryboard() {
     if (adjusting.value) return
     if (!copyText.value.trim()) { status.value = '文案为空，请先填写视频文案。'; return }
     const t = getTintin()
-    if (!t?.server?.llmChat) { status.value = '服务端 LLM 不可用，请检查服务端连接。'; return }
+    if (!t?.server?.post) { status.value = '服务端 LLM 不可用，请检查服务端连接。'; return }
     adjusting.value = true
     status.value = 'AI 正在调整文案…'
     try {
@@ -145,12 +147,13 @@ export function useOpsStoryboard() {
         copyText: copyText.value.trim(),
         extraPrompt: extraPrompt.value,
       })
-      const res = await t.server.llmChat({
+      const res = await t.server.post('/llm/chat/completions', {
+        max_tokens: STORYBOARD_LLM_MAX_TOKENS,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-      })
+      }, undefined, STORYBOARD_LLM_TIMEOUT_MS)
       if (res && typeof res === 'object' && 'error' in (res as Record<string, unknown>)) {
         throw new Error(String((res as Record<string, unknown>).error || '调整失败'))
       }
@@ -195,27 +198,30 @@ export function useOpsStoryboard() {
     if (generating.value) return
     if (!copyText.value.trim()) { status.value = '请先填写或生成视频文案。'; return }
     const t = getTintin()
-    if (!t?.server?.llmChat) { status.value = '服务端 LLM 不可用，请检查服务端连接。'; return }
+    if (!t?.server?.post) { status.value = '服务端 LLM 不可用，请检查服务端连接。'; return }
     generating.value = true
     status.value = 'AI 正在拆解分镜…'
     try {
       const { systemPrompt, userPrompt } = buildStoryboardPrompt(copyText.value.trim(), ratio.value)
-      const res = await t.server.llmChat({
+      // 显式 max_tokens + 放宽超时（2026-11-25 长文案截断修复，注释见常量出处）
+      const res = await t.server.post('/llm/chat/completions', {
+        max_tokens: STORYBOARD_LLM_MAX_TOKENS,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
         ],
-      })
+      }, undefined, STORYBOARD_LLM_TIMEOUT_MS)
       if (res && typeof res === 'object' && 'error' in (res as Record<string, unknown>)) {
         throw new Error(String((res as Record<string, unknown>).error || '生成失败'))
       }
       const text = pickLlmText(res)
       if (!text) throw new Error('模型未返回内容')
+      const finish = String((res as { choices?: Array<{ finish_reason?: unknown }> })?.choices?.[0]?.finish_reason ?? '')
       const parsed = parseStoryboardShots(text)
       shots.value = parsed.shots
       const total = Math.round(totalDuration(parsed.shots.map((s) => s.duration)))
       status.value = parsed.fallback
-        ? '分镜解析失败，已将原始结果放入第一格，可手动拆分编辑。'
+        ? `分镜解析失败（${finish === 'length' ? '模型输出被 max_tokens 截断' : '模型未返回 JSON 数组'}），已将原始结果放入第一格，可手动拆分编辑。`
         : `分镜已生成（${parsed.shots.length} 个镜头，约 ${total}s），可直接编辑各镜头字段，或点击「引用素材」关联素材。`
     } catch (e) {
       status.value = `生成失败：${(e as Error)?.message || e}`

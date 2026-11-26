@@ -32,10 +32,4 @@ describe('openfilm:native:open-external wiring', () => {
     expect(source).toContain("nativeInvoke('openfilm:native:open-external'")
   })
 
-  it('cover editor resolves the bridge from self or parent and auto-opens on login', () => {
-    const source = read('../dsh-tintin-cover-plugin/src/editor/server-settings.tsx')
-    expect(source).toContain('resolveOpenExternal')
-    expect(source).toContain('openfilmNative')
-    expect(source).toContain('openVerificationUri(verificationUri)')
-  })
 })

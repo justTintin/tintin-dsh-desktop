@@ -27,16 +27,9 @@ function applyLitePackage() {
     const f = join(stagingBin, name)
     if (existsSync(f)) { rmSync(f, { force: true }); removed.push(name) }
   }
-  const remotion = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '.remotion')
-  if (existsSync(remotion)) { rmSync(remotion, { recursive: true, force: true }); removed.push('.remotion') }
   const ofDir = join(packageRoot, 'tintin-resources', 'openfilm')
   if (existsSync(ofDir)) { rmSync(ofDir, { recursive: true, force: true }); removed.push('openfilm') }
-  const loArm = join(packageRoot, 'tintin-resources', 'cover-plugin', 'node_modules', '@deepseek-ai', 'libreoffice-kit-win32-arm64')
-  if (existsSync(loArm)) { rmSync(loArm, { recursive: true, force: true }); removed.push('libreoffice-kit-win32-arm64') }
-  const tmpDir = join(packageRoot, 'tintin-resources', 'cover-plugin', '.tmp')
-  if (existsSync(tmpDir)) { rmSync(tmpDir, { recursive: true, force: true }); removed.push('.tmp') }
-  writeFileSync(join(packageRoot, 'tintin-resources', 'cover-plugin', '.tintin-lite'), 'lite package: media binaries download after install; .remotion auto-downloads on first render\n')
-  process.stdout.write(`[lite] staging 剔除: ${removed.join(', ') || '(已缺)'} + 放置 .tintin-lite 标记\n`)
+  process.stdout.write(`[lite] staging 剔除: ${removed.join(', ') || '(已缺)'}（标记由 afterPack 写入产物 resources/）\n`)
 }
 
 /** 收掉占用旧产物的自愈 PowerShell（2026-11-18 EBUSY 事故）。

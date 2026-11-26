@@ -267,7 +267,9 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, onUpload, onKee
     if (asked) showRef.current(asked);
     return onRevealInLibrary((next) => { takeRevealed(); showRef.current(next); });
   }, []);
-  const pickGroup = (next: string) => { SHOWN.group[cat] = next; setGroup(next); setQuery(''); closePreview(); };
+  /* TinTin(2026-11-24 用户报障「两个一起在选中的状态」): 选中任何常规行/组=离开在线素材面板——
+     tintinOnline 与侧栏选中态(lineOn/railPick)互斥,否则原行保持高亮+在线面板盖住切换目标 */
+  const pickGroup = (next: string) => { setTintinOnline(false); SHOWN.group[cat] = next; setGroup(next); setQuery(''); closePreview(); };
   React.useEffect(() => {
     if (mediaRequest == null) return;
     if (cat !== 'media') show('media');
@@ -531,16 +533,17 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, onUpload, onKee
   const ownShown = !ownLines && (current.kind === 'project' || current.kind === 'folder') && !(cat === 'media' && group !== '');
   /* a namespace shown whole (or the text's looks or templates, OpenFilm's): no line in it lit */
   const wholeShown = group === STARRED || group === OFFICIAL_ALL || group === COMMUNITY_ALL || (cat === 'text' && (group === ART || group === TEMPLATES));
-  const lineOn = (line: Line) => !(q && !ownShown) && (cat === 'media'
+  const lineOn = (line: Line) => !tintinOnline && !(q && !ownShown) && (cat === 'media'
     ? (line.kind === 'pack' ? group === line.group : group === '' && line.key === current.key)
     : line.key === current.key && !(sectioned && wholeShown));
   const pickLine = (line: Line) => {
+    setTintinOnline(false);
     SHOWN.line[cat] = line.key; setLineKey(line.key);
     if (line.kind === 'project' || line.kind === 'folder') { onMediaScope(line.key); if (cat === 'media') pickGroup(''); }
     else pickGroup(line.kind === 'new' ? NEW_TEXT : line.kind === 'presets' ? PRESETS : line.group ?? '');
   };  /* the side bar as namespaces (all but the media's): a box picks, or opens to the lines it holds */
   type RailNode = { key: string; name: string; on?: boolean; onPick?: () => void; line?: Line; children?: RailNode[] };
-  const railPick = (id: string): RailNode => ({ key: id || 'all', name: '', on: group === id && !(q && id !== RECORD), onPick: () => pickGroup(id) });
+  const railPick = (id: string): RailNode => ({ key: id || 'all', name: '', on: !tintinOnline && group === id && !(q && id !== RECORD), onPick: () => pickGroup(id) });
   const ofLine = (line: Line): RailNode => ({ key: line.key, name: line.name, on: lineOn(line), onPick: () => pickLine(line), line });
   /* the voice-over's own: the person's (recording, then their voices cloned), the starred, the services */
   const inMine = cat === 'voice' && (group === MY_VOICES || group === RECORD);
@@ -827,11 +830,6 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, onUpload, onKee
               <div className="flex flex-col gap-2">
                 {head.map((line) => <RailLine key={line.key} look="box" line={line} on={lineOn(line)} onPick={() => pickLine(line)} />)}
                 {railNode({ ...railPick(STARRED), name: t('assetDrawer.favorites') })}
-                {/* TinTin: 在线素材（window.tintinOnlineLibrary 页级桥挂载, 0.3 缝 0.4 重放） */}
-                <button type="button" data-tintin-online="" onClick={() => setTintinOnline(true)}
-                  className={`${RAIL_BOX} ${tintinOnline ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
-                  <span className="min-w-0 flex-1 truncate">{t('gallery.tintinOnline')}</span>
-                </button>
                 {movable.length === 1 && renaming !== movable[0]!.key ? mineLine(movable[0]!, 0, 'box') : movable.length ? (
                   <div className="flex flex-col" data-rail-section="mine">
                     <button type="button" aria-expanded={!folded[`${cat}:mine`]} onClick={() => fold('mine')}
@@ -843,6 +841,12 @@ export function LibraryDrawer({ media, mediaScope, onMediaScope, onUpload, onKee
                   </div>
                 ) : null}
                 {spaces.map(railNode)}
+                {/* TinTin: 在线素材（window.tintinOnlineLibrary 页级桥挂载, 0.3 缝 0.4 重放;
+                    2026-11-24 用户裁决: 移到侧栏最后, 选中态与常规行互斥——见 pickGroup/lineOn/railPick） */}
+                <button type="button" data-tintin-online="" onClick={() => setTintinOnline(true)}
+                  className={`${RAIL_BOX} ${tintinOnline ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
+                  <span className="min-w-0 flex-1 truncate">{t('gallery.tintinOnline')}</span>
+                </button>
               </div>
             )}
             {making ? <RailName value={t('assets.newFolder')} onDone={(name) => { setMaking(false); void makeFolder(name); }} onCancel={() => setMaking(false)} /> : null}

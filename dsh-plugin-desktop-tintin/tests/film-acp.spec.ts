@@ -1,19 +1,19 @@
 // tests/film-acp.spec.ts — 影片智能体 ACP 桥的纯函数面:补丁文本形状与幂等落盘。
-// (子进程/协议面由探针 C:\Users\Administrator\.tintin-film-acp-probe 实机验证,2026-10-23。)
-import { existsSync, readFileSync } from 'node:fs'
-import { mkdtempSync, rmSync } from 'node:fs'
+// (子进程/协议面由 .tmp/agent-route-probe-film.spec.ts 真实 dsh + 真实服务端实测,2026-11-24。)
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 import {
   advanceToolCallGuard,
   ensureFilmAgentPatch,
   extractAsyncTaskIds,
-  FILM_AGENT_MODELS,
-  FILM_AGENT_WORK_RULES,
   FILM_TINTIN_AGENT_MODELS,
   FILM_TINTIN_AGENT_PERSONA,
+  FILM_AGENT_WORK_RULES,
+  filmAgentHomeDir,
   filmAgentPatchFile,
   filmAgentPatchText,
   isAsyncCreateTool,
@@ -23,38 +23,47 @@ import {
 } from '../src/tintin/film-acp.ts'
 
 const dirs: string[] = []
+const NL = String.fromCharCode(10)
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
+const tmpHome = (): string => {
+  const dir = mkdtempSync(join(tmpdir(), 'film-acp-'))
+  dirs.push(dir)
+  return dir
+}
+type Row = { id?: string; insert?: Array<{ id?: string }>; config?: Record<string, unknown> }
+const rowsOf = (text: string): Row[] => parse(text) as Row[]
+const serverModels = [
+  { id: 'deepseek-v4-flash', name: 'deepseek-v4-flash' },
+  { id: 'deepseek-v4-pro', name: 'deepseek-v4-pro' },
+  { id: 'qwen3.8-flash-next-iq2_xs', name: 'qwen3.8-flash-next-iq2_xs' },
+]
+
 describe('filmAgentPatchText', () => {
-  it('路由到服务端 /llm,含全部模型与 acp 默认模型,尾斜杠归一', () => {
-    const text = filmAgentPatchText('http://192.168.111.31:8000/')
+  it('TinTin 智能体(自定义):模型路由到服务端 /llm,清单=服务端实拉原生名,首个为默认,尾斜杠归一', () => {
+    const home = tmpHome()
+    const text = filmAgentPatchText('http://192.168.111.31:8000/', serverModels, FILM_TINTIN_AGENT_PERSONA, 'tintin-agent', home)
     expect(text).toContain('baseURL: http://192.168.111.31:8000/llm')
     expect(text).toContain('apiKeyEnv: TINTIN_SERVER_API_KEY')
-    expect(text).toContain('- id: deepseek-v4-flash')
+    expect(text).toContain('- id: qwen3.8-flash-next-iq2_xs')
     expect(text).toContain('provider: tintin-server')
     expect(text).toContain('model: deepseek-v4-flash')
     expect(text).not.toMatch(/8000\/\/llm/)
+    /* 2026-11-23 用户裁决:模型行显示服务端的模型清单,不再把首个模型显示名品牌化成「TinTin智能体」
+       (2026-10-30 的品牌化退役 —— 选择器里模型行写着「TinTin智能体」、悬浮只有一项,看不到模型) */
+    expect(text).not.toContain('name: TinTin智能体')
     /* MCP 挂载行(2026-10-30):rc.2 会话参数失效,补丁行进程级挂载服务端工具箱;
        新行必须 insert(顶层 - id: 行=更新语义,目标不存在=静默忽略) */
     expect(text).toContain('- insert:')
     expect(text).toContain('- id: mcp-tintin-server')
     expect(text).toContain("name: '@deepseek-ai/dsh-mcp-client'")
-    expect(text).toContain('serverName: tintin-server')
-    expect(text).toContain('transport: streamable-http')
     expect(text).toContain('url: http://192.168.111.31:8000/mcp')
   })
 
-  it('模型清单可覆盖,首个为默认', () => {
-    const text = filmAgentPatchText('http://a:1', [{ id: 'm-2', name: 'M2' }])
-    expect(text).toContain('model: m-2')
-    expect(text).not.toContain('deepseek-v4-flash')
-    expect(FILM_AGENT_MODELS.length).toBeGreaterThan(0)
-  })
-
-  it('TinTin智能体角色:模型显示名=TinTin智能体,人设列出服务端子智能体(视频/图片/音乐/音频/口播/数字人)', () => {
-    const text = filmAgentPatchText('http://a:1', FILM_TINTIN_AGENT_MODELS, FILM_TINTIN_AGENT_PERSONA)
+  it('TinTin 智能体人设列出服务端子智能体(视频/图片/音乐/音频/口播/数字人),整份补丁是合法 YAML', () => {
+    const text = filmAgentPatchText('http://a:1', serverModels, FILM_TINTIN_AGENT_PERSONA, 'tintin-agent', tmpHome())
     expect(text).toContain('- id: system-prompt')
     expect(text).toContain('personaPrefix: |-')
     expect(text).toContain('「TinTin智能体」')
@@ -62,39 +71,60 @@ describe('filmAgentPatchText', () => {
     for (const tool of ['create_video', 'create_image', 'create_music', 'create_audio', 'create_digital_human', 'task_status_unified']) {
       expect(text).toContain(tool)
     }
-    expect(text).toContain('视频生成')
-    expect(text).toContain('图片生成')
-    expect(text).toContain('音乐生成')
-    expect(text).toContain('口播生成')
     expect(text).not.toContain('{{')
-    /* 模型行显示名即角色名,底层模型 id 不变(选择器按钮因此显示「TinTin智能体」) */
-    expect(text).toContain('name: TinTin智能体')
-    expect(text).toContain('- id: deepseek-v4-flash')
-    expect(text).toContain('model: deepseek-v4-flash')
-    /* 人设块不破坏后续 YAML 行的缩进结构 */
-    expect(text).toContain('\n- id: llm-pi-ai')
-    /* 整份补丁是合法 YAML,人设多行块按行保留 */
-    const doc = parse(text) as Array<{ id: string; config?: Record<string, unknown> }>
-    const personaRow = doc.find((row) => row.id === 'system-prompt')
+    expect(text).toContain(`${NL}- id: llm-pi-ai`)
+    const personaRow = rowsOf(text).find((row) => row.id === 'system-prompt')
     expect(String(personaRow?.config?.personaPrefix ?? '')).toContain('create_video')
-    expect((personaRow?.config?.personaPrefix as string).split('\n').length).toBe(FILM_TINTIN_AGENT_PERSONA.split('\n').length)
+    expect(String(personaRow?.config?.personaPrefix ?? '').split(NL).length).toBe(FILM_TINTIN_AGENT_PERSONA.split(NL).length)
   })
 
-  it('编导角色(deepseek,默认):产出编排工作纪律(生成唯一出口=服务端工具+轮询/重试上限),不含 TinTin智能体人设身份', () => {
-    /* 2026-11-01 用户裁决:防空转护栏第一步 —— deepseek 默认角色也带 system-prompt
-       (此前人设纪律只随已禁用的 TinTin智能体存在, 默认反转后一度消失) */
-    const text = filmAgentPatchText('http://a:1', FILM_AGENT_MODELS, FILM_AGENT_WORK_RULES)
-    expect(text).toContain('- id: system-prompt')
+  it('DeepSeek Harness(默认智能体,照上游 openfilm)=客户端自己的 dsh:不改写模型路由,默认模型=客户端默认', () => {
+    const home = tmpHome()
+    const text = filmAgentPatchText('http://a:1', [], FILM_AGENT_WORK_RULES, 'deepseek', home)
+    /* 模型/凭据/账号全用客户端的:补丁里没有服务端路由 */
+    expect(text).not.toContain('provider: tintin-server')
+    expect(text).not.toContain('llm-pi-ai')
+    expect(text).not.toContain('baseURL:')
+    expect(text).not.toContain('TINTIN_SERVER_API_KEY')
+    /* 默认模型跟随客户端;客户端没保存过 = dsh 自身默认(agent-default-model: deepseek-flash)。
+       acp-app 包给 ACP 钉的旧 id deepseek-v4-flash 不在 dsh 官方模型目录里,不沿用 */
+    const acp = rowsOf(text).find((row) => row.id === 'acp')
+    expect(acp?.config).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
+    /* 服务端 MCP 工具行保留:编导调 create_* 生成与模型路由无关;编排工作纪律照旧 */
+    expect(text).toContain('- id: mcp-tintin-server')
     expect(text).toContain('唯一出口')
-    expect(text).toContain('task_status_unified')
-    expect(text).toContain('预算 30 分钟')
-    expect(text).toContain('重试最多 2 次')
-    expect(text).not.toContain('{{')
     expect(text).not.toContain('「TinTin智能体」')
-    /* 整份补丁仍是合法 YAML,纪律多行块按行保留 */
-    const doc = parse(text) as Array<{ id: string; config?: Record<string, unknown> }>
-    const personaRow = doc.find((row) => row.id === 'system-prompt')
+    /* DSH_HOME 是客户端的:技能目录与会话目录经 dsh 插件配置项指回 TinTin 的智能体目录
+       (不写进客户端的技能库与会话列表;旧会话路径不变照常续接) */
+    const agentDir = join(home, filmAgentHomeDir('deepseek')).replaceAll('\\', '/')
+    const skills = rowsOf(text).find((row) => row.id === 'skill-filesystem')
+    const sessions = rowsOf(text).find((row) => row.id === 'session-persistence-jsonl')
+    expect(skills?.config).toEqual({ customSkillDirs: [`${agentDir}/skills`] })
+    expect(sessions?.config).toEqual({ root: `${agentDir}/sessions` })
+    /* 整份补丁是合法 YAML,纪律多行块按行保留 */
+    const personaRow = rowsOf(text).find((row) => row.id === 'system-prompt')
     expect(String(personaRow?.config?.personaPrefix ?? '')).toContain('唯一出口')
+  })
+
+  it('默认模型跟随客户端:客户端保存过 agent-default-model(deepseek-official)就用它的', () => {
+    const home = tmpHome()
+    mkdirSync(join(home, 'profiles', 'desktop'), { recursive: true })
+    writeFileSync(join(home, 'profiles', 'desktop', 'cordis.patch.yml'), [
+      '- id: agent-default-model', '  config:', '    provider: deepseek-official', '    model: deepseek-v4-pro', '',
+    ].join(NL))
+    const acp = rowsOf(filmAgentPatchText('http://a:1', [], FILM_AGENT_WORK_RULES, 'deepseek', home)).find((row) => row.id === 'acp')
+    expect(acp?.config).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+  })
+
+  it('兜底默认模型 = harness base 包 agent-default-model 的模型(钉住的 dsh 换默认值时这里先红)', (t) => {
+    const bundle = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'deepseek-harness', 'packages', 'bundle', 'base', 'cordis.patch.yml')
+    if (!existsSync(bundle)) { t.skip(); return }
+    const source = readFileSync(bundle, 'utf8')
+    const block = source.slice(source.indexOf('- id: agent-default-model'))
+    expect(block).toMatch(/provider:\s*deepseek-official\s+model:\s*(\S+)/)
+    const dshDefault = /provider:\s*deepseek-official\s+model:\s*(\S+)/.exec(block)![1]!
+    const acp = rowsOf(filmAgentPatchText('http://a:1', [], FILM_AGENT_WORK_RULES, 'deepseek', tmpHome())).find((row) => row.id === 'acp')
+    expect(acp?.config?.model).toBe(dshDefault)
   })
 })
 
@@ -139,35 +169,67 @@ describe('回合工具调用护栏(2026-11-01 防空转第 2 步)', () => {
 })
 
 describe('ensureFilmAgentPatch', () => {
-  it('写入一次成文,内容不变再写为幂等,URL 变化重写', () => {
-    const home = mkdtempSync(join(tmpdir(), 'film-acp-'))
-    dirs.push(home)
-    const first = ensureFilmAgentPatch(home, 'http://a:1')
+  it('写入一次成文,内容不变再写为幂等,URL 变化重写(TinTin 智能体=服务端路由)', () => {
+    const home = tmpHome()
+    const first = ensureFilmAgentPatch(home, 'http://a:1', serverModels, 'tintin-agent')
     expect(existsSync(first)).toBe(true)
     expect(readFileSync(first, 'utf8')).toContain('baseURL: http://a:1/llm')
-    /* deepseek 默认角色 → 补丁带编排工作纪律(2026-11-01) */
-    expect(readFileSync(first, 'utf8')).toContain('唯一出口')
-    expect(ensureFilmAgentPatch(home, 'http://a:1')).toBe(first)
-    expect(readFileSync(first, 'utf8')).toBe(filmAgentPatchText('http://a:1', FILM_AGENT_MODELS, FILM_AGENT_WORK_RULES))
-    ensureFilmAgentPatch(home, 'http://b:2')
+    expect(readFileSync(first, 'utf8')).toContain('「TinTin智能体」')
+    expect(ensureFilmAgentPatch(home, 'http://a:1', serverModels, 'tintin-agent')).toBe(first)
+    expect(readFileSync(first, 'utf8')).toBe(filmAgentPatchText('http://a:1', serverModels, FILM_TINTIN_AGENT_PERSONA, 'tintin-agent', home))
+    ensureFilmAgentPatch(home, 'http://b:2', serverModels, 'tintin-agent')
     expect(readFileSync(first, 'utf8')).toContain('baseURL: http://b:2/llm')
     expect(first.startsWith(join(home, 'tintin'))).toBe(true)
   })
 
-  it('按角色分文件:TinTin智能体补丁带角色人设,编导补丁带编排工作纪律(2026-11-01 起),互不覆盖', () => {
-    const home = mkdtempSync(join(tmpdir(), 'film-acp-'))
-    dirs.push(home)
+  it('缺省清单=兜底清单(服务端 /v1/models 不可达时)', () => {
+    const home = tmpHome()
+    const text = readFileSync(ensureFilmAgentPatch(home, 'http://a:1', undefined, 'tintin-agent'), 'utf8')
+    for (const model of FILM_TINTIN_AGENT_MODELS) expect(text).toContain(`- id: ${model.id}`)
+    /* 兜底清单也是原生名 */
+    expect(FILM_TINTIN_AGENT_MODELS.every((model) => model.name === model.id)).toBe(true)
+  })
+
+  it('按智能体分文件:TinTin 智能体补丁带角色人设+服务端路由,DeepSeek Harness 补丁带编排纪律+客户端路由,互不覆盖', () => {
+    const home = tmpHome()
     expect(filmAgentPatchFile('tintin-agent')).toBe('film-tintin-agent.patch.yml')
     expect(filmAgentPatchFile('deepseek')).toBe('film-agent.patch.yml')
-    const tintin = ensureFilmAgentPatch(home, 'http://a:1', undefined, 'tintin-agent')
+    const tintin = ensureFilmAgentPatch(home, 'http://a:1', serverModels, 'tintin-agent')
     const plain = ensureFilmAgentPatch(home, 'http://a:1', undefined, 'deepseek')
     expect(tintin).not.toBe(plain)
-    expect(readFileSync(tintin, 'utf8')).toBe(filmAgentPatchText('http://a:1', FILM_TINTIN_AGENT_MODELS, FILM_TINTIN_AGENT_PERSONA))
+    expect(readFileSync(tintin, 'utf8')).toBe(filmAgentPatchText('http://a:1', serverModels, FILM_TINTIN_AGENT_PERSONA, 'tintin-agent', home))
     expect(readFileSync(tintin, 'utf8')).toContain('personaPrefix: |-')
-    /* 编导(deepseek)补丁 = 工作纪律(防空转护栏), 不是 TinTin智能体角色人设 */
-    expect(readFileSync(plain, 'utf8')).toBe(filmAgentPatchText('http://a:1', FILM_AGENT_MODELS, FILM_AGENT_WORK_RULES))
+    expect(readFileSync(plain, 'utf8')).toBe(filmAgentPatchText('http://a:1', [], FILM_AGENT_WORK_RULES, 'deepseek', home))
     expect(readFileSync(plain, 'utf8')).not.toContain('「TinTin智能体」')
+    expect(readFileSync(plain, 'utf8')).not.toContain('provider: tintin-server')
     /* 幂等 */
-    expect(ensureFilmAgentPatch(home, 'http://a:1', undefined, 'tintin-agent')).toBe(tintin)
+    expect(ensureFilmAgentPatch(home, 'http://a:1', serverModels, 'tintin-agent')).toBe(tintin)
+  })
+})
+
+describe('DeepSeek Harness 跟随客户端「设置→模型」的 DeepSeek 配置(2026-11-23 用户裁决②)', () => {
+  it('客户端自定义过目录(desktop profile patch 的 llm-deepseek 行)→ 原文并进 DeepSeek Harness 补丁;TinTin 智能体补丁不并', () => {
+    const home = tmpHome()
+    mkdirSync(join(home, 'profiles', 'desktop'), { recursive: true })
+    writeFileSync(join(home, 'profiles', 'desktop', 'cordis.patch.yml'), [
+      '- id: llm-deepseek',
+      '  name: "@deepseek-ai/dsh-llm-deepseek-api-key"',
+      '  config:',
+      '    models:',
+      '      - id: deepseek-flash',
+      '        name: DeepSeek-V4.1-Flash',
+      '',
+    ].join(NL))
+    const deepseekText = readFileSync(ensureFilmAgentPatch(home, 'http://a:1', undefined, 'deepseek'), 'utf8')
+    expect(deepseekText).toContain('- id: llm-deepseek')
+    expect(deepseekText).toContain('name: DeepSeek-V4.1-Flash')
+    expect(deepseekText).not.toContain('provider: tintin-server')
+    expect(rowsOf(deepseekText).find((row) => row.id === 'llm-deepseek')).toBeTruthy()
+    expect(readFileSync(ensureFilmAgentPatch(home, 'http://a:1', serverModels, 'tintin-agent'), 'utf8')).not.toContain('- id: llm-deepseek')
+  })
+
+  it('客户端没自定义过:DeepSeek Harness 补丁不含 llm-deepseek 行(智能体用 dsh 内置目录)', () => {
+    const home = tmpHome()
+    expect(rowsOf(readFileSync(ensureFilmAgentPatch(home, 'http://a:1', undefined, 'deepseek'), 'utf8')).some((row) => row.id === 'llm-deepseek')).toBe(false)
   })
 })

@@ -44,14 +44,12 @@ describe('服务设置（2026-11-14 用户裁决：运营工具本面服务端�
     expect(html).toContain('aria-label="服务设置"')
   })
 
-  it('弹层 visible=false 不渲染；visible=true 出双栏（左表单+右 MCP 清单，SSR 无桥调用）', async () => {
+  it('弹层 visible=false 不渲染；visible=true 出地址表单（SSR 无桥调用）', async () => {
     expect(await ssr(ServerSettingsDialog, { visible: false, surface: 'ops' })).not.toContain('ssd-card')
     const html = await ssr(ServerSettingsDialog, { visible: true, surface: 'ops' })
     expect(html).toContain('ssd-card')
     expect(html).toContain('ssd-input')
     expect(html).toContain('保存地址')
-    expect(html).toContain('获取 MCP 服务')
-    expect(html).toContain('发现的 MCP 服务')
-    expect(html).toContain('正在加载…')
+    expect(html).not.toContain('获取 MCP 服务')
   })
 })

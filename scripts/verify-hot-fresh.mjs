@@ -45,9 +45,6 @@ const PAIRS = [
   ['dsh-plugin-desktop-tintin/tintin-resources/openfilm-shell-src', 'dsh-plugin-desktop-tintin/tintin-resources/openfilm/node_modules/openfilm/studio/ui/dist', 'corepack yarn workspace dsh-plugin-desktop-tintin prepare:openfilm-shell'],
   ['dsh-tintin-media-bundle/src', 'dsh-tintin-media-bundle/dist', 'corepack yarn workspace dsh-tintin-media-bundle build'],
   ['dsh-tintin-ops-bundle/src', 'dsh-tintin-ops-bundle/dist', 'corepack yarn workspace dsh-tintin-ops-bundle build'],
-  ['dsh-tintin-cover-plugin/src', 'dsh-tintin-cover-plugin/client.js', 'node ../dsh-tintin-cover-plugin/scripts/stage.mjs'],
-  ['dsh-tintin-cover-plugin/src', 'dsh-tintin-cover-plugin/dist/engine.mjs', 'node ../dsh-tintin-cover-plugin/scripts/stage.mjs'],
-  ['dsh-tintin-cover-plugin/chat-shell', 'dsh-tintin-cover-plugin/chat-shell/dist', 'node ../dsh-tintin-cover-plugin/chat-shell/build.mjs', ['dist']],
 ]
 
 const problems = []
@@ -78,4 +75,4 @@ if (problems.length > 0) {
   for (const fix of fixes) console.error(`    ${fix}`)
   process.exit(1)
 }
-console.log('[verify-hot-fresh] 载荷新鲜:通道 lib、OpenFilm 壳、两个 Vue 子应用 dist 与封面载荷(client.js/engine/chat-shell)均不旧于源码 ✓')
+console.log('[verify-hot-fresh] 载荷新鲜:通道 lib、OpenFilm 壳、两个 Vue 子应用 dist 均不旧于源码 ✓')

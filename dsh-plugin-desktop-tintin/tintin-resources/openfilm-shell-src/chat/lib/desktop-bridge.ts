@@ -14,7 +14,7 @@ import type { HostAgentCatalog } from 'openfilm/studio-ui/lib/host.ts';
 export type DesktopAgentId = 'claude' | 'codex' | 'cursor' | 'copilot' | 'opencode' | 'codebuddy' | 'devin';
 
 /** The chat's agents: the person's own (Codex, Claude Code, Qwen Code, …), and the app's own on their own key. */
-export type LocalAgentId = 'openfilm' | 'claude' | 'codex' | 'copilot' | 'cursor' | 'opencode' | 'codebuddy' | 'qwen' | 'kimi' | 'minimax' | 'deepseek' | 'antigravity' | 'byok';
+export type LocalAgentId = 'openfilm' | 'claude' | 'codex' | 'copilot' | 'cursor' | 'opencode' | 'codebuddy' | 'qwen' | 'kimi' | 'minimax' | 'deepseek' | 'antigravity' | 'byok' | 'tintin-agent';
 
 /** One agent as the app's roster has it (apps/desktop/src/agent-roster.mjs; Studio's lib/host.ts HostAgent). */
 export interface RosterAgent {

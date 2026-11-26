@@ -54,6 +54,7 @@ import { AppIcon } from '../AppIcon';
 import { ConnectorActions, ConnectorBody, ConnectorMark, connectConnector, useConnectorStates } from './ConnectorPanel';
 import { CallOut, COVER_GRID, DetailShell, Facts, ManageButton, PageButton, StateMark, STORE_GRID, StoreCardSkeleton, StoreChips, StoreCard, StoreSection } from './Store';
 import { AddButton, ASSET_GRID, AssetCover, KindCover, AssetTile, Badge, BenchGrid, GroupList, FoldedGroup, GradientCover, PackTile, packGrid, Shelf, shapeOf, type BenchTileItem, type GroupItem } from './CommunityViews';
+import { DreaminaLine, DreaminaToggle } from './FilmDreaminaSkill';
 
 /** A plugin as people see it: its title and summary in the language shown, else its id. */
 export function usePluginWords() {
@@ -557,6 +558,15 @@ export function PluginsPane({ line, query, projectId, opened, onOpen, onWorkbenc
             ))}
           </Shelf>
         ) : null}
+        <section className="mb-12" data-community-shelf="即梦 CLI">
+          <header className="mb-4 flex items-end gap-4">
+            <div className="min-w-0 flex-1">
+              <h3 className="text-[17px] font-semibold tracking-[-0.015em] text-[var(--text)]">即梦 CLI</h3>
+              <p className="mt-1 text-[13px] leading-[18px] text-[var(--text-faint)]">已登录且开关打开时，图片/视频生成优先用即梦 CLI；登录与能力详情见「技能」。</p>
+            </div>
+            <DreaminaToggle />
+          </header>
+        </section>
         {packRows.length ? (
           <Shelf title={t('assetDrawer.minePacks')} note={t('assetDrawer.note_minePacks')}>
             <GroupList items={packRows} />
@@ -634,6 +644,9 @@ export function PluginsPane({ line, query, projectId, opened, onOpen, onWorkbenc
             ))}
           </Shelf>
         ) : null}
+        <Shelf title="即梦 CLI" note="登录即梦并展开详情，可查看 8 项生成能力与账户积分/VIP">
+          <DreaminaLine />
+        </Shelf>
         <StoreChips label={t('assetDrawer.tab_skills')} value={pick} onChange={setSkillSort}
           items={shelves.length > 1 ? [{ key: null, label: t('assetDrawer.allItems') }, ...shelves.map(({ c, list }) => ({ key: c, label: t(`assetDrawer.skillCat_${c}`), count: list.length }))] : []} />
         {waiting ? (

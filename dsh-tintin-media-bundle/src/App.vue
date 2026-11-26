@@ -73,8 +73,7 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
     ],
   },
   {
-    // 封面制作卡已退役（2026-11-09 用户裁决）：封面编辑器独立为侧栏「封面制作」
-    // 视图（dsh-tintin-cover-plugin 页内挂载），媒体包旧 workflow 版卡整体删除
+    // 封面制作已整体删除（2026-11-25 用户裁决：即梦 CLI 移入视频剪辑技能管理）
     group: '图形',
     tools: [
       { id: 'image-matting', title: '图像抠图', desc: '智能抠图 / 去除背景', emoji: '✂️', accent: 'linear-gradient(135deg,#0EA5E9 0%,#06B6D4 100%)' },

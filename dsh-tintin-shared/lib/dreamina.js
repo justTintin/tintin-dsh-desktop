@@ -10,10 +10,74 @@
 // 输出形态实测（2026-10-25）：--version / user_credit / list_task = JSON 文本；
 // login 设备码材料 = `key: value` 行；两类都经 parseCliOutput 归一，raw 兜底。
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import * as logic from './dreamina-logic.js'
+
+/** 官方安装器(jimeng.jianying.com/cli)的下载源与落位——首跑自愈装配用(2026-11-24
+ *  用户报障「安装包装到新设备没有即梦 CLI」:包按可下载件不入包先例不带 CLI,
+ *  新设备没有任何装配链路=即梦功能全灭。此处按官方脚本同源自动装配)。 */
+const DREAMINA_CDN_BASE = 'https://lf3-static.bytednsdoc.com/obj/eden-cn/psj_hupthlyk/ljhwZthlaukjlkulzlp'
+
+/** 首跑自愈装配:二进制缺失时从官方 CDN 拉 CLI+SKILL.md+version.json,落位与官方
+ *  安装脚本完全一致(<home>/bin/dreamina.exe + ~/.dreamina_cli/{dreamina/SKILL.md,version.json});
+ *  Windows 追加用户 PATH持久化(官方脚本同款 powershell,失败不阻断——宿主解析走绝对路径)。
+ *  二进制已存在=幂等跳过。返回 { ok, bin, downloaded[] } 或 { ok:false, error }。 */
+export async function ensureDreaminaCli({ homeDir = homedir(), platform = process.platform, arch = process.arch, fetchImpl = fetch, log = () => {} } = {}) {
+  const binExt = platform === 'win32' ? '.exe' : ''
+  const binDir = join(homeDir, 'bin')
+  const binPath = join(binDir, `dreamina${binExt}`)
+  if (existsSync(binPath)) return { ok: true, skipped: true, bin: binPath }
+  const table = {
+    'win32_x64': 'dreamina_cli_windows_amd64.exe',
+    'darwin_arm64': 'dreamina_cli_darwin_arm64',
+    'darwin_x64': 'dreamina_cli_darwin_amd64',
+    'linux_arm64': 'dreamina_cli_linux_arm64',
+    'linux_x64': 'dreamina_cli_linux_amd64',
+  }
+  const file = table[`${platform}_${arch}`]
+  if (!file) return { ok: false, error: `不支持的平台:${platform}/${arch}` }
+  const downloaded = []
+  const grab = async (url, dest, minBytes, timeoutMs) => {
+    const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!res.ok) throw new Error(`HTTP ${res.status} ← ${url}`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length < minBytes) throw new Error(`下载不完整(${buf.length}B) ← ${url}`)
+    mkdirSync(dirname(dest), { recursive: true })
+    writeFileSync(dest, buf)
+    downloaded.push(dest)
+  }
+  try {
+    log('即梦 CLI 未安装,正在从官方源装配…')
+    await grab(`${DREAMINA_CDN_BASE}/${file}`, binPath, 1024 * 1024, 180_000)
+    await grab(`${DREAMINA_CDN_BASE}/SKILL.md`, join(homeDir, '.dreamina_cli', 'dreamina', 'SKILL.md'), 200, 30_000)
+    await grab(`${DREAMINA_CDN_BASE}/version.json`, join(homeDir, '.dreamina_cli', 'version.json'), 10, 30_000)
+  } catch (error) {
+    return { ok: false, error: `即梦 CLI 装配失败:${error instanceof Error ? error.message : String(error)}`, downloaded }
+  }
+  if (platform === 'win32') {
+    /* 官方脚本同款:用户 PATH 追加(bin 目录),让 agent 的 shell `dreamina` 调用也生效 */
+    try {
+      const { execFileSync } = await import('node:child_process')
+      execFileSync('powershell.exe', ['-NoProfile', '-Command',
+        `$target='${binDir}'; $current=[Environment]::GetEnvironmentVariable('Path','User'); if ([string]::IsNullOrWhiteSpace($current)) { [Environment]::SetEnvironmentVariable('Path', $target, 'User') } elseif (-not ($current.Split(';') -contains $target)) { [Environment]::SetEnvironmentVariable('Path', $current + ';' + $target, 'User') }`],
+        { timeout: 30_000, windowsHide: true, stdio: 'ignore' })
+    } catch { /* PATH 持久化失败不阻断:宿主解析走绝对路径 */ }
+  }
+  log('即梦 CLI 装配完成:' + binPath)
+  return { ok: true, bin: binPath, downloaded }
+}
+
+/** 并发去重版:status/login-start/生成探针可能同时触发装配——同 home 只跑一次 */
+const provisionInFlight = new Map()
+export function ensureDreaminaCliOnce(options = {}) {
+  const key = String(options.homeDir ?? homedir())
+  if (!provisionInFlight.has(key)) {
+    provisionInFlight.set(key, ensureDreaminaCli(options).finally(() => provisionInFlight.delete(key)))
+  }
+  return provisionInFlight.get(key)
+}
 
 /** 二进制定位（每通道现查——用户装完 CLI 无需重启宿主） */
 export function resolveDreaminaBin(env = process.env, platform = process.platform) {

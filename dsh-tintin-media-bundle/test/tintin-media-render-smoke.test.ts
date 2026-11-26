@@ -45,7 +45,7 @@ function fakeShell() {
       applyScriptProduct: () => {}, clearScriptProduct: () => {},
       copyPrompt: ref(''), manualCopy: ref(''), manualCopyBusy: ref(false),
       activeNarrative: ref(''),
-      scriptPlatform: ref('抖音'), platformOptions: ref([{ name: '抖音', guide: '' }]),
+      scriptPlatform: ref('抖音'), platformOptions: ref([{ name: '抖音' }]),
       loadPlatforms: async () => {},
       voiceoverCandidates: ref([]), voiceoverFailedFormulas: ref([]),
       voiceoverDlgOpen: ref(false), voiceoverSelectedIdxs: ref([] as number[]),
@@ -57,6 +57,10 @@ function fakeShell() {
       genStoryboard: async () => {}, storyboardBusy: ref(false),
       scenes: ref([]), shotClipGroup: ref<number[][]>([]),
       bindShotMaterial: () => {}, removeShotClipAt: () => {}, unbindShotMaterial: () => {},
+      // 逐镜逐轨生成状态（2026-11-26 四源四轨：fake shell 同步补成员）
+      shotMatMsg: ref(''),
+      shotGenStates: ref({}), shotGenActiveOf: () => false, shotGenStateOf: () => undefined,
+      shotBatchAI: async () => {}, shotBatchARoll: async () => {}, shotBatchProgressOf: () => ({ total: 0, done: 0, failed: 0, active: 0 }),
       toAbsolute: (p: string) => p,
       storyboards,
       activeStoryboardId,
@@ -221,6 +225,35 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     const voice = await renderWithShell(CopywritingStoryboard, shell, { mode: 'voice' })
     expect(voice).not.toContain('sb-copy"') // voice 态不渲染文案行（面板口播文案框已上移）
     expect(voice).not.toContain('sb-copy-edit')
+  })
+
+  it('四源四轨：轨道瓦片 + 右列单选/搜索按钮 + A-Roll 组（2026-11-26 用户裁决）', async () => {
+    const { shell } = fakeShell()
+    shell.s.storyboards.value = [tab('t1', '痛点式', [shot()])]
+    shell.s.activeStoryboardId.value = 't1'
+    shell.s.copyShots.value = shell.s.storyboards.value[0]!.shots
+    storyboardShotsExpanded.value = true
+    const idle = await renderWithShell(CopywritingStoryboard, shell, { mode: 'material' })
+    // 四轨瓦片 + 右列控制 + A-Roll 组（图1/图2 红框位）
+    expect(idle).toContain('seg-tracks')
+    expect(idle).toContain('seg-ctl')
+    expect(idle).toContain('生成A-Roll')
+    expect(idle).toContain('在线搜索素材')
+    expect(idle).toContain('A-Roll 数字人') // TrackBatchBar kind=aroll 组标题
+    expect(idle).toContain('track-ph') // 未绑定占位图
+    expect(idle).toContain('未绑定素材')
+    expect(idle).toContain('拆分口播') // 卡顶拆分声音绑定回显（1126 用户裁决）
+    expect(idle).not.toContain('选择素材（追加）') // 手动追加入口已删（1126 用户裁决）
+    // 生成中：AI 轨瓦片就地进度卡（阶段/进度条/百分数/已用时）
+    const states = { '0:gen': { phase: 'generating', progress: 45, taskId: 'j-1', msg: '', startedAt: 0, elapsedSec: 12 } }
+    shell.s.shotGenStates = ref(states)
+    shell.s.shotGenActiveOf = (i: number, track: string) => i === 0 && track === 'gen'
+    shell.s.shotGenStateOf = (i: number, track: string) => (states as Record<string, never>)[`${i}:${track}`]
+    const gen = await renderWithShell(CopywritingStoryboard, shell, { mode: 'material' })
+    expect(gen).toContain('track-gen')
+    expect(gen).toContain('iv-bar')
+    expect(gen).toContain('45%')
+    expect(gen).toContain('12s')
   })
 
   it('克隆声音显示在每个 tab 的视频文案下面（2026-11-05 用户裁定，随标签/收起不控制）', async () => {
