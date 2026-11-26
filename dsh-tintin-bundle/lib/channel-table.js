@@ -532,10 +532,7 @@ export function createChannelTable(deps) {
         return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
       }
     },
-    // server:uploadImage — 图片上传入服务端图库（2026-11-26 用户裁决：A-Roll 人物图改为
-    // 上传而非手输素材 ID）。端点=/api/storyboard/scripts/product-upload，multipart 字段
-    // 名 files（复数，服务端实测）；返回 {paths:[服务端绝对路径], count}——路径形态直接
-    // 可作 aroll_image（material://id 之外的路径形态，worker 兼容性由服务端渠道确认）。
+    // server:uploadImage — 图片上传入服务端图库（product-upload，字段 files 复数）。
     'server:uploadImage': async (args) => {
       const [path] = args ?? []
       try {
@@ -546,6 +543,28 @@ export function createChannelTable(deps) {
         return await multipartPost(API_ENDPOINTS.storyboard.productUpload, [
           { name: 'files', path: String(path), contentType: imageMime },
         ])
+      } catch (err) {
+        return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
+      }
+    },
+    // server:arollGenerate — 数字人 A-roll 一次上传直生成（2026-11-26 用户裁决：
+    // multipart 图+声一次收齐，script_id 绑脚本 mode=per_shot → 服务端内部按镜拆分
+    // 对齐并逐镜生成（有素材镜自动跳过、镜级回写）→ 202 {task_id, poll}）。
+    'server:arollGenerate': async (args) => {
+      const p = args?.[0] ?? {}
+      try {
+        if (!p.imagePath) throw new Error('server:arollGenerate requires imagePath')
+        if (!p.audioPath) throw new Error('server:arollGenerate requires audioPath')
+        if (!existsSync(p.imagePath)) throw new Error(`图片不存在: ${p.imagePath}`)
+        if (!existsSync(p.audioPath)) throw new Error(`音频不存在: ${p.audioPath}`)
+        const ext = extname(String(p.imagePath)).toLowerCase()
+        const imageMime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : ext === '.gif' ? 'image/gif' : 'image/jpeg'
+        return await multipartPost(API_ENDPOINTS.digitalHuman.aroll, [
+          { name: 'image', path: String(p.imagePath), contentType: imageMime },
+          { name: 'audio', path: String(p.audioPath), contentType: audioMimeOf(p.audioPath) },
+          { name: 'script_id', value: String(p.scriptId || '') },
+          { name: 'mode', value: String(p.mode || 'per_shot') },
+        ], 120000)
       } catch (err) {
         return isExpectedOfflineError(err) ? null : { error: err?.message ?? String(err) }
       }

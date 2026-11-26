@@ -187,7 +187,7 @@ export function useCopywritingMontageStep4Openfilm(deps: CopywritingStep4Openfil
       if (!segs.length) { notify('没有剪辑方案', '方案内没有可用片段：请重新智能匹配。'); return }
       ofProgress.value = 32
       ofStage.value = '创建视频剪辑项目...'
-      const created = await (window.tintin as any).openfilm.createProject({ name: `文案混剪-${new Date().toISOString().slice(0, 10)}` })
+      const created = await (window.tintin as any).openfilm.createProject({ name: `文案智剪-${new Date().toISOString().slice(0, 10)}` })
       if (created?.error) throw new Error(created.error)
       const project = String(created.project)
       const relOfPath = new Map<string, string>()

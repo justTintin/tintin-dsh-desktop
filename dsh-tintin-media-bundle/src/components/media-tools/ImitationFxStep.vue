@@ -1,11 +1,11 @@
 <script setup lang="ts">
 // ═════════════════════════════════════════════════════════════
-// ImitationFxStep.vue — 仿视频第 5 步 特效包装：整套嵌入文案混剪第 4 步面板
+// ImitationFxStep.vue — 仿视频第 5 步 特效包装：整套嵌入文案智剪第 4 步面板
 // （CopywritingStep4Panel 本体：上部脚本+逐镜视频，下部花字/字体模板/关键词
 //  标注/字幕样式/BGM/音效 + 导出与合成——2026-10-06 用户裁决整套嵌入）。
 // 数据面=useCopywritingMontage 独立实例；装载=把仿视频脚本（同库 storyboard
 // 脚本）经 选择脚本链（refreshScriptOptions→selectScriptOption→
-// applySelectedScript）灌入文案混剪状态机——与「选择分镜脚本」同口径。
+// applySelectedScript）灌入文案智剪状态机——与「选择分镜脚本」同口径。
 // ═════════════════════════════════════════════════════════════
 import { computed, onMounted, provide, ref, watch } from 'vue'
 import { useCopywritingMontage } from '@/composables/useCopywritingMontage'
@@ -45,7 +45,7 @@ async function loadImitationScript(): Promise<void> {
     s.storyboards.value = s.storyboards.value.filter((t) => t.scriptId !== props.scriptId)
     // 等绑定恢复入池完成（2026-10-06：交付步装载后要按绑定自动生成合成方案）
     await s.applySelectedScript({ silent: true })
-    // 只保留本仿视频脚本的分镜 tab——文案混剪状态可能残留其他脚本的旧 tab
+    // 只保留本仿视频脚本的分镜 tab——文案智剪状态可能残留其他脚本的旧 tab
     //（词表按全部分镜 tab 构建，旧旁白会混进词条预览；运行时剔除，服务端脚本库不受影响）
     const keep = s.storyboards.value.find((t) => t.scriptId === props.scriptId)
     if (keep) {
@@ -64,7 +64,7 @@ async function loadImitationScript(): Promise<void> {
     } catch { /* 静默：取不到就不显示口播条 */ }
     // 第④步进入加载：文字模板库/花字 lanes/字幕样式/voiceRows 重扫（漏跑=模板库空、词条全空）
     await s.enterStep4()
-    // 字幕样式/字体库预载（2026-10-06 用户报障"字幕样本太少"：对齐文案混剪 enterStepVoice——
+    // 字幕样式/字体库预载（2026-10-06 用户报障"字幕样本太少"：对齐文案智剪 enterStepVoice——
     // 漏跑=样式恒 6 条本地兜底（服务端 /subtitle_styles 有 30 条）、字体缺服务端 /config/fonts 库）
     void s.refreshSubtitleStyles()
     void s.refreshFonts()
@@ -79,7 +79,7 @@ async function loadImitationScript(): Promise<void> {
   }
 }
 
-// 文案混剪内部步序（0 基：0 文案编写/1 口播配音/2 视频素材/3 特效包装）——直接落在特效包装
+// 文案智剪内部步序（0 基：0 文案编写/1 口播配音/2 视频素材/3 特效包装）——直接落在特效包装
 const cwStep = ref(3)
 function go(i: number): void { cwStep.value = Math.max(0, Math.min(3, i)) }
 
@@ -96,7 +96,7 @@ provide(copywritingMontageShellKey, {
 
 const montageStepProps = computed(() => ({ s }))
 
-// ── 确认合成视频脚本（2026-10-06 用户裁决：对齐文案混剪「视频素材·生成剪辑方案」——
+// ── 确认合成视频脚本（2026-10-06 用户裁决：对齐文案智剪「视频素材·生成剪辑方案」——
 //    嵌入面板无内部步条，方案生成收拢为本按钮；交付步的导出/服务端合成消费同一 assemblePlans）──
 const planBusy = computed(() => s.concatBusy.value)
 const planReady = computed(() => s.assemblePlans.value.length > 0 && !s.hasUnconfirmed.value)
@@ -132,18 +132,18 @@ watch(() => props.scriptId, () => { void loadImitationScript() })
     <div v-else-if="loadState === 'error'" class="iv-err">脚本装载失败：{{ loadErr }}</div>
     <template v-else>
       <div class="row">
-        <span class="muted">特效包装（文案混剪同款面板——脚本/视频在上，字体模板/关键词标注/字幕样式/BGM 在下；导出为客户端剪映草稿）</span>
+        <span class="muted">特效包装（文案智剪同款面板——脚本/视频在上，字体模板/关键词标注/字幕样式/BGM 在下；导出为客户端剪映草稿）</span>
         <span class="spacer"></span>
       </div>
       <ImitationFxPackPanel :s="s" :section="section" :voice-audio-url="voiceAudioUrl" />
-      <!-- 确认合成视频脚本（整行；文案混剪同口径=生成剪辑方案，供交付步导出/合成消费） -->
+      <!-- 确认合成视频脚本（整行；文案智剪同口径=生成剪辑方案，供交付步导出/合成消费） -->
       <TButton
         v-if="section === 'fx'"
         :label="planReady ? '确认合成视频脚本（方案已生成，可重新生成）' : '确认合成视频脚本'"
         style="width: 100%"
         :loading="planBusy"
         :icon="planReady ? 'check' : ''"
-        title="按每镜绑定素材生成合成方案（同文案混剪「生成剪辑方案」）；交付步的导出与服务端合成依赖此方案"
+        title="按每镜绑定素材生成合成方案（同文案智剪「生成剪辑方案」）；交付步的导出与服务端合成依赖此方案"
         @click="confirmVideoScript"
       />
       <div v-if="planNote" class="muted">{{ planNote }}</div>

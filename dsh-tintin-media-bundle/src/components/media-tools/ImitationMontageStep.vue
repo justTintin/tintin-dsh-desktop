@@ -2,7 +2,7 @@
 // ═════════════════════════════════════════════════════════════
 // ImitationMontageStep.vue — 仿视频第 5 步 特效包装（storyboard_montage 草稿链）
 // 与第 6 步 交付（导入服务端草稿包→落盘剪映）。2026-10-06 用户裁决：
-// 特效包装实体化（参考文案混剪链）、导出拆分到第 6 步。
+// 特效包装实体化（参考文案智剪链）、导出拆分到第 6 步。
 // ═════════════════════════════════════════════════════════════
 import { computed, ref, watch } from 'vue'
 import TButton from '@/components/common/TButton.vue'
@@ -34,7 +34,7 @@ const emit = defineEmits<{
   (e: 'download'): void
 }>()
 
-// ── BGM 选择（数据源同文案混剪=音频库音乐；写入脚本随草稿链消费）──
+// ── BGM 选择（数据源同文案智剪=音频库音乐；写入脚本随草稿链消费）──
 interface BgmRow { mid: number | string; filename?: string }
 const bgmRows = ref<BgmRow[]>([])
 const bgmLoading = ref(false)
@@ -69,7 +69,7 @@ const qualityScore = computed(() => (props.result as Record<string, unknown>)?.q
       <div class="seg-card">
         <div class="seg-head">
           <span class="seg-no">配置</span>
-          <span class="sb-info">转场与 BGM（随脚本保存，草稿链消费——同文案混剪口径）</span>
+          <span class="sb-info">转场与 BGM（随脚本保存，草稿链消费——同文案智剪口径）</span>
         </div>
         <div class="row">
           <label class="cfg-field"><span class="lbl">镜间转场</span>
@@ -125,7 +125,7 @@ const qualityScore = computed(() => (props.result as Record<string, unknown>)?.q
       <div class="seg-card">
         <div class="seg-head">
           <span class="seg-no">交付</span>
-          <span class="sb-info">导入服务端草稿包 → 落盘剪映草稿目录（解压 + 数据/路径校验，同文案混剪）</span>
+          <span class="sb-info">导入服务端草稿包 → 落盘剪映草稿目录（解压 + 数据/路径校验，同文案智剪）</span>
         </div>
         <div class="row">
           <TButton label="下载成片" variant="primary" :disabled="!videoPath" :loading="exporting" @click="emit('download')" />

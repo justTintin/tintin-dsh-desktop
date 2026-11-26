@@ -517,10 +517,11 @@ export function useCopywritingMontage() {
     productBrief: sharedProductInfo,
     // 轨道产物写激活 tab 的 shot.slots（2026-11-26 四源四轨裁决）
     activeShots: () => activeStoryboard.value?.shots || [],
-    // 数字人 A-Roll：取激活 tab 的脚本同步 id 与口播音频 id
+    // 数字人 A-Roll：取激活 tab 的脚本同步 id、口播音频 id 与本地克隆口播 wav 路径
+    // （2026-11-26 一次上传直生成：multipart 直接传本地文件，无需预上传）
     digitalHuman: () => {
       const t = activeStoryboard.value
-      return { scriptId: t?.scriptId || '', voiceAudioId: t?.voiceAudioId || '' }
+      return { scriptId: t?.scriptId || '', voiceAudioId: t?.voiceAudioId || '', voiceWav: t?.voiceWav || '' }
     },
   })
 

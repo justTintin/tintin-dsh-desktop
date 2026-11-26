@@ -850,7 +850,8 @@ function clearVoiceProgressListener(): void {
           tab.shots.forEach((s, i) => {
             const row = payShots[i]
             if (!row) return
-            if (s.markARoll) row.mark_aroll = true
+            // mark_aroll 恒写（默认 true）——显式 false 也要落，取消勾选才能跨恢复还原
+            row.mark_aroll = s.markARoll === true
             if (s.markAI) row.mark_ai = true
             if (s.slots && (s.slots.stock || s.slots.gen || s.slots.aroll)) row.slots = s.slots
             if (s.splitAudioId) row.split_audio_id = s.splitAudioId
@@ -1055,7 +1056,8 @@ function clearVoiceProgressListener(): void {
             // 轨道产物/标记回填（2026-11-26 四源四轨：clip_groups 同款——normalizeShot
             // 白名单不带，从原始 shots 提取 gen_mode/slots）
             const raw = (s ?? {}) as Record<string, unknown>
-            if (raw.mark_aroll) n.markARoll = true
+            // mark_aroll：新存档恒有值=精确还原（含显式 false）；旧存档无此字段=按裁决默认选中
+            n.markARoll = raw.mark_aroll !== undefined ? !!raw.mark_aroll : true
             if (raw.mark_ai) n.markAI = true
             if (raw.slots && typeof raw.slots === 'object') n.slots = raw.slots as StoryboardShot['slots']
             if (raw.split_audio_id) n.splitAudioId = String(raw.split_audio_id)

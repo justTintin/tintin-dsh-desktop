@@ -2,7 +2,7 @@
 // 媒体工具视图根组件（WP-3）：分组卡片网格 + 多 Tab 工作区。
 // 2026-09-24 用户裁决：分组对齐原客户端 views/MediaTools.vue（文案脚本模板/图形/
 // 音频/视频 四组；智能混剪按 A1 裁决永久不移植故不列卡）；未移植卡以「建设中」
-// 角标占位（不可点，恢复一张加一张卡）。已可用：文案混剪、剪映模板、声音克隆、
+// 角标占位（不可点，恢复一张加一张卡）。已可用：文案智剪、剪映模板、声音克隆、
 // 图像抠图、参考视频下载（2026-09-25 用户裁决随产品资料批次移植）；素材库
 // （2026-09-29 由「音频生成」卡升级：视频/图片素材库 + 音频页原音频生成）。
 // 2026-11-12 多 Tab 工作区落地（docs/tintin-multitab-workspace.md，2026-11-09
@@ -34,7 +34,7 @@ import VideoTranscribe from './components/media-tools/VideoTranscribe.vue'
 // 去水印字幕（2026-09-25 P2 恢复）：预览帧四点框选 + /vsr/remove
 import SubtitleRemoval from './components/media-tools/SubtitleRemoval.vue'
 // 仿视频（V3.5 · PRD-M-5，2026-10-02）：原视频→仿拍脚本→AI 素材→剪映草稿七步向导；
-// 取代已退役的旧「仿爆款」卡（裁决 §11-15），整体方案与文案混剪对应（§5.3）
+// 取代已退役的旧「仿爆款」卡（裁决 §11-15），整体方案与文案智剪对应（§5.3）
 import ImitationVideo from './components/media-tools/ImitationVideo.vue'
 // 直播切片（2026-09-25 P2 恢复）：热点发现→切片→封面/字幕（whisper+llmChat+liveclip 文件 I/O）
 import LiveClip from './components/media-tools/LiveClip.vue'
@@ -89,7 +89,7 @@ const GROUPS: Array<{ group: string; tools: ToolCard[] }> = [
   {
     group: '视频',
     tools: [
-      { id: 'copywriting-montage', title: '文案混剪', desc: '按文案自动匹配素材，快速生成混剪成片', emoji: '📝', accent: 'linear-gradient(135deg,#10B981 0%,#0EA5E9 100%)' },
+      { id: 'copywriting-montage', title: '文案智剪', desc: '按文案自动匹配素材，快速生成混剪成片', emoji: '📝', accent: 'linear-gradient(135deg,#10B981 0%,#0EA5E9 100%)' },
       { id: 'imitation-video', title: '仿爆款视频', desc: '原视频拆解 → 仿拍脚本 → AI 分镜生成 → 剪映草稿', emoji: '🎯', accent: 'linear-gradient(135deg,#F43F5E 0%,#F59E0B 100%)' },
       // 仿爆款旧卡已退役（2026-10-02 用户裁决：旧款未投产，V3.5 仿视频向导链取代；
       // 服务端 /viral/clone/* 契约面与类型保留，客户端 UI/composable/logic 移除）

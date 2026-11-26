@@ -18,6 +18,7 @@ import { toFileUrl } from '@/utils/fileUrl'
 import type { StoryboardShot } from '@/composables/opsStoryboardLogic'
 import type { OnlineItem } from '@/composables/useOnlineStock'
 import { useHostDark } from '@/composables/hostTheme'
+import { resolveShotTrack, type ShotTrack } from '@/composables/copywritingMontageTrackLogic'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 import OnlineStockPanel from './OnlineStockPanel.vue'
 import TrackTile from './TrackTile.vue'
@@ -55,6 +56,15 @@ function setMark(shot: StoryboardShot, kind: 'aroll' | 'ai', on: boolean): void 
 function slotLocal(i: number, track: 'gen' | 'stock' | 'aroll'): string {
   const local = copyShots.value[i]?.slots?.[track]?.local || ''
   return local ? toFileUrl(local) : ''
+}
+// ── 素材状态行（2026-11-26 用户裁决：显示该镜生效源——A-Roll/AI生成/在线素材/
+//    实拍素材/未绑定素材，单行不换行；与合成取用同一解析 resolveShotTrack）──
+const TRACK_LABEL: Record<ShotTrack, string> = { aroll: 'A-Roll', gen: 'AI生成', stock: '在线素材', material: '实拍素材' }
+function trackStatus(i: number): { text: string; none: boolean; material: boolean } {
+  const shot = copyShots.value[i]
+  const resolved = shot ? resolveShotTrack(shot, boundClips(i).length > 0) : null
+  if (!resolved) return { text: '未绑定素材', none: true, material: false }
+  return { text: TRACK_LABEL[resolved.track] || resolved.track, none: false, material: resolved.track === 'material' }
 }
 /** 是否有任一镜任一轨在生成（顶部全局状态行的新旧样式判据） */
 const shotGenAnyActive = computed(() => copyShots.value.some((_, i) =>
@@ -305,31 +315,23 @@ const EMPTY_HINT: Record<string, string> = {
           />
         </div>
 
-        <!-- 绑定素材（material 态；2026-09-22 用户裁决：一镜多片·按时长装填——
-             逐片列表 + 覆盖时长/镜标对比；「选择素材」追加式，单片可移除，「解绑」清空整组）
-             2026-09-25 用户裁决：片数汇总/达标徽标移到「绑定素材」标签后；追加/解绑并排一行
-             2026-09-28 用户需求：fx（特效包装）态同样展示绑定素材信息（只读——
-             无移除/追加/解绑操作，包装确认态不改变绑定）；voice 态维持不显示 -->
+        <!-- 素材状态行（2026-11-26 用户裁决：四轨制下显示该镜生效源——A-Roll/AI生成/
+             在线素材/实拍素材，无则「未绑定素材」；单行不换行。实拍素材=素材绑定轨时
+             保留片数/Σ/达标徽标与逐片管理；解绑保留用于清空素材轨） -->
         <template v-if="mode === 'material' || mode === 'fx'">
           <div class="seg-field">
-            <div class="row"><span class="lbl">绑定素材</span>
-              <template v-if="boundClips(i).length">
-                <span class="muted">共 {{ boundClips(i).length }} 片 · Σ {{ coveredSec(i).toFixed(1) }}s / 标 {{ shot.duration }}s</span>
-                <span v-if="fillBadge(i)" class="fill-badge" :class="fillBadge(i)!.cls"
-                  title="Σ片段全长 vs 镜标：差值<15% 达标；欠装时预合成按现有片段合成（末端裁剪照常）">{{ fillBadge(i)!.text }}</span>
-              </template>
+            <div class="sb-line track-status" :class="{ 'track-status--none': trackStatus(i).none }">
+              素材状态：{{ trackStatus(i).text }}<template v-if="trackStatus(i).material && boundClips(i).length"> · 共 {{ boundClips(i).length }} 片 · Σ {{ coveredSec(i).toFixed(1) }}s / 标 {{ shot.duration }}s</template><span v-if="trackStatus(i).material && fillBadge(i)" class="fill-badge" :class="fillBadge(i)!.cls"
+                title="Σ片段全长 vs 镜标：差值<15% 达标；欠装时预合成按现有片段合成（末端裁剪照常）">{{ fillBadge(i)!.text }}</span>
             </div>
-            <div v-if="boundClips(i).length" class="sb-line">
+            <div v-if="trackStatus(i).material && boundClips(i).length" class="sb-line track-status">
               <span v-for="(s, j) in boundClips(i)" :key="s.idx" class="bound-clip">
                 {{ j + 1 }}. {{ s.name }}（{{ s.duration > 0 ? s.duration.toFixed(1) + 's' : '—' }}）
                 <button v-if="mode === 'material'" class="unbind-btn" title="移除该片段" @click="removeShotClipAt(i, j)">×</button>
               </span>
             </div>
-            <div v-else class="muted">未绑定素材</div>
-            <div v-if="mode === 'material'" class="row">
-              <!-- 2026-11-26 用户裁决：手动追加素材入口删除（四轨占位制，素材轨由智能匹配
-                   供给）；解绑保留用于清空素材轨 -->
-              <TButton v-if="boundClips(i).length" label="解绑全部" variant="secondary" size="small" @click="unbindShotMaterial(i)" />
+            <div v-if="mode === 'material' && boundClips(i).length" class="row">
+              <TButton label="解绑全部" variant="secondary" size="small" @click="unbindShotMaterial(i)" />
             </div>
           </div>
         </template>
@@ -370,6 +372,7 @@ const EMPTY_HINT: Record<string, string> = {
         <TButton label="＋ 添加镜头" variant="secondary" size="small" @click="copyShots.splice(copyShots.length, 0, {
           index: copyShots.length + 1, shot_type: '', visual: '', audio: '', sfx: '', duration: 3,
           material_path: '', material_type: '', material_hash: '', material_id: 0,
+          markARoll: true,
         })" />
       </div>
     </template>
@@ -507,11 +510,19 @@ const EMPTY_HINT: Record<string, string> = {
 /* 拆分口播绑定回显（2026-11-26：A-Roll 组拆分后逐镜绑定；未绑定时灰显） */
 .sb-split { font-size: 12px; color: var(--primary); }
 .sb-split--none { color: var(--muted-foreground); }
+/* 素材状态行（2026-11-26 用户裁决：单行不换行；无源灰显） */
+.track-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
+.track-status--none { color: var(--muted-foreground); }
 /* ── 四源四轨（2026-11-26 用户裁决）：material 态右列=四轨占位瓦片（TrackTile 自带
-   三态样式）+ 最右控制列（单选 生成A-Roll/AI生成 + 在线搜索素材按钮，纵排） ── */
-.seg-right { display: flex; align-items: flex-start; gap: 8px; flex: 0 0 auto; align-self: flex-start; }
+   三态样式，垂直居中不靠上）+ 最右控制列（两复选框互不排斥 + 在线搜索素材按钮，
+   均布到分镜卡全高） ── */
+.seg-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; align-self: stretch; }
 .seg-tracks { display: flex; gap: 6px; }
-.seg-ctl { display: flex; flex-direction: column; gap: 6px; width: 96px; flex: none; }
+.seg-ctl { display: flex; flex-direction: column; justify-content: space-evenly; align-self: stretch; width: 96px; flex: none; gap: 6px; }
+/* 复选框（2026-11-26 用户裁决：加大易点选；与搜索按钮互不影响） */
+.ctl-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--foreground); cursor: pointer; }
+.ctl-check input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; flex: none; margin: 0; }
+.ctl-check span { white-space: nowrap; }
 .ctl-mark {
   height: 30px; padding: 0 8px; font-size: 12px; cursor: pointer; text-align: center;
   background: var(--surface-container); color: var(--muted-foreground);
@@ -532,6 +543,15 @@ const EMPTY_HINT: Record<string, string> = {
 }
 .modal-title { font-size: 15px; font-weight: 600; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* 弹窗标题行（标题左 + 右上角标准 × 关闭钮——2026-11-26 用户裁决：在线搜索弹窗
+   去掉底部「关闭」，确认即确定，右上角 × 兜底关闭） */
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.modal-x {
+  width: 26px; height: 26px; padding: 0; line-height: 1; font-size: 15px; flex: none;
+  background: transparent; border: none; color: var(--muted-foreground); cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.modal-x:hover { color: var(--foreground); background: var(--surface-container-high); }
 
 /* 弹窗内列表行（单镜选素材弹窗复用；原选择脚本弹窗已随按钮删除退役） */
 .script-list { flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }

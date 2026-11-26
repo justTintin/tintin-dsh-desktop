@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// useCopywritingMontageVoiceSync.ts — 文案混剪口播音频跨机同步·编排壳
+// useCopywritingMontageVoiceSync.ts — 文案智剪口播音频跨机同步·编排壳
 // （2026-09-30 用户裁决 B：克隆产物 wav 上传服务端音频库、应用脚本后按 id 下载
 //  回填。附加/提取纯函数在 copywritingMontageVoiceRefLogic.ts；本模块只做 IPC
 //  桥接与 tab 状态回写，自 useCopywritingMontageStep3Voice.ts 分离以控其行数
@@ -32,7 +32,7 @@ export async function uploadTabVoiceWav(tab: VoiceSyncTab): Promise<void> {
       await window.tintin.server.audioLibraryUpload({
         filePath: tab.voiceWav,
         category: '口播',
-        tags: tab.scriptId ? `文案混剪 script_${tab.scriptId}` : '文案混剪',
+        tags: tab.scriptId ? `文案智剪 script_${tab.scriptId}` : '文案智剪',
       }),
       '口播音频上传')
     const id = Number(up.id)

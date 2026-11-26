@@ -372,7 +372,7 @@ const onLeave = onUp
       </div>
 
       <div class="vsr2-section">
-        <div class="vsr2-title">字幕样式（与文案混剪·特效包装同源）</div>
+        <div class="vsr2-title">字幕样式（与文案智剪·特效包装同源）</div>
         <div class="sub-style-grid">
           <button v-for="p in stylePresets" :key="p.key" type="button" class="sub-style-tile"
             :class="{ active: styleKey === p.key }" :title="p.label" @click="styleKey = p.key">

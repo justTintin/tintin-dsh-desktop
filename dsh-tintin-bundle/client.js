@@ -500,6 +500,7 @@ const tintinClient = (() => {
         // 图片上传入服务端图库（2026-11-26 用户裁决：A-Roll 人物图改为上传而非手输 ID；
         // /api/storyboard/scripts/product-upload，字段 files，返回 {paths:[服务端绝对路径]}）
         uploadImage: (path) => call('server:uploadImage', { args: [path] }),
+        arollGenerate: (p) => call('server:arollGenerate', { args: [p] }), // A-roll 一次上传直生成（图+声 multipart，1126）
         downloadResult: (path, savePath) => call('server:downloadResult', { args: [path, savePath] }),
         // 音频生成域三通道（2026-09-25 随音频生成卡出清 PENDING 白名单）：下载临时/
         // 归档落盘走宿主 httpRequest+fs（渲染层无请求能力），BGM 入库 multipart 由

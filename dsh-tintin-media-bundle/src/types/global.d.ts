@@ -117,6 +117,10 @@ declare interface TintinBridgeServer {
   downloadResult(path: string, savePath: string): Promise<string | null>
   /** 图片上传入服务端图库（product-upload，multipart files 字段）→ {paths:[服务端绝对路径]} */
   uploadImage(path: string): Promise<{ paths?: string[]; count?: number } | { error: string } | null>
+  /** 数字人 A-roll 一次上传直生成（multipart 图+声+script_id，mode=per_shot）
+   *  → 202 {task_id, poll} */
+  arollGenerate(p: { imagePath: string; audioPath: string; scriptId?: string; mode?: string }):
+    Promise<{ task_id?: string; poll?: string } | { error: string } | null>
 
   // ---------- health / stats ----------
   // healthCapabilities 已移除（/health/capabilities 服务端从未实现，声明即陷阱）

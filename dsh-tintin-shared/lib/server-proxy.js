@@ -138,6 +138,9 @@ export const API_ENDPOINTS = {
   vision: { reversePrompt: '/vision/reverse-prompt' },
   digitalHuman: { generate: '/digital-human/generate', listModels: '/digital-human/models' },
   storyboard: { scripts: '/api/storyboard/scripts', scriptItem: (id) => `/api/storyboard/scripts/${id}`, productUpload: '/api/storyboard/scripts/product-upload' },
+  // 数字人 A-roll 一次上传直生成（2026-11-26 用户裁决：multipart 图+声一次收齐，
+  // 绑脚本 mode=per_shot 服务端内部按镜拆分对齐逐镜生成，202 {task_id, poll}）
+  digitalHuman: { aroll: '/digital-human/aroll', batch: '/digital-human/batch' },
   // /agent/* 编排已于 2026-09-25 服务端退役（chat/tasks/sessions/artifacts 全部
   // 下线，调用一律 404）；仅能力目录 registry 保留（MCP 与仪表盘仍在消费，
   // 后续 P2 defineTool 工具化的数据源）。与 SRC 的 API_PATHS 同步在此处有意分叉。

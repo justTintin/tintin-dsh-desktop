@@ -245,7 +245,9 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     expect(idle).toContain('在线搜索素材')
     expect(idle).toContain('A-Roll 数字人') // TrackBatchBar kind=aroll 组标题
     expect(idle).toContain('track-ph') // 未绑定占位图
-    expect(idle).toContain('未绑定素材')
+    expect(idle).toContain('素材状态：未绑定素材') // 素材状态行单行口径（1126 用户裁决）
+    expect(idle).toContain('ctl-check') // 复选框样式
+    expect(idle).toContain('上传人物图')
     expect(idle).toContain('拆分口播') // 卡顶拆分声音绑定回显（1126 用户裁决）
     expect(idle).not.toContain('选择素材（追加）') // 手动追加入口已删（1126 用户裁决）
     // 生成中：AI 轨瓦片就地进度卡（阶段/进度条/百分数/已用时）

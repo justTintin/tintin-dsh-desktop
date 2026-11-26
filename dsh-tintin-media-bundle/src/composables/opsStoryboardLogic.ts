@@ -105,6 +105,9 @@ export function normalizeShot(raw: unknown, fallbackIndex: number): StoryboardSh
     material_type: String(s.material_type ?? ''),
     material_hash: String(s.material_hash ?? ''),
     material_id: toMaterialId(s.material_id),
+    /** 默认勾选生成 A-Roll（2026-11-26 用户裁决：所有分镜默认 A-roll 选中——
+     *  客户端态字段；恢复路径会在其后再按原始 shots 覆写，未勾选的可还原为未标记） */
+    markARoll: true,
   }
 }
 
