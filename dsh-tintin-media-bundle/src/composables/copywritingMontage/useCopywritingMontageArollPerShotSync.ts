@@ -35,11 +35,19 @@ export function createArollPerShotSync(deps: {
         const row = payShots[i]
         if (!row) return
         row.mark_aroll = s.markARoll === true
+        if (s.markMaterial) row.mark_material = true
         if (s.markAI) row.mark_ai = true
         if (s.slots && (s.slots.stock || s.slots.gen || s.slots.aroll)) row.slots = s.slots
         if (s.splitAudioId) row.split_audio_id = s.splitAudioId
       })
       payload.aroll = { mode: 'per_shot' }
+      // 2026-11-26 探针实测修订（实弹对照证据）：worker 只认 aroll.audio_id——
+      // voice_audio_id 挂脚本根字段不免疫（script_1ad32b343720 任务 2003 报
+      // 「缺口播音频（aroll.audio_id 或脚本 voice_audio_id）」实败；验收临时脚本
+      // script_65e20f5b3a92 任务 2004 带 aroll.audio_id 实过音频门直接 running）。
+      // 克隆声音 id（tab.voiceAudioId=脚本根 voice_audio_id 同源）随 per_shot 预置一并落 aroll.audio_id。
+      const arollAudioId = String(tab.voiceAudioId ?? '').trim()
+      if (arollAudioId) payload.aroll = { mode: 'per_shot', audio_id: arollAudioId }
       try {
         await deps.post('/api/storyboard/scripts', payload, undefined, 300000)
       } catch (e) {

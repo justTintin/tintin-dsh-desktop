@@ -16,6 +16,7 @@
 
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { clientError } from '../utils/clientLog'
+import { copyHeadName } from './copywritingMontageStep3VoiceLogic'
 import { API_PATHS } from '../types/server-api'
 import {
   // Step3 字幕样式（2026-09-17 用户裁决：字幕样式统一来自服务端 /subtitle_styles）
@@ -322,7 +323,8 @@ export function useCopywritingMontage() {
     const narrative = String(text || '').trim()
     if (!narrative) { notify('输入文案为空', '请输入文案后再点「使用文案」。'); return false }
     const tab = addStoryboardTab({
-      name: '输入文案', narrative, shots: [],
+      // 2026-11-26 用户裁决：名尾=文案开头 5-10 字（copyHeadName），替代来源标签「输入文案」
+      name: copyHeadName(narrative), narrative, shots: [],
       productBrief: productBriefOf(sharedProductInfo.value),
     })
     if (!tab) { notify('无法添加文案', `分镜标签已达上限 ${COPY_STORYBOARD_MAX}。`); return false }
@@ -593,7 +595,7 @@ export function useCopywritingMontage() {
     rewriteTemp,
     voiceBusy, rewriteBusy,
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,
-    shotMatBusy: shotMat.busy, shotMatMsg: shotMat.msg, genShotMaterial: shotMat.generate, addOnlineShotMaterial: shotMat.addOnline,
+    shotMatBusy: shotMat.busy, shotMatMsg: shotMat.msg, shotMatMsgs: shotMat.groupMsgs, genShotMaterial: shotMat.generate, addOnlineShotMaterial: shotMat.addOnline,
     // 逐镜逐轨生成状态 + 批量入口（2026-11-26 四源四轨裁决：产物写 shot.slots 各轨占位）
     shotGenStates: shotMat.states, shotGenActiveOf: shotMat.active, shotGenStateOf: shotMat.stateOf,
     shotBatchAI: shotMat.batchGenerateAI, shotBatchARoll: shotMat.batchGenerateARoll, shotBatchProgressOf: shotMat.batchProgressOf,

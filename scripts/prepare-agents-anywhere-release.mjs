@@ -89,7 +89,9 @@ function patchManifest(packagePath, peerRanges, releaseVersion = desktopVersion)
   const buildVersion = dev['@deepseek-ai/dsh-session']
   if (!/^\d+\.\d+\.\d+-[\w.-]+$/u.test(buildVersion ?? '')) throw new Error('AA source must declare an exact DSH build version')
   const schemaVersion = dev['@deepseek-ai/schemastery']
-  const cosmokitForSchema = { '3.18.2': '1.8.3', '3.18.4': '1.8.5', '3.18.5': '1.8.6', '3.19.0': '1.9.0' }
+  // 2026-11-26: AA main 65aa2214(QuickJS-WASM 助手批)把 schemastery 钉到 3.20.0-alpha.1
+  // ——其 npm 声明 @deepseek-ai/cosmokit ~1.10.0-alpha.1,按既有口径取区间基线为精确钉版
+  const cosmokitForSchema = { '3.18.2': '1.8.3', '3.18.4': '1.8.5', '3.18.5': '1.8.6', '3.19.0': '1.9.0', '3.20.0-alpha.1': '1.10.0-alpha.1' }
   const cosmokitVersion = cosmokitForSchema[schemaVersion]
   if (!cosmokitVersion) throw new Error(`Unsupported AA build schemastery version: ${String(schemaVersion)}; read the cosmokit range that schemastery ${String(schemaVersion)} declares on npm and add it to cosmokitForSchema`)
   const buildPackages = new Set([

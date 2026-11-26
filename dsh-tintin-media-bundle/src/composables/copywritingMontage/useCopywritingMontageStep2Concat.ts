@@ -202,8 +202,8 @@ export function useCopywritingMontageStep2Concat(ctx: MontageStep2Context) {
       })
       .filter(Boolean)
     if (incomplete.length) {
-      concatError.value = `以下分镜四轨均无视频源（素材/AI生成/在线搜索/A-Roll 至少一项），不能预合成：${incomplete.join('、')}。`
-      notify('有分镜缺视频源', concatError.value)
+      concatError.value = `以下分镜未绑定任何视频素材（素材/AI生成/在线搜索/A-Roll 至少一项），不能生成剪辑方案：${incomplete.join('、')}。`
+      notify('有分镜缺视频素材', concatError.value)
       return false
     }
     concatBusy.value = true

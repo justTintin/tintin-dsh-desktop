@@ -15,6 +15,7 @@ import CopywritingBgmPickDialog from './CopywritingBgmPickDialog.vue'
 import CopywritingStoryboard from './CopywritingStoryboard.vue'
 import KeywordAnnotateRows from '../KeywordAnnotateRows.vue'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
+import { storyboardShotsExpanded } from '@/composables/storyboardShotsState'
 import { subtitlePresetTileStyle, fancyPreviewStyleOf } from '@/composables/copywritingMontageLogic'
 import { errText, notify, joinPath } from '@/composables/copywritingMontage/context'
 import { clientError } from '@/utils/clientLog'
@@ -26,6 +27,9 @@ import jyImportSettingImg from '@/assets/jianying-import-setting.png'
 
 const shell = inject(copywritingMontageShellKey)!
 const { step, go, steps } = shell
+// 包装交付默认展开分镜卡（2026-11-26 用户裁决：本步脚本也要像第三步一样直接看到
+// 四轨视频——全局展开态默认收起，进入本步自动展开；用户仍可手动收起）
+onMounted(() => { storyboardShotsExpanded.value = true })
 const {
   splitResolution,
   previewUrl,
@@ -779,10 +783,7 @@ const fancyCustomPreviewStyle = computed<Record<string, string>>(() =>
         </div>
       </section>
 
-        <!-- 导航行（2026-09-21 用户裁决：上一步=视频素材） -->
-        <div class="row left">
-          <TButton label="上一步：视频素材" plain @click="go(2)" />
-        </div>
+        <!-- 导航行（2026-11-26 用户裁决：移除，容器悬浮底栏统一渲染） -->
 
     <!-- 分镜声音批量克隆选择弹窗（BGM 选择组件复用为音频选择） -->
     <CopywritingBgmPickDialog ref="bgmDlgRef" />

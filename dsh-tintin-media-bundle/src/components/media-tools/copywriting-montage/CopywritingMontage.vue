@@ -29,13 +29,19 @@ import CopywritingStep3Panel from './CopywritingStep3Panel.vue'
 import CopywritingStep1Panel from './CopywritingStep1Panel.vue'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 import { markdownListLines, stripProductCodeFromModel, parseProductKeywords } from '@/composables/opsProductLibraryLogic'
+import { hasAnySplitShots } from '@/composables/copywritingMontageTrackLogic'
 import { copyPreviewText, subtitlePresetTileStyle, fancyPreviewStyleOf } from '@/composables/copywritingMontageLogic'
 import type { PickerItem } from '@/composables/useWorkbenchPickers'
 
 // 2026-09-17 用户裁决：步骤序定案 1.文案编写 → 2.口播配音 → 3.镜头重组 → 4.特效包装
 // 2026-09-21 用户裁决：第③步展示名「镜头重组」→「视频素材」（仅步骤条展示名，
-// 页面内「镜头重组」执行按钮不动）
-const STEPS = ['1. 文案编写', '2. 口播配音', '3. 视频素材', '4. 特效包装']
+// 页面内「镜头重组」执行按钮不动）；2026-11-26 用户裁决：第④步展示名「特效包装」→「包装交付」
+const STEPS = ['1. 文案编写', '2. 口播配音', '3. 视频素材', '4. 包装交付']
+/** 步骤展示名（去序号前缀，悬浮导航按钮文案用） */
+const stepName = (i: number) => (STEPS[i] ?? '').replace(/^\d+\.\s*/, '')
+/** 第①步进入第②步门控（与 Step1Panel 原面板内导航同口径）：至少一个 tab 生成了分镜 */
+const hasSplitStoryboards = computed(() => hasAnySplitShots(s.storyboards.value))
+
 const step = ref(0)
 function go(i: number) {
   step.value = Math.max(0, Math.min(STEPS.length - 1, i))
@@ -88,7 +94,7 @@ const {
 
 // ── 左右分栏手动调整（2026-09-10 用户需求）：拖拽分隔条改左右比例，默认 6:4，localStorage 记忆 ──
 const VD_SPLIT_KEY = 'vd-split-pct'
-const vdSplitPct = ref(Math.min(80, Math.max(35, Number(localStorage.getItem(VD_SPLIT_KEY)) || 60)))
+const vdSplitPct = ref(Math.min(80, Math.max(35, Number((typeof localStorage !== 'undefined' && localStorage.getItem(VD_SPLIT_KEY)) || 0) || 60)))
 /** 左栏宽度由分隔条拖拽控制（右栏吃剩余全部，三步共享同一比例 → 右栏位置切步不变） */
 const vdLeftStyle = computed(() => ({ flex: `0 0 calc(${vdSplitPct.value}% - 6px)` }))
 // 拖拽改宽后每行能容纳的样式卡片数会变 → 重测样式预览是否溢出（声明须在
@@ -357,7 +363,23 @@ function scoreClass(score: number | undefined): string {
     <!-- 配音文案编辑弹窗（原版 TextEditDialog，dialogs.py L31-80 文案逐字；⚖ 对比按钮同入口附原文对照） -->
     <teleport to="body"><div class="tintin-media-scope tintin-modal-layer">
     </div></teleport>
+
+    <!-- 页尾让位垫（2026-11-26 用户裁决）：滚动到底时底部内容不被悬浮胶囊挡住 -->
+    <div class="step-float-nav-pad"></div>
   </div>
+
+    <!-- 悬浮导航底栏（2026-11-26 用户裁决：四步上一步/下一步常驻半透明悬浮底部，
+         长脚本页面免滚动到底才能翻步；门控保留：第①步未生成分镜脚本时下一步禁用，
+         与原面板内导航同口径；面板内导航行已全部移除由本栏统一接管。
+         2026-11-26 用户再裁：只剩一个钮时居中——第二步两钮左右分列不变） -->
+    <div class="step-float-nav" :class="{ 'step-float-nav--single': step === 0 || step === STEPS.length - 1 }">
+      <TButton v-if="step > 0" :label="`上一步：${stepName(step - 1)}`" plain @click="go(step - 1)" />
+      <TButton v-if="step < STEPS.length - 1" :label="`下一步：${stepName(step + 1)}`" icon="right"
+        :disabled="step === 0 && !hasSplitStoryboards"
+        :title="step === 0 && !hasSplitStoryboards ? '尚未生成分镜脚本：点击「✨ AI 生成分镜脚本」生成后再进入下一步' : ''"
+        @click="go(step + 1)" />
+    </div>
+
 </template>
 
 <style scoped>
@@ -995,4 +1017,21 @@ function scoreClass(score: number | undefined): string {
 
 /* 还原 LUT：库内选择列表（2026-09-14） */
 .lut-list { display: flex; flex-direction: column; gap: 4px; max-height: 132px; overflow-y: auto; }
+
+/* 悬浮导航底栏（2026-11-26 用户裁决）：四步共用，半透明+毛玻璃胶囊，常驻底部可视；
+   层级低于弹窗层（modal 12000），高于普通内容 */
+.step-float-nav {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 60;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  min-width: min(720px, 86vw);
+  padding: 8px 18px; border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+}
+/* 单钮步（第一步/最后一步）居中（2026-11-26 用户裁决），胶囊缩到内容宽 */
+.step-float-nav--single { justify-content: center; min-width: 0; }
+/* 页面滚动到底时给胶囊让位：内容底部留出胶囊高度+间距（2026-11-26 用户裁决） */
+.step-float-nav-pad { height: 64px; flex: 0 0 auto; }
 </style>

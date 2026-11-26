@@ -275,6 +275,9 @@ export function topUpClipGroups(
   groups: ReadonlyArray<ReadonlyArray<number>>,
   pool: ReadonlyArray<AssignPoolItem>,
   voiceDurSec: number,
+  /** 2026-11-26 用户裁决：跳过镜（不补片）——智能匹配只服务勾选「素材」复选的镜，
+   *  欠装补片同口径跳过未勾选镜（其视频源走 AI/搜索/A-Roll 轨） */
+  skip?: (i: number) => boolean,
 ): { groups: number[][]; appendedTotal: number; appendedByShot: number[] } {
   const scale = voiceScaleOf(voiceDurSec, shots.reduce((a, s) => a + (Number(s?.duration) || 0), 0))
   const byIdx = new Map(pool.map((c) => [c.scene.idx, c]))
@@ -285,6 +288,7 @@ export function topUpClipGroups(
   const appendedByShot: number[] = []
   let appendedTotal = 0
   groups.forEach((g, i) => {
+    if (skip?.(i)) { out.push([...(g || [])]); appendedByShot.push(0); return }
     const idxs = [...(g || [])]
     const inGroup = new Set<number>()
     let fullSum = 0

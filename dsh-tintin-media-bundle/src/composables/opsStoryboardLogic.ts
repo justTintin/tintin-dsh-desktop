@@ -71,8 +71,9 @@ export interface StoryboardShot {
    *  AI生成/在线搜索/A-Roll 三轨产物挂 slots；同步走 attach/extract（clip_groups 同款，
    *  服务端原样透传），不入 toServerShot/normalizeShot 白名单 */
   slots?: ShotTrackSlots
-  /** 右列复选标记（2026-11-26 用户裁决：两复选框互不排斥——可同时勾选，分别驱动
-   *  A-Roll 批量与 AI 批量；都不勾=素材轨） */
+  /** 右列复选标记（2026-11-26 用户裁决：复选框互不排斥——素材/AI生成/生成A-Roll
+   *  各自独立勾选；素材勾选=该镜开启按镜手动选择素材） */
+  markMaterial?: boolean
   markARoll?: boolean
   markAI?: boolean
   /** 服务端按镜拆分出的该镜口播音频 id（2026-11-26 用户裁决：A-Roll 组拆分后逐镜绑定
@@ -108,6 +109,9 @@ export function normalizeShot(raw: unknown, fallbackIndex: number): StoryboardSh
     /** 默认勾选生成 A-Roll（2026-11-26 用户裁决：所有分镜默认 A-roll 选中——
      *  客户端态字段；恢复路径会在其后再按原始 shots 覆写，未勾选的可还原为未标记） */
     markARoll: true,
+    /** 默认勾选素材（2026-11-26 用户裁决：素材复选框全部默认选中——客户端态字段，
+     *  恢复路径同样按原始 shots 覆写） */
+    markMaterial: true,
   }
 }
 

@@ -24,7 +24,10 @@ const labels = props.steps ?? ['1. 镜头智能分割', '2. 镜头重组', '3. �
 </script>
 
 <style scoped>
-.step-bar { display: flex; align-items: center; gap: var(--space-2); padding: 6px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+/* 2026-11-26 用户裁决：步骤条吸顶——文案智剪/仿款视频页面下滚时步骤条常驻可见
+   （滚动宿主=ToolTabPane .tool-tab-pane，条与滚动宿主之间无 overflow 祖先，
+   sticky 合法定锚；z-index 压过内容层 1~2、让位弹窗层 1002+） */
+.step-bar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: var(--space-2); padding: 6px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .step-pill { flex: 1; padding: 4px 0; border-radius: var(--radius-sm); font-size: 13px; color: var(--muted-foreground); cursor: pointer; text-align: center; transition: background var(--duration-fast), color var(--duration-fast); }
 .step-pill.disabled { cursor: not-allowed; opacity: .5; }
 .step-pill.active { background: rgba(96, 165, 250, 0.12); color: var(--info, #60a5fa); font-weight: 700; padding: 4px 8px; }

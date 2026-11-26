@@ -43,6 +43,7 @@ const {
   // 上一步（口播配音）的分镜脚本 + 每镜绑定素材（2026-09-21 用户裁决：
   // 确认合成的视频来源=分割镜头按分镜绑定；自动分配/单独选素材都写 shotClipIdx）
   storyboards, activeStoryboard, shotClipGroup, runConcatFromAllStoryboards, syncStoryboardsToServer,
+  shotBatchProgressOf,
   // 素材上传与镜头分割（2026-09-21 用户裁决：自智能混剪 Step1 移植到本页「本地上传」tab）
   // 2026-09-23 用户裁决：分割阈值输入框删除（智能匹配直采分割结果无需人工调敏；
   // 编排层 threshold 仍以默认 50 传服务端，行为不变）
@@ -390,6 +391,22 @@ const splitTableVisible: boolean = false
  *  → LLM 候选内语义精选 → 校验解析；失败/缺槽按原循环轮转兜底（全局镜头序跨脚本连续
  *  取模，各素材使用次数均衡）。素材来源将来含在线/AI 生成时同样进 buildAssignPool 池 */
 const smartAssignBusy = ref(false)
+/** 组标题计数（2026-11-26 用户裁决：每组标题后带该组视频素材信息，随左列复选变化——
+ *  AI生成=batchProgressOf('ai') 与批量生成同一口径；素材库=markMaterial 复选镜数，
+ *  完成该镜素材绑定组有货） */
+const aiBatch = computed(() => shotBatchProgressOf('ai'))
+const materialBatch = computed(() => {
+  let total = 0
+  let done = 0
+  for (const tab of storyboards.value) {
+    tab.shots.forEach((sh, si) => {
+      if (!sh.markMaterial) return
+      total += 1
+      if ((tab.clipGroups[si] || []).length > 0) done += 1
+    })
+  }
+  return { total, done }
+})
 /** 匹配目标选择弹窗（2026-09-23 用户裁决）：点「智能匹配到分镜脚本」先弹窗勾选要
  *  匹配哪些分镜脚本（默认全选=原批量口径），确认后才执行；单选 narrowing 即取消勾选 */
 const matchDlg = ref({ show: false, selectedIds: [] as string[] })
@@ -459,16 +476,25 @@ async function applyAssignment(matchIds?: string[]): Promise<void> {
   let aiHit = 0
   let coveredAll = 0
   let targetAll = 0
+  /** 2026-11-26 用户裁决：报告口径=选择池实际分配到的镜数（每段素材首次被某镜
+   *  使用即计一镜），不再拿全部镜数当分配数——其余镜为循环补位 */
+  let assignedShots = 0
+  const usedSegs = new Set<number>()
   const failedTabs: string[] = []
   try {
     for (let ti = 0; ti < tabs.length; ti++) {
       const tab = tabs[ti]
       if (!tab.shots.length) { tab.clipGroups = []; continue }
+      // 2026-11-26 用户裁决（再明确）：智能匹配只服务勾选「素材」复选的镜——LLM 匹配/
+      // 循环补位/装填全只跑素材镜；未勾选镜清空旧绑定（其视频源走 AI/搜索/A-Roll 轨）
+      const marked = tab.shots.map((s, si) => ({ s, si })).filter((x) => x.s.markMaterial)
+      if (!marked.length) { tab.clipGroups = tab.shots.map(() => []); continue }
       statusText.value = `智能匹配中（第 ${ti + 1}/${tabs.length} 个分镜脚本）…`
-      const candidates = buildAssignCandidateSet(tab.shots, pool)
+      const markedShots = marked.map((x) => x.s)
+      const candidates = buildAssignCandidateSet(markedShots, pool)
       let parsed: Map<number, number> | null = null
       try {
-        const { systemPrompt, userPrompt } = buildAssignMatchPrompt(tab.shots, candidates)
+        const { systemPrompt, userPrompt } = buildAssignMatchPrompt(markedShots, candidates)
         const res = await window.tintin.server.llmChat({
           model: '',
           messages: [
@@ -478,14 +504,14 @@ async function applyAssignment(matchIds?: string[]): Promise<void> {
         })
         if (res && 'error' in res) throw new Error(String(res.error) || 'LLM 返回空错误')
         const content = String(res?.choices?.[0]?.message?.content ?? '')
-        parsed = parseAssignMatchResponse(content, tab.shots.length, candidates.length)
+        parsed = parseAssignMatchResponse(content, markedShots.length, candidates.length)
         if (!parsed) throw new Error('匹配结果解析失败（未返回合法 matches JSON）')
       } catch (e) {
         clientError('copywriting-montage', '智能匹配 LLM 失败（该脚本整组循环兜底）', errText(e))
         failedTabs.push(tab.name)
         parsed = null
       }
-      const { idxs, matched, nextK } = mergeTabAssignment(tab.shots.length, parsed, candidates, pool, cyclicK)
+      const { idxs, matched, nextK } = mergeTabAssignment(markedShots.length, parsed, candidates, pool, cyclicK)
       cyclicK = nextK
       // 一镜多片装填（2026-09-22 用户裁决开工：方案C——主片按镜标×0.9 封镜，末端超长
       // 裁剪到剩余量；每镜绑定组写 tab.clipGroups，确认预合成按组渲染/拼接）
@@ -502,9 +528,12 @@ async function applyAssignment(matchIds?: string[]): Promise<void> {
       // 使用时，从预筛排名取未用片段替换（池内无未用才保留原选）；补片排序同样
       // 优先未用（planShotGroup usage 参数），消除「每镜补的都是同一段」
       const runUsage = new Map<number, number>()
+      let mi = 0
       tab.shots.forEach((shot, si) => {
+        if (!shot.markMaterial) { groups.push([]); return } // 未勾选素材镜不绑素材
+        const markedIdx = mi++
         const shim = voiceScale !== 1 ? { ...shot, duration: Math.max(0.1, (Number(shot.duration) || 0) * voiceScale) } : shot
-        let primaryIdx = idxs[si] ?? -1
+        let primaryIdx = idxs[markedIdx] ?? -1
         if (primaryIdx >= 0 && (runUsage.get(primaryIdx) ?? 0) > 0) {
           const alt = prefilterShotCandidates(shot, pool)
             .find((c) => c.scene.idx !== primaryIdx && (runUsage.get(c.scene.idx) ?? 0) === 0)
@@ -513,8 +542,11 @@ async function applyAssignment(matchIds?: string[]): Promise<void> {
         const fill = planShotGroup(shim, primaryIdx, pool, { usage: runUsage })
         fill.idxs.forEach((i2) => runUsage.set(i2, (runUsage.get(i2) ?? 0) + 1))
         groups.push(fill.idxs)
+        if (fill.idxs.some((i2) => !usedSegs.has(i2))) assignedShots += 1
+        fill.idxs.forEach((i2) => usedSegs.add(i2))
         coveredAll += fill.coveredSec
         targetAll += Math.max(0, (Number(shot.duration) || 0) * voiceScale)
+        total += 1 // 只计素材复选镜（2026-11-26 用户裁决：匹配范围=素材占位镜）
         const first = pool.find((pc) => pc.scene.idx === (fill.idxs[0] ?? -1))
         if (first && shot) {
           shot.material_path = first.scene.clipUrl || first.scene.name || ''
@@ -522,12 +554,11 @@ async function applyAssignment(matchIds?: string[]): Promise<void> {
         }
       })
       tab.clipGroups = groups
-      total += tab.shots.length
       aiHit += matched
     }
     const fallback = total - aiHit
     const failNote = failedTabs.length ? `；脚本「${failedTabs.join('」「')}」LLM 不可用已整组兜底` : ''
-    assignMsg.value = `智能匹配完成：${tabs.length} 个分镜脚本共 ${total} 镜，AI 命中 ${aiHit}、循环兜底 ${fallback}；装填后画面 Σ${coveredAll.toFixed(1)}s（镜标设计 Σ${targetAll.toFixed(1)}s，素材池去重后 ${pool.length} 段）${failNote}`
+    assignMsg.value = `智能匹配完成：素材复选 ${total} 镜，选择池 ${pool.length} 段已分配到 ${assignedShots} 镜（循环补位 ${fallback}）；AI 命中 ${aiHit}；装填后画面 Σ${coveredAll.toFixed(1)}s（镜标设计 Σ${targetAll.toFixed(1)}s）${failNote}`
     // 2026-09-23 用户裁决：匹配为探索动作不再触发同步——脚本库同步点收敛到
     // 「生成剪辑方案」定稿时（onConfirmCompose await sync）
   } finally {
@@ -554,7 +585,8 @@ async function onConfirmCompose(): Promise<void> {
     let toppedShots = 0
     for (const tab of storyboards.value) {
       if (!tab.shots.length || tab.clipGroups.length !== tab.shots.length) continue
-      const r = topUpClipGroups(tab.shots, tab.clipGroups, topPool, Number(tab.voiceDurSec) || 0)
+      // 2026-11-26 用户裁决：补片同口径只服务素材复选镜（未勾选镜不绑素材）
+      const r = topUpClipGroups(tab.shots, tab.clipGroups, topPool, Number(tab.voiceDurSec) || 0, (si) => !tab.shots[si]?.markMaterial)
       if (r.appendedTotal) {
         tab.clipGroups = r.groups
         toppedSegs += r.appendedTotal
@@ -597,11 +629,105 @@ function scoreClass(score: number | undefined): string {
       <VdStepBar :step="step" :steps="steps" @go="go" /><!-- 步骤条=最高布局层级（卡片框上面，同上一步/下一步层） -->
       <section class="card">
         <!-- 分镜脚本（2026-09-21 用户裁决：上一步的分镜脚本在页面顶部显示（material 态，
-             只读 + 自动分配的素材镜头列表）；素材上传/分割区移到脚本下面） -->
-        <CopywritingStoryboard mode="material" />
+             只读 + 自动分配的素材镜头列表）；素材上传/分割区移到脚本下面）。
+             2026-11-26 用户裁决：第三步改左右布局——左=脚本内容（本组件+参数设置），
+             右=口播文案及声音/视频素材：A-Roll（组件内自持）+ 素材库/AI生成（#side 注入，
+             分割线可拖默认 6:4，见 CopywritingStoryboard sidePanel） -->
+        <CopywritingStoryboard mode="material" side-panel>
+          <template #side>
+            <section class="sb-side-g sb2-side-g">
+              <div class="sb-side-title">视频素材：素材库<span class="sb-side-info">已选 {{ materialBatch.total }} 镜：完成 {{ materialBatch.done }}</span></div>
+        <!-- 选择素材 + 智能匹配到分镜脚本（2026-09-23 用户裁决：两按钮同一行平分；
+             选择过素材后文案变「重新选择素材」，分割进行中再点先停止确认。
+             匹配=本地预筛+LLM 精选+循环兜底，分配明细见顶部分镜脚本各镜） -->
+              <div class="row duel-row">
+                <TButton :label="hasSelected ? '重新选择素材' : '选择素材'" class="duel-half"
+                  title="选择素材来源（本地上传 / 素材库）" @click="openSrcDlg" />
+                <TButton label="智能匹配到分镜脚本" :icon="tabsAllBound ? 'check' : ''" class="duel-half" :loading="smartAssignBusy"
+                  :disabled="splitBusy || !filteredScenes.length || !storyboards.length"
+                  :title="splitBusy ? '镜头分割进行中：素材池尚未完整，请等分割完成后再智能匹配' : '选择要匹配的分镜脚本，按分镜镜头的景别/时长/画面语义，从已分割素材中智能匹配并绑定素材'" @click="openMatchDlg" />
+              </div>
+              <div v-if="assignMsg" class="hint">{{ assignMsg }}</div>
 
-        <!-- 素材来源（2026-09-21 用户裁决：本地上传/素材库/在线库/AI生成/混合 五个 tab，
-             当前仅本地上传实装；上传素材+镜头分割自智能混剪 Step1 移植） -->
+        <!-- 选择池常显条（2026-09-23 用户裁决：弹窗确认关闭后，池内容在本卡展示——
+             汇总来源计数 + 横向片段 chip（点击预览），即智能匹配的输入池） -->
+              <div v-if="filteredScenes.length" class="pool-strip">
+                <div class="row between">
+                  <span class="sec-label">选择池</span>
+                  <span class="muted">{{ poolSummary }}</span>
+                </div>
+                <div class="pool-chips">
+                  <button v-for="r in filteredScenes" :key="r.idx" type="button" class="pool-chip"
+                    :title="(r.description || r.name) + '（点击预览）'" @click="previewScene(r)">
+                    <span class="pool-idx">#{{ r.idx }}</span>
+                    <span class="pool-dur">{{ r.duration > 0 ? r.duration.toFixed(1) + 's' : '—' }}</span>
+                    <span v-if="r.shotType" class="pool-shot">{{ SHOT_TYPE_LABELS[r.shotType] || r.shotType }}</span>
+                  </button>
+                </div>
+              </div>
+              <div v-else class="pool-strip pool-strip--empty">
+                <span class="muted">选择池为空：点上方「选择素材」上传素材并完成智能镜头分割，或从素材库加入，即可进行智能匹配</span>
+              </div>
+            </section>
+            <section class="sb-side-g sb2-side-g">
+              <div class="sb-side-title">视频素材：AI生成<span class="sb-side-info">已选 {{ aiBatch.total }} 镜：完成 {{ aiBatch.done }}{{ aiBatch.active ? ` · 进行中 ${aiBatch.active}` : '' }}{{ aiBatch.failed ? ` · 失败 ${aiBatch.failed}` : '' }}</span></div>
+              <!-- AI 生成组（2026-11-26 用户裁决：批量跑所有勾选「AI生成」的分镜，逐镜进度在
+                   分镜卡 AI 轨瓦片就地显示；生成剪辑方案已移至「视频模式」组） -->
+              <TrackBatchBar kind="ai" />
+            </section>
+            <!-- 视频模式组（2026-11-26 用户裁决：参数设置+生成剪辑方案是一起的，从左栏底部
+                 移入右栏单独分组——参数仍随上方激活分镜 tab 绑定读写） -->
+            <section class="sb-side-g sb2-side-g">
+              <div class="sb-side-title">视频模式</div>
+              <!-- 2026-11-26 用户裁决：一个配置一行，不乱换行 -->
+              <div class="param-col">
+                <div class="param-line">
+                  <span class="param-label" title="设置随上方激活的分镜 tab 切换；每个分镜脚本各自保存一份">当前分镜:</span>
+                  <span class="tab-bound-name" :title="activeStoryboard ? '本行设置为该分镜脚本独有配置' : '无分镜 tab 时为全局缺省'">
+                    {{ activeStoryboard ? activeStoryboard.name : '全局（无分镜）' }}</span>
+                </div>
+                <div class="param-line">
+                  <span class="param-label">输出画幅:</span>
+                  <select v-model="activeTabLayout" class="input w180">
+                    <option v-for="o in LAYOUTS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                  <span v-if="activeTabLayout === 'source'" class="src-res"
+                    title="分割片段画幅（2026-09-15 裁决：画幅基准=分割片段而非原素材），选择'与分割视频一致'时将使用此分辨率">
+                    分割画幅: {{ splitResolution || '未知' }}</span>
+                </div>
+                <div class="param-line">
+                  <span class="param-label">时长限制:</span>
+                  <input :value="activeTabDurationLimit" readonly class="input w80"
+                    title="跟随本分镜克隆声音的实际时长；未生成声音时为缺省 30 秒" />
+                  <span class="hint">跟随声音</span>
+                </div>
+                <div class="param-line">
+                  <span class="param-label">转场动画:</span>
+                  <select v-model="activeTabTransition" class="input w120" title="本分镜成片的镜头间转场（剪映常用转场）；「随机」=镜间从三种转场随机">
+                    <option v-for="o in TRANSITIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                </div>
+                <div class="param-line">
+                  <span class="param-label">输出帧率:</span>
+                  <select v-model="activeTabFps" class="input w140"
+                    title="成片帧率，随服务端合成提交 fps 字段（契约 integer，默认 30）。&#10;跟随原片：用服务端 split 响应的 source_resolution.fps（2026-09-11 实测有此字段），&#10;服务端未给时本地探测兑底；都不行则回退 30。&#10;29.97/23.976 等小数帧率服务端不收，一律取整。">
+                    <option v-for="o in FPS_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+                  </select>
+                  <span v-if="activeTabFps === 'source'" class="src-res"
+                    title="服务端 source_resolution.fps 优先，本地探测兑底；都拿不到时按 30 fps 提交">
+                    原片: {{ splitFps > 0 ? splitFps + ' fps' : '未知（回退 30）' }}</span>
+                </div>
+              </div>
+              <div class="row confirm-row">
+                <!-- 2026-11-26 用户裁决：生成时逐镜检查点名（每镜至少一个绑定视频素材）——按钮不禁死，缺镜由 runConcatFromAllStoryboards 内部检查报告 -->
+                <TButton label="生成剪辑方案" :loading="concatBusy"
+                  :icon="precomposeDone ? 'check' : ''"
+                  :disabled="splitBusy"
+                  :title="splitBusy ? '镜头分割进行中：请等分割完成后再生成剪辑方案' : (precomposeDone ? '剪辑方案已生成；重新智能匹配后可再次生成' : (tabsAllBound ? '按每镜绑定的视频素材（素材/AI生成/在线搜索/A-Roll 至少一项）生成剪辑方案' : '有分镜尚未绑定视频素材：点击生成会逐镜点名提示缺哪些镜'))" @click="onConfirmCompose" />
+              </div>
+            </section>
+          </template>
+        </CopywritingStoryboard>
       </section>
 
       <!-- 选择素材弹窗（2026-09-22 用户裁决：素材选择与主界面分离——
@@ -888,7 +1014,7 @@ function scoreClass(score: number | undefined): string {
                   <!-- 第一行：脚本名 + 统计；第二行：产品快照/选题/脚本 id（2026-09-23 用户裁决） -->
                   <span class="match-pick-line">
                     <span class="match-pick-name" :title="t.name">{{ t.name }}</span>
-                    <span class="muted">{{ t.shots.length }} 镜{{ t.clipGroups.some((g) => g.length) ? ' · 已有绑定（匹配后覆盖）' : '' }}</span>
+                    <span class="muted">{{ t.shots.filter((sh) => sh.markMaterial).length }} 镜（素材复选）{{ t.clipGroups.some((g) => g.length) ? ' · 已有绑定（匹配后覆盖）' : '' }}</span>
                   </span>
                   <span class="match-pick-meta">
                     <span :class="t.productBrief ? '' : 'muted'">{{ t.productBrief || '产品信息未记录' }}</span>
@@ -907,100 +1033,6 @@ function scoreClass(score: number | undefined): string {
         </div>
       </div></teleport>
 
-      <section class="card">
-        <!-- 选择素材 + 智能匹配到分镜脚本（2026-09-23 用户裁决：两按钮同一行平分；
-             选择过素材后文案变「重新选择素材」，分割进行中再点先停止确认。
-             匹配=本地预筛+LLM 精选+循环兜底，分配明细见顶部分镜脚本各镜） -->
-        <div class="row duel-row">
-          <TButton :label="hasSelected ? '重新选择素材' : '选择素材'" class="duel-half"
-            title="选择素材来源（本地上传 / 素材库）" @click="openSrcDlg" />
-          <TButton label="智能匹配到分镜脚本" :icon="tabsAllBound ? 'check' : ''" class="duel-half" :loading="smartAssignBusy"
-            :disabled="splitBusy || !filteredScenes.length || !storyboards.length"
-            :title="splitBusy ? '镜头分割进行中：素材池尚未完整，请等分割完成后再智能匹配' : '选择要匹配的分镜脚本，按分镜镜头的景别/时长/画面语义，从已分割素材中智能匹配并绑定素材'" @click="openMatchDlg" />
-        </div>
-        <div v-if="assignMsg" class="hint">{{ assignMsg }}</div>
-
-        <!-- 选择池常显条（2026-09-23 用户裁决：弹窗确认关闭后，池内容在本卡展示——
-             汇总来源计数 + 横向片段 chip（点击预览），即智能匹配的输入池） -->
-        <div v-if="filteredScenes.length" class="pool-strip">
-          <div class="row between">
-            <span class="sec-label">选择池</span>
-            <span class="muted">{{ poolSummary }}</span>
-          </div>
-          <div class="pool-chips">
-            <button v-for="r in filteredScenes" :key="r.idx" type="button" class="pool-chip"
-              :title="(r.description || r.name) + '（点击预览）'" @click="previewScene(r)">
-              <span class="pool-idx">#{{ r.idx }}</span>
-              <span class="pool-dur">{{ r.duration > 0 ? r.duration.toFixed(1) + 's' : '—' }}</span>
-              <span v-if="r.shotType" class="pool-shot">{{ SHOT_TYPE_LABELS[r.shotType] || r.shotType }}</span>
-            </button>
-          </div>
-        </div>
-        <div v-else class="pool-strip pool-strip--empty">
-          <span class="muted">选择池为空：点上方「选择素材」上传素材并完成智能镜头分割，或从素材库加入，即可进行智能匹配</span>
-        </div>
-
-        <!-- 参数设置组（2026-09-23 用户裁决：视频设置按 tab 绑定——输出画幅/时长限制/
-             转场动画/输出帧率读写激活分镜自己的配置，切换上方分镜 tab 即切换设置；
-             导出按各分镜自身 transition 消费） -->
-        <div class="params-group">
-          <div class="param-row">
-            <span class="param-label" title="设置随上方激活的分镜 tab 切换；每个分镜脚本各自保存一份">当前分镜:</span>
-            <span class="tab-bound-name" :title="activeStoryboard ? '本行设置为该分镜脚本独有配置' : '无分镜 tab 时为全局缺省'">
-              {{ activeStoryboard ? activeStoryboard.name : '全局（无分镜）' }}</span>
-            <span class="param-label">输出画幅:</span>
-            <select v-model="activeTabLayout" class="input w180">
-              <option v-for="o in LAYOUTS" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
-            <span v-if="activeTabLayout === 'source'" class="src-res"
-              title="分割片段画幅（2026-09-15 裁决：画幅基准=分割片段而非原素材），选择'与分割视频一致'时将使用此分辨率">
-              分割画幅: {{ splitResolution || '未知' }}</span>
-            <span class="param-label">时长限制:</span>
-            <!-- 时长跟随本分镜口播声音的实际时长（派生只读）；未生成声音时为缺省 30 秒 -->
-            <input :value="activeTabDurationLimit" readonly class="input w80"
-              title="跟随本分镜克隆声音的实际时长；未生成声音时为缺省 30 秒" />
-            <span class="hint">跟随声音</span>
-            <!-- 2026-09-21 用户裁决：成片数=分镜脚本数，生成视频数量输入删除 -->
-            <span class="param-label">转场动画:</span>
-            <select v-model="activeTabTransition" class="input w120" title="本分镜成片的镜头间转场（剪映常用转场）；「随机」=镜间从三种转场随机">
-              <option v-for="o in TRANSITIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
-            <!-- 2026-09-22 用户裁决：「出入场加速」下拉移除——虚拟时间轴架构下无生效路径
-                 （时长由装填+末端裁剪控制），镜级变速实装时以按镜设置新形态回归 -->
-            <span class="param-label">输出帧率:</span>
-            <select v-model="activeTabFps" class="input w140"
-              title="成片帧率，随服务端合成提交 fps 字段（契约 integer，默认 30）。&#10;跟随原片：用服务端 split 响应的 source_resolution.fps（2026-09-11 实测有此字段），&#10;服务端未给时本地探测兑底；都不行则回退 30。&#10;29.97/23.976 等小数帧率服务端不收，一律取整。">
-              <option v-for="o in FPS_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-            </select>
-            <span v-if="activeTabFps === 'source'" class="src-res"
-              title="服务端 source_resolution.fps 优先，本地探测兑底；都拿不到时按 30 fps 提交">
-              原片: {{ splitFps > 0 ? splitFps + ' fps' : '未知（回退 30）' }}</span>
-          </div>
-        </div>
-
-        <!-- AI 生成组（2026-11-26 用户裁决：生成剪辑方案上方——批量跑所有勾选「AI生成」
-             的分镜，逐镜进度在分镜卡 AI 轨瓦片就地显示） -->
-        <TrackBatchBar kind="ai" />
-
-        <!-- 确认行（2026-09-22 用户裁决·架构：预合成 mp4 移除——「生成剪辑方案」=
-             虚拟时间轴就绪（秒级），导出草稿直接消费；完成对号=方案就绪标识） -->
-        <div class="row confirm-row">
-          <TButton label="生成剪辑方案" :loading="concatBusy"
-            :icon="precomposeDone ? 'check' : ''"
-            :disabled="splitBusy || !tabsAllBound"
-            :title="splitBusy ? '镜头分割进行中：请等分割完成后再生成剪辑方案' : (precomposeDone ? '剪辑方案已生成；重新智能匹配后可再次生成' : '所有分镜脚本绑定完整素材后才能生成剪辑方案；有分镜缺素材时不能生成')" @click="onConfirmCompose" />
-          <!-- 2026-09-21 用户裁决：「生成口播文案」删除——文案在第一步编写/生成，旁白已在第二步克隆 -->
-        </div>
-        <!-- 2026-09-22 架构：剪辑方案=虚拟时间轴秒级生成，原渲染进度条块随之移除 -->
-
-        <!-- 导航行（2026-09-10 用户裁决：上/下步按钮属操作区，归左栏底部；原版 nav_row L288-301） -->
-        <div class="row between">
-          <!-- 2026-09-17 用户裁决：上一步删除；下一步=跳转口播配音界面（换序后 go(1)） -->
-          <TButton label="上一步：口播配音" icon="left" @click="go(1)" />
-          <!-- 2026-09-21 用户裁决：完成第三步可进入第四步特效包装 -->
-          <TButton label="下一步：特效包装" icon="right" @click="go(3)" />
-        </div>
-      </section>
 
 
 
@@ -1059,6 +1091,18 @@ function scoreClass(score: number | undefined): string {
 .shot-type-badge { display: inline-block; padding: 1px 6px; border: 1px solid; border-radius: 4px; font-size: 11px; font-weight: 600; line-height: 1.4; }
 /* Step2 镜头重组（原版 params_group/result_box/player 等同布局；颜色走 V3 design tokens） */
 .params-group { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md); }
+/* 组标题尾计数（2026-11-26 用户裁决：每组标题后带该组视频素材信息） */
+.sb-side-title { display: flex; align-items: center; gap: 8px; }
+/* 视频模式组一配置一行（2026-11-26 用户裁决：不乱换行） */
+.param-col { display: flex; flex-direction: column; gap: 8px; }
+.param-line { display: flex; align-items: center; gap: 8px; }
+.param-line .src-res { margin-left: 0; }
+.sb-side-info { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted-foreground); white-space: nowrap; }
+/* 右栏注入组（2026-11-26 用户裁决：#side 槽内容带本组件作用域，sb-side-g/sb-side-title
+   需本面板同款定义——与 CopywritingStoryboard 内右栏组样式保持一致） */
+.sb2-side-g { display: flex; flex-direction: column; gap: 8px; padding: var(--space-5); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.sb-side-title { font-size: 13px; font-weight: 600; color: var(--foreground); }
+.sb2-side-g .pool-strip { margin: 0; }
 .param-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .param-row .param-label { margin-left: var(--space-3); }
 .param-row .param-label:first-child { margin-left: 0; }

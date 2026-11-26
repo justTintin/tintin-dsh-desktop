@@ -76,8 +76,9 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
   const { storyboards, activeStoryboardId } = deps
   function nextStoryboardName(): string {
     let max = 0
+    // 2026-11-26 日期前缀改 YYYYMMDD——旧 YYYY-MM-DD 形态（历史 tab）仍命中
     for (const s of storyboards.value) {
-      const m = /^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s+)?脚本(\d+)$/.exec(s.name)
+      const m = /^(?:(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}:\d{2}\s+)?脚本(\d+)$/.exec(s.name)
       if (m) max = Math.max(max, Number(m[1]))
     }
     return `脚本${max + 1}`

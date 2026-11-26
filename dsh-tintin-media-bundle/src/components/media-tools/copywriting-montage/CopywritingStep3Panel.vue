@@ -60,6 +60,8 @@ const {
 //    （shot.splitAudioId），各分镜卡顶部「拆分口播」就地回显）──
 const splitVoiceBusy = ref(false)
 const splitVoiceMsg = ref('')
+/** 拆分成功完成标记（2026-11-26 用户裁决：按钮显完成对号，口径同生成剪辑方案） */
+const splitOk = ref(false)
 const splitDone = ref(0)
 const splitTotal = ref(0)
 const splitProgress = computed(() => splitTotal.value ? Math.round(splitDone.value / splitTotal.value * 100) : 0)
@@ -73,6 +75,7 @@ async function splitVoiceToShots(): Promise<void> {
     return
   }
   splitVoiceBusy.value = true
+  splitOk.value = false // 新一轮拆分先熄灭对号，成功后再亮
   splitTotal.value = tabs.length
   splitDone.value = 0
   splitVoiceMsg.value = '正在请求服务端按分镜拆分口播音频…（首次拆分走 whisper 对齐，分钟级耗时）'
@@ -84,7 +87,9 @@ async function splitVoiceToShots(): Promise<void> {
     for (const tab of tabs) {
       let split: { map: Map<number, string>; detail: string; undeployed: boolean }
       try {
-        split = await shotSplitVoiceByScript(tab.scriptId)
+        // 2026-11-26 服务端会话实证：绑定回写可能晚于 split——body 直带
+        // source_audio_id（=tab.voiceAudioId，克隆上传响应的音频库 id）
+        split = await shotSplitVoiceByScript(tab.scriptId, tab.voiceAudioId)
       } catch (e) {
         if (!firstError) firstError = errText(e) // 超时/网络等真实原因；404 才是未部署
         missTabs.push(`${tab.name}（${errText(e).slice(0, 60)}）`)
@@ -123,6 +128,8 @@ async function splitVoiceToShots(): Promise<void> {
     }
     splitVoiceMsg.value = `拆分完成：${okTabs}/${tabs.length} 个脚本成功，绑定 ${bound} 镜${missTabs.length ? `；未拿到音频：${missTabs.join('、')}` : ''}（各分镜卡顶部可见）。`
     notify('拆分完成', splitVoiceMsg.value)
+    // 2026-11-26 用户裁决：拆分成功=按钮亮完成对号（口径同生成剪辑方案）；完成文案只走 notify
+    splitOk.value = true
   } finally { splitVoiceBusy.value = false }
 }
 
@@ -268,24 +275,20 @@ const tabVoices = computed(() => {
         <!-- 拆分声音到分镜脚本（2026-11-26 用户裁决：独立成行、主按钮样式；
              服务端按契约把各脚本整段克隆口播按镜拆分，逐镜绑定（卡顶「拆分口播」回显）） -->
         <div class="row split-voice-row">
+          <!-- 2026-11-26 用户裁决：成功后按钮亮完成对号（口径同生成剪辑方案）；按钮后的
+               完成文案删除——结果走 notify 弹窗，逐镜标识在各分镜卡上 -->
           <TButton label="拆分声音到分镜脚本" :loading="splitVoiceBusy" :disabled="!canSplitVoice"
+            :icon="splitOk ? 'check' : ''"
             :title="canSplitVoice ? '把每个分镜脚本绑定的整段克隆口播按镜时长拆分，逐镜绑定（A-Roll 数字人读该镜音频）' : '先完成批量克隆人声合成（生成口播音频并同步脚本）后才能拆分'"
             @click="splitVoiceToShots" />
           <span v-if="!canSplitVoice" class="muted">先完成批量克隆人声合成，生成口播音频后才能拆分。</span>
-          <span v-if="splitVoiceMsg" class="muted">{{ splitVoiceMsg }}</span>
         </div>
         <template v-if="splitVoiceBusy">
           <div class="concat-status-line">正在拆分声音 {{ splitDone }}/{{ splitTotal }}：逐镜对齐口播（首次走 whisper 对齐，分钟级）</div>
           <div class="clone-progress-bar"><div class="clone-progress-fill" :style="{ width: splitProgress + '%' }"></div></div>
         </template>
 
-        <!-- 导航行（2026-09-10 用户裁决：上/下步按钮属操作区；2026-09-09 裁决：合成声音即可跳第四步） -->
-        <div class="row between">
-          <!-- 2026-09-17 用户裁决换序：上一步=文案编写(0) -->
-          <TButton label="上一步：文案编写" plain @click="go(0)" />
-          <!-- 2026-09-17 用户裁决换序：下一步=镜头重组(2)；2026-09-21 展示名改「视频素材」 -->
-          <TButton label="下一步：视频素材" icon="right" @click="go(2)" />
-        </div>
+        <!-- 导航行（2026-11-26 用户裁决：移除，容器悬浮底栏统一渲染） -->
     <div v-if="step === 1" class="ns-section">
       <div class="ns-title">没有想要的样本？上传音频创建新样本</div>
       <div

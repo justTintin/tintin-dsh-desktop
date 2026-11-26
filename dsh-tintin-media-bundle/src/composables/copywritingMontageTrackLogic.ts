@@ -39,6 +39,12 @@ export function resolveShotTrack(shot: Pick<StoryboardShot, 'markARoll' | 'markA
 
 /** 批量标记过滤：复选标记命中且该轨尚无产物的镜下标（重复点批量不重做已完成的；
  *  markAI 对应 slots.gen、markARoll 对应 slots.aroll） */
+/** 第①步→第②步门控（2026-11-05 用户裁定）：至少一个 tab 生成了分镜（纯文案 tab 不算；
+ *  2026-11-26 悬浮导航接管按钮后由容器消费，逻辑层单一来源） */
+export function hasAnySplitShots(tabs: Array<{ shots: unknown[] }>): boolean {
+  return tabs.some((t) => t.shots.length > 0)
+}
+
 export function markedShotIdxs(shots: Array<Pick<StoryboardShot, 'markARoll' | 'markAI' | 'slots'>>, mode: 'aroll' | 'ai'): number[] {
   const slotKey = mode === 'ai' ? 'gen' : mode
   const marked = mode === 'ai' ? 'markAI' : 'markARoll'

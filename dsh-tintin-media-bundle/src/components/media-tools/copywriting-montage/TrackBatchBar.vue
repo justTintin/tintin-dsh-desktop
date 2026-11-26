@@ -5,28 +5,21 @@
 //     路径随 scheduled stage=aroll 任务下发（worker 在服务端主机读图））
 //   kind='ai'    = AI 生成组（生成剪辑方案上方；批量跑所有勾选 AI生成 的分镜）
 // 自注入 shell（与面板同源状态）；进度行=标记数/完成/进行中/失败 就地汇总。
-import { computed, inject, ref } from 'vue'
+import { inject, ref } from 'vue'
 import TButton from '@/components/common/TButton.vue'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 
 const props = defineProps<{ kind: 'aroll' | 'ai' }>()
 const shell = inject(copywritingMontageShellKey)!
-const { shotMatBusy, shotMatMsg, shotBatchAI, shotBatchARoll, shotBatchProgressOf } = shell.s
+const { shotMatBusy, shotMatMsgs, shotBatchAI, shotBatchARoll } = shell.s
+// 2026-11-26 用户裁决：分组消息各自独立（shotMatMsgs[kind]）——A-Roll 的提示不再串进 AI 生成组
+// 2026-11-26 用户裁决：组计数信息（已选 N 镜：完成 M）移到分组标题行（Storyboard/
+// Step2Panel 标题消费 shotBatchProgressOf），本组件不再重复展示
 
 const personRef = ref('') // 人物图服务端路径（product-upload 返回）
 const personName = ref('')
 const personUploading = ref(false)
 const personError = ref('')
-const progress = computed(() => shotBatchProgressOf(props.kind))
-const progressText = computed(() => {
-  const p = progress.value
-  if (!p.total) {
-    return props.kind === 'aroll'
-      ? '在分镜右侧勾选「生成A-Roll」后点生成（需先完成第 2 步口播配音）'
-      : '在分镜右侧勾选「AI生成」后点生成'
-  }
-  return `已选 ${p.total} 镜：完成 ${p.done}${p.active ? ` · 进行中 ${p.active}` : ''}${p.failed ? ` · 失败 ${p.failed}` : ''}`
-})
 
 async function pickPersonImage(): Promise<void> {
   personError.value = ''
@@ -65,19 +58,19 @@ function run(): void {
       <span v-if="personName" class="muted tbatch-file" :title="personRef">已选：{{ personName }}</span>
       <span v-if="personError" class="tbatch-err">{{ personError }}</span>
     </template>
-    <TButton :label="kind === 'aroll' ? '生成A-Roll' : 'AI生成勾选分镜'" size="small" :disabled="shotMatBusy" @click="run" />
-    <span class="muted tbatch-progress">{{ progressText }}</span>
-    <span v-if="shotMatMsg" class="tbatch-msg">{{ shotMatMsg }}</span>
+    <!-- 2026-11-26 用户裁决：生成按钮换行占整行 -->
+    <TButton class="tbatch-run" :label="kind === 'aroll' ? '生成A-Roll' : 'AI生成分镜'" size="small" :disabled="shotMatBusy" @click="run" />
+    <span v-if="shotMatMsgs[kind]" class="tbatch-msg">{{ shotMatMsgs[kind] }}</span>
   </div>
 </template>
 
 <style scoped>
-.tbatch { display: flex; align-items: center; gap: var(--space-3, 12px); flex-wrap: wrap; padding: 8px 12px;
-  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-container); }
-.tbatch--ai { border: none; background: transparent; padding: 4px 0; }
+.tbatch { display: flex; align-items: center; gap: var(--space-3, 12px); flex-wrap: wrap; padding: 4px 0;
+  border: none; background: transparent; }
 .tbatch-title { font-size: 13px; font-weight: 600; color: var(--foreground); flex: none; }
 .tbatch-file { font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tbatch-progress { font-size: 12px; }
+/* 生成按钮换行占整行（2026-11-26 用户裁决） */
+.tbatch-run { flex: 1 1 100%; }
 .tbatch-msg { font-size: 12px; color: var(--muted-foreground); word-break: break-all; }
 .muted { color: var(--muted-foreground); }
 </style>

@@ -10,18 +10,33 @@
 // 桥接调用全部不发生——模板不触 window.tintin。
 
 import { describe, expect, it, beforeEach, vi } from 'vitest'
+
+// Montage 链路 setup 期读 localStorage（bgmPath/画幅比例等记忆），node SSR 无——
+// 空实现桩（tintin-montage-material-sequence.test.ts 同款口径）
+;(globalThis as unknown as { localStorage: Storage }).localStorage = {
+  getItem: () => null, setItem: () => {}, removeItem: () => {}, clear: () => {},
+  key: () => null, get length() { return 0 },
+} as Storage
 import { createSSRApp, ref, defineComponent, h } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import CopywritingStep1Panel from '../src/components/media-tools/copywriting-montage/CopywritingStep1Panel.vue'
+import CopywritingMontage from '../src/components/media-tools/copywriting-montage/CopywritingMontage.vue'
+import CopywritingStep2Panel from '../src/components/media-tools/copywriting-montage/CopywritingStep2Panel.vue'
 import CopywritingStoryboard from '../src/components/media-tools/copywriting-montage/CopywritingStoryboard.vue'
 import VoiceoverPickerDialog from '../src/components/media-tools/VoiceoverPickerDialog.vue'
 import { copywritingMontageShellKey } from '../src/components/media-tools/copywriting-montage/copywritingMontageUiContext'
 import { storyboardShotsExpanded } from '../src/composables/storyboardShotsState'
+import { hasAnySplitShots } from '../src/composables/copywritingMontageTrackLogic'
 import type { StoryboardShot } from '../src/composables/opsStoryboardLogic'
 
 // 产品选择公共弹窗只留壳（SSR 不验证弹窗内部装载面板）
 vi.mock('../src/components/workbench/WbPickProductDialog.vue', () => ({
   default: defineComponent({ name: 'WbPickProductDialogStub', render: () => null }),
+}))
+
+// Montage 链路的播放器壳依赖 plyr（import 期触 document，node SSR 无）——只留壳
+vi.mock('../src/components/common/VideoPlayer.vue', () => ({
+  default: defineComponent({ name: 'VideoPlayerStub', render: () => null }),
 }))
 
 const shot = (over: Partial<StoryboardShot> = {}): StoryboardShot => ({
@@ -38,7 +53,7 @@ function fakeShell() {
   const shell = {
     step: ref(0),
     go: () => {},
-    steps: ['1. 文案编写', '2. 口播配音', '3. 视频素材', '4. 特效包装'],
+    steps: ['1. 文案编写', '2. 口播配音', '3. 视频素材', '4. 包装交付'],
     s: {
       // Step1 面板消费
       sharedProductInfo: ref({ brand: '', product: '', model: '', extra: '', keywords: [] as string[] }),
@@ -70,6 +85,16 @@ function fakeShell() {
       COPY_STORYBOARD_MAX: 10,
     },
   }
+  // Montage/Step2Panel 消费成员远多于上列表（2026-11-26 悬浮导航/左右分栏把冒烟面
+  // 扩到容器级）：Proxy 兜底缺失键=缓存 ref([])（数组安全，真值性偏宽——冒烟不校验布尔态）
+  const fallback = new Map<string, unknown>()
+  shell.s = new Proxy(shell.s, {
+    get(t, k) {
+      if (typeof k !== 'string' || k in t) return (t as Record<string, unknown>)[k]
+      if (!fallback.has(k)) fallback.set(k, ref([]))
+      return fallback.get(k)
+    },
+  })
   return { shell, storyboards, activeStoryboardId }
 }
 
@@ -114,18 +139,47 @@ describe('CopywritingStep1Panel 渲染冒烟（1105 批一改版）', () => {
     expect(html).toContain('disabled')
   })
 
-  it('分镜未生成时下一步禁用、生成后可用（2026-11-05 用户裁定）', async () => {
+  it('分镜未生成时悬浮导航下一步禁用、生成后可用（2026-11-05 裁定；2026-11-26 移容器悬浮底栏）', async () => {
     const { shell } = fakeShell()
     shell.s.storyboards.value = [tab('t1', '痛点式')] // 纯文案 tab（无镜头）
     shell.s.activeStoryboardId.value = 't1'
-    const html = await renderWithShell(CopywritingStep1Panel, shell)
+    const html = await renderWithShell(CopywritingMontage, shell)
+    // 悬浮导航渲染面：底栏胶囊 + 去序号步骤名（第①步无上一步）；第④步展示名已改包装交付
+    expect(html).toContain('step-float-nav')
+    expect(html).toContain('下一步：口播配音')
+    expect(html).not.toContain('上一步：')
     expect(html).toContain('尚未生成分镜脚本')
     expect(html).toMatch(/disabled/)
     shell.s.storyboards.value = [tab('t1', '痛点式', [shot()])]
     shell.s.activeStoryboardId.value = 't1'
     shell.s.copyShots.value = shell.s.storyboards.value[0]!.shots
-    const html2 = await renderWithShell(CopywritingStep1Panel, shell)
-    expect(html2).not.toContain('尚未生成分镜脚本')
+    // 门禁解除相：Montage 自持真实 composable（注入 fake 不进入），渲染面只钉禁用相；
+    // 解除相在逻辑层钉（helper=门控单一来源）
+    shell.s.storyboards.value = [tab('t1', '痛点式', [shot()])]
+    expect(hasAnySplitShots(shell.s.storyboards.value)).toBe(true)
+    expect(hasAnySplitShots([tab('t2', '纯文案')])).toBe(false)
+  })
+  it('第三步左右分栏渲染面（2026-11-26 用户裁决）：口播文案及声音/视频素材：A-Roll（组件内）+ 素材库/AI生成（#side 注入），分割线在场，导航行已移除', async () => {
+    const { shell } = fakeShell()
+    shell.s.storyboards.value = [tab('t1', '痛点式', [shot()], { narrative: '旁白稿' })]
+    shell.s.activeStoryboardId.value = 't1'
+    shell.s.copyShots.value = shell.s.storyboards.value[0]!.shots
+    const html = await renderWithShell(CopywritingStep2Panel, shell)
+    // 右栏组标题（次序=注入序：素材库 → AI生成；文案声音/A-Roll 两组组件内自持在前）
+    expect(html).toContain('口播文案及声音')
+    expect(html).toContain('视频素材：A-Roll')
+    expect(html).toContain('视频素材：素材库')
+    expect(html).toContain('视频素材：AI生成')
+    expect(html.indexOf('视频素材：A-Roll')).toBeLessThan(html.indexOf('视频素材：素材库'))
+    expect(html.indexOf('视频素材：素材库')).toBeLessThan(html.indexOf('视频素材：AI生成'))
+    // 分割线可拖（占位元素）+ 组内关键件（选择素材/生成剪辑方案/参数设置随脚本留左栏）
+    expect(html).toContain('sb-div')
+    expect(html).toContain('选择素材')
+    expect(html).toContain('生成剪辑方案')
+    expect(html).toContain('当前分镜')
+    // 面板内导航行不再渲染（悬浮底栏接管）
+    expect(html).not.toContain('上一步：口播配音')
+    expect(html).not.toContain('下一步：特效包装')
   })
 
   it('已选产品时展示产品 chip 与清除钮', async () => {
@@ -164,8 +218,10 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     // 文案绑定脚本：edit 态脚本顶部显示视频文案框（2026-11-05 用户裁定迁入分镜顶部）
     expect(html).toContain('口播文案（可选）')
     expect(html).toContain('sb-copy-edit')
-    // 输出画幅选择随脚本信息行（2026-11-26 用户裁决：第一步红框位，选完贯穿各步）
+    // 输出画幅选择在脚本基本信息行（2026-11-26 用户裁决改判：tab 胶囊不塞控件；
+    // edit 态=下拉可改，全量选项口径不变）
     expect(html).toContain('输出画幅')
+    expect(html).not.toContain('sb-tab-aspect') // tab 胶囊还原纯名称
     expect(html).toContain('竖屏 (1080x1920 抖音流)')
     expect(html).not.toContain('>文案：旁白<') // sb-copy 只读行仅非编辑态
     expect(html).not.toContain('sb-voice-row') // 无克隆产物不显示声音行
@@ -231,6 +287,24 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     expect(voice).not.toContain('sb-copy-edit')
   })
 
+  it('输出画幅在基本信息行（1126 改判）：edit/voice/material 下拉可改；fx 只读值；tab 无控件', async () => {
+    const { shell } = fakeShell()
+    shell.s.storyboards.value = [tab('t1', '痛点式', [shot()], { layout: 'horizontal' })]
+    shell.s.activeStoryboardId.value = 't1'
+    shell.s.copyShots.value = shell.s.storyboards.value[0]!.shots
+    storyboardShotsExpanded.value = true // 基本信息行在展开态模板内
+    const mat = await renderWithShell(CopywritingStoryboard, shell, { mode: 'material' })
+    expect(mat).toContain('输出画幅')
+    expect(mat).toContain('<select') // 信息行下拉可改
+    expect(mat).toContain('横屏 (1920x1080 宽屏)') // 全量选项口径
+    const fx = await renderWithShell(CopywritingStoryboard, shell, { mode: 'fx' })
+    expect(fx).toContain('输出画幅：横屏 (1920x1080 宽屏)') // 只读显示当前值
+    expect(fx).not.toContain('<select')
+    const voice = await renderWithShell(CopywritingStoryboard, shell, { mode: 'voice' })
+    expect(voice).toContain('<select') // 第二步也可下拉改（1126 用户裁决）
+    expect(voice).toContain('横屏 (1920x1080 宽屏)')
+  })
+
   it('四源四轨：轨道瓦片 + 右列单选/搜索按钮 + A-Roll 组（2026-11-26 用户裁决）', async () => {
     const { shell } = fakeShell()
     shell.s.storyboards.value = [tab('t1', '痛点式', [shot()])]
@@ -249,7 +323,11 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     expect(idle).toContain('ctl-check') // 复选框样式
     expect(idle).toContain('上传人物图')
     expect(idle).toContain('拆分口播') // 卡顶拆分声音绑定回显（1126 用户裁决）
-    expect(idle).not.toContain('选择素材（追加）') // 手动追加入口已删（1126 用户裁决）
+    // 素材复选框（2026-11-26 用户裁决：默认全选；「选择素材（追加）」按钮删除——
+    // 解绑全部移到素材状态行最右，无绑定镜不渲染）
+    expect(idle).toContain('实拍素材轨标记（默认全选；「解绑全部」清空该镜全部视频源）')
+    expect(idle).not.toContain('选择素材（追加）')
+    expect(idle).not.toContain('>解绑全部<') // 无绑定镜不渲染解绑钮（title 内文字不算）
     // 生成中：AI 轨瓦片就地进度卡（阶段/进度条/百分数/已用时）
     const states = { '0:gen': { phase: 'generating', progress: 45, taskId: 'j-1', msg: '', startedAt: 0, elapsedSec: 12 } }
     shell.s.shotGenStates = ref(states)

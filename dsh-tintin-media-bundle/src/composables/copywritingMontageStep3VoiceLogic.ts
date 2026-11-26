@@ -232,24 +232,40 @@ export const FANCY_POSITION_OPTIONS = [
  * （useCopywritingMontageStep3Voice `/^脚本(\d+)$/`）。
  */
 export function isAutoStoryboardName(name: string): boolean {
-  return /^(?:\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s+)?脚本\d+$/.test(String(name || '').trim())
+  // 2026-11-26 用户裁决：日期前缀改 YYYYMMDD——旧 YYYY-MM-DD 形态（历史 tab）仍命中
+  return /^(?:(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}:\d{2}\s+)?脚本\d+$/.test(String(name || '').trim())
 }
 
-/** 分镜脚本名默认日期前缀（YYYY-MM-DD，本地日期）；已是日期开头或服务端
+/** 文案名尾（2026-11-26 用户裁决：tab 名尾段=文案开头 5-10 字，替代「输入文案」
+ *  这类来源标签）：全空白剥离，首个分句标点处即断（落在 5-10 字区间最自然），
+ *  无标点才限 10 字截断（不加省略号——tab 名空间有限，头 10 字足以辨识）。 */
+export function copyHeadName(narrative: string): string {
+  const flat = String(narrative || '').replace(/\s+/g, '')
+  // 首个分句标点处即断（「目前全球AI领域，封锁…」→「目前全球AI领域」）；
+  // 无标点长句再限 10 字（2026-11-26 用户裁决：tab 名尾=文案开头 5-10 字）
+  const cut = flat.search(/[，。！？、；：,.!?;:]/)
+  // 分句标点处即断且整段保留（「2026年10月22日，…」→「2026年10月22日」11 字不裁）；
+  // 无标点长句才限 10 字（测试钉定口径）
+  return cut >= 0 ? flat.slice(0, cut) : flat.slice(0, 10)
+}
+
+/** 分镜脚本名默认日期前缀（YYMMDD HH:mm，2026-11-26 用户两连裁：日期去连字符、
+ *  年份去世纪前缀「20」从 26 起精确到分钟）；已是日期开头或服务端
  *  「分镜脚本_YYYYMMDD」形态的不重复加。 */
 export function storyboardDatePrefix(d = new Date()): string {
-  const y = d.getFullYear()
+  const y = String(d.getFullYear() % 100).padStart(2, '0')
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
   const hh = String(d.getHours()).padStart(2, '0')
   const mm = String(d.getMinutes()).padStart(2, '0')
-  return `${y}-${m}-${day} ${hh}:${mm}`
+  return `${y}${m}${day} ${hh}:${mm}`
 }
 export function datedStoryboardName(name: string, d = new Date()): string {
   const base = String(name || '').trim()
   if (!base) return base
   const prefix = storyboardDatePrefix(d)
-  if (base.startsWith(prefix) || /^分镜脚本_\d{8}/.test(base)) return base
+  // 旧连字符/全日期形态（历史 tab）与新 YYMMDD 形态（异分钟）同样视为已有日期不重加
+  if (base.startsWith(prefix) || /^(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}:\d{2} /.test(base) || /^分镜脚本_\d{8}/.test(base)) return base
   return `${prefix} ${base}`
 }
 

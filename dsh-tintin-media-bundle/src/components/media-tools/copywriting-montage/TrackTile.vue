@@ -32,7 +32,7 @@ const mediaStyle = computed(() => (props.aspect ? { aspectRatio: props.aspect } 
 
 <template>
   <div class="track-tile">
-    <span class="track-lbl">{{ label }}</span>
+    <!-- 2026-11-26 用户裁决：顶部标题删除——占位框内已有名称，不重复 -->
     <video v-if="videoSrc" controls preload="metadata" :src="videoSrc" class="track-video" :style="mediaStyle" />
     <div v-else-if="state && state.phase !== 'done'" class="track-gen" :class="{ 'is-failed': state.phase === 'failed' }" :style="mediaStyle">
       <span class="track-gen-phase">{{ phaseText }}</span>
@@ -54,7 +54,7 @@ const mediaStyle = computed(() => (props.aspect ? { aspectRatio: props.aspect } 
 
 <style scoped>
 .track-tile { width: 104px; flex: 0 0 104px; display: flex; flex-direction: column; gap: 3px; }
-.track-lbl { font-size: 11px; color: var(--muted-foreground); text-align: center; }
+
 .track-video { width: 100%; height: auto; object-fit: cover; display: block; background: #101010; border-radius: var(--radius-sm); }
 /* 进行中/失败进度卡 */
 .track-gen { width: 100%; padding: 8px 4px; display: flex; flex-direction: column; gap: 4px; align-items: stretch; background: #101010; border-radius: var(--radius-sm); min-height: 58px; justify-content: center; }

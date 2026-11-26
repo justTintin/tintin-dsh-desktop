@@ -24,14 +24,21 @@ import OnlineStockPanel from './OnlineStockPanel.vue'
 import TrackTile from './TrackTile.vue'
 import TrackBatchBar from './TrackBatchBar.vue'
 
-const props = defineProps<{ mode: 'edit' | 'voice' | 'material' | 'fx'; sfxBusy?: boolean; singleScript?: boolean }>()
+const props = defineProps<{
+  mode: 'edit' | 'voice' | 'material' | 'fx'
+  sfxBusy?: boolean
+  singleScript?: boolean
+  /** 第三步左右分栏态（2026-11-26 用户裁决）：左=脚本内容，右=文案声音/A-Roll/
+   *  素材库/AI生成四组（后两组由上层 #side 注入）；分割线可拖，默认 6:4 */
+  sidePanel?: boolean
+}>()
 const emit = defineEmits<{ (e: 'sfx-regen', shot: StoryboardShot): void; (e: 'sfx-remove', shot: StoryboardShot): void }>()
 
 const isDark = useHostDark() // 弹窗 teleport 到 body（App 根外），暗色类需显式绑定（2026-11-05 白弹窗同款）
 const shell = inject(copywritingMontageShellKey)!
 const {
   copyShots, copyShotsStale, genStoryboard, storyboardBusy, activeNarrative,
-  scenes, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, toAbsolute,
+  scenes, shotClipGroup, removeShotClipAt, unbindShotMaterial, toAbsolute, shotBatchProgressOf,
   storyboards, activeStoryboardId, setActiveStoryboard, renameStoryboardTab, removeStoryboardTab, COPY_STORYBOARD_MAX,
   splitResolution,
   shotMatMsg, addOnlineShotMaterial,
@@ -49,13 +56,36 @@ function onShotOnlineAdd(items: OnlineItem[]): void {
 // ── 四源四轨（2026-11-26 用户裁决）：右列两复选框互不排斥（markARoll/markAI 分别
 //    驱动两批量）；产物各归各轨占位（素材/AI/搜索/A-Roll 瓦片，TrackTile 三态渲染）──
 const TRACK_KEYS = ['gen', 'stock', 'aroll'] as const
-function setMark(shot: StoryboardShot, kind: 'aroll' | 'ai', on: boolean): void {
-  if (kind === 'aroll') shot.markARoll = on || undefined
+function setMark(shot: StoryboardShot, kind: 'material' | 'aroll' | 'ai', on: boolean): void {
+  if (kind === 'material') shot.markMaterial = on || undefined
+  else if (kind === 'aroll') shot.markARoll = on || undefined
   else shot.markAI = on || undefined
 }
 function slotLocal(i: number, track: 'gen' | 'stock' | 'aroll'): string {
   const local = copyShots.value[i]?.slots?.[track]?.local || ''
   return local ? toFileUrl(local) : ''
+}
+
+// ── 第三步左右分栏（2026-11-26 用户裁决：默认 6:4，分割线拖拽调节，localStorage 记忆；
+//    与智能混剪页 vd-split 同交互形态）──
+const SB_SPLIT_KEY = 'copy-sb-split-pct'
+const sbSplitPct = ref(Math.min(80, Math.max(35, Number((typeof localStorage !== 'undefined' && localStorage.getItem(SB_SPLIT_KEY)) || 0) || 70)))
+const sbLeftStyle = computed(() => ({ flex: `0 0 calc(${sbSplitPct.value}% - 6px)` }))
+function onSbDivDown(e: MouseEvent): void {
+  e.preventDefault()
+  const pane = (e.currentTarget as HTMLElement).parentElement
+  if (!pane) return
+  const rect = pane.getBoundingClientRect()
+  const onMove = (ev: MouseEvent) => {
+    sbSplitPct.value = Math.min(80, Math.max(35, Math.round(((ev.clientX - rect.left) / rect.width) * 100)))
+  }
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+    localStorage.setItem(SB_SPLIT_KEY, String(sbSplitPct.value))
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
 }
 // ── 素材状态行（2026-11-26 用户裁决：显示该镜生效源——A-Roll/AI生成/在线素材/
 //    实拍素材/未绑定素材，单行不换行；与合成取用同一解析 resolveShotTrack）──
@@ -65,6 +95,19 @@ function trackStatus(i: number): { text: string; none: boolean; material: boolea
   const resolved = shot ? resolveShotTrack(shot, boundClips(i).length > 0) : null
   if (!resolved) return { text: '未绑定素材', none: true, material: false }
   return { text: TRACK_LABEL[resolved.track] || resolved.track, none: false, material: resolved.track === 'material' }
+}
+/** 该镜是否有任一视频源绑定（解绑全部按钮的显隐判据：素材绑定组或三轨占位任一有货） */
+function trackHasAnySource(i: number): boolean {
+  const shot = copyShots.value[i]
+  if (!shot) return false
+  return boundClips(i).length > 0 || TRACK_KEYS.some((t) => !!shot.slots?.[t]?.local)
+}
+/** 解绑该镜全部视频源（2026-11-26 用户裁决：不只素材轨——素材绑定组 +
+ *  AI生成/在线搜索/A-Roll 三轨占位一并解绑，供生成剪辑方案逐镜检查重新计量） */
+function unbindAllSources(i: number): void {
+  unbindShotMaterial(i)
+  const shot = copyShots.value[i]
+  if (shot) shot.slots = undefined
 }
 /** 是否有任一镜任一轨在生成（顶部全局状态行的新旧样式判据） */
 const shotGenAnyActive = computed(() => copyShots.value.some((_, i) =>
@@ -78,6 +121,15 @@ const tileAspect = computed(() => {
   const m = /(\d+)\s*[x×]\s*(\d+)/.exec(splitResolution.value || '')
   return m ? `${m[1]} / ${m[2]}` : '9 / 16'
 })
+/** A-Roll 组标题计数（2026-11-26 用户裁决：每组标题后带该组视频素材信息，
+ *  随左列复选变化；生成 A-Roll 时跑的就是这个数量） */
+const arollBatch = computed(() => shotBatchProgressOf('aroll'))
+/** 横屏画幅时四瓦片 2×2（2026-11-26 用户裁决：两个在上两个在下；竖屏保持一排）——
+ *  按 tileAspect 宽高比判定，覆盖 horizontal 与「与分割视频一致」的横版分辨率 */
+const tracksGrid = computed(() => {
+  const m = /(\d+)\s*\/\s*(\d+)/.exec(tileAspect.value)
+  return !!m && Number(m[1]) > Number(m[2])
+})
 /** 输出画幅下拉（2026-11-26 用户裁决：第一步信息行红框位——与第三步参数区同一
  *  layout 字段，选完贯穿各步；选项口径对齐 Step2Panel LAYOUTS） */
 const LAYOUT_OPTIONS = computed(() => [
@@ -87,6 +139,15 @@ const LAYOUT_OPTIONS = computed(() => [
 ])
 
 const editable = computed(() => props.mode === 'edit')
+// ── 输出画幅·脚本基本信息行（2026-11-26 用户裁决改判：选择/显示放回基本信息行——
+//    tab 胶囊只留名称，不塞控件；第一步/第三步可改，口播配音/包装交付只读展示当前值。
+//    第三步改画幅提示：修改画幅会导致视频可能出现裁切）──
+const layoutFull = (v: unknown): string =>
+  (LAYOUT_OPTIONS.value.find((o) => o.value === v)?.label ?? String(v ?? 'vertical'))
+const aspectWarned = ref(false)
+function onMetaAspectChange(): void {
+  if (props.mode === 'material') aspectWarned.value = true
+}
 /** 激活分镜 tab（脚本基本信息来源：topic/scriptId 均为服务端原值字段，2026-09-22
  *  用户裁决：显示与服务端返回字段定义对齐，不做截断/改名加工） */
 const activeMeta = computed(() => storyboards.value.find((t) => t.id === activeStoryboardId.value) || null)
@@ -171,6 +232,9 @@ const EMPTY_HINT: Record<string, string> = {
 
 <template>
   <div class="sb-block">
+    <!-- 第三步左右分栏（2026-11-26 用户裁决）：sidePanel 态文案/声音不顶置，移右栏
+         「口播文案及声音」组；其余步骤（非 sidePanel）照旧顶置 -->
+    <template v-if="!sidePanel">
     <!-- 2026-11-05 用户裁定：视频文案在分镜脚本顶部显示（有激活脚本才显示；进默认
          无脚本不显示）；文案与激活脚本一一对应——编辑即改该脚本旁白，克隆声音以此为准。
          文案框不受收起控制（收起/展开只控制下方分镜卡） -->
@@ -200,6 +264,12 @@ const EMPTY_HINT: Record<string, string> = {
       />
       <span class="sb-voice-dur" :class="{ none: !activeMeta.voiceDurSec }">{{ activeMeta.voiceDurSec > 0 ? fmtDur(activeMeta.voiceDurSec) : '--:--' }}</span>
     </div>
+    </template><!-- /非 sidePanel 顶置文案声音 -->
+
+    <!-- 左右分栏容器（仅 sidePanel 生效）：左=脚本内容（tab 条+分镜卡），右=文案声音/
+         A-Roll/上层注入组；分割线夹中可拖 -->
+    <div :class="{ 'sb-cols': sidePanel }">
+      <div class="sb-col-main" :style="sidePanel ? sbLeftStyle : undefined">
 
     <!-- 分镜 tab 条（多分镜：每 tab 一个脚本对应一个视频；双击重命名，删除二次确认，上限 10。
          2026-11-05 用户裁定：行尾收起/展开钮（控制分镜卡显示，不控制视频文案）——加长样式） -->
@@ -217,8 +287,10 @@ const EMPTY_HINT: Record<string, string> = {
           @click.stop="onTabClose(sb.id)">×</button>
       </div>
       <!-- singleScript（仿视频=一个视频脚本）：多分镜添加提示/删除入口不适用 -->
-      <span v-if="!singleScript && storyboards.length < COPY_STORYBOARD_MAX" class="sb-info" title="生成新的分镜：点击「✨ AI 生成分镜脚本」">{{ storyboards.length ? '' : '' }}可再添加 {{ COPY_STORYBOARD_MAX - storyboards.length }} 个分镜</span>
-      <span v-else-if="!singleScript" class="sb-info">已达分镜数量上限（{{ COPY_STORYBOARD_MAX }}）</span>
+      <!-- 2026-11-26 用户裁决：余量提示居中显示（绝对定位水平居中于标签行），
+           不再跟在末尾标签后顶左——与标签数无关恒居中 -->
+      <span v-if="!singleScript && storyboards.length < COPY_STORYBOARD_MAX" class="sb-info sb-add-hint" title="生成新的分镜：点击「✨ AI 生成分镜脚本」">{{ storyboards.length ? '' : '' }}可再添加 {{ COPY_STORYBOARD_MAX - storyboards.length }} 个分镜</span>
+      <span v-else-if="!singleScript" class="sb-info sb-add-hint">已达分镜数量上限（{{ COPY_STORYBOARD_MAX }}）</span>
       <span class="sb-flex"></span>
       <SbCollapseToggle v-if="storyboards.length" />
     </div>
@@ -229,22 +301,27 @@ const EMPTY_HINT: Record<string, string> = {
     <div class="row between">
       <!-- 2026-09-22 用户裁决：脚本头部显示服务端脚本基本信息（选题/脚本库 id）——
            取回分镜脚本后基本信息随 tab 保存，不再只显示镜数/时长 -->
-      <span class="sb-info">分镜脚本{{ copyShots.length ? `：共 ${copyShots.length} 镜 ｜ 总时长 ${shotsTotalSec} 秒` : '' }}<template v-if="activeMeta && copyShots.length"> ｜ 选题：{{ activeMeta.topic || '—' }}</template><template v-if="activeMeta?.scriptId"> ｜ 脚本 {{ activeMeta.scriptId }}</template>
-        <!-- 输出画幅随脚本（2026-11-26 用户裁决：第一步信息行红框位直接选，选完贯穿
-             各步——第三步参数区/四轨瓦片/AI 生成比例同一 layout 字段自动跟随） -->
-        <template v-if="editable && activeMeta"> ｜ 输出画幅：
-          <select v-model="activeMeta.layout" class="input w150" title="本脚本输出画幅（生成视频素材前选定，各步跟随）">
-            <option v-for="o in LAYOUT_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-          </select>
-        </template>
+      <span class="sb-info sb-meta-big">分镜脚本{{ copyShots.length ? `：共 ${copyShots.length} 镜 ｜ 总时长 ${shotsTotalSec} 秒` : '' }}<template v-if="activeMeta && copyShots.length"> ｜ 选题：{{ activeMeta.topic || '—' }}</template><template v-if="activeMeta?.scriptId"> ｜ 脚本 {{ activeMeta.scriptId }}</template>
+      <!-- 输出画幅在脚本基本信息行（2026-11-26 用户裁决改判：tab 胶囊不塞控件——
+           前三步可改下拉，包装交付只读显示当前值；同一 layout 字段贯穿各步，
+           第三步参数区/四轨瓦片/AI 生成比例自动跟随） -->
+      <template v-if="mode !== 'fx' && activeMeta"> ｜ 输出画幅：
+        <select v-model="activeMeta.layout" class="input w150" @change="onMetaAspectChange"
+          title="本脚本输出画幅（各步跟随；第三步修改会导致已生成视频可能出现裁切）">
+          <option v-for="o in LAYOUT_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+      </template>
+      <template v-else-if="activeMeta"> ｜ 输出画幅：{{ layoutFull(activeMeta.layout) }}</template>
         <span v-if="copyShotsStale" class="sb-stale">⚠ 分镜基于旧版文案（文案已修改），克隆将使用当前旁白全文；请重新生成分镜</span>
       </span>
       <span v-if="mode !== 'edit'" class="sb-info">{{ MODE_STATUS[mode] }}</span>
     </div>
+    <!-- 第三步改画幅提示（2026-11-26 用户裁决：修改画幅会导致视频可能出现裁切） -->
+    <div v-if="mode === 'material' && aspectWarned" class="sb-aspect-warn" title="切换画幅后，按原画幅生成的素材在合成时按新画幅装配，可能出现裁切">⚠ 修改画幅会导致视频可能出现裁切</div>
     <div v-if="shotMatMsg" class="sb-info" :class="shotGenAnyActive ? '' : 'sb-stale'">{{ shotGenAnyActive ? '生成中… ' : '' }}{{ shotMatMsg }}</div>
     <!-- A-Roll 数字人组（2026-11-26 用户裁决：图2 红框位——分镜标签行下方独立分组；
          人物图素材 ID 组内共用，批量生成所有勾选「生成A-Roll」的分镜） -->
-    <TrackBatchBar v-if="mode === 'material'" kind="aroll" />
+    <TrackBatchBar v-if="mode === 'material' && !sidePanel" kind="aroll" />
 
     <template v-if="copyShots.length">
       <div v-for="(shot, i) in copyShots" :key="i" class="seg-card seg-card--row">
@@ -266,9 +343,11 @@ const EMPTY_HINT: Record<string, string> = {
             <span class="spacer"></span>
           </template>
         </div>
-        <!-- 拆分口播绑定回显（2026-11-26 用户裁决：A-Roll 组拆分后逐镜绑定，卡顶可见） -->
-        <div class="sb-line sb-split" :class="{ 'sb-split--none': !shot.splitAudioId }">
-          拆分口播：{{ shot.splitAudioId || '未绑定' }}
+        <!-- 声音拆分完成标识（2026-11-26 用户裁决：每个分镜都要有——已拆分=绿字对号
+             「✓ 声音拆分完成（切片 N）」；未拆分=灰字「拆分口播：未绑定」。共享组件
+             一处改=四个步骤全脚本生效） -->
+        <div class="sb-line sb-split" :class="shot.splitAudioId ? 'sb-split--done' : 'sb-split--none'">
+          {{ shot.splitAudioId ? `✓ 声音拆分完成（切片 ${shot.splitAudioId}）` : '拆分口播：未绑定' }}
         </div>
 
         <label v-if="editable" class="seg-field"><span class="lbl">画面描述（视频生成提示词）</span>
@@ -317,12 +396,17 @@ const EMPTY_HINT: Record<string, string> = {
 
         <!-- 素材状态行（2026-11-26 用户裁决：四轨制下显示该镜生效源——A-Roll/AI生成/
              在线素材/实拍素材，无则「未绑定素材」；单行不换行。实拍素材=素材绑定轨时
-             保留片数/Σ/达标徽标与逐片管理；解绑保留用于清空素材轨） -->
+             保留片数/Σ/达标徽标与逐片管理。2026-11-26 用户裁决：「解绑全部」移到本行
+             最右——清空该镜全部视频源绑定（素材绑定+AI/搜索/A-Roll 四轨全清）；
+             「选择素材（追加）」按钮删除） -->
         <template v-if="mode === 'material' || mode === 'fx'">
           <div class="seg-field">
             <div class="sb-line track-status" :class="{ 'track-status--none': trackStatus(i).none }">
-              素材状态：{{ trackStatus(i).text }}<template v-if="trackStatus(i).material && boundClips(i).length"> · 共 {{ boundClips(i).length }} 片 · Σ {{ coveredSec(i).toFixed(1) }}s / 标 {{ shot.duration }}s</template><span v-if="trackStatus(i).material && fillBadge(i)" class="fill-badge" :class="fillBadge(i)!.cls"
-                title="Σ片段全长 vs 镜标：差值<15% 达标；欠装时预合成按现有片段合成（末端裁剪照常）">{{ fillBadge(i)!.text }}</span>
+              <span class="track-status-text">素材状态：{{ trackStatus(i).text }}<template v-if="trackStatus(i).material && boundClips(i).length"> · 共 {{ boundClips(i).length }} 片 · Σ {{ coveredSec(i).toFixed(1) }}s / 标 {{ shot.duration }}s</template><span v-if="trackStatus(i).material && fillBadge(i)" class="fill-badge" :class="fillBadge(i)!.cls"
+                title="Σ片段全长 vs 镜标：差值<15% 达标；欠装时预合成按现有片段合成（末端裁剪照常）">{{ fillBadge(i)!.text }}</span></span>
+              <span class="spacer"></span>
+              <TButton v-if="mode === 'material' && trackHasAnySource(i)" label="解绑全部" variant="secondary" size="small"
+                title="清空该镜全部视频源绑定：素材绑定组 + AI生成/在线搜索/A-Roll 三轨占位一并解绑" @click="unbindAllSources(i)" />
             </div>
             <div v-if="trackStatus(i).material && boundClips(i).length" class="sb-line track-status">
               <span v-for="(s, j) in boundClips(i)" :key="s.idx" class="bound-clip">
@@ -330,26 +414,30 @@ const EMPTY_HINT: Record<string, string> = {
                 <button v-if="mode === 'material'" class="unbind-btn" title="移除该片段" @click="removeShotClipAt(i, j)">×</button>
               </span>
             </div>
-            <div v-if="mode === 'material' && boundClips(i).length" class="row">
-              <TButton label="解绑全部" variant="secondary" size="small" @click="unbindShotMaterial(i)" />
-            </div>
           </div>
         </template>
           </div><!-- /seg-main -->
-          <!-- 2026-11-26 四源四轨裁决：material 态右列=四轨占位瓦片（素材/AI/搜索/A-Roll，
-               各轨产物视频/进度卡/占位三态，TrackTile 渲染，比例随分镜脚本输出画幅）+
-               最右控制列（两复选框互不排斥 + 在线搜索素材按钮）；其余态保留单预览列 -->
-          <div v-if="mode === 'material'" class="seg-right">
-            <div class="seg-tracks">
+          <!-- 2026-11-26 用户裁决：四轨占位瓦片+控制列显示在有分镜脚本的各步里
+               （素材/AI/搜索/A-Roll 各轨产物视频/进度卡/占位三态，TrackTile 渲染，
+               比例随分镜脚本输出画幅；复选标记互不排斥互相不影响。
+               2026-11-26 用户再裁：横屏画幅时四瓦片 2×2 两行两列，竖屏保持一排） -->
+          <div class="seg-right">
+            <!-- 2026-11-26 用户裁决：四轨顺序=A-Roll→素材→AI生成→在线搜索（瓦片与右列
+                 复选同序；共享组件一处改=四个步骤全脚本生效） -->
+            <div class="seg-tracks" :class="{ 'seg-tracks--grid': tracksGrid }">
+              <TrackTile label="A-Roll" :aspect="tileAspect" :video-src="slotLocal(i, 'aroll')" :state="shotGenStateOf(i, 'aroll')" fallback="A-Roll" />
               <TrackTile label="素材" :aspect="tileAspect" :video-src="previewSrc(i)" fallback="未绑定素材" />
               <TrackTile label="AI" :aspect="tileAspect" :video-src="slotLocal(i, 'gen')" :state="shotGenStateOf(i, 'gen')" fallback="AI 生成" />
               <TrackTile label="搜索" :aspect="tileAspect" :video-src="slotLocal(i, 'stock')" :state="shotGenStateOf(i, 'stock')" fallback="在线搜索" />
-              <TrackTile label="A-Roll" :aspect="tileAspect" :video-src="slotLocal(i, 'aroll')" :state="shotGenStateOf(i, 'aroll')" fallback="A-Roll" />
             </div>
             <div class="seg-ctl">
               <label class="ctl-check" title="勾选后由上方 A-Roll 组批量生成数字人（读该镜拆分口播音频）">
                 <input type="checkbox" :checked="!!copyShots[i]?.markARoll" @change="setMark(copyShots[i]!, 'aroll', ($event.target as HTMLInputElement).checked)" />
                 <span>生成A-Roll</span>
+              </label>
+              <label class="ctl-check" title="实拍素材轨标记（默认全选；「解绑全部」清空该镜全部视频源）">
+                <input type="checkbox" :checked="!!copyShots[i]?.markMaterial" @change="setMark(copyShots[i]!, 'material', ($event.target as HTMLInputElement).checked)" />
+                <span>素材</span>
               </label>
               <label class="ctl-check" title="勾选后由「AI生成」组批量生成视频（两勾互不影响，可同时）">
                 <input type="checkbox" :checked="!!copyShots[i]?.markAI" @change="setMark(copyShots[i]!, 'ai', ($event.target as HTMLInputElement).checked)" />
@@ -358,10 +446,6 @@ const EMPTY_HINT: Record<string, string> = {
               <button type="button" class="ctl-mark" :disabled="shotGenActiveOf(i, 'stock')"
                 title="在线搜索素材到该镜搜索轨" @click="shotOnlineIdx = i">在线搜索素材</button>
             </div>
-          </div>
-          <div v-else class="seg-video">
-            <video v-if="previewSrc(i)" controls preload="metadata" :src="previewSrc(i)"></video>
-            <span v-else class="sb-info seg-video-empty">未绑定素材</span>
           </div>
       </div>
 
@@ -373,6 +457,7 @@ const EMPTY_HINT: Record<string, string> = {
           index: copyShots.length + 1, shot_type: '', visual: '', audio: '', sfx: '', duration: 3,
           material_path: '', material_type: '', material_hash: '', material_id: 0,
           markARoll: true,
+          markMaterial: true,
         })" />
       </div>
     </template>
@@ -389,11 +474,50 @@ const EMPTY_HINT: Record<string, string> = {
     <div v-if="mode === 'edit'" class="row sb-actions">
       <TButton label="✨ AI 生成分镜脚本" :loading="storyboardBusy" @click="genStoryboard" />
     </div>
+      </div><!-- /sb-col-main 脚本内容 -->
+
+      <!-- 右栏（2026-11-26 用户裁决）：口播文案及声音 / 视频素材：A-Roll 两组组件内
+           自持，「视频素材：素材库」「视频素材：AI生成」由上层 #side 注入（次序=注入序） -->
+      <template v-if="sidePanel">
+        <div class="sb-div" title="拖拽调节左右比例" @mousedown="onSbDivDown"></div>
+        <div class="sb-col-side">
+          <section class="sb-side-g">
+            <div class="sb-side-title">口播文案及声音</div>
+            <div v-if="mode === 'edit' && activeMeta" class="sb-copy-edit">
+              <label class="sb-copy-lbl">
+                口播文案（可选）
+                <span class="sb-copy-tip" title="该脚本绑定的口播文案（=激活分镜的旁白，克隆声音以此为准）；由方案一/二生成后随标签装载，也可就地编辑">ⓘ</span>
+              </label>
+              <textarea v-model="activeNarrative" class="input carry-textarea sb-copy-ta" rows="8"
+                placeholder="该脚本的口播文案（由方案一/二生成后随标签装载，可就地编辑）"></textarea>
+            </div>
+            <div v-else-if="mode !== 'edit' && mode !== 'voice' && activeMeta?.narrative" class="sb-copy" :title="activeMeta.narrative">文案：{{ activeMeta.narrative }}</div>
+            <div v-if="activeMeta?.voiceWav" class="sb-voice-row">
+              <span class="sb-voice-lbl">克隆声音</span>
+              <audio
+                :key="activeMeta.voiceWav"
+                class="sb-voice-audio"
+                controls
+                preload="auto"
+                :src="toFileUrl(activeMeta.voiceWav)"
+                :title="`分镜「${activeMeta.name}」克隆声音（${activeMeta.voiceDurSec > 0 ? fmtDur(activeMeta.voiceDurSec) : '时长未知'}）`"
+              />
+              <span class="sb-voice-dur" :class="{ none: !activeMeta.voiceDurSec }">{{ activeMeta.voiceDurSec > 0 ? fmtDur(activeMeta.voiceDurSec) : '--:--' }}</span>
+            </div>
+          </section>
+          <section v-if="mode === 'material'" class="sb-side-g">
+            <div class="sb-side-title">视频素材：A-Roll<span class="sb-side-info">已选 {{ arollBatch.total }} 镜：完成 {{ arollBatch.done }}{{ arollBatch.active ? ` · 进行中 ${arollBatch.active}` : '' }}{{ arollBatch.failed ? ` · 失败 ${arollBatch.failed}` : '' }}</span></div>
+            <TrackBatchBar kind="aroll" />
+          </section>
+          <slot name="side" />
+        </div>
+      </template>
+    </div><!-- /sb-cols -->
 
     <!-- 单镜在线搜索弹窗（2026-11-26 四源四轨：产物进该镜搜索轨占位） -->
     <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
       <div v-if="shotOnlineIdx >= 0" class="modal-mask" @click.self="shotOnlineIdx = -1">
-        <div class="modal" style="width:min(960px,94vw)">
+        <div class="modal" style="width:min(1060px,94vw);height:min(86vh,900px)">
           <div class="modal-head">
             <span class="modal-title">为分镜 #{{ shotOnlineIdx + 1 }} 在线搜索素材（按画面描述匹配）</span>
             <button type="button" class="modal-x" title="关闭" @click="shotOnlineIdx = -1">×</button>
@@ -425,6 +549,15 @@ const EMPTY_HINT: Record<string, string> = {
 <style scoped>
 /* ── 布局与通用 ── */
 .sb-block { display: flex; flex-direction: column; gap: 6px; }
+/* 第三步左右分栏（2026-11-26 用户裁决：左=脚本内容 6，右=文案声音/A-Roll/素材库/AI生成 4，
+   分割线拖拽可调；sb-side-g 同时被上层 #side 槽复用，槽内容样式由上层同款定义） */
+.sb-cols { display: flex; align-items: flex-start; gap: 6px; }
+.sb-col-main { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sb-col-side { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.sb-div { flex: 0 0 6px; align-self: stretch; min-height: 260px; border-radius: 3px; background: var(--border); cursor: col-resize; }
+.sb-div:hover { background: var(--primary); opacity: 0.35; }
+.sb-side-g { display: flex; flex-direction: column; gap: 8px; padding: var(--space-5); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.sb-side-title { font-size: 13px; font-weight: 600; color: var(--foreground); }
 .sb-info { font-size: 12px; color: var(--muted-foreground); }
 .sb-actions { display: flex; }
 .sb-actions :deep(.t-button) { flex: 1 1 0; }
@@ -433,6 +566,11 @@ const EMPTY_HINT: Record<string, string> = {
 .sb-copy {
   font-size: 12px; color: var(--foreground); line-height: 1.6;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* 侧栏口播文案（2026-11-26 用户裁决再调：默认显示 20 行，多的滚动） */
+.sb-side .sb-copy, .sb-col-side .sb-copy {
+  display: block; -webkit-line-clamp: unset;
+  max-height: calc(20 * 1.6 * 12px + 2px); overflow-y: auto;
 }
 /* 克隆声音播放行（2026-11-05 用户裁定：随文案框显示在每个 tab 的视频文案下面） */
 .sb-voice-row { display: flex; align-items: center; gap: 8px; }
@@ -455,7 +593,9 @@ const EMPTY_HINT: Record<string, string> = {
 
 /* ── 分镜 tab 条（多分镜：切换/双击重命名/删除二次确认，上限 10） ── */
 /* 脚本名行：按上限 10 个等分占用，单行不换行；每个名称在自己份额内尽量完整显示 */
-.sb-tabs { display: flex; align-items: stretch; gap: 4px; flex-wrap: nowrap; }
+.sb-tabs { position: relative; display: flex; align-items: stretch; gap: 4px; flex-wrap: nowrap; }
+/* 余量提示居中（2026-11-26 用户裁决）：绝对定位水平垂直居中于标签行，不占 flex 流 */
+.sb-add-hint { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: auto; }
 /* 行尾弹性占位（收起/展开钮推到最右——2026-11-05 用户裁定） */
 .sb-flex { flex: 1 1 auto; min-width: 0; }
 .sb-tab {
@@ -466,6 +606,8 @@ const EMPTY_HINT: Record<string, string> = {
 }
 .sb-tab.active { color: var(--primary); font-weight: 600; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface-container)); }
 .sb-tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 第三步改画幅警示行（2026-11-26 用户裁决：修改画幅会导致视频可能出现裁切） */
+.sb-aspect-warn { font-size: 12px; color: var(--warning, #f59e0b); }
 .sb-rename { width: 90px; max-width: 100%; box-sizing: border-box; height: 22px; padding: 0 6px; font-size: 12px; }
 .sb-tab-close {
   width: 18px; height: 18px; padding: 0; line-height: 1; font-size: 12px; flex: none;
@@ -510,14 +652,32 @@ const EMPTY_HINT: Record<string, string> = {
 /* 拆分口播绑定回显（2026-11-26：A-Roll 组拆分后逐镜绑定；未绑定时灰显） */
 .sb-split { font-size: 12px; color: var(--primary); }
 .sb-split--none { color: var(--muted-foreground); }
+/* 声音拆分完成标识（2026-11-26 用户裁决：已拆分=绿字对号，口径同达标徽标） */
+.sb-split--done { color: var(--success); font-weight: 600; }
+/* 侧栏分组标题尾计数（2026-11-26 用户裁决：右行弱化展示） */
+.sb-side-title { display: flex; align-items: center; gap: 8px; }
+.sb-side-info { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted-foreground); white-space: nowrap; }
 /* 素材状态行（2026-11-26 用户裁决：单行不换行；无源灰显） */
-.track-status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--foreground); }
+/* 素材状态行改 flex（2026-11-26 用户裁决：解绑全部钉行最右）；文本段保持单行省略 */
+.track-status { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--foreground); }
+.track-status-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track-status .spacer { flex: 1 1 auto; }
+/* 脚本基本信息行（2026-11-26 用户裁决：大字体醒目色，所有步骤统一） */
+.sb-meta-big { font-size: 14px; font-weight: 600; color: var(--primary); }
 .track-status--none { color: var(--muted-foreground); }
 /* ── 四源四轨（2026-11-26 用户裁决）：material 态右列=四轨占位瓦片（TrackTile 自带
    三态样式，垂直居中不靠上）+ 最右控制列（两复选框互不排斥 + 在线搜索素材按钮，
    均布到分镜卡全高） ── */
 .seg-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; align-self: stretch; }
 .seg-tracks { display: flex; gap: 6px; }
+/* 横屏画幅 2×2（2026-11-26 用户裁决：两个在上两个在下；竖屏不变） */
+/* flex 用固定 basis + min-width:0——视频元素未加载元数据时的 intrinsic 宽度会把
+   首个瓦片顶成独占一行（1+3），钉死 basis 才稳 2×2 */
+/* 瓦片必须定宽：seg-right 是内容自适应宽（flex:0 0 auto），百分比基宽对自动宽容器
+   是循环解析——素材匹配后有真实视频（intrinsic ~960px）时容器被内容撑爆、左列文案
+   被挤没（1126 报障实锤）。定宽 176px 与竖屏 104px 同一模式，2×2=358px 稳定 */
+.seg-tracks--grid { flex-wrap: wrap; }
+.seg-tracks--grid :deep(.track-tile) { flex: 0 0 176px; width: 176px; min-width: 0; }
 .seg-ctl { display: flex; flex-direction: column; justify-content: space-evenly; align-self: stretch; width: 96px; flex: none; gap: 6px; }
 /* 复选框（2026-11-26 用户裁决：加大易点选；与搜索按钮互不影响） */
 .ctl-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--foreground); cursor: pointer; }
@@ -552,6 +712,13 @@ const EMPTY_HINT: Record<string, string> = {
   border-radius: var(--radius-sm);
 }
 .modal-x:hover { color: var(--foreground); background: var(--surface-container-high); }
+.script-list { display: flex; flex-direction: column; gap: 6px; max-height: 50vh; overflow-y: auto; }
+.script-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: var(--radius-md); background: var(--surface-container); cursor: pointer; text-align: left; }
+.script-row:hover { border-color: var(--primary); }
+.script-topic { font-size: 12px; color: var(--foreground); flex: none; }
+.script-meta { color: var(--muted-foreground); font-size: 12px; }
+.script-empty { padding: 12px; text-align: center; }
 
 /* 弹窗内列表行（单镜选素材弹窗复用；原选择脚本弹窗已随按钮删除退役） */
 .script-list { flex: 1 1 auto; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }

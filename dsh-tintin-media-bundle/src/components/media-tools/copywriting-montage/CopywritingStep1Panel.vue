@@ -188,13 +188,7 @@ function fillSample(): void {
 
       </section>
 
-      <!-- 底部导航条 -->
-      <div class="row">
-        <span class="spacer"></span>
-        <TButton label="下一步：口播配音" icon="right" :disabled="!hasSplitStoryboards"
-          :title="hasSplitStoryboards ? '' : '尚未生成分镜脚本：点击「✨ AI 生成分镜脚本」生成后再进入下一步'"
-          @click="go(1)" />
-      </div>
+      <!-- 导航条（2026-11-26 用户裁决：移除，容器悬浮底栏统一渲染） -->
 
       <!-- 选择产品公共弹窗（WbPickProductDialog：TDialog 壳 + WbPickProductPanel，单选上报后自动关闭） -->
       <WbPickProductDialog
@@ -218,12 +212,15 @@ function fillSample(): void {
 
 <style scoped>
 .card { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
-.copy-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+/* 2026-11-26 用户裁决：AI生成文案/输入文案改媒体工具样式 tab——两占整行（各半），
+   口径对齐分镜 tab（surface-container 底+边框胶囊，激活=primary 染色加粗） */
+.copy-tabs { display: flex; gap: 6px; }
 .copy-tab {
-  padding: 6px 16px; border-radius: var(--radius-md); border: 1px solid transparent;
-  background: transparent; color: var(--muted-foreground); font-size: 13px; cursor: pointer;
+  flex: 1 1 50%; text-align: center; padding: 8px 0;
+  border-radius: var(--radius-md); border: 1px solid var(--border);
+  background: var(--surface-container); color: var(--muted-foreground); font-size: 13px; cursor: pointer;
 }
-.copy-tab.on { background: var(--primary); color: var(--primary-foreground); font-weight: 700; }
+.copy-tab.on { color: var(--primary); font-weight: 600; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface-container)); }
 
 /* 方案一/二（2026-11-05 用户裁定：两方案同构——同款胶囊标签+提示行；提示行文案色
    方案二为红（用户指定），方案一中性） */
