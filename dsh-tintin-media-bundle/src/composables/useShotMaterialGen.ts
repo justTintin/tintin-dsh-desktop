@@ -204,22 +204,28 @@ export function useShotMaterialGen(deps: {
     }
   }
 
-  /** 服务端声音按镜拆分（2026-11-26 用户裁决：拆分在服务端；契约 POST
-   *  /audio/voice/split-by-shots {script_id} → [{shot_index,audio_id}]，段入音频库。
-   *  首次拆分走服务端 whisper 词级对齐——服务端要求客户端超时 ≥600s）。
-   *  返回 {shot_index(0-based) → audio_id}；**端点未部署(HTTP 404) → null**；
-   *  其他失败（超时/网络）原样上抛，调用方显示真实原因——不与「未部署」混谈。 */
-  async function splitVoiceByScript(scriptId: string): Promise<Map<number, string> | null> {
+  /** 服务端声音按镜拆分（契约 POST /audio/voice/split-by-shots {script_id} →
+   *  [{shot_index(0-based),audio_id,...}]，段入音频库；首次走 whisper 对齐，服务端
+   *  要求客户端超时 ≥600s）。返回富结果：**detail 逐字透出服务端返回**（业务 400 的
+   *  detail/空音频行统计等），undeployed 仅 HTTP 404；其他失败原样上抛。 */
+  async function splitVoiceByScript(scriptId: string): Promise<{ map: Map<number, string>; detail: string; undeployed: boolean }> {
+    const empty = (detail: string, undeployed = false) => ({ map: new Map<number, string>(), detail, undeployed })
     let res: unknown
     try {
       res = await window.tintin.server.post<unknown>('/audio/voice/split-by-shots', { script_id: scriptId }, {}, 600_000)
     } catch (e) {
-      if ((e as { status?: number })?.status === 404) return null
+      if ((e as { status?: number })?.status === 404) return empty('HTTP 404（端点未部署）', true)
       throw e
     }
-    if (!res || (typeof res === 'object' && 'error' in res)) return null
+    if (!res) return empty('服务端响应为空')
+    if (typeof res === 'object' && 'error' in (res as Record<string, unknown>)) {
+      return empty(String((res as Record<string, unknown>).error || '服务端返回错误'))
+    }
+    if (typeof res === 'object' && 'detail' in (res as Record<string, unknown>)) {
+      return empty(String((res as Record<string, unknown>).detail)) // 服务端业务 400/404 明细（如「各镜 shot.audio 全空」）
+    }
     const list = Array.isArray(res) ? res : (res as { items?: unknown[] })?.items
-    if (!Array.isArray(list)) return null
+    if (!Array.isArray(list)) return empty(`响应非数组：${String(res).slice(0, 120)}`)
     const map = new Map<number, string>()
     for (const row of list as Array<Record<string, unknown>>) {
       // 服务端 shot_index 为 0-based（2026-11-26 实测：首镜 shot_index=0）
@@ -227,7 +233,8 @@ export function useShotMaterialGen(deps: {
       const audioId = String(row.audio_id ?? row.audioId ?? '')
       if (Number.isInteger(idx) && idx >= 0 && audioId) map.set(idx, audioId)
     }
-    return map.size ? map : null
+    if (!map.size) return empty(`返回 ${list.length} 行但无一含 audio_id（首行：${JSON.stringify(list[0]).slice(0, 120)}）`)
+    return { map, detail: `${map.size}/${list.length} 行有效`, undeployed: false }
   }
 
   /** 批量 AI 生成（2026-11-26 用户裁决：所有勾选 AI生成的分镜并行提交，进度就地）。 */

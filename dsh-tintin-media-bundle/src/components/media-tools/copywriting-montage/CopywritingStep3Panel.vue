@@ -62,6 +62,8 @@ const splitVoiceMsg = ref('')
 const splitDone = ref(0)
 const splitTotal = ref(0)
 const splitProgress = computed(() => splitTotal.value ? Math.round(splitDone.value / splitTotal.value * 100) : 0)
+/** 没有克隆完成的口播音频就不能拆分（克隆中/一个都没完成=禁用） */
+const canSplitVoice = computed(() => !voiceBusy.value && storyboards.value.some((t) => t.scriptId && t.voiceAudioId && t.shots.length))
 async function splitVoiceToShots(): Promise<void> {
   if (splitVoiceBusy.value) return
   const tabs = storyboards.value.filter((t) => t.scriptId && t.voiceAudioId && t.shots.length)
@@ -255,9 +257,10 @@ const tabVoices = computed(() => {
         <!-- 拆分声音到分镜脚本（2026-11-26 用户裁决：独立成行、主按钮样式；
              服务端按契约把各脚本整段克隆口播按镜拆分，逐镜绑定（卡顶「拆分口播」回显）） -->
         <div class="row split-voice-row">
-          <TButton label="拆分声音到分镜脚本" :loading="splitVoiceBusy"
-            title="把每个分镜脚本绑定的整段克隆口播按镜时长拆分，逐镜绑定（A-Roll 数字人读该镜音频）"
+          <TButton label="拆分声音到分镜脚本" :loading="splitVoiceBusy" :disabled="!canSplitVoice"
+            :title="canSplitVoice ? '把每个分镜脚本绑定的整段克隆口播按镜时长拆分，逐镜绑定（A-Roll 数字人读该镜音频）' : '先完成批量克隆人声合成（生成口播音频并同步脚本）后才能拆分'"
             @click="splitVoiceToShots" />
+          <span v-if="!canSplitVoice" class="muted">先完成批量克隆人声合成，生成口播音频后才能拆分。</span>
           <span v-if="splitVoiceMsg" class="muted">{{ splitVoiceMsg }}</span>
         </div>
         <template v-if="splitVoiceBusy">
