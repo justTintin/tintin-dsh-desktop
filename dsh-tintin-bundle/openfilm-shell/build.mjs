@@ -2,7 +2,8 @@
 // onto the vendored openfilm package's editor dir — the Studio server serves it unchanged
 // (startStudio's default EDITOR_DIR), so the embedded view gains the chat with zero
 // server changes. The stock dist is kept beside it as `dist.stock` once, for restore.
-// 安装走 npm(此目录不在 yarn workspaces 内,依赖版本与官方聊天一致,与桌面包隔离)。
+// 依赖由根 workspace 统一供给(已收编进 yarn workspaces;lexical 等钉定版本与官方聊天
+// 一致,nmHoistingLimits 仍把安装产物隔离在本目录 node_modules,不与桌面包混树)。
 import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, join, resolve } from 'node:path'
@@ -31,11 +32,8 @@ for (const tree of ['openfilm', 'chat', 'shared']) {
 }
 
 if (!existsSync(join(here, 'node_modules'))) {
-  console.log('build: installing shell dependencies (pinned to the official chat\'s versions)')
-  /* Windows 的 npm 是 .cmd(Node 安全限制:无 shell 拉起 .cmd 报 EINVAL)→ 经 cmd.exe;镜像与 fetch 脚本同源 */
-  const npmArgs = ['install', '--no-fund', '--no-audit', '--loglevel=error', '--registry=https://registry.npmmirror.com']
-  if (process.platform === 'win32') run('cmd.exe', ['/c', 'npm', ...npmArgs], { cwd: here })
-  else run('npm', npmArgs, { cwd: here })
+  console.error('build: openfilm-shell 依赖缺失 — 已由根 workspace 统一供给,请在仓库根执行 corepack yarn install')
+  process.exit(1)
 }
 
 console.log('build: vite build')
