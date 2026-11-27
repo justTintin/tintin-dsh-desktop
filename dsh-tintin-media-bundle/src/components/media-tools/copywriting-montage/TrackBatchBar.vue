@@ -5,13 +5,23 @@
 //     路径随 scheduled stage=aroll 任务下发（worker 在服务端主机读图））
 //   kind='ai'    = AI 生成组（生成剪辑方案上方；批量跑所有勾选 AI生成 的分镜）
 // 自注入 shell（与面板同源状态）；进度行=标记数/完成/进行中/失败 就地汇总。
-import { inject, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import TButton from '@/components/common/TButton.vue'
 import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 
 const props = defineProps<{ kind: 'aroll' | 'ai' }>()
 const shell = inject(copywritingMontageShellKey)!
-const { shotMatBusy, shotMatMsgs, shotBatchAI, shotBatchARoll } = shell.s
+const { shotMatBusy, shotMatMsgs, shotMatActiveGroup, shotBatchAI, shotBatchARoll, shotMatStop, storyboards } = shell.s
+/** 停止按钮只出现在跑批组的生成按钮旁（2026-11-27 用户裁决：AI/A-Roll 两支各管各的）。
+ *  坑（1048 实机报障）：script computed 里 Ref 不自动解包——shotMatBusy/.value
+ *  缺失时恒 truthy/恒不等，停止钮永远不渲染；模板里用会解包，script 里必须手动 */
+const stopVisible = computed(() => shotMatBusy.value && shotMatActiveGroup.value === props.kind)
+/** 完成对号=数据派生（2026-11-26 用户裁决：对号防丢失与漂移）——该轨任一分镜有产物
+ *  即亮（A-Roll=slots.aroll、AI生成=slots.gen），跨步往返/重挂不丢 */
+const kindDone = computed(() => {
+  const key = props.kind === 'aroll' ? 'aroll' : 'gen'
+  return storyboards.value.some((t) => t.shots.some((sh) => !!sh.slots?.[key]?.local))
+})
 // 2026-11-26 用户裁决：分组消息各自独立（shotMatMsgs[kind]）——A-Roll 的提示不再串进 AI 生成组
 // 2026-11-26 用户裁决：组计数信息（已选 N 镜：完成 M）移到分组标题行（Storyboard/
 // Step2Panel 标题消费 shotBatchProgressOf），本组件不再重复展示
@@ -58,8 +68,12 @@ function run(): void {
       <span v-if="personName" class="muted tbatch-file" :title="personRef">已选：{{ personName }}</span>
       <span v-if="personError" class="tbatch-err">{{ personError }}</span>
     </template>
-    <!-- 2026-11-26 用户裁决：生成按钮换行占整行 -->
-    <TButton class="tbatch-run" :label="kind === 'aroll' ? '生成A-Roll' : 'AI生成分镜'" size="small" :disabled="shotMatBusy" @click="run" />
+    <!-- 2026-11-26 用户裁决：生成按钮换行占整行；2026-11-27 用户裁决：生成中在旁就地停止 -->
+    <div class="tbatch-run-row">
+      <TButton class="tbatch-run" :label="kind === 'aroll' ? '生成A-Roll' : 'AI生成分镜'" size="small" :disabled="shotMatBusy" :icon="kindDone ? 'check' : ''" @click="run" />
+      <TButton v-if="stopVisible" class="tbatch-stop" label="停止" variant="secondary" size="small"
+        title="停止等待：向服务端请求取消未完成任务，已生成的产物保留" @click="shotMatStop(kind)" />
+    </div>
     <span v-if="shotMatMsgs[kind]" class="tbatch-msg">{{ shotMatMsgs[kind] }}</span>
   </div>
 </template>
@@ -69,8 +83,10 @@ function run(): void {
   border: none; background: transparent; }
 .tbatch-title { font-size: 13px; font-weight: 600; color: var(--foreground); flex: none; }
 .tbatch-file { font-size: 12px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 生成按钮换行占整行（2026-11-26 用户裁决） */
-.tbatch-run { flex: 1 1 100%; }
+/* 生成按钮换行占整行（2026-11-26 用户裁决）；生成中右侧并排停止按钮（2026-11-27） */
+.tbatch-run-row { flex: 1 1 100%; display: flex; align-items: center; gap: var(--space-3, 12px); }
+.tbatch-run { flex: 1; }
+.tbatch-stop { flex: none; }
 .tbatch-msg { font-size: 12px; color: var(--muted-foreground); word-break: break-all; }
 .muted { color: var(--muted-foreground); }
 </style>

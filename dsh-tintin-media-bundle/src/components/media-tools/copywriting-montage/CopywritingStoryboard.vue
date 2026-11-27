@@ -16,6 +16,7 @@ import { storyboardShotsExpanded } from '@/composables/storyboardShotsState'
 import { fmtDur } from '@/composables/copywritingMontageLogic'
 import { toFileUrl } from '@/utils/fileUrl'
 import type { StoryboardShot } from '@/composables/opsStoryboardLogic'
+import { ratioToOrient } from '@/composables/opsStoryboardLogic'
 import type { OnlineItem } from '@/composables/useOnlineStock'
 import { useHostDark } from '@/composables/hostTheme'
 import { resolveShotTrack, type ShotTrack } from '@/composables/copywritingMontageTrackLogic'
@@ -53,8 +54,8 @@ function onShotOnlineAdd(items: OnlineItem[]): void {
   shotOnlineIdx.value = -1
 }
 
-// ── 四源四轨（2026-11-26 用户裁决）：右列两复选框互不排斥（markARoll/markAI 分别
-//    驱动两批量）；产物各归各轨占位（素材/AI/搜索/A-Roll 瓦片，TrackTile 三态渲染）──
+// ── 四源四轨（2026-11-26 用户裁决重申：三复选互不影响多选——1126 单选裁决仅指
+//    在线搜索弹窗结果选择；产物各归各轨占位）──
 const TRACK_KEYS = ['gen', 'stock', 'aroll'] as const
 function setMark(shot: StoryboardShot, kind: 'material' | 'aroll' | 'ai', on: boolean): void {
   if (kind === 'material') shot.markMaterial = on || undefined
@@ -130,24 +131,22 @@ const tracksGrid = computed(() => {
   const m = /(\d+)\s*\/\s*(\d+)/.exec(tileAspect.value)
   return !!m && Number(m[1]) > Number(m[2])
 })
-/** 输出画幅下拉（2026-11-26 用户裁决：第一步信息行红框位——与第三步参数区同一
- *  layout 字段，选完贯穿各步；选项口径对齐 Step2Panel LAYOUTS） */
-const LAYOUT_OPTIONS = computed(() => [
-  { label: splitResolution.value ? `与分割视频一致 (${splitResolution.value})` : '与分割视频一致', value: 'source' },
-  { label: '竖屏 (1080x1920 抖音流)', value: 'vertical' },
-  { label: '横屏 (1920x1080 宽屏)', value: 'horizontal' },
-])
+/** 输出画幅回显（2026-11-27 用户再裁决：用比例不用分辨率——与运营分镜
+ *  RATIO_OPTIONS/ratioToOrient 同口径；source=与分割视频一致按分割分辨率换算，
+ *  本身就是分辨率概念保留原样；未知值回落竖屏口径） */
+const layoutFull = (v: unknown): string => {
+  if (v === 'horizontal') return '16:9（横屏）'
+  if (v === 'source') return splitResolution.value ? `与分割视频一致 (${splitResolution.value})` : '与分割视频一致'
+  return '9:16（竖屏）'
+}
 
 const editable = computed(() => props.mode === 'edit')
-// ── 输出画幅·脚本基本信息行（2026-11-26 用户裁决改判：选择/显示放回基本信息行——
-//    tab 胶囊只留名称，不塞控件；第一步/第三步可改，口播配音/包装交付只读展示当前值。
-//    第三步改画幅提示：修改画幅会导致视频可能出现裁切）──
-const layoutFull = (v: unknown): string =>
-  (LAYOUT_OPTIONS.value.find((o) => o.value === v)?.label ?? String(v ?? 'vertical'))
-const aspectWarned = ref(false)
-function onMetaAspectChange(): void {
-  if (props.mode === 'material') aspectWarned.value = true
-}
+/** 生成时画幅（2026-11-27 用户裁决：「AI 生成分镜脚本」按钮前选择，用比例；
+ *  默认竖屏=2026-09-21 文案混剪输出口径；生成时经 GEN_RATIO_LAYOUT 写入
+ *  tab.layout 贯穿各步，生成后脚本锁定。1:1 不进本链——layout 域无方形分支） */
+const GEN_ASPECT_OPTIONS = ['9:16', '16:9'] as const
+const GEN_RATIO_LAYOUT: Record<string, string> = { '9:16': 'vertical', '16:9': 'horizontal' }
+const genAspect = ref<(typeof GEN_ASPECT_OPTIONS)[number]>('9:16')
 /** 激活分镜 tab（脚本基本信息来源：topic/scriptId 均为服务端原值字段，2026-09-22
  *  用户裁决：显示与服务端返回字段定义对齐，不做截断/改名加工） */
 const activeMeta = computed(() => storyboards.value.find((t) => t.id === activeStoryboardId.value) || null)
@@ -219,7 +218,8 @@ function previewSrc(i: number): string {
 
 const MODE_STATUS: Record<string, string> = {
   voice: '口播状态：旁白整体克隆为声音，按分镜时间轴对齐',
-  material: '素材状态：按各镜时长自动分配已分割素材',
+  // material 条目已删（2026-11-27 用户裁决：基本信息行不再显示「按各镜时长自动
+  // 分配已分割素材」——素材分配状态已由四轨分组计数与逐镜状态行承担）
   fx: '特效状态：字幕/花字/文字模板按旁白与画面挂接',
 }
 const EMPTY_HINT: Record<string, string> = {
@@ -292,38 +292,33 @@ const EMPTY_HINT: Record<string, string> = {
       <span v-if="!singleScript && storyboards.length < COPY_STORYBOARD_MAX" class="sb-info sb-add-hint" title="生成新的分镜：点击「✨ AI 生成分镜脚本」">{{ storyboards.length ? '' : '' }}可再添加 {{ COPY_STORYBOARD_MAX - storyboards.length }} 个分镜</span>
       <span v-else-if="!singleScript" class="sb-info sb-add-hint">已达分镜数量上限（{{ COPY_STORYBOARD_MAX }}）</span>
       <span class="sb-flex"></span>
-      <SbCollapseToggle v-if="storyboards.length" />
     </div>
 
     <!-- 分镜卡区（2026-11-05 用户裁决：默认收起——收起时卡片/信息行不显示；
          无任何分镜时保持引导提示可见不受收起影响） -->
-    <template v-if="!storyboards.length || storyboardShotsExpanded">
     <div class="row between">
       <!-- 2026-09-22 用户裁决：脚本头部显示服务端脚本基本信息（选题/脚本库 id）——
            取回分镜脚本后基本信息随 tab 保存，不再只显示镜数/时长 -->
       <span class="sb-info sb-meta-big">分镜脚本{{ copyShots.length ? `：共 ${copyShots.length} 镜 ｜ 总时长 ${shotsTotalSec} 秒` : '' }}<template v-if="activeMeta && copyShots.length"> ｜ 选题：{{ activeMeta.topic || '—' }}</template><template v-if="activeMeta?.scriptId"> ｜ 脚本 {{ activeMeta.scriptId }}</template>
-      <!-- 输出画幅在脚本基本信息行（2026-11-26 用户裁决改判：tab 胶囊不塞控件——
-           前三步可改下拉，包装交付只读显示当前值；同一 layout 字段贯穿各步，
-           第三步参数区/四轨瓦片/AI 生成比例自动跟随） -->
-      <template v-if="mode !== 'fx' && activeMeta"> ｜ 输出画幅：
-        <select v-model="activeMeta.layout" class="input w150" @change="onMetaAspectChange"
-          title="本脚本输出画幅（各步跟随；第三步修改会导致已生成视频可能出现裁切）">
-          <option v-for="o in LAYOUT_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
-        </select>
-      </template>
-      <template v-else-if="activeMeta"> ｜ 输出画幅：{{ layoutFull(activeMeta.layout) }}</template>
+      <!-- 输出画幅在脚本基本信息行（2026-11-27 用户裁决：改纯文字只读——画面描述
+           按生成时画幅写死，生成后改画幅必然图文不符；画幅唯一修改入口=
+           「AI 生成分镜脚本」按钮前的画幅选择，生成时定死贯穿各步） -->
+      <template v-if="activeMeta"> ｜ 输出画幅：{{ layoutFull(activeMeta.layout) }}</template>
         <span v-if="copyShotsStale" class="sb-stale">⚠ 分镜基于旧版文案（文案已修改），克隆将使用当前旁白全文；请重新生成分镜</span>
       </span>
-      <span v-if="mode !== 'edit'" class="sb-info">{{ MODE_STATUS[mode] }}</span>
+      <span v-if="mode !== 'edit' && MODE_STATUS[mode]" class="sb-info">{{ MODE_STATUS[mode] }}</span>
+      <SbCollapseToggle v-if="storyboards.length" />
     </div>
-    <!-- 第三步改画幅提示（2026-11-26 用户裁决：修改画幅会导致视频可能出现裁切） -->
-    <div v-if="mode === 'material' && aspectWarned" class="sb-aspect-warn" title="切换画幅后，按原画幅生成的素材在合成时按新画幅装配，可能出现裁切">⚠ 修改画幅会导致视频可能出现裁切</div>
     <div v-if="shotMatMsg" class="sb-info" :class="shotGenAnyActive ? '' : 'sb-stale'">{{ shotGenAnyActive ? '生成中… ' : '' }}{{ shotMatMsg }}</div>
     <!-- A-Roll 数字人组（2026-11-26 用户裁决：图2 红框位——分镜标签行下方独立分组；
          人物图素材 ID 组内共用，批量生成所有勾选「生成A-Roll」的分镜） -->
     <TrackBatchBar v-if="mode === 'material' && !sidePanel" kind="aroll" />
 
+    <template v-if="!storyboards.length || storyboardShotsExpanded">
     <template v-if="copyShots.length">
+      <!-- 2026-11-26 用户裁决：分镜卡列表默认显示约 6 个分镜，更多的列表内滚动——
+           页面不再被整条拉长（来回刷新要移动的太多了）。「＋ 添加镜头」在列表外仍常驻 -->
+      <div class="seg-list">
       <div v-for="(shot, i) in copyShots" :key="i" class="seg-card seg-card--row">
           <div class="seg-main">
         <div class="seg-head">
@@ -417,37 +412,49 @@ const EMPTY_HINT: Record<string, string> = {
           </div>
         </template>
           </div><!-- /seg-main -->
-          <!-- 2026-11-26 用户裁决：四轨占位瓦片+控制列显示在有分镜脚本的各步里
-               （素材/AI/搜索/A-Roll 各轨产物视频/进度卡/占位三态，TrackTile 渲染，
-               比例随分镜脚本输出画幅；复选标记互不排斥互相不影响。
-               2026-11-26 用户再裁：横屏画幅时四瓦片 2×2 两行两列，竖屏保持一排） -->
+          <!-- 四轨占位瓦片（TrackTile 三态，比例随脚本画幅；2026-11-26 用户裁决大改：
+               右列复选/搜索钮退役——复选上瓦片右上角（大面积热点，仅第三步显示），
+               视频中央半透明大图标点击播放/暂停（与右上复选热点不重叠），在线搜索钮
+               移入搜索瓦片下半；逻辑不变=点击瓦片上的复选即选择。横屏 2×2 竖屏一排） -->
           <div class="seg-right">
-            <!-- 2026-11-26 用户裁决：四轨顺序=A-Roll→素材→AI生成→在线搜索（瓦片与右列
-                 复选同序；共享组件一处改=四个步骤全脚本生效） -->
+            <!-- 2026-11-26 用户裁决：四轨顺序=A-Roll→素材→AI生成→在线搜索；
+                 共享组件一处改=四个步骤全脚本生效 -->
             <div class="seg-tracks" :class="{ 'seg-tracks--grid': tracksGrid }">
-              <TrackTile label="A-Roll" :aspect="tileAspect" :video-src="slotLocal(i, 'aroll')" :state="shotGenStateOf(i, 'aroll')" fallback="A-Roll" />
-              <TrackTile label="素材" :aspect="tileAspect" :video-src="previewSrc(i)" fallback="未绑定素材" />
-              <TrackTile label="AI" :aspect="tileAspect" :video-src="slotLocal(i, 'gen')" :state="shotGenStateOf(i, 'gen')" fallback="AI 生成" />
-              <TrackTile label="搜索" :aspect="tileAspect" :video-src="slotLocal(i, 'stock')" :state="shotGenStateOf(i, 'stock')" fallback="在线搜索" />
-            </div>
-            <div class="seg-ctl">
-              <label class="ctl-check" title="勾选后由上方 A-Roll 组批量生成数字人（读该镜拆分口播音频）">
-                <input type="checkbox" :checked="!!copyShots[i]?.markARoll" @change="setMark(copyShots[i]!, 'aroll', ($event.target as HTMLInputElement).checked)" />
-                <span>生成A-Roll</span>
-              </label>
-              <label class="ctl-check" title="实拍素材轨标记（默认全选；「解绑全部」清空该镜全部视频源）">
-                <input type="checkbox" :checked="!!copyShots[i]?.markMaterial" @change="setMark(copyShots[i]!, 'material', ($event.target as HTMLInputElement).checked)" />
-                <span>素材</span>
-              </label>
-              <label class="ctl-check" title="勾选后由「AI生成」组批量生成视频（两勾互不影响，可同时）">
-                <input type="checkbox" :checked="!!copyShots[i]?.markAI" @change="setMark(copyShots[i]!, 'ai', ($event.target as HTMLInputElement).checked)" />
-                <span>AI生成</span>
-              </label>
-              <button type="button" class="ctl-mark" :disabled="shotGenActiveOf(i, 'stock')"
-                title="在线搜索素材到该镜搜索轨" @click="shotOnlineIdx = i">在线搜索素材</button>
+              <div class="track-cell">
+                <TrackTile label="A-Roll" :aspect="tileAspect" :video-src="slotLocal(i, 'aroll')" :state="shotGenStateOf(i, 'aroll')" fallback="A-Roll" />
+                <button v-if="mode === 'material'" type="button" class="cell-check" :class="{ on: !!copyShots[i]?.markARoll }"
+                  title="勾选后由上方 A-Roll 组批量生成数字人（读该镜拆分口播音频）"
+                  @click.stop="setMark(copyShots[i]!, 'aroll', !copyShots[i]?.markARoll)">
+                  <span class="cell-check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5 11-11" /></svg></span>
+                </button>
+              </div>
+              <div class="track-cell">
+                <TrackTile label="素材" :aspect="tileAspect" :video-src="previewSrc(i)" fallback="未绑定素材" />
+                <button v-if="mode === 'material'" type="button" class="cell-check" :class="{ on: !!copyShots[i]?.markMaterial }"
+                  title="勾选后参与素材匹配/绑定（默认勾选；「解绑全部」清空该镜全部视频源）"
+                  @click.stop="setMark(copyShots[i]!, 'material', !copyShots[i]?.markMaterial)">
+                  <span class="cell-check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5 11-11" /></svg></span>
+                </button>
+              </div>
+              <div class="track-cell">
+                <TrackTile label="AI" :aspect="tileAspect" :video-src="slotLocal(i, 'gen')" :state="shotGenStateOf(i, 'gen')" fallback="AI 生成" />
+                <button v-if="mode === 'material'" type="button" class="cell-check" :class="{ on: !!copyShots[i]?.markAI }"
+                  title="勾选后由「AI生成」组批量生成视频（与其他勾选互不影响）"
+                  @click.stop="setMark(copyShots[i]!, 'ai', !copyShots[i]?.markAI)">
+                  <span class="cell-check-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l5 5 11-11" /></svg></span>
+                </button>
+              </div>
+              <div class="track-cell">
+                <TrackTile label="搜索" :aspect="tileAspect" :video-src="slotLocal(i, 'stock')" :state="shotGenStateOf(i, 'stock')" fallback="" /><!-- 1126：占位文字不显示，避免与下半「在线搜索」钮重叠 -->
+                <button v-if="mode === 'material'" type="button" class="cell-search" :disabled="shotGenActiveOf(i, 'stock')"
+                  title="在线搜索素材到该镜搜索轨" @click.stop="shotOnlineIdx = i">
+                  <span class="cell-search-btn">在线搜索</span>
+                </button>
+              </div>
             </div>
           </div>
       </div>
+      </div><!-- /seg-list 分镜卡内滚列表 -->
 
       <!-- 2026-09-29 用户裁决：「保存脚本」按钮删除——脚本随批量克隆完成/生成剪辑
            方案/导出草稿三个里程碑自动同步，不再需要手动保存（原 0925 右对齐布局随
@@ -470,9 +477,18 @@ const EMPTY_HINT: Record<string, string> = {
     </div>
     </template><!-- /分镜脚本卡（收起/展开） -->
 
-    <!-- 2026-11-05 用户裁定：AI 生成分镜脚本按钮移到分镜区底部（红框位），全宽 -->
+    <!-- 2026-11-05 用户裁定：AI 生成分镜脚本按钮移到分镜区底部（红框位），全宽；
+         2026-11-27 用户裁决：按钮前加画幅比例选择（用比例不用分辨率，口径同运营
+         分镜 RATIO_OPTIONS）——画面描述与后续素材生成都按此画幅，生成时写入脚本
+         layout 锁定（基本信息行只读回显） -->
     <div v-if="mode === 'edit'" class="row sb-actions">
-      <TButton label="✨ AI 生成分镜脚本" :loading="storyboardBusy" @click="genStoryboard" />
+      <label class="sb-gen-aspect" title="本次 AI 生成分镜脚本的画幅比例：画面描述按此生成，写入脚本后贯穿各步（基本信息行只读回显）">
+        <span class="sb-gen-aspect-lbl">画幅比例:</span>
+        <select v-model="genAspect" class="input w150" :disabled="storyboardBusy">
+          <option v-for="r in GEN_ASPECT_OPTIONS" :key="r" :value="r">{{ r }}（{{ ratioToOrient(r) }}）</option>
+        </select>
+      </label>
+      <TButton class="sb-gen-btn" label="✨ AI 生成分镜脚本" :loading="storyboardBusy" @click="genStoryboard(GEN_RATIO_LAYOUT[genAspect])" />
     </div>
       </div><!-- /sb-col-main 脚本内容 -->
 
@@ -517,7 +533,7 @@ const EMPTY_HINT: Record<string, string> = {
     <!-- 单镜在线搜索弹窗（2026-11-26 四源四轨：产物进该镜搜索轨占位） -->
     <teleport to="body"><div class="tintin-media-scope tintin-modal-layer" :class="{ dark: isDark }">
       <div v-if="shotOnlineIdx >= 0" class="modal-mask" @click.self="shotOnlineIdx = -1">
-        <div class="modal" style="width:min(1060px,94vw);height:min(86vh,900px)">
+        <div class="modal" style="width:min(1400px,96vw);height:min(86vh,900px)">
           <div class="modal-head">
             <span class="modal-title">为分镜 #{{ shotOnlineIdx + 1 }} 在线搜索素材（按画面描述匹配）</span>
             <button type="button" class="modal-x" title="关闭" @click="shotOnlineIdx = -1">×</button>
@@ -559,8 +575,11 @@ const EMPTY_HINT: Record<string, string> = {
 .sb-side-g { display: flex; flex-direction: column; gap: 8px; padding: var(--space-5); background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 .sb-side-title { font-size: 13px; font-weight: 600; color: var(--foreground); }
 .sb-info { font-size: 12px; color: var(--muted-foreground); }
-.sb-actions { display: flex; }
-.sb-actions :deep(.t-button) { flex: 1 1 0; }
+.sb-actions { display: flex; align-items: center; gap: var(--space-3, 12px); }
+/* 画幅比例在 AI 生成按钮前（2026-11-27 用户裁决）；按钮仍占余宽 */
+.sb-gen-aspect { display: flex; align-items: center; gap: 6px; flex: none; }
+.sb-gen-aspect-lbl { font-size: 12px; color: var(--foreground); white-space: nowrap; }
+.sb-actions :deep(.sb-gen-btn.t-button), .sb-actions :deep(.t-button) { flex: 1 1 0; }
 .sb-line { font-size: 12px; color: var(--foreground); line-height: 1.5; }
 /* 脚本头部文案行（2026-11-05 用户裁定：每个分镜脚本头部显示其绑定的文案，超两行截断、悬停看全文） */
 .sb-copy {
@@ -617,6 +636,8 @@ const EMPTY_HINT: Record<string, string> = {
 .sb-tab-close.warn { color: #fff; background: var(--danger, #e74c3c); }
 
 /* ── 镜头卡 ── */
+/* 分镜卡列表内滚（2026-11-26 用户裁决：默认约 5 卡，更多内滚；卡间距与页一致） */
+.seg-list { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; max-height: 1380px; scrollbar-width: thin; }
 .seg-card {
   display: flex; flex-direction: column; gap: 6px; padding: 10px 12px;
   background: var(--surface-container); border: 1px solid var(--border); border-radius: var(--radius-md);
@@ -677,20 +698,36 @@ const EMPTY_HINT: Record<string, string> = {
    是循环解析——素材匹配后有真实视频（intrinsic ~960px）时容器被内容撑爆、左列文案
    被挤没（1126 报障实锤）。定宽 176px 与竖屏 104px 同一模式，2×2=358px 稳定 */
 .seg-tracks--grid { flex-wrap: wrap; }
-.seg-tracks--grid :deep(.track-tile) { flex: 0 0 176px; width: 176px; min-width: 0; }
-.seg-ctl { display: flex; flex-direction: column; justify-content: space-evenly; align-self: stretch; width: 96px; flex: none; gap: 6px; }
-/* 复选框（2026-11-26 用户裁决：加大易点选；与搜索按钮互不影响） */
-.ctl-check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--foreground); cursor: pointer; }
-.ctl-check input[type='checkbox'] { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; flex: none; margin: 0; }
-.ctl-check span { white-space: nowrap; }
-.ctl-mark {
-  height: 30px; padding: 0 8px; font-size: 12px; cursor: pointer; text-align: center;
-  background: var(--surface-container); color: var(--muted-foreground);
-  border: 1px solid var(--border); border-radius: var(--radius-md); white-space: nowrap;
+.seg-tracks--grid .track-cell { flex: 0 0 176px; width: 176px; }
+.seg-tracks--grid .track-cell :deep(.track-tile) { flex: 1 1 auto; width: 100%; min-width: 0; }
+/* 瓦片内嵌控件（2026-11-26 用户裁决：右列复选/搜索钮退役——控件上瓦片）。
+   cell 收缩包住瓦片，覆盖层锚定 cell=与瓦片对齐 */
+.track-cell { position: relative; display: flex; flex-direction: column; align-items: stretch; width: fit-content; flex: none; }
+/* 复选热点=右上角大面积（60%×42%），勾选框视觉钉角上；z 高于瓦片、低于弹窗 */
+.cell-check {
+  position: absolute; top: 0; right: 0; width: 60%; height: 42%;
+  display: flex; align-items: flex-start; justify-content: flex-end; padding: 5px;
+  border: 0; background: transparent; cursor: pointer; z-index: 3;
 }
-.ctl-mark:hover { border-color: var(--primary); }
-.ctl-mark.on { color: var(--primary); font-weight: 600; border-color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface-container)); }
-.ctl-mark:disabled { opacity: 0.5; cursor: not-allowed; }
+.cell-check-box {
+  width: 20px; height: 20px; border-radius: 5px; display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid rgba(255, 255, 255, 0.7); background: rgba(0, 0, 0, 0.35); color: transparent;
+}
+.cell-check.on .cell-check-box { background: var(--primary); border-color: var(--primary); color: #fff; }
+.cell-check-box svg { width: 13px; height: 13px; }
+/* 在线搜索钮=搜索瓦片下半（大面积热点），视觉为半透明胶囊钉底部 */
+.cell-search {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 50%;
+  display: flex; align-items: flex-end; padding: 6px;
+  border: 0; background: transparent; cursor: pointer; z-index: 2;
+}
+.cell-search-btn {
+  width: 100%; padding: 5px 0; font-size: 11px; text-align: center; white-space: nowrap;
+  color: rgba(255, 255, 255, 0.85); background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.35); border-radius: var(--radius-sm);
+}
+.cell-search:disabled { cursor: not-allowed; }
+.cell-search:disabled .cell-search-btn { opacity: 0.5; }
 
 /* ── 弹窗通用 ── */
 .modal-mask {

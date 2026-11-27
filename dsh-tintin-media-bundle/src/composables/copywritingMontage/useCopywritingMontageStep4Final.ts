@@ -532,6 +532,9 @@ async function exportAllToJianyingDraft(): Promise<void> {
     mode: 'single' | 'multi'
     videoPath?: string
     videoPaths?: string[]
+    /** 2026-11-26 四视频占位=四条剪映视频轨：逐段轨属（与 videoPaths 平行；
+     *  aroll/material/gen/stock），导出器按此落四条命名视频轨；缺省=单素材轨 */
+    videoTrackKinds?: string[]
     srtPath?: string
     srtPaths?: Array<string | null>
     /** 每条 SRT 的字幕窗口上限（µs，2026-09-24）：与 srtPaths 对齐；null=该段自身时长 */
@@ -870,6 +873,9 @@ async function exportAllToJianyingDraft(): Promise<void> {
       /** 素材使用上报标识（2026-09-27）：优先 serverPath（服务端可解析，含
        *  material://<id> 形态），回落 clipUrl/clipLocalPath */
       usageRef?: string
+      /** 2026-11-26 四视频占位=四条剪映视频轨：该段轨属（aroll/material/gen/stock），
+       *  导出器据此落四条命名视频轨 */
+      trackKind: string
     }
     const segs: SegMeta[] = []
     const planHits: Array<Array<{ text: string; start: number; end: number; keywords: string[]; templateId?: string }>> = []
@@ -881,21 +887,29 @@ async function exportAllToJianyingDraft(): Promise<void> {
         const shotLen = g.useDurs.reduce((a, b) => a + (Number(b) || 0), 0)
         g.scenes.forEach((s, si) => {
           const durSec = Math.max(0.1, Number(g.useDurs[si]) || Math.max(0.1, Number(s.duration) || 0.1))
-          segs.push({
-            path: s.clipLocalPath || '',
-            durSec,
-            c0, c1: c0 + durSec,
-            planIdx, planFirst: gi === 0 && si === 0, shotFirst: si === 0,
-            planKey: `plan:${p.tabId}`,
-            text: tab.narrative,
-            timingPath: tab.voiceWav ? tab.voiceWav + '.timing.json' : '',
-            voicePath: tab.voiceWav,
-            srtKey: `plan${planIdx}`,
-            sfxWavLocal: tab.shots[gi]?.sfxWavLocal,
-            sfxDurSec: tab.shots[gi]?.sfxDurSec,
-            shotLen,
-            usageRef: s.serverPath || s.clipUrl || s.clipLocalPath || '',
-          })
+            // 2026-11-26 四视频占位=四条剪映视频轨：轨属源自合成行标记
+            // （轨道产物行 serverPath='track:<轨>'；素材池行=material）
+            const sp = String(s.serverPath || '')
+            const trackKind = sp.startsWith('track:aroll') ? 'aroll'
+              : sp.startsWith('track:gen') ? 'gen'
+              : sp.startsWith('track:stock') ? 'stock'
+              : 'material'
+            segs.push({
+              path: s.clipLocalPath || '',
+              durSec,
+              c0, c1: c0 + durSec,
+              planIdx, planFirst: gi === 0 && si === 0, shotFirst: si === 0,
+              planKey: `plan:${p.tabId}`,
+              text: tab.narrative,
+              timingPath: tab.voiceWav ? tab.voiceWav + '.timing.json' : '',
+              voicePath: tab.voiceWav,
+              srtKey: `plan${planIdx}`,
+              sfxWavLocal: tab.shots[gi]?.sfxWavLocal,
+              sfxDurSec: tab.shots[gi]?.sfxDurSec,
+              shotLen,
+              usageRef: s.serverPath || s.clipUrl || s.clipLocalPath || '',
+              trackKind,
+            })
           c0 += durSec
         })
       })
@@ -1069,6 +1083,9 @@ async function exportAllToJianyingDraft(): Promise<void> {
     const ok = await doJianyingExport({
       mode: 'multi',
       videoPaths: cands,
+      // 2026-11-26 四视频占位=四条剪映视频轨：逐段轨属（与 cands 平行），
+      // 导出器按轨属落四条命名视频轨（A-Roll→素材→AI生成→在线搜索）
+      videoTrackKinds: segsReady.map((sg) => sg.trackKind),
       // 2026-09-22 虚拟时间轴：逐段源裁剪时长（微秒）+ 视频段静音（旁白轨覆盖）
       videoDurations,
       gapAfterUs,

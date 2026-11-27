@@ -218,11 +218,14 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     // 文案绑定脚本：edit 态脚本顶部显示视频文案框（2026-11-05 用户裁定迁入分镜顶部）
     expect(html).toContain('口播文案（可选）')
     expect(html).toContain('sb-copy-edit')
-    // 输出画幅选择在脚本基本信息行（2026-11-26 用户裁决改判：tab 胶囊不塞控件；
-    // edit 态=下拉可改，全量选项口径不变）
+    // 输出画幅在脚本基本信息行（2026-11-27 用户裁决：纯文字只读——生成后改画幅
+    // 必然图文不符；画幅唯一修改入口=生成区「画幅比例」选择，在 AI 按钮前）
     expect(html).toContain('输出画幅')
     expect(html).not.toContain('sb-tab-aspect') // tab 胶囊还原纯名称
-    expect(html).toContain('竖屏 (1080x1920 抖音流)')
+    expect(html).toContain('9:16（竖屏）') // 比例口径（1127 用户裁决：用比例不用分辨率）
+    expect(html).toContain('画幅比例') // 生成区画幅选择（2026-11-27）
+    // 按钮前（锚 sb-gen-btn：提示语文本里也含「AI 生成分镜脚本」字样，不能拿它定位）
+    expect(html.indexOf('画幅比例')).toBeLessThan(html.indexOf('sb-gen-btn'))
     expect(html).not.toContain('>文案：旁白<') // sb-copy 只读行仅非编辑态
     expect(html).not.toContain('sb-voice-row') // 无克隆产物不显示声音行
     expect(html).toContain('画面描述（视频生成提示词）')
@@ -287,22 +290,22 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     expect(voice).not.toContain('sb-copy-edit')
   })
 
-  it('输出画幅在基本信息行（1126 改判）：edit/voice/material 下拉可改；fx 只读值；tab 无控件', async () => {
+  it('输出画幅在基本信息行纯文字（1127 裁决）：全部形态只读回显当前值，不再可改', async () => {
     const { shell } = fakeShell()
     shell.s.storyboards.value = [tab('t1', '痛点式', [shot()], { layout: 'horizontal' })]
     shell.s.activeStoryboardId.value = 't1'
     shell.s.copyShots.value = shell.s.storyboards.value[0]!.shots
     storyboardShotsExpanded.value = true // 基本信息行在展开态模板内
     const mat = await renderWithShell(CopywritingStoryboard, shell, { mode: 'material' })
-    expect(mat).toContain('输出画幅')
-    expect(mat).toContain('<select') // 信息行下拉可改
-    expect(mat).toContain('横屏 (1920x1080 宽屏)') // 全量选项口径
+    expect(mat).toContain('输出画幅：16:9（横屏）') // 纯文字回显当前值（比例口径）
+    expect(mat).not.toContain('素材状态：按各镜时长自动分配已分割素材') // 1127 裁决：基本信息行此文案移除
+    expect(mat).not.toContain('本脚本输出画幅') // 旧可改下拉已移除
     const fx = await renderWithShell(CopywritingStoryboard, shell, { mode: 'fx' })
-    expect(fx).toContain('输出画幅：横屏 (1920x1080 宽屏)') // 只读显示当前值
+    expect(fx).toContain('输出画幅：16:9（横屏）') // 只读显示当前值（比例口径）
     expect(fx).not.toContain('<select')
     const voice = await renderWithShell(CopywritingStoryboard, shell, { mode: 'voice' })
-    expect(voice).toContain('<select') // 第二步也可下拉改（1126 用户裁决）
-    expect(voice).toContain('横屏 (1920x1080 宽屏)')
+    expect(voice).toContain('输出画幅：16:9（横屏）') // 纯文字回显当前值（比例口径）
+    expect(voice).not.toContain('本脚本输出画幅')
   })
 
   it('四源四轨：轨道瓦片 + 右列单选/搜索按钮 + A-Roll 组（2026-11-26 用户裁决）', async () => {
@@ -314,18 +317,33 @@ describe('CopywritingStoryboard 渲染冒烟（1105 收起/展开）', () => {
     const idle = await renderWithShell(CopywritingStoryboard, shell, { mode: 'material' })
     // 四轨瓦片 + 右列控制 + A-Roll 组（图1/图2 红框位）
     expect(idle).toContain('seg-tracks')
-    expect(idle).toContain('seg-ctl')
-    expect(idle).toContain('生成A-Roll')
-    expect(idle).toContain('在线搜索素材')
+    // 2026-11-26 用户裁决：右列复选/搜索钮退役——复选上瓦片右上（cell-check，仅
+    // material 态）、在线搜索钮入搜索瓦片下半（cell-search）
+    expect(idle).toContain('track-cell')
+    expect(idle).toContain('cell-check')
+    expect(idle).toContain('cell-search-btn')
+    expect(idle).toContain('>在线搜索<')
+    expect(idle).not.toContain('seg-ctl') // 右列控制列已删
+    expect(idle).not.toContain('>在线搜索素材<') // 旧列钮文案随删（title 内文字不算）
+    expect(idle).toContain('生成A-Roll') // TrackBatchBar kind=aroll 组按钮
     expect(idle).toContain('A-Roll 数字人') // TrackBatchBar kind=aroll 组标题
     expect(idle).toContain('track-ph') // 未绑定占位图
     expect(idle).toContain('素材状态：未绑定素材') // 素材状态行单行口径（1126 用户裁决）
-    expect(idle).toContain('ctl-check') // 复选框样式
     expect(idle).toContain('上传人物图')
     expect(idle).toContain('拆分口播') // 卡顶拆分声音绑定回显（1126 用户裁决）
+    // 停止按钮显隐（1127 用户裁决 + 1048 实机报障回归：script computed 里 Ref 必须
+    // 手动解包，否则停止钮永不渲染）——空闲不显示；跑批本组显示、跨组不显示
+    expect(idle).not.toContain('停止等待')
+    shell.s.shotMatBusy.value = true
+    shell.s.shotMatActiveGroup.value = 'aroll'
+    const running = await renderWithShell(CopywritingStoryboard, shell, { mode: 'material' })
+    expect(running).toContain('停止等待') // A-Roll 跑批：本组生成按钮旁出现停止
+    shell.s.shotMatActiveGroup.value = 'ai'
+    const cross = await renderWithShell(CopywritingStoryboard, shell, { mode: 'material' })
+    expect(cross).not.toContain('停止等待') // AI 跑批：A-Roll 组不出现停止（归属闸）
     // 素材复选框（2026-11-26 用户裁决：默认全选；「选择素材（追加）」按钮删除——
     // 解绑全部移到素材状态行最右，无绑定镜不渲染）
-    expect(idle).toContain('实拍素材轨标记（默认全选；「解绑全部」清空该镜全部视频源）')
+    expect(idle).toContain('勾选后参与素材匹配/绑定（默认勾选；「解绑全部」清空该镜全部视频源）')
     expect(idle).not.toContain('选择素材（追加）')
     expect(idle).not.toContain('>解绑全部<') // 无绑定镜不渲染解绑钮（title 内文字不算）
     // 生成中：AI 轨瓦片就地进度卡（阶段/进度条/百分数/已用时）
@@ -401,5 +419,19 @@ describe('VoiceoverPickerDialog 渲染冒烟（1105 多选形态）', () => {
     expect(body).toContain('>确定采用选中文案<')
     expect(body).toContain('voice-radio')
     expect(body).toContain('is-selected') // 单选选中卡高亮沿用
+  })
+})
+
+// ── 源码契约（2026-11-27 用户裁决：第三步/包装交付进面板即展开分镜卡——
+//    第三步展开曾在连锁改判中被退掉，读源码钉死防再退） ──
+import { readFileSync } from 'node:fs'
+const step2PanelSrc = readFileSync(new URL('../src/components/media-tools/copywriting-montage/CopywritingStep2Panel.vue', import.meta.url), 'utf8')
+const step4PanelSrc = readFileSync(new URL('../src/components/media-tools/copywriting-montage/CopywritingStep4Panel.vue', import.meta.url), 'utf8')
+describe('分镜卡展开契约（进面板自动展开）', () => {
+  it('第三步（视频素材）面板挂载即置 storyboardShotsExpanded=true', () => {
+    expect(step2PanelSrc).toContain("onMounted(() => { storyboardShotsExpanded.value = true })")
+  })
+  it('第四步（包装交付）面板挂载即置 storyboardShotsExpanded=true（既有先例钉住）', () => {
+    expect(step4PanelSrc).toContain("onMounted(() => { storyboardShotsExpanded.value = true })")
   })
 })

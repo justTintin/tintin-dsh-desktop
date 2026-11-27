@@ -6,7 +6,7 @@
 // 右键菜单、口播弹窗产品选择（WbPickProductPanel）、scoreClass（Step1/2 各持一份）。
 // 注：toAbsolute 在面板内以原名解构，模板沿用原别名 vdToAbsolute（与 Shell 等价）。
 // ═══════════════════════════════════════════════════════════════
-import { ref, reactive, computed, watch, inject, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, inject, onMounted, onUnmounted } from 'vue'
 import TButton from '@/components/common/TButton.vue'
 import TSelect from '@/components/common/TSelect.vue'
 import WbPickProductPanel from '@/components/workbench/WbPickProductPanel.vue'
@@ -19,6 +19,7 @@ import { resolveShotTrack } from '@/composables/copywritingMontageTrackLogic'
 import { copyPreviewText, SHOT_TYPE_COLORS, SHOT_TYPE_LABELS, buildAssignPool } from '@/composables/copywritingMontageLogic'
 import { buildAssignCandidateSet, buildAssignMatchPrompt, parseAssignMatchResponse, mergeTabAssignment, planShotGroup, prefilterShotCandidates, topUpClipGroups } from '@/composables/copywritingMontageAssignLogic'
 import { fetchMaterialGrid, fetchMaterialDistinct, type PickerItem } from '@/composables/useWorkbenchPickers'
+import { storyboardShotsExpanded } from '@/composables/storyboardShotsState'
 
 import { buildMediaServeUrl, buildMediaThumbUrl } from '@/composables/workbenchChatContext'
 import { errText, notify } from '@/composables/copywritingMontage/context'
@@ -30,6 +31,9 @@ import { copywritingMontageShellKey } from './copywritingMontageUiContext'
 
 const shell = inject(copywritingMontageShellKey)!
 const { step, go, steps } = shell
+// 视频素材步默认展开分镜卡（2026-11-27 用户裁决：进第三步直接看到脚本——全局展开
+// 态默认收起，进入本步自动展开；用户仍可手动收起。Step4Panel 同款先例）
+onMounted(() => { storyboardShotsExpanded.value = true })
 const isDark = useHostDark() // 弹窗 teleport 到 body（App 根外），暗色类需显式绑定（2026-11-05 白弹窗报障）
 const {
   // 参数与方案（2026-09-23 用户裁决：输出画幅/时长限制/转场动画/输出帧率改用按
@@ -725,6 +729,9 @@ function scoreClass(score: number | undefined): string {
                   :disabled="splitBusy"
                   :title="splitBusy ? '镜头分割进行中：请等分割完成后再生成剪辑方案' : (precomposeDone ? '剪辑方案已生成；重新智能匹配后可再次生成' : (tabsAllBound ? '按每镜绑定的视频素材（素材/AI生成/在线搜索/A-Roll 至少一项）生成剪辑方案' : '有分镜尚未绑定视频素材：点击生成会逐镜点名提示缺哪些镜'))" @click="onConfirmCompose" />
               </div>
+              <!-- 2026-11-26 用户裁决：提示信息（克隆完成/匹配完成等）显示在生成剪辑
+                   方案按钮下方（原渲染在页面底部左栏，第三步已从页尾状态条移出） -->
+              <div v-if="statusText" class="hint step2-status">{{ statusText }}</div>
             </section>
           </template>
         </CopywritingStoryboard>
@@ -1095,6 +1102,8 @@ function scoreClass(score: number | undefined): string {
 .sb-side-title { display: flex; align-items: center; gap: 8px; }
 /* 视频模式组一配置一行（2026-11-26 用户裁决：不乱换行） */
 .param-col { display: flex; flex-direction: column; gap: 8px; }
+/* 提示信息行（2026-11-26 用户裁决：移到生成剪辑方案按钮下方） */
+.step2-status { font-size: 12px; color: var(--muted-foreground); word-break: break-all; }
 .param-line { display: flex; align-items: center; gap: 8px; }
 .param-line .src-res { margin-left: 0; }
 .sb-side-info { margin-left: auto; font-size: 12px; font-weight: 400; color: var(--muted-foreground); white-space: nowrap; }

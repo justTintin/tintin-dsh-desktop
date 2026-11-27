@@ -60,8 +60,11 @@ const {
 //    （shot.splitAudioId），各分镜卡顶部「拆分口播」就地回显）──
 const splitVoiceBusy = ref(false)
 const splitVoiceMsg = ref('')
-/** 拆分成功完成标记（2026-11-26 用户裁决：按钮显完成对号，口径同生成剪辑方案） */
-const splitOk = ref(false)
+/** 完成对号=数据派生（2026-11-26 用户裁决：对号防丢失与漂移——组件随步骤 v-if
+ *  重挂，本地 ref 会清零；改从产物数据推导，跨步往返/重开页都不丢）：
+ *  声音克隆=任一脚本已有克隆产物 id；拆分=任一分镜已有切片绑定 */
+const cloneOk = computed(() => storyboards.value.some((t) => !!t.voiceAudioId))
+const splitOk = computed(() => storyboards.value.some((t) => t.shots.some((s) => !!s.splitAudioId)))
 const splitDone = ref(0)
 const splitTotal = ref(0)
 const splitProgress = computed(() => splitTotal.value ? Math.round(splitDone.value / splitTotal.value * 100) : 0)
@@ -75,7 +78,6 @@ async function splitVoiceToShots(): Promise<void> {
     return
   }
   splitVoiceBusy.value = true
-  splitOk.value = false // 新一轮拆分先熄灭对号，成功后再亮
   splitTotal.value = tabs.length
   splitDone.value = 0
   splitVoiceMsg.value = '正在请求服务端按分镜拆分口播音频…（首次拆分走 whisper 对齐，分钟级耗时）'
@@ -128,8 +130,6 @@ async function splitVoiceToShots(): Promise<void> {
     }
     splitVoiceMsg.value = `拆分完成：${okTabs}/${tabs.length} 个脚本成功，绑定 ${bound} 镜${missTabs.length ? `；未拿到音频：${missTabs.join('、')}` : ''}（各分镜卡顶部可见）。`
     notify('拆分完成', splitVoiceMsg.value)
-    // 2026-11-26 用户裁决：拆分成功=按钮亮完成对号（口径同生成剪辑方案）；完成文案只走 notify
-    splitOk.value = true
   } finally { splitVoiceBusy.value = false }
 }
 
@@ -214,9 +214,9 @@ const tabVoices = computed(() => {
         <div v-if="activeNarrative.trim()" class="carry-copy">
           <span class="sb-info">口播文案（旁白，与激活分镜脚本绑定，共 {{ activeNarrative.length }} 字；在「文案编写」页编辑）：</span>
           <textarea readonly rows="6" class="input carry-textarea">{{ activeNarrative }}</textarea>
-          <span v-if="!tabVoices.length" class="muted">当前分镜暂无声音：点击下方「开始批量克隆人声合成」，即为各分镜旁白生成声音（完成后显示在下方分镜脚本的视频文案下面）</span>
+          <span v-if="!tabVoices.length" class="muted">当前分镜暂无声音：点击下方「开始声音克隆」，即为各分镜旁白生成声音（完成后显示在下方分镜脚本的视频文案下面）</span>
         </div>
-        <div v-else class="muted">先在「文案编写」页生成文案与分镜脚本，再点击「开始批量克隆人声合成」生成声音</div>
+        <div v-else class="muted">先在「文案编写」页生成文案与分镜脚本，再点击「开始声音克隆」生成声音</div>
 
         <!-- 分镜脚本（公共组件 voice 态，始终显示；2026-09-21 用户报障：从视频素材返回本步时分镜消失） -->
         <CopywritingStoryboard mode="voice" />
@@ -247,10 +247,13 @@ const tabVoices = computed(() => {
 
         <div class="row between clone-row">
           <div class="row clone-eng-row">
+            <!-- 2026-11-26 用户裁决：引擎下拉补「模型选择:」标签，与上两行格式对齐 -->
+            <label class="label">模型选择:</label>
             <TSelect v-model="ttsEngine" :options="TTS_ENGINE_OPTIONS" class="tts-engine-select" />
             <TButton label="设置声音克隆" variant="secondary" size="small" @click="openCloneParams" />
           </div>
-          <TButton label="开始批量克隆人声合成" :loading="voiceBusy" @click="startSynthesizeVoice" />
+          <!-- 2026-11-26 用户裁决：按钮改名「开始声音克隆」；完成亮对号（数据派生防丢失） -->
+          <TButton label="开始声音克隆" :loading="voiceBusy" :icon="cloneOk ? 'check' : ''" @click="startSynthesizeVoice" />
           <!-- 只重试失败项（2026-11-05 用户裁定：服务端 TTS 资源性单条失败——不再重克已成功的） -->
           <TButton v-if="lastCloneFailedIds.length" label="只重试失败项" variant="secondary"
             :loading="voiceBusy" title="仅重新克隆上一轮失败的分镜声音（已成功的不重克）"

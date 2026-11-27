@@ -14,9 +14,12 @@ import type { ShotTrackSlots } from './opsStoryboardLogic'
 import type { StoryboardShot } from './opsStoryboardLogic'
 
 const POLL_INTERVAL = 3_000
-const POLL_BUDGET = 30 * 60_000
-/** A-roll per_shot 批量预算：N 镜逐镜生成可达小时级（2026-11-26 一次上传直生成流） */
-const AROLL_POLL_BUDGET = 120 * 60_000
+/** 单镜任务等待上限（2026-11-27 用户裁决：数字人≈1 分钟生成 1 秒视频、AI 生成同口径；
+ *  **按各自开跑起算**——queued 排队不计入窗口，不设整批预算） */
+const SHOT_TASK_TIMEOUT = 15 * 60_000
+/** 排队等待兜底帽（防服务端队列僵死导致客户端永挂；正常到不了——串行队列 41 镜
+ *  最坏 ≈10 小时内。超帽判该镜失败并取消，可单独重试） */
+const QUEUE_WAIT_CAP = 24 * 60 * 60_000
 
 export type ShotTrackKey = keyof ShotTrackSlots
 
@@ -46,7 +49,7 @@ export function useShotMaterialGen(deps: {
   /** 激活 tab 的服务端身份（A-Roll 数字人：脚本已同步即可） */
   digitalHuman: () => { scriptId: string; voiceAudioId: string; voiceWav: string }
   /** A-roll per_shot 预置：把脚本 PUT 回写 aroll.mode='per_shot'（2026-11-26 用户转述
-   *  服务端契约：stage=aroll 一次触发，切分/对齐/逐镜生成/回写全服务端包干） */
+   *  服务端契约：stage=aroll 任务按镜包干——切分/对齐/逐镜生成/回写全服务端完成） */
   syncArollPerShot: () => Promise<void>
   /** 该镜素材绑定轨是否有货（A-Roll 跳过镜的判定口径与合成一致） */
   hasMaterial: (idx: number) => boolean
@@ -56,6 +59,20 @@ export function useShotMaterialGen(deps: {
   /** 分组消息（2026-11-26 用户裁决：每个分组进度/提示单独——A-Roll 组与 AI 生成组
    *  各自显示自己的消息，不再共用一条全局 msg 互相串台） */
   const groupMsgs = ref<{ ai: string; aroll: string }>({ ai: '', aroll: '' })
+  /** 停止旗标（2026-11-27 用户裁决：生成按钮旁加停止按钮）——置位后由轮询相就地
+   *  收割：AI 镜逐个向 /tasks/batch_cancel 请求取消统一任务；A-Roll 向
+   *  /scheduled/tasks/{id}/cancel 取消（探针 2026-11-27 实证两端点均部署），
+   *  已落地产物保留。预置回写相（syncArollPerShot，300s 上限）不可中断，旗标在
+   *  其返回后的下一相生效。 */
+  const stopFlags = ref<{ ai: boolean; aroll: boolean }>({ ai: false, aroll: false })
+  /** 正在跑批的分组（2026-11-27 用户裁决：停止按钮只出现在跑批组的生成按钮旁，
+   *  AI/A-Roll 两支各管各的——busy 是全组共位，不用它判显隐归属） */
+  const activeGroup = ref<'' | 'ai' | 'aroll'>('')
+  function stopBatch(kind: 'ai' | 'aroll'): void {
+    if (!busy.value || activeGroup.value !== kind) return
+    stopFlags.value[kind] = true
+    setGroupMsg(kind, '正在停止…（取消未完成任务，已落地产物保留）')
+  }
   function setGroupMsg(kind: 'ai' | 'aroll', text: string): void {
     groupMsgs.value[kind] = text
     msg.value = text // 全局状态行（分镜脚本信息行）仍镜像最新一条
@@ -124,7 +141,7 @@ export function useShotMaterialGen(deps: {
     if (!url) { msg.value = '素材地址缺失'; return false }
     const k = keyOf(idx, 'stock')
     if (active(idx, 'stock')) return false
-    busy.value = true; msg.value = ''
+    busy.value = true; msg.value = ''; activeGroup.value = '' // 下载无停止语义（2026-11-27）
     setState(k, { phase: 'downloading', progress: -1, msg: '正在下载在线素材…' })
     try {
       const dir = joinPath(await readCacheDir(), 'montage_cache', deps.splitsJobId.value || 'session', 'stock')
@@ -152,6 +169,7 @@ export function useShotMaterialGen(deps: {
     const k = keyOf(idx, 'gen')
     if (active(idx, 'gen')) return false // 同镜同轨防重入
     setGroupMsg('ai', '')
+    stopFlags.value.ai = false // 新任务起跑重置停止旗标（批量入口亦然，2026-11-27）
     const startedAt = Date.now()
     setState(k, { phase: 'submitting', progress: -1, msg: '正在提交生成任务…', startedAt, elapsedSec: 0 })
     try {
@@ -176,10 +194,16 @@ export function useShotMaterialGen(deps: {
       setState(k, { phase: 'generating', taskId, msg: 'AI 生成中…' })
       setGroupMsg('ai', `第 ${idx + 1} 镜已提交生成（${taskId}），等待完成…`)
 
-      const started = Date.now()
+      /** 每镜窗口锚点（2026-11-27 用户再裁决：15 分钟按**各自开跑**起算）——queued
+       *  阶段随 tick 后移不计时（排队不吃生成窗口，同 A-Roll 口径），running 起锚定；
+       *  排队兜底帽 24h（QUEUE_WAIT_CAP）防队列僵死永挂 */
+      let clockStart = Date.now()
+      let aiQueuedAt = 0
       let output = ''
-      while (Date.now() - started < POLL_BUDGET) {
+      let stopped = false
+      while (Date.now() - clockStart < SHOT_TASK_TIMEOUT) {
         await new Promise((r) => setTimeout(r, POLL_INTERVAL))
+        if (stopFlags.value.ai) { stopped = true; break }
         const node = await window.tintin.server.tasksUnifiedItem(taskId)
         // 2026-11-26 报障「生成失败：null」：统一任务视图恒带 error 键（未失败=null）——
         // 键存在≠失败，必须判空值；否则 String(null)='null' 在首轮轮询就误抛
@@ -187,6 +211,17 @@ export function useShotMaterialGen(deps: {
         if (nodeErr !== null && nodeErr !== undefined && nodeErr !== '') throw new Error(String(nodeErr))
         const task = extractTaskObj(node)
         const phase = mapTaskStatus(task?.status ?? task?.state, task).phase
+        // queued 看原始 status（mapTaskStatus 无 queued 映射，同 A-Roll 口径）
+        const rawStatus = String(task?.status ?? task?.state ?? '').toLowerCase()
+        const isQueued = rawStatus === 'queued' || rawStatus === 'pending' || rawStatus === 'waiting'
+        if (isQueued) {
+          clockStart = Date.now() // 排队中：窗口起点随 tick 后移
+          if (!aiQueuedAt) aiQueuedAt = Date.now()
+          else if (Date.now() - aiQueuedAt >= QUEUE_WAIT_CAP) throw new Error('排队超时（24 小时未开跑，请检查服务端队列）')
+          setState(k, { phase: 'generating', progress: -1, elapsedSec: Math.round((Date.now() - startedAt) / 1000), msg: '已提交，等待服务端队列…' })
+          continue
+        }
+        aiQueuedAt = 0
         setState(k, {
           phase: 'generating',
           progress: progressOf(task),
@@ -201,7 +236,20 @@ export function useShotMaterialGen(deps: {
           break
         }
       }
-      if (!output) throw new Error('生成超时（30 分钟）')
+      if (stopped) {
+        // 2026-11-27 停止裁决：向服务端请求取消该统一任务（未开跑的不再跑；契约
+        // 探针 2026-11-27 实证 task_ids 键名），取消结果不阻塞收割，已落地产物保留
+        void window.tintin.server.post('/tasks/batch_cancel', { task_ids: [taskId] }, {}, 30_000)
+        setGroupMsg('ai', `第 ${idx + 1} 镜已停止（已请求取消）。`)
+        setState(k, { phase: 'failed', msg: '已停止（已请求取消）', elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
+        return false
+      }
+      if (!output) {
+        // 客户端判超时必须同时取消服务端统一任务（2026-11-27 用户裁决：不允许
+        // 客户端已失败而服务端还在烧小时级；契约=task_ids 键，探针实证）
+        void window.tintin.server.post('/tasks/batch_cancel', { task_ids: [taskId] }, {}, 30_000)
+        throw new Error('生成超时（15 分钟/镜）')
+      }
 
       setState(k, { phase: 'downloading', progress: -1, msg: '生成完成，正在下载产物…', elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
       const dir = joinPath(await readCacheDir(), 'montage_cache', deps.splitsJobId.value || 'session', 'generated')
@@ -273,10 +321,14 @@ export function useShotMaterialGen(deps: {
     const idxs = markedShotIdxs(shots, 'ai')
     if (!idxs.length) { setGroupMsg('ai', '没有勾选「AI生成」的分镜（或勾选分镜已全部有产物）。'); return }
     busy.value = true
+    activeGroup.value = 'ai' // 停止按钮归属本组（2026-11-27 用户裁决）
     try {
       const results = await Promise.all(idxs.map((i) => generate(i, shots[i]!)))
       const ok = results.filter(Boolean).length
-      setGroupMsg('ai', `AI 批量生成完成：成功 ${ok}/${idxs.length}。`)
+      // 停止收割后的批量结尾报「已停止」而非「完成 0/N」（2026-11-27 停止裁决）
+      setGroupMsg('ai', stopFlags.value.ai
+        ? `AI 批量已停止：成功 ${ok}/${idxs.length}。`
+        : `AI 批量生成完成：成功 ${ok}/${idxs.length}。`)
     } finally { busy.value = false }
   }
 
@@ -290,7 +342,12 @@ export function useShotMaterialGen(deps: {
    *  列表=pending 镜的 0-based 镜号），不给→任务失败明确报错
    *  ②POST /scheduled/tasks {script_id, stage:'aroll', aroll_image: 人物图服务端
    *  路径} ③轮询+逐镜回轨 ④任务终态兜底扫尾。有素材镜服务端自动跳过=保留素材
-   *  轨，起跑即标完成。人物图必须先经 product-upload 落到服务端路径。 */
+   *  轨，起跑即标完成。人物图必须先经 product-upload 落到服务端路径。
+   *  2026-11-27 用户裁决两改：①**逐镜各提交一个独立任务**（每镜
+   *  aroll_shot_indexes=[该镜]）——单任务包干观测不到逐镜起跑，服务端队列串行
+   *  （实测 max_concurrent=1）时后位镜排队即被误判超时；②每镜 15 分钟窗口从
+   *  **该任务开跑**起算（queued 随 tick 后移不计时），到点判超时并取消该任务；
+   *  停止=未完成镜逐个取消，已落地产物保留。 */
   async function batchGenerateARoll(personImagePath: string): Promise<void> {
     const shots = deps.activeShots()
     const idxs = markedShotIdxs(shots, 'aroll')
@@ -300,9 +357,13 @@ export function useShotMaterialGen(deps: {
     const imagePath = String(personImagePath || '').trim()
     if (!imagePath) { setGroupMsg('aroll', 'A-Roll 组需要先上传人物图。'); return }
     busy.value = true
+    activeGroup.value = 'aroll' // 停止按钮归属本组（2026-11-27 用户裁决）
+    stopFlags.value.aroll = false // 新批次重置停止旗标（2026-11-27 停止裁决）
     const startedAt = Date.now()
     /** 尚未回轨的镜 index 集合（回轨/跳过即移出；失败上报以 states 终态为准） */
     const pending = new Set<number>()
+    /** 每镜任务号（catch 域也要用——判死必须同步取消服务端任务，2026-11-27） */
+    const taskIds = new Map<number, string>()
     try {
       // ①脚本预置 per_shot 模式（含 aroll.audio_id；失败=中断，缺模式 worker 会走整条旧语义）
       setGroupMsg('aroll', '正在把脚本置为 A-roll 按镜生成模式…')
@@ -319,42 +380,31 @@ export function useShotMaterialGen(deps: {
         msg.value = 'A-Roll：勾选镜均已绑定素材，无需生成。'
         return
       }
-      // ②一次触发 stage=aroll 任务（切分/对齐/逐镜生成/回写全服务端包干）。
-      // 2026-11-26 契约 2ef347a0（选镜制）：per_shot 必须显式传 params.aroll_shot_indexes
-      // （0-based 列表）=pending 镜的 0-based 镜号，不给→任务失败明确报错
-      const arollShotIndexes = [...pending].map((i) => {
+      // ②③客户端逐镜流水线（2026-11-27 实测裁决：服务端 §8 任务级互斥——同脚本
+      // 同时只允许一个在飞任务，40 并发提交=1 成功 39×409「已有生成任务在飞」；
+      // 服务端队列本就串行 max_concurrent=1，流水线不损吞吐）。前一镜任务终态后
+      // 再提交下一镜，每镜独立可观测：
+      // ·15 分钟窗口从该任务**开跑**起算（queued 随 tick 后移不计时）
+      // ·超时/停止/异常=取消当前任务+不再提交后续（真·「停止队列里下面的任务」）
+      // ·2026-11-26 契约 2ef347a0：aroll_shot_indexes=[该镜 0-based 镜号]
+      const zeroIdxOf = (i: number): number => {
         const n = Number(shots[i]!.index)
         return Number.isFinite(n) && n > 0 ? n - 1 : i
-      })
-      setGroupMsg('aroll', '正在提交 A-roll 任务…')
-      const submitted = await window.tintin.server.post<Record<string, unknown>>(
-        '/scheduled/tasks',
-        { task_type: 'storyboard_generate', params: { script_id: scriptId, stage: 'aroll', aroll_image: imagePath, auto_montage: false, aroll_shot_indexes: arollShotIndexes } },
-        {}, 30_000,
-      )
-      if (!submitted) throw new Error('服务端不可达')
-      if (submitted.error) throw new Error(String(submitted.error))
-      const taskId = String(submitted.task_id ?? submitted.id ?? '')
-      if (!taskId) throw new Error('A-roll 提交响应缺 id/task_id')
-      const tickMsg = (verb: string): string => `${verb}（已回轨 ${idxs.length - pending.size}/${idxs.length}）…`
-      for (const i of pending) setState(keyOf(i, 'aroll'), { phase: 'generating', taskId, msg: '数字人生成中…' })
-      setGroupMsg('aroll', tickMsg('A-roll 已提交'))
+      }
       const dir = joinPath(await readCacheDir(), 'montage_cache', deps.splitsJobId.value || 'session', 'generated')
-
       /** 单镜回轨：下载该镜 aroll_material_id 产物→写 A-Roll 轨→瓦片标完成 */
       const fillShot = async (i: number, mid: number): Promise<void> => {
         const k = keyOf(i, 'aroll')
         setState(k, { phase: 'downloading', progress: -1, msg: '生成完成，正在下载产物…' })
-        const local = joinPath(dir, `${taskId}_${i + 1}.mp4`)
+        const local = joinPath(dir, `${taskIds.get(i) ?? 'shot'}_${i + 1}.mp4`)
         const res = await window.tintin.server.downloadResult(`/material/serve?material_id=${mid}`, local)
         if (res === null) { setState(k, { phase: 'failed', msg: '产物下载通道不可达' }); return }
         if (res && typeof res === 'object' && 'error' in res) {
           setState(k, { phase: 'failed', msg: `产物下载失败：${errMsg(res)}` }); return
         }
-        setSlot(i, 'aroll', { local, taskId })
+        setSlot(i, 'aroll', { local, taskId: taskIds.get(i) ?? '' })
         setState(k, { phase: 'done', progress: 100, msg: '数字人已生成', elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
       }
-
       /** 回读脚本 detail 取逐镜产物映射（对位：优先脚本镜 index，退回数组位） */
       let scriptShots: Array<Record<string, unknown>> = []
       const readScriptShots = async (): Promise<void> => {
@@ -367,54 +417,171 @@ export function useShotMaterialGen(deps: {
         const raw = scriptShots.find((r) => Number(r.index) === Number(shot.index)) ?? scriptShots[i]
         return Number(raw?.aroll_material_id ?? 0)
       }
-
-      // ③轮询到 completed；每 tick 并读脚本——生成一个回轨一个
-      const started = Date.now()
-      while (Date.now() - started < AROLL_POLL_BUDGET && pending.size) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL))
-        const node = await window.tintin.server.get(`/scheduled/tasks/${taskId}`)
-        if (node === null || node === undefined) throw new Error('任务通道不可达')
-        // 同款判空防御：error 键存在但值为空≠失败
-        const nodeErr = (node && typeof node === 'object' ? (node as { error?: unknown }).error : undefined)
-        if (nodeErr !== null && nodeErr !== undefined && nodeErr !== '') throw new Error(String(nodeErr))
-        const task = extractTaskObj(node)
-        const phase = mapTaskStatus(task?.status ?? task?.state, task).phase
-        const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
-        await readScriptShots()
-        for (const i of [...pending]) {
+      const cancelShotTask = async (i: number): Promise<boolean> => {
+        const tid = taskIds.get(i)
+        if (!tid) return false
+        const c = await window.tintin.server.post(`/scheduled/tasks/${tid}/cancel`, undefined, {}, 30_000)
+        return !(c && typeof c === 'object' && 'error' in c && c.error)
+      }
+      const doneCount = (): number => idxs.filter((x) => states.value[keyOf(x, 'aroll')]?.phase === 'done').length
+      // 预置回写相不可中断（300s 上限）；旗标在此收割——点了停止就不提交任务
+      if (stopFlags.value.aroll) { setGroupMsg('aroll', '已停止：未提交任务。'); return }
+      const pipeline = [...pending]
+      let stopRequested = false
+      /** 当前镜窗口锚点（0=未锚定——仍 queued，随 tick 后移；running 起锚定） */
+      const windowAt = new Map<number, number>()
+      /** 当前镜首见 queued 时刻（排队兜底帽计时；离开 queued 即清） */
+      const queuedAt = new Map<number, number>()
+      /** 提交单镜任务：409「已有生成任务在飞」=与前一镜收尾的互斥竞态，退避重试；
+       *  通道不可达也重试；其余错误（含 409 详情）原样透出——不再吞成「服务端不可达」 */
+      const submitShot = async (i: number, seqNo: number): Promise<{ tid?: string; err?: string; stopped?: boolean }> => {
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (stopFlags.value.aroll) return { stopped: true }
+          if (attempt) await new Promise((r) => setTimeout(r, POLL_INTERVAL))
+          setGroupMsg('aroll', `正在提交第 ${seqNo}/${pipeline.length} 镜 A-roll 任务…（已回轨 ${doneCount()}/${idxs.length}）`)
+          let res: Record<string, unknown> | null = null
+          try {
+            res = await window.tintin.server.post<Record<string, unknown>>(
+              '/scheduled/tasks',
+              { task_type: 'storyboard_generate', params: { script_id: scriptId, stage: 'aroll', aroll_image: imagePath, auto_montage: false, aroll_shot_indexes: [zeroIdxOf(i)] } },
+              {}, 30_000,
+            )
+          } catch { res = null } // 通道异常（非离线判定）→ 与离线同路重试
+          if (!res) { if (attempt === 4) return { err: '服务端不可达' }; continue }
+          if (res.error) {
+            const em = String(res.error)
+            if (/409|在飞|已有生成任务/.test(em) && attempt < 4) continue // 互斥竞态退避
+            return { err: em }
+          }
+          const got = String(res.task_id ?? res.id ?? '')
+          return got ? { tid: got } : { err: '提交响应缺 id/task_id' }
+        }
+        return { err: '提交重试次数用尽' }
+      }
+      for (let pi = 0; pi < pipeline.length; pi++) {
+        const i = pipeline[pi]!
+        if (!pending.has(i)) continue
+        if (stopFlags.value.aroll) { stopRequested = true; break }
+        const k = keyOf(i, 'aroll')
+        const sub = await submitShot(i, pi + 1)
+        if (sub.err) {
+          if (sub.stopped) { stopRequested = true; break }
+          pending.delete(i)
+          setState(k, { phase: 'failed', msg: `提交失败：${sub.err}`, elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
+          continue
+        }
+        if (stopFlags.value.aroll) { // 提交成功但停止已按下：取消刚提交的任务再收手
+          stopRequested = true
+          taskIds.set(i, sub.tid!)
+          await cancelShotTask(i)
+          break
+        }
+        taskIds.set(i, sub.tid!)
+        setState(k, { phase: 'submitting', taskId: sub.tid, msg: '已提交，等待服务端队列…', startedAt, elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
+        // ── 单镜轮询到终态：素材判定先于状态（遗留产物立即收割，queued 不拦）；
+        // 窗口从开跑起算（queued 随 tick 后移），到点判超时并取消让位串行队列 ──
+        windowAt.set(i, 0)
+        queuedAt.delete(i)
+        let doneTicks = 0
+        while (pending.has(i)) {
+          if (stopFlags.value.aroll) { stopRequested = true; await cancelShotTask(i); break }
+          await new Promise((r) => setTimeout(r, POLL_INTERVAL))
+          if (stopFlags.value.aroll) { stopRequested = true; await cancelShotTask(i); break }
+          await readScriptShots()
           const mid = midOf(i)
-          if (!mid) {
-            setState(keyOf(i, 'aroll'), { phase: 'generating', progress: progressOf(task), elapsedSec, msg: '数字人生成中…' })
+          if (mid) { pending.delete(i); await fillShot(i, mid); break }
+          const node = await window.tintin.server.get(`/scheduled/tasks/${taskIds.get(i)}`)
+          // 通道抖动跳过本 tick（不可达≠任务失败）
+          const nodeErr = (node && typeof node === 'object' ? (node as { error?: unknown }).error : undefined)
+          if (node === null || node === undefined || (nodeErr !== null && nodeErr !== undefined && nodeErr !== '')) continue
+          const task = extractTaskObj(node)
+          const rawStatus = String(task?.status ?? task?.state ?? '').toLowerCase()
+          const isQueued = rawStatus === 'queued' || rawStatus === 'pending' || rawStatus === 'waiting'
+          const phase = mapTaskStatus(task?.status ?? task?.state, task).phase
+          const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
+          if (phase === 'failed') {
+            pending.delete(i)
+            setState(k, { phase: 'failed', msg: `生成失败：${String(task?.error_message ?? task?.error_msg ?? task?.error ?? task?.last_message ?? 'A-roll 生成失败')}`, elapsedSec })
+            break
+          }
+          if (isQueued) {
+            windowAt.set(i, 0)
+            const q0 = queuedAt.get(i) ?? Date.now()
+            queuedAt.set(i, q0)
+            if (Date.now() - q0 >= QUEUE_WAIT_CAP) {
+              await cancelShotTask(i)
+              pending.delete(i)
+              setState(k, { phase: 'failed', msg: '排队超时（24 小时未开跑，请检查服务端队列）', elapsedSec })
+              break
+            }
+            setState(k, { phase: 'generating', progress: -1, elapsedSec, msg: '已提交，等待服务端队列…' })
             continue
           }
-          pending.delete(i)
-          await fillShot(i, mid)
+          queuedAt.delete(i)
+          if (!windowAt.get(i)) {
+            const srv = Date.parse(String(task?.started_at ?? ''))
+            windowAt.set(i, Number.isFinite(srv) ? srv : Date.now())
+          }
+          const win = windowAt.get(i) ?? Date.now()
+          if (phase !== 'done' && Date.now() - win >= SHOT_TASK_TIMEOUT) {
+            await cancelShotTask(i) // 超时让位：串行队列下挂死/超慢任务必须取消
+            pending.delete(i)
+            setState(k, { phase: 'failed', msg: '生成超时（15 分钟/镜）', elapsedSec })
+            break
+          }
+          if (phase === 'done') {
+            // 任务 completed 但脚本未回写：短暂竞态等几个 tick，超 30s 判未回写
+            doneTicks += 1
+            if (doneTicks >= 10) {
+              pending.delete(i)
+              setState(k, { phase: 'failed', msg: '任务已完成但服务端未回写该镜产物', elapsedSec })
+              break
+            }
+            continue
+          }
+          setState(k, { phase: 'generating', progress: progressOf(task), elapsedSec, msg: '数字人生成中…' })
         }
-        setGroupMsg('aroll', phase === 'done' ? 'A-roll 任务完成，正在核对逐镜产物…' : tickMsg('A-roll 生成中'))
-        if (phase === 'failed') throw new Error(String(task?.error_message ?? task?.error_msg ?? task?.error ?? task?.last_message ?? 'A-roll 生成失败'))
-        if (phase === 'done') break
+        setGroupMsg('aroll', `A-roll 生成中：第 ${pi + 1}/${pipeline.length} 镜（已回轨 ${doneCount()}/${idxs.length}）…`)
       }
-      // ④扫尾：任务终态后仍无产物的镜兜底重读一次再判失败（完成瞬间回读竞态先例）
+      if (stopRequested) {
+        // 停止收尾：当前任务已在逐镜相取消；未启动镜不再提交（真正的「停止队列里
+        // 下面的任务」）。已落地产物照常收割（扫尾），未回轨镜就地标已停止
+        setGroupMsg('aroll', `已停止：已完成 ${doneCount()}/${idxs.length}，未启动镜不再提交。`)
+      }
+      // ④扫尾：任务终态/停止后仍无产物的镜兜底重读一次再判（完成瞬间回读竞态先例）
       if (pending.size && pending.size < idxs.length) await readScriptShots()
       for (const i of [...pending]) {
         const mid = midOf(i)
         if (mid) { pending.delete(i); await fillShot(i, mid) }
       }
-      for (const i of pending) setState(keyOf(i, 'aroll'), { phase: 'failed', msg: '服务端未回写该镜 A-roll 产物' })
+      for (const i of pending) setState(keyOf(i, 'aroll'), { phase: 'failed', msg: stopRequested ? '已停止（未提交或已取消）' : '服务端未回写该镜 A-roll 产物' })
       const okCount = idxs.filter((i) => states.value[keyOf(i, 'aroll')]?.phase === 'done').length
-      if (!okCount) throw new Error('A-roll 生成完成但无一镜产物落盘')
+      if (!okCount) {
+        if (stopRequested) return // 主动停止不算失败（2026-11-27 用户裁决）
+        throw new Error('A-roll 生成完成但无一镜产物落盘')
+      }
       setGroupMsg('aroll', `A-roll 批量生成完成：成功 ${okCount}/${idxs.length}。`)
     } catch (e) {
+      // 客户端判死必须同步收回服务端资源（2026-11-27 用户裁决：不允许客户端已失败
+      // 而服务端还在烧小时级）——未回轨镜的 task 逐个请求取消（火后不理，取消失败
+      // 不影响失败上报）
+      for (const [i, tid] of taskIds) {
+        if (!pending.has(i)) continue // 已回轨/已终态的镜任务不动
+        void window.tintin.server.post(`/scheduled/tasks/${tid}/cancel`, undefined, {}, 30_000)
+      }
       // 失败只烧未回轨镜——已回轨/已跳过的瓦片保留终态（用户裁决：回轨不回滚）
       const doneN = idxs.filter((i) => states.value[keyOf(i, 'aroll')]?.phase === 'done').length
       const suffix = doneN ? `（已回轨 ${doneN}/${idxs.length}，其余失败）` : ''
       setGroupMsg('aroll', `A-roll 生成失败${suffix}：${errMsg(e)}`)
       for (const i of idxs) {
-        if (states.value[keyOf(i, 'aroll')]?.phase === 'done') continue
+        const st = states.value[keyOf(i, 'aroll')]
+        // 已有终态判定的镜（done/逐镜失败/超时/停止）保留专属文案——批量错误只
+        // 兜底 stamp 仍无判定的瓦片（2026-11-27 逐镜任务化后逐镜判定是常态）
+        if (st?.phase === 'done' || st?.phase === 'failed') continue
         setState(keyOf(i, 'aroll'), { phase: 'failed', msg: `A-roll 生成失败：${errMsg(e)}`, elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
       }
     } finally { busy.value = false }
   }
 
-  return { busy, msg, groupMsgs, states, active, stateOf, batchProgressOf, addOnline, generate, batchGenerateAI, batchGenerateARoll, splitVoiceByScript }
+  return { busy, msg, groupMsgs, states, active, stateOf, batchProgressOf, activeGroup, addOnline, generate, batchGenerateAI, batchGenerateARoll, stopBatch, splitVoiceByScript }
 }

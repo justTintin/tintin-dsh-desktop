@@ -15,11 +15,9 @@
 //   · workers/concat_workers.py FinalMixWorker L651-746 → final:mix
 //     （本地 ffmpeg：ffprobe 探测音频流 → sidechain ducking + 淡入淡出 +
 //       loudnorm（EBU R128 -16 LUFS）；无 BGM → -c copy）
-//   · video_montage_page.py _collect_mix_candidates 回退段 L4088-4104 → final:collectOutputs
-//     （扫描 outputs 排列视频，_get_out_montage_dir L3969-3981 目录规则）
+//   · video_montage_page.py _collect_mix_candidates 回退段 → final:collectOutputs（扫描 outputs 排列视频）
 //   · _find_srt_for_video L4249-4271 → final:findSrt
-//   · _export_to_jianying_draft / _export_all_to_jianying_draft L4196-4326
-//     → jianying:export（JianyingExporter 一比一移植于 jianying-exporter.js）
+//   · _export_to_jianying_draft / _export_all_to_jianying_draft → jianying:export（JianyingExporter 一比一移植）
 //   · 本端扩展（架构差异，AI BGM 生成结果为服务端 URL，本地混音需落盘）：
 //     bgm:downloadUrl —— 下载 AI 生成 BGM 到本地（列入待裁决清单）
 // 剪映导出为本地文件操作，不依赖服务端契约。
@@ -1197,6 +1195,7 @@ function createMontageFinalApi({ httpRequest, isExpectedOfflineError, getServerU
           const res = p.mode === 'multi'
         ? JY.exportMultiToDraft({
             videoPaths: p.videoPaths,
+            videoTrackKinds: Array.isArray(p.videoTrackKinds) ? p.videoTrackKinds : null, // 1126 四轨制：逐段轨属，不给=单素材轨
             videoDurations: Array.isArray(p.videoDurations) ? p.videoDurations : null, // 0922 虚拟时间轴：逐段源裁剪时长（µs）覆盖
             gapAfterUs: Array.isArray(p.gapAfterUs) ? p.gapAfterUs : null, // 2026-11-06 用户裁定：段后黑场表（仅方案成片边界 5s，方案内 0=紧密保转场）
             muteVideoAudio: p.muteVideoAudio ?? false,

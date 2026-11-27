@@ -596,9 +596,11 @@ export function useCopywritingMontage() {
     voiceBusy, rewriteBusy,
     copyShots, copyShotsStale, shotClipGroup, bindShotMaterial, removeShotClipAt, unbindShotMaterial, genStoryboard, storyboardBusy, scriptSaving, saveStoryboard,
     shotMatBusy: shotMat.busy, shotMatMsg: shotMat.msg, shotMatMsgs: shotMat.groupMsgs, genShotMaterial: shotMat.generate, addOnlineShotMaterial: shotMat.addOnline,
+    shotMatActiveGroup: shotMat.activeGroup, // 停止按钮只出现在跑批组（2026-11-27 用户裁决）
     // 逐镜逐轨生成状态 + 批量入口（2026-11-26 四源四轨裁决：产物写 shot.slots 各轨占位）
     shotGenStates: shotMat.states, shotGenActiveOf: shotMat.active, shotGenStateOf: shotMat.stateOf,
     shotBatchAI: shotMat.batchGenerateAI, shotBatchARoll: shotMat.batchGenerateARoll, shotBatchProgressOf: shotMat.batchProgressOf,
+    shotMatStop: shotMat.stopBatch, // 2026-11-27 用户裁决：生成按钮旁停止按钮（取消未完成任务，已落地产物保留）
     shotSplitVoiceByScript: shotMat.splitVoiceByScript,
     scriptPickDlg, openScriptPick, refreshScriptOptions, pickDetail, selectScriptOption, applySelectedScript,
     scanVoiceDir, enterStepVoice, loadRefSamples, refPreviewUrl,

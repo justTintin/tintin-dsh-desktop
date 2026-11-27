@@ -87,3 +87,29 @@ describe('genStoryboardsForTabs LLM 调用契约（长文案截断修复）', ()
     expect(notifications.some((n) => n.includes('模型未返回 JSON 数组') && !n.includes('max_tokens'))).toBe(true)
   })
 })
+
+describe('生成画幅契约（2026-11-27 用户裁决：按钮前选择，写入 tab.layout 锁定）', () => {
+  it('ratio=horizontal：prompt 出横屏（16:9）画面描述口径，layout 写入 horizontal', async () => {
+    llmReply = () => ({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify([
+      { index: 1, shot_type: '近景', visual: '画面', audio: '文案', sfx: '', duration: 3 },
+    ]) } }] }) // 前用例改写的回复形态会毒化本链（模块态泄漏防，文件头既有纪律）
+    const { storyboards, tabs } = makeTabs()
+    tabs.addStoryboardTab({ name: '横屏稿', narrative: '横屏文案', shots: [] })
+    await tabs.genStoryboardsForTabs([storyboards.value[0]!], 'horizontal')
+    expect(lastPost).toBeTruthy()
+    const msgs = lastPost!.payload.messages as Array<{ role: string; content: string }>
+    expect(msgs[1]!.content).toContain('横屏（16:9）')
+    expect(msgs[1]!.content).not.toContain('竖屏')
+    expect(storyboards.value[0]!.layout).toBe('horizontal')
+    expect(storyboards.value[0]!.shots.length).toBe(1)
+  })
+
+  it('缺省 ratio=vertical：prompt 出竖屏（9:16），layout 写入 vertical（现状口径不变）', async () => {
+    const { storyboards, tabs } = makeTabs()
+    tabs.addStoryboardTab({ name: '竖屏稿', narrative: '竖屏文案', shots: [] })
+    await tabs.genStoryboardsForTabs([storyboards.value[0]!])
+    const msgs = lastPost!.payload.messages as Array<{ role: string; content: string }>
+    expect(msgs[1]!.content).toContain('竖屏（9:16）')
+    expect(storyboards.value[0]!.layout).toBe('vertical')
+  })
+})

@@ -907,12 +907,14 @@ function clearVoiceProgressListener(): void {
    *  解析失败（fallback 单镜回退标记）保留现有卡并报错，不吞用户已编辑内容。
    *  2026-11-05 用户裁决：多稿装载态（「仅文案」tab，shots 为空）批量补全——逐 tab 按
    *  其旁白各生成一套分镜（对应文案个数，genStoryboardsForTabs 已迁
-   *  useCopywritingMontageStoryboardTabs.ts）；无装载态保持单稿行为（激活旁白→新 tab） */
-  async function genStoryboard(): Promise<void> {
+   *  useCopywritingMontageStoryboardTabs.ts）；无装载态保持单稿行为（激活旁白→新 tab）。
+   *  ratio=本次生成画幅（2026-11-27 用户裁决：按钮前选择）——prompt 按画幅出画面
+   *  描述并写入新 tab.layout 锁定；生成走 /llm 纯文本接口，横竖屏由 prompt 文字控制 */
+  async function genStoryboard(ratio = 'vertical'): Promise<void> {
     if (storyboardBusy.value) return
     const pending = storyboards.value.filter((t) => t.narrative.trim() && !t.shots.length)
     if (pending.length) {
-      await genStoryboardsForTabs(pending)
+      await genStoryboardsForTabs(pending, ratio)
       return
     }
     // 2026-09-21 用户裁决：口播文案与分镜脚本绑定——生成分镜取激活旁白
@@ -922,7 +924,7 @@ function clearVoiceProgressListener(): void {
     storyboardBusy.value = true
     try {
       statusText.value = '正在根据旁白生成分镜脚本...'
-      const { systemPrompt, userPrompt } = buildCopywritingStoryboardPrompt(copy)
+      const { systemPrompt, userPrompt } = buildCopywritingStoryboardPrompt(copy, ratio)
       // 显式 max_tokens + 放宽超时（2026-11-25 长文案截断修复，参数注释见常量出处）
       const res = await window.tintin.server.post('/llm/chat/completions', {
         model: '',
@@ -944,6 +946,10 @@ function clearVoiceProgressListener(): void {
         notify('分镜数量已达上限', `最多支持 ${COPY_STORYBOARD_MAX} 个分镜脚本，请先删除部分分镜。`)
         return
       }
+      // 生成画幅写入新 tab（2026-11-27 用户裁决：生成时定死贯穿各步；必须经
+      // storyboards.value 重新解析写——闭包原始对象直写不触发响应式与持久化 watch）
+      const liveTab = storyboards.value.find((t) => t.id === tab.id)
+      if (liveTab) liveTab.layout = ratio
       const total = parsed.shots.reduce((s, x) => s + (Number(x.duration) || 0), 0)
       statusText.value = `完成： 分镜「${tab.name}」已生成（${parsed.shots.length} 镜 / 约 ${Math.round(total)} 秒）`
       void syncStoryboardsToServer()
@@ -1065,9 +1071,9 @@ function clearVoiceProgressListener(): void {
             // 轨道产物/标记回填（2026-11-26 四源四轨：clip_groups 同款——normalizeShot
             // 白名单不带，从原始 shots 提取 gen_mode/slots）
             const raw = (s ?? {}) as Record<string, unknown>
-            // mark_aroll：新存档恒有值=精确还原（含显式 false）；旧存档无此字段=按裁决默认选中
+            // mark_aroll/mark_material：新存档恒有值=精确还原（含显式 false）；
+            // 旧存档无字段=按裁决默认选中（A-Roll/素材均默认勾选）
             n.markARoll = raw.mark_aroll !== undefined ? !!raw.mark_aroll : true
-            // mark_material：2026-11-26 用户裁决素材复选默认全选——旧存档无字段也默认选中
             n.markMaterial = raw.mark_material !== undefined ? !!raw.mark_material : true
             if (raw.mark_ai) n.markAI = true
             if (raw.slots && typeof raw.slots === 'object') n.slots = raw.slots as StoryboardShot['slots']

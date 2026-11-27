@@ -11,13 +11,16 @@ import { onlineKey, type OnlineItem } from '@/composables/useOnlineStock'
 const props = withDefaults(defineProps<{ initialQuery?: string; single?: boolean }>(), { initialQuery: '', single: false })
 const emit = defineEmits<{ (e: 'add', items: OnlineItem[]): void }>()
 const { oKw, oKind, oItems, oLoading, oError, oMsg, oPage, oHasMore, oSelected, oThumbFailed,
-  oSelectedCount, oToggle, oSelectPageAll, oClearSelection, runOnline } = useOnlineStockPicker()
+  oSelectedCount, oToggle, oSelectOnly, oSelectPageAll, oClearSelection, runOnline } = useOnlineStockPicker()
 
-// 播放预览（2026-11-26 用户裁决：点击结果卡即在右侧播放该视频/图片）
+// 播放预览（2026-11-26 用户裁决：点击结果卡即在右侧播放该视频/图片）。
+// 2026-11-26 用户裁决再改：单镜弹窗（single）下结果**单选**——点一条只选这一条
+// （自动清掉其它勾选），确认即绑定该条；素材库 tab 多选口径不变。
 const previewItem = ref<OnlineItem | null>(null)
 function preview(it: OnlineItem): void {
   previewItem.value = it
-  oToggle(it)
+  if (props.single) oSelectOnly(it)
+  else oToggle(it)
 }
 const previewIsVideo = computed(() => previewItem.value?.type !== 'image')
 
@@ -76,9 +79,10 @@ function add(): void {
     </div>
     <div class="row between">
       <div class="row">
-        <TButton label="全选本页" variant="secondary" size="small" :disabled="!oItems.length" @click="oSelectPageAll" />
-        <TButton label="取消全选" variant="secondary" size="small" :disabled="!oSelectedCount" @click="oClearSelection" />
-        <span class="muted">已选 {{ oSelectedCount }} 项（跨页保留）</span>
+        <!-- 2026-11-26 用户裁决：单镜弹窗单选——全选/取消全选不适用，隐藏 -->
+        <TButton v-if="!props.single" label="全选本页" variant="secondary" size="small" :disabled="!oItems.length" @click="oSelectPageAll" />
+        <TButton v-if="!props.single" label="取消全选" variant="secondary" size="small" :disabled="!oSelectedCount" @click="oClearSelection" />
+        <span class="muted">已选 {{ oSelectedCount }} 项<span v-if="!props.single">（跨页保留）</span></span>
       </div>
       <div class="row">
         <TButton label="上一页" variant="secondary" size="small" :disabled="oPage <= 1 || oLoading" @click="runOnline(oPage - 1)" />
@@ -98,7 +102,7 @@ function add(): void {
 .ostock-left { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .online-stock .lib-grid-wrap { flex: 1 1 auto; min-height: 160px; overflow-y: auto; overscroll-behavior: contain; }
 /* 播放预览栏（点击结果卡即在此播放） */
-.ostock-preview { flex: 0 0 300px; display: flex; flex-direction: column; gap: 6px; align-items: stretch; justify-content: center;
+.ostock-preview { flex: 0 0 600px; /* 2026-11-26 用户裁决：预览区宽度增加一倍 */ display: flex; flex-direction: column; gap: 6px; align-items: stretch; justify-content: center;
   background: #101010; border-radius: var(--radius-md); padding: 10px; min-height: 0; }
 .ostock-pv-media { width: 100%; max-height: 430px; object-fit: contain; background: #000; border-radius: var(--radius-sm); }
 .ostock-pv-meta { font-size: 12px; color: var(--foreground); text-align: center; }
@@ -111,7 +115,7 @@ function add(): void {
 .input.grow { flex: 1 1 auto; min-width: 0; }
 .lib-input-sm { width: 110px; flex: none; }
 /* 结果网格卡（样式自 CopywritingStep2Panel 素材库 tab 同款平移） */
-.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; align-content: start; }
+.lib-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; align-content: start; } /* 1126 用户裁决：一行五个，item 变小 */
 .lib-card {
   position: relative; display: flex; flex-direction: column; gap: 3px;
   padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-md);

@@ -169,7 +169,8 @@ onUnmounted(() => document.removeEventListener('click', closeMenu))
   background: var(--surface-container); border-radius: var(--radius-md);
 }
 .kwar-seg { font-size: 13px; color: var(--foreground); user-select: text; cursor: text; }
-.kwar-ts { font-size: 11px; font-weight: 700; color: var(--muted-foreground); font-variant-numeric: tabular-nums; margin-right: 2px; }
+/* 时间戳+括号淡绿色（2026-11-26 用户裁决：[00:00.x] 括号与时间用淡绿色区分正文） */
+.kwar-ts { font-size: 11px; font-weight: 700; color: var(--success, #4ade80); font-variant-numeric: tabular-nums; margin-right: 2px; }
 .kwar-kw {
   color: var(--primary); font-weight: 700; cursor: context-menu;
   background: color-mix(in srgb, var(--primary) 14%, transparent);

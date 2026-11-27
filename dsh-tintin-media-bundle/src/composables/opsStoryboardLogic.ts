@@ -106,11 +106,10 @@ export function normalizeShot(raw: unknown, fallbackIndex: number): StoryboardSh
     material_type: String(s.material_type ?? ''),
     material_hash: String(s.material_hash ?? ''),
     material_id: toMaterialId(s.material_id),
-    /** 默认勾选生成 A-Roll（2026-11-26 用户裁决：所有分镜默认 A-roll 选中——
-     *  客户端态字段；恢复路径会在其后再按原始 shots 覆写，未勾选的可还原为未标记） */
+    /** 默认勾选生成 A-Roll（2026-11-26 用户裁决：所有分镜默认 A-roll 选中）+
+     *  默认勾选素材（1126 续批：素材复选默认全选）——三复选互不影响多选；
+     *  恢复路径在其后按原始 shots 覆写 */
     markARoll: true,
-    /** 默认勾选素材（2026-11-26 用户裁决：素材复选框全部默认选中——客户端态字段，
-     *  恢复路径同样按原始 shots 覆写） */
     markMaterial: true,
   }
 }

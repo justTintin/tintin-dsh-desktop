@@ -529,8 +529,7 @@ function buildTemplateClipTrio(p, phrase, canvasW = 0, canvasH = 0) {
   }
   extraRefs.push(...flowerEffects.map((m) => m.id), ...animMaterials.map((m) => m.id))
 
-  // 2026-09-20 修复（用户报障「高保真音质」模板实例超宽未生效）：预设 original_size
-  // 是预设原文的排版尺寸，剪映实际渲染=填充文字排版尺寸×scale——填充词更长时须把
+  // 2026-09-20 修复（模板实例超宽未生效）：剪映实际渲染=填充文字排版尺寸×scale——长度膨胀比计入钳制，并按「文字+贴纸」整体包围盒 fit 画布防贴纸偏移。
   // 长度膨胀比计入钳制；并按"文字+贴纸"整体包围盒 fit 画布，防贴纸位置偏移出画布。
   const presetText = (() => { try { return String(JSON.parse(para.content || '{}').text || '') } catch (_) { return '' } })()
   const presetAttach = para.attach_info || {}
@@ -678,8 +677,7 @@ function appendSfxTrackFromEvents(tracks, materials, events, offsetUs, limitEndU
   }
   const gainDb = Number(opts.gainDb)
   const volume = Number.isFinite(gainDb) ? Math.min(1, Math.max(0, Math.pow(10, gainDb / 20))) : 1.0
-  // 2026-09-24 用户裁决：音效尽量合并到一条轨——贪心分配到「末尾 ≤ 起点」的既有
-  // 轨，真重叠才开新轨；sfxTrackPool 由调用方持有（跨视频复用同一池）
+  // 2026-09-24 用户裁决：音效尽量合并一条轨——贪心分配到「末尾 ≤ 起点」的既有轨，真重叠才开新轨；sfxTrackPool 由调用方持有（跨视频复用同一池）
   const sfxTrackPool = Array.isArray(opts.sfxTrackPool) ? opts.sfxTrackPool : []
   list.forEach((ev, idx) => {
     const sfxPath = String(pool[(base + idx) % pool.length])
@@ -728,8 +726,7 @@ function appendSfxTrackFromClips(tracks, materials, clips, offsetUs, limitEndUs,
   }
   const gainDb = Number(opts.gainDb)
   const volume = Number.isFinite(gainDb) ? Math.min(1, Math.max(0, Math.pow(10, gainDb / 20))) : 1.0
-  // 2026-09-24 用户裁决：音效尽量合并到一条轨——段按起点排序后贪心分配到
-  // 「末尾 ≤ 起点」的既有轨，真重叠才开新轨；sfxTrackPool 由调用方持有复用
+  // 2026-09-24 用户裁决：音效尽量合并一条轨——段按起点排序贪心分配既有轨，真重叠才开新轨；sfxTrackPool 由调用方持有复用
   const sfxTrackPool = Array.isArray(opts.sfxTrackPool) ? opts.sfxTrackPool : []
   list.sort((a, b) => a.startUs - b.startUs)
   list.forEach((c) => {
@@ -768,11 +765,7 @@ function draft_content_tracks_render_index(tracks) {
 /** 模板实例段追加到文字模板轨（时间窗裁剪同 appendSubtitleTrack 口径；
  *  preset 解析经 cache 复用；模板缺失静默跳过——不造假）。 */
 function appendTextTemplateSegments(track, materials, clips, presetDir, offsetUs, limitEndUs, tplCache, canvasW = 0, canvasH = 0, fallback = null) {
-  // 2026-09-19 修复（用户报障「关键词不显示」）：返回实际追加段数——此前预设查不到
-  // （Text_V2 目录缺失 / resource_id 不匹配）逐命中静默 continue，模板轨零产出无任何信号。
-  // fallback={tracks,cache,opts}（2026-09-19 用户裁决修正）：预设查不到 ≠ 关键词丢弃——
-  // 关键词命中=服务端权威（词+时间点），模板只是渲染样式层；同一命中原样落纯文本
-  // 关键词段（纯色蓝字），显示保证不丢。返回 {appended, fallbackSegs}
+  // 2026-09-19 修复（关键词不显示）：返回实际追加段数；预设查不到 ≠ 丢关键词——命中=服务端权威，同一命中原样落纯文本蓝字段（fallback 修正，显示保证不丢）。
   let appended = 0
   let fallbackSegs = 0
   for (const c of clips) {
@@ -926,8 +919,7 @@ function buildStickerTrackFromPreset(presetDir, rid, clipDurationUs, canvasW, ca
     }
     if (bestD) { bestD.used = true; assign[i] = bestD }
   })
-  // 贴纸本地文件必须存在于剪映缓存（resource_id 指向云端时剪映自动下载），
-  // 我们导出为贴纸段（sticker material 带 resource_id），文件路径仅作排障参考。
+  // 贴纸本地文件必须存在于剪映缓存（resource_id 指向云端时自动下载），导出为贴纸段，文件路径仅作排障参考。
   const track = newTrack('sticker')
   elements.forEach((e, i) => {
     const c = (e.attach_info && e.attach_info.clip) || {}
@@ -1118,7 +1110,7 @@ function exportToDraft({ videoPath, bgmPath = '', bgmVolume = 50, srtPath = '', 
  *  不再导出旧 'tpl' 蓝字关键词轨（原生模板实例替代），'fancy' 花字轨照旧。
  *  sfxPaths（2026-09-18 用户裁决）：音效池=服务端音频库剪映音效库 <2s 条目
  *  下载产物（主进程 resolveJianyingSfxPool 解析），按文字模板命中全局索引循环指派。 */
-function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio = false, transitions = null, bgmPath = '', bgmPaths = null, bgmVolume = 50, srtPaths = null, srtLimitUs = null, draftName = '', fxWords = null, fxKinds = null, textAnim = '', fancyEffectId = '', tplEffectId = '', subAnim = '', videoEffectId = '', videoEffectName = '', textTemplateClips = null, fancyEvents = null, voiceClips = null, sfxClips = null, sfxPaths = null, sfxGainDb = null, subtitleStyle = null, subtitleBoxOpacity = null, subtitleFontSize = null, gapAfterUs = null, deps }) {
+function exportMultiToDraft({ videoPaths, videoTrackKinds = null, videoDurations = null, muteVideoAudio = false, transitions = null, bgmPath = '', bgmPaths = null, bgmVolume = 50, srtPaths = null, srtLimitUs = null, draftName = '', fxWords = null, fxKinds = null, textAnim = '', fancyEffectId = '', tplEffectId = '', subAnim = '', videoEffectId = '', videoEffectName = '', textTemplateClips = null, fancyEvents = null, voiceClips = null, sfxClips = null, sfxPaths = null, sfxGainDb = null, subtitleStyle = null, subtitleBoxOpacity = null, subtitleFontSize = null, gapAfterUs = null, deps }) {
   const paths = (videoPaths || []).filter(Boolean)
   if (!paths.length) return { success: false, message: '没有可导出的视频' }
   for (const p of paths) {
@@ -1204,7 +1196,14 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
     //    口播 wav 独立成音频轨，对应素材段自动静音（与成片「配音替换原声」混音口径一致）；
     //    无口播的素材段保留原声
     const transitionSpecs = normalizeTransitions(transitions, clips.length - 1)
-    const videoTrack = newTrack('video')
+    // 1126 四轨制：四条命名视频轨（A-Roll→素材→AI生成→在线搜索，同分镜瓦片序）——
+    // 剪映同类型多轨合法（各轨指定 name）；每镜只落自己轨时间窗（轨间无重叠）；
+    // 未传 videoTrackKinds（旧调用方）=单素材轨原口径；转场仅同轨相邻片段生效
+    const JY_SEQ = { aroll: 'A-Roll', material: '素材', gen: 'AI生成', stock: '在线搜索' }
+    const kindsOk = Array.isArray(videoTrackKinds) && videoTrackKinds.length === clips.length
+    const segKinds = kindsOk ? videoTrackKinds.map((k) => (k in JY_SEQ ? String(k) : 'material')) : clips.map(() => 'material')
+    const videoTracks = Object.entries(kindsOk ? JY_SEQ : { material: '' }).map(([kind, name]) => { const tr = newTrack('video'); tr.name = name; tr.is_default_name = !!name; return { kind, track: tr } })
+    const trackOfKind = (kind) => (videoTracks.find((t) => t.kind === kind) || videoTracks[0]).track
     const voiceTrack = newTrack('audio')
     const voiceSegsByVideo = normalizeVoiceClips(voiceClips, clips.length)
     // 配音末端两遍法（2026-10-13 实障：旁白 33.12s > 视频轨 30s——配音尾被时间轴
@@ -1255,10 +1254,10 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
         ...visualSegmentFields(),
         hdr_settings: { intensity: 1.0, mode: 1, nits: 1000 },
       }
-      videoTrack.segments.push(seg)
-      if (i > 0 && !(gapAfter[i - 1] > 0)) { // 与前段之间有黑场则转场失效（需相邻片段），不挂
-        const spec = transitionSpecs[i - 1]
-        if (spec) videoTrack.segments[videoTrack.segments.length - 2].extra_material_refs.push(buildTransitionMaterial(materials, spec))
+      trackOfKind(segKinds[i]).segments.push(seg)
+      if (i > 0 && segKinds[i] === segKinds[i - 1] && !(gapAfter[i - 1] > 0)) { // 转场仅同轨相邻片段生效（异轨跳过）
+        const spec = transitionSpecs[i - 1], segs = trackOfKind(segKinds[i]).segments
+        if (spec && segs.length >= 2) segs[segs.length - 2].extra_material_refs.push(buildTransitionMaterial(materials, spec))
       }
       if (gapAfter[i] > 0) { // 方案边界：实体透明图片段铺满黑场窗（转场守卫已先取前内容段）
         const g = gapAfter[i]
@@ -1266,7 +1265,8 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
         materials.videos.push(pm)
         const bsp = speedMaterial(1.0)
         speeds.push(bsp)
-        videoTrack.segments.push({ ...baseSegmentFields(pm.id, cursorUs + clip.durationUs, g), ...mediaSegmentFields(g, bsp.id, { volume: 0 }), ...visualSegmentFields(), hdr_settings: { intensity: 1.0, mode: 1, nits: 1000 } })
+        // 黑场落在下一段所在轨（与其同行相邻）
+        trackOfKind(segKinds[i + 1] ?? segKinds[i]).segments.push({ ...baseSegmentFields(pm.id, cursorUs + clip.durationUs, g), ...mediaSegmentFields(g, bsp.id, { volume: 0 }), ...visualSegmentFields(), hdr_settings: { intensity: 1.0, mode: 1, nits: 1000 } })
       }
       for (const vc of voiceSegsByVideo[i] || []) {
         const mat = audioMaterialFields(vc.path, vc.durUs)
@@ -1288,8 +1288,10 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
     })
     // 配音末端 > 视频轨末端：末段视频慢速延长铺满（speed<1，画面末帧缓放，
     // 源消耗=target*speed 恰好=源全长）；BGM 末窗同步延长；内容总时长对齐
-    if (voiceTimelineEndUs > cursorUs && videoTrack.segments.length) {
-      const lastSeg = videoTrack.segments[videoTrack.segments.length - 1]
+    // 末段延长基准=四轨里时间轴最末的内容段（1126 四轨制：末段可能在任一轨）
+    const allVideoSegs = videoTracks.flatMap((t) => t.track.segments), endUsOf = (sg) => (Number(sg.target_timerange?.start) || 0) + (Number(sg.target_timerange?.duration) || 0)
+    if (voiceTimelineEndUs > cursorUs && allVideoSegs.length) {
+      const lastSeg = allVideoSegs.reduce((a, b) => (endUsOf(b) > endUsOf(a) ? b : a))
       const tt = lastSeg.target_timerange
       const srcDur = Number(tt.duration) || 0
       const newDur = voiceTimelineEndUs - Number(tt.start)
@@ -1305,7 +1307,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
         content.duration = Math.max(Number(content.duration) || 0, voiceTimelineEndUs)
       }
     }
-    const tracks = [videoTrack]
+    const tracks = [...videoTracks.map((t) => t.track)]
 
     // 6. 字幕轨（order 1）+ 关键词轨（fancy/tpl）+ 原生文字模板轨；textAnim=文字入场动画名，
     //    fancyEffectId=花字效果 id。二期②：subAnim=字幕轨入场动画（本地语义 key → 剪映动画名映射）
@@ -1467,14 +1469,13 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
 
     // 二期④：视频特效挂载（videoEffectId 有值时给主轨全片段挂 video_effects）
     if (videoEffectId) {
-      applyVideoEffect(materials, videoTrack, videoEffectId, videoEffectName)
+      for (const vt of videoTracks) applyVideoEffect(materials, vt.track, videoEffectId, videoEffectName) // 1126 四轨制：挂全部视频轨
     }
 
     // 6.5 口播音频轨（有段才入轨；音频域三轨=口播/BGM/音效）
     if (voiceTrack.segments.length) tracks.push(voiceTrack)
 
-    // 音效轨池入轨（2026-09-24 用户裁决：音效尽量合并一条轨——贪心分配后
-    // 按首段起点排序入轨，重叠的段自然落到备用轨）
+  // 音效轨池入轨（2026-09-24 裁决：贪心分配后按首段起点排序入轨，重叠段自然落备用轨）
     for (const slot of sfxTrackPool) {
       if (slot.track.segments.length) tracks.push(slot.track)
     }
@@ -1498,7 +1499,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
     })
     // 2026-09-24 用户裁决：音频与视频同长——音频轨超出画面轨末尾的部分一律截断（不拖出视频）。
     // 基准=延长后的画面轨末端（2026-10-16：两遍法慢放铺满口播后，若仍按原始镜长和截断会把刚延长的口播/BGM 尾巴裁回去）
-    const videoTotalUs = videoTrack.segments.reduce((acc, s) => Math.max(acc, (Number(s.target_timerange?.start) || 0) + (Number(s.target_timerange?.duration) || 0)), 0)
+    const videoTotalUs = allVideoSegs.reduce((acc, s) => Math.max(acc, endUsOf(s)), 0)
     for (const t of tracks) {
       if (t.type !== 'audio') continue
       t.segments = t.segments.flatMap((s) => {
@@ -1561,9 +1562,7 @@ function exportMultiToDraft({ videoPaths, videoDurations = null, muteVideoAudio 
     // bgmIncluded：BGM 轨是否实际生成（未选/文件不存在时为 false，渲染层据实提示）
     // conformance：标准符合性自检（本路径全部走标准构造器，预期 0 警告；非 0 即构造器缺陷）
     const conformance = auditDraftStandardConformance(content)
-    // 2026-09-19 模板轨诊断回传（用户报障「关键词不显示」零信号根因）：
-    // expected=输入命中非空；appended=预设实际成段数（原生模板样式）；
-    // kwFallbackSegs=预设缺失时同一命中落纯文本段的兜底段数（显示保证）。渲染层据实提示
+  // 模板轨诊断回传：expected=输入命中非空；appended=原生模板成段数；kwFallbackSegs=预设缺失时纯文本兜底段数（渲染层据实提示）
     return { success: true, message: draftFolder, draftName, schemaVersion: DRAFT_SCHEMA, bgmIncluded, conformance, textTplExpected, textTplAppended, textTplKwFallbackSegs, missingMedia }
   } catch (e) {
     return { success: false, message: e && e.message ? e.message : String(e) }

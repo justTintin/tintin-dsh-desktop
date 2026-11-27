@@ -233,7 +233,7 @@ export const FANCY_POSITION_OPTIONS = [
  */
 export function isAutoStoryboardName(name: string): boolean {
   // 2026-11-26 用户裁决：日期前缀改 YYYYMMDD——旧 YYYY-MM-DD 形态（历史 tab）仍命中
-  return /^(?:(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}:\d{2}\s+)?脚本\d+$/.test(String(name || '').trim())
+  return /^(?:(?:(?:\d{6}-\d{4})|(?:(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}[-:]\d{2}))\s+)?脚本\d+$/.test(String(name || '').trim())
 }
 
 /** 文案名尾（2026-11-26 用户裁决：tab 名尾段=文案开头 5-10 字，替代「输入文案」
@@ -249,8 +249,8 @@ export function copyHeadName(narrative: string): string {
   return cut >= 0 ? flat.slice(0, cut) : flat.slice(0, 10)
 }
 
-/** 分镜脚本名默认日期前缀（YYMMDD HH:mm，2026-11-26 用户两连裁：日期去连字符、
- *  年份去世纪前缀「20」从 26 起精确到分钟）；已是日期开头或服务端
+/** 分镜脚本名默认日期前缀（YYMMDD-HHMM，2026-11-26 用户终裁：日期-时分用「-」
+ *  相连、时分四位紧凑无分隔——Windows 文件名合法且紧凑）；已是日期开头或服务端
  *  「分镜脚本_YYYYMMDD」形态的不重复加。 */
 export function storyboardDatePrefix(d = new Date()): string {
   const y = String(d.getFullYear() % 100).padStart(2, '0')
@@ -258,14 +258,14 @@ export function storyboardDatePrefix(d = new Date()): string {
   const day = String(d.getDate()).padStart(2, '0')
   const hh = String(d.getHours()).padStart(2, '0')
   const mm = String(d.getMinutes()).padStart(2, '0')
-  return `${y}${m}${day} ${hh}:${mm}`
+  return `${y}${m}${day}-${hh}${mm}`
 }
 export function datedStoryboardName(name: string, d = new Date()): string {
   const base = String(name || '').trim()
   if (!base) return base
   const prefix = storyboardDatePrefix(d)
   // 旧连字符/全日期形态（历史 tab）与新 YYMMDD 形态（异分钟）同样视为已有日期不重加
-  if (base.startsWith(prefix) || /^(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}:\d{2} /.test(base) || /^分镜脚本_\d{8}/.test(base)) return base
+  if (base.startsWith(prefix) || /^\d{6}-\d{4} /.test(base) || /^(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}[-:]\d{2} /.test(base) || /^分镜脚本_\d{8}/.test(base)) return base
   return `${prefix} ${base}`
 }
 

@@ -19,15 +19,15 @@ describe('isAutoStoryboardName（默认「脚本N」判定）', () => {
     expect(isAutoStoryboardName('脚本12')).toBe(true)
     expect(isAutoStoryboardName(' 脚本3 ')).toBe(true) // 首尾空白 trim 后命中
     expect(isAutoStoryboardName('脚本 1')).toBe(false) // 内嵌空格≠自增默认名（保守：视为用户命名不覆盖）
-    expect(isAutoStoryboardName('261126 13:45 脚本3')).toBe(true) // YYMMDD HH:mm 前缀（2026-11-26 用户裁决：去 20 从 26 起）
-    expect(isAutoStoryboardName('20261126 13:45 脚本3')).toBe(true) // YYYYMMDD HH:mm 前缀（同日上一版形态仍命中）
-    expect(isAutoStoryboardName('2026-11-26 13:45 脚本3')).toBe(true) // 旧连字符形态（历史 tab）仍命中
+    expect(isAutoStoryboardName('261126-1345 脚本3')).toBe(true) // YYMMDD-HHMM 前缀（2026-11-26 用户终裁：紧凑相连）
+    expect(isAutoStoryboardName('20261126 13:45 脚本3')).toBe(true) // 旧冒号形态仍命中
+    expect(isAutoStoryboardName('2026-11-26 13:45 脚本3')).toBe(true) // 旧全连字符形态（历史 tab）仍命中
   })
 
   it('用户重命名/选题名/空值 不命中', () => {
     expect(isAutoStoryboardName('卫衣上新')).toBe(false)
     expect(isAutoStoryboardName('分镜脚本_20260924_1529')).toBe(false)
-    expect(isAutoStoryboardName('20261126 13:45 目前全球AI领域')).toBe(false) // 文案头名=用户可读名不覆盖
+    expect(isAutoStoryboardName('261126-1345 目前全球AI领域')).toBe(false) // 文案头名=用户可读名不覆盖
     expect(isAutoStoryboardName('脚本一')).toBe(false)
     expect(isAutoStoryboardName('')).toBe(false)
   })
@@ -60,14 +60,13 @@ describe('storyboardNameAfterSave（保存回学规则）', () => {
 describe('datedStoryboardName（分镜脚本名默认日期开头）', () => {
   const d = new Date(2026, 10, 26, 13, 45)
   it('日期前缀 YYMMDD HH:mm（2026-11-26 用户两连裁：去连字符、年份去「20」从 26 起精确到分钟）', () => {
-    expect(storyboardDatePrefix(d)).toBe('261126 13:45')
-    expect(datedStoryboardName('脚本1', d)).toBe('261126 13:45 脚本1')
-    expect(datedStoryboardName('价格冲击式', d)).toBe('261126 13:45 价格冲击式')
-    expect(datedStoryboardName('目前全球AI领域', d)).toBe('261126 13:45 目前全球AI领域')
+    expect(storyboardDatePrefix(d)).toBe('261126-1345')
+    expect(datedStoryboardName('脚本1', d)).toBe('261126-1345 脚本1')
+    expect(datedStoryboardName('价格冲击式', d)).toBe('261126-1345 价格冲击式')
+    expect(datedStoryboardName('目前全球AI领域', d)).toBe('261126-1345 目前全球AI领域')
   })
   it('已有日期或服务端选题形态不重复加', () => {
-    expect(datedStoryboardName('261126 13:45 脚本1', d)).toBe('261126 13:45 脚本1')
-    expect(datedStoryboardName('20261126 13:45 脚本1', d)).toBe('20261126 13:45 脚本1') // 全日期形态不重加
+    expect(datedStoryboardName('261126-1345 脚本1', d)).toBe('261126-1345 脚本1')
     expect(datedStoryboardName('2026-11-26 13:45 脚本1', d)).toBe('2026-11-26 13:45 脚本1') // 旧形态不重加
     expect(datedStoryboardName('分镜脚本_20261126_1200', d)).toBe('分镜脚本_20261126_1200')
     expect(datedStoryboardName('', d)).toBe('')

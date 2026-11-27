@@ -78,7 +78,7 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
     let max = 0
     // 2026-11-26 日期前缀改 YYYYMMDD——旧 YYYY-MM-DD 形态（历史 tab）仍命中
     for (const s of storyboards.value) {
-      const m = /^(?:(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}:\d{2}\s+)?脚本(\d+)$/.exec(s.name)
+      const m = /^(?:(?:(?:\d{6}-\d{4})|(?:(?:\d{6}|\d{8}|\d{4}-\d{2}-\d{2}) \d{2}[-:]\d{2}))\s+)?脚本(\d+)$/.exec(s.name)
       if (m) max = Math.max(max, Number(m[1]))
     }
     return `脚本${max + 1}`
@@ -171,8 +171,10 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
   const storyboardBusy = ref(false)
   /** 批量补全：为每个「仅文案」tab 按其旁白各生成一套分镜（顺序调服务端 LLM；
    *  单 tab 失败不阻断其余，口径同批量克隆）。写回须经 storyboards.value 重新解析出
-   *  代理对象（2026-09-30 实测教训：闭包原始对象直写不触发响应式更新与持久化 watch） */
-  async function genStoryboardsForTabs(tabs: StoryboardTab[]): Promise<void> {
+   *  代理对象（2026-09-30 实测教训：闭包原始对象直写不触发响应式更新与持久化 watch）。
+   *  ratio=本次生成画幅（2026-11-27 用户裁决：生成按钮前选择）——prompt 按画幅出
+   *  画面描述（横屏/竖屏字样），并写入 tab.layout 锁定（生成后脚本画幅只读） */
+  async function genStoryboardsForTabs(tabs: StoryboardTab[], ratio = 'vertical'): Promise<void> {
     storyboardBusy.value = true
     const fails: string[] = []
     let done = 0
@@ -182,7 +184,10 @@ export function createStoryboardTabs(deps: StoryboardTabsDeps) {
         const copy = tab.narrative.trim()
         deps.statusText.value = `正在为「${tab.name}」生成分镜脚本（${i + 1}/${tabs.length}）...`
         try {
-          const { systemPrompt, userPrompt } = buildCopywritingStoryboardPrompt(copy)
+          // 画幅先落 tab（基本信息行立即回显本次选择），prompt 按同一画幅出画面描述
+          const preLive = storyboards.value.find((t) => t.id === tab.id)
+          if (preLive) preLive.layout = ratio
+          const { systemPrompt, userPrompt } = buildCopywritingStoryboardPrompt(copy, ratio)
           // 显式 max_tokens + 放宽超时（2026-11-25 长文案截断修复，参数注释见常量出处）
           const res = await window.tintin.server.post('/llm/chat/completions', {
             model: '',

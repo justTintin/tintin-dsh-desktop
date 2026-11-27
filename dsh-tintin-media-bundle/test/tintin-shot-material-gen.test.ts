@@ -23,12 +23,15 @@ let splitPostResult: unknown = { items: [{ shot_index: 1, audio_id: 'aud-1' }] }
 let splitPostThrow: Error | null = null // 置非 null=该端点直接 reject（模拟 HTTP 404 等）
 let splitPostBody: Record<string, unknown> | null = null // split 请求体（source_audio_id 契约钉定）
 let taskNode: () => unknown = () => ({ status: 'done', result: { output_url: 'http://srv/v.mp4' } })
-let scheduledTaskNode: () => unknown = () => ({ status: 'queued' })
+let scheduledTaskNode: (path?: string) => unknown = () => ({ status: 'queued' })
 let scriptDetail: unknown = {}  // 函数形态=按回读次数动态演化（增量回轨测试用）
 let scheduledTaskBody: Record<string, unknown> | null = null
+let cancelPostBody: Record<string, unknown> | null = null // /tasks/batch_cancel 请求体（task_ids 契约钉定，2026-11-27 探针）
+const cancelPaths: string[] = [] // /scheduled/tasks/{id}/cancel 触发记录（2026-11-27 停止裁决）
 let downloadOk = true
 const downloads: string[] = []
 const posts: string[] = []
+const scheduledBodies: Array<Record<string, unknown>> = [] // 逐镜独立提交体（v4 再裁决契约钉定）
 const puts: string[] = []
 
 beforeAll(() => {
@@ -40,6 +43,7 @@ beforeAll(() => {
           posts.push(path)
           if (path === '/scheduled/tasks') {
             scheduledTaskBody = (body ?? null) as Record<string, unknown> | null
+            scheduledBodies.push(scheduledTaskBody!)
             return scheduledPostResult
           }
           if (path === '/generate/video') {
@@ -51,10 +55,18 @@ beforeAll(() => {
             if (splitPostThrow) throw splitPostThrow
             return splitPostResult
           }
+          if (path === '/tasks/batch_cancel') {
+            cancelPostBody = (body ?? null) as Record<string, unknown> | null
+            return { cancelled: 1, total: 1 }
+          }
+          if (/^\/scheduled\/tasks\/[^/]+\/cancel$/.test(path)) {
+            cancelPaths.push(path)
+            return { ok: true }
+          }
           return postResult
         },
         get: async (path: string) => (path.startsWith('/scheduled/tasks/')
-          ? scheduledTaskNode()
+          ? scheduledTaskNode(path)
           : path.startsWith('/api/storyboard/scripts/')
             ? (typeof scriptDetail === 'function' ? (scriptDetail as () => unknown)() : scriptDetail)
             : null),
@@ -320,7 +332,8 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
     // 中间态：镜 0 已回轨 done，镜 1 仍在生成（不互相等待）
     expect(shots[0]!.slots?.aroll?.local).toContain('ah-inc_1.mp4')
     expect(gen.stateOf(0, 'aroll')?.phase).toBe('done')
-    expect(gen.stateOf(1, 'aroll')?.phase).toBe('generating')
+    // 流水线（1127 §8 互斥裁决）：前镜终态后才提交后镜——此瞬后镜尚未提交
+    expect(gen.stateOf(1, 'aroll')?.phase).toBe('submitting')
     expect(gen.msg.value).toContain('已回轨 1/2')
     for (let k = 0; k < 10 && gen.active(1, 'aroll'); k++) await vi.advanceTimersByTimeAsync(3000)
     await p
@@ -336,6 +349,7 @@ describe('批量入口（2026-11-26 四源四轨裁决）', () => {
     const gen = makeGen(shots)
     scheduledPostResult = { id: 'ah-err' }
     scheduledTaskNode = () => ({ status: 'failed', error_msg: '第 3 镜未铺旁白' })
+    scriptDetail = { shots: [] } // 上一用例的增量回写函数会泄漏毒化（模块态纪律）
     const p = gen.batchGenerateARoll('/home/srv/person.png')
     for (let k = 0; k < 20; k++) await vi.advanceTimersByTimeAsync(3000)
     await p
@@ -397,5 +411,239 @@ describe('per_shot 预置回写 aroll.audio_id（2026-11-26 探针实测契约�
     const aroll = bodies[0]?.aroll as Record<string, unknown>
     expect(aroll?.mode).toBe('per_shot')
     expect(aroll?.audio_id).toBeUndefined()
+  })
+})
+
+describe('每镜 15 分钟超时 + 停止按钮（2026-11-27 用户裁决）', () => {
+  it('AI 生成单镜 15 分钟超时：queued 不动到点判失败，不再挂 30 分钟旧预算', async () => {
+    const shots = [shot()]
+    const gen = makeGen(shots)
+    taskNode = () => ({ status: 'running', progress: 0.2 })
+    postResult = { task_id: 't-slow' }
+    downloadOk = true
+    const p = gen.generate(0, shots[0]!)
+    // 有界推进过 15 分钟（1 分钟步进×20；推进一律有界循环到目标态）
+    for (let k = 0; k < 20 && gen.active(0, 'gen'); k++) await vi.advanceTimersByTimeAsync(60_000)
+    await p
+    expect(gen.stateOf(0, 'gen')?.phase).toBe('failed')
+    expect(gen.stateOf(0, 'gen')?.msg).toContain('生成超时（15 分钟/镜）')
+    expect(gen.active(0, 'gen')).toBe(false)
+    // 判死同步收回服务端资源（2026-11-27 用户裁决：不允许客户端失败服务端还烧）
+    expect(posts).toContain('/tasks/batch_cancel')
+  })
+
+  it('AI 生成停止：stopBatch 置旗标→轮询收割→/tasks/batch_cancel 带 task_ids→瓦片已停止', async () => {
+    const shots = [shot('a'), shot('b')]
+    shots[0]!.markAI = true
+    shots[1]!.markAI = true
+    const gen = makeGen(shots)
+    taskNode = () => ({ status: 'running', progress: 0.3 })
+    postResult = { task_id: 't-stop' }
+    cancelPostBody = null
+    const p = gen.batchGenerateAI()
+    for (let k = 0; k < 4 && posts.filter((x) => x === '/generate/video').length < 2; k++) await vi.advanceTimersByTimeAsync(3000)
+    gen.stopBatch('aroll') // 跨组误触：AI 跑批时 A-Roll 组停止无效果（activeGroup 归属闸）
+    expect(gen.groupMsgs.value.aroll).toBe('')
+    gen.stopBatch('ai')
+    for (let k = 0; k < 10 && (gen.active(0, 'gen') || gen.active(1, 'gen')); k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    await vi.advanceTimersByTimeAsync(3000) // void 取消请求微任务排空
+    // 两镜共用同一假任务 id：逐镜各发一次取消，捕获到的是最后一发的 body
+    expect(cancelPostBody?.task_ids).toEqual(['t-stop'])
+    expect(gen.stateOf(0, 'gen')?.msg).toContain('已停止')
+    expect(gen.stateOf(1, 'gen')?.msg).toContain('已停止')
+    expect(gen.groupMsgs.value.ai).toContain('已停止')
+  })
+
+  it('A-roll 停止：旗标→/scheduled/tasks/{id}/cancel→未回轨镜已停止（主动停止不算失败）', async () => {
+    const shots = [shot('开场')]
+    shots[0]!.markARoll = true
+    const gen = makeGen(shots)
+    downloadOk = true
+    posts.length = 0; cancelPaths.length = 0
+    scheduledPostResult = { id: 'ah-stop' }
+    scheduledTaskNode = () => ({ status: 'running', progress: 10 })
+    scriptDetail = { shots: [] } // 永无产物=回轨永不发生
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
+    for (let k = 0; k < 4 && !posts.some((x) => x === '/scheduled/tasks'); k++) await vi.advanceTimersByTimeAsync(3000)
+    gen.stopBatch('aroll')
+    for (let k = 0; k < 10 && gen.active(0, 'aroll'); k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    expect(cancelPaths).toEqual(['/scheduled/tasks/ah-stop/cancel'])
+    expect(gen.stateOf(0, 'aroll')?.msg).toContain('已停止')
+    expect(gen.groupMsgs.value.aroll).toContain('已停止')
+  })
+
+  it('A-roll 每镜 15 分钟上限：running 不动到点逐镜判超时，整批不挂 120 分钟旧预算', async () => {
+    const shots = [shot('开场'), shot('第二镜')]
+    shots[0]!.markARoll = true
+    shots[1]!.markARoll = true
+    const gen = makeGen(shots)
+    downloadOk = true
+    scheduledPostResult = { id: 'ah-slow' }
+    scheduledTaskNode = () => ({ status: 'running', progress: 10 })
+    scriptDetail = { shots: [] }
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
+    // 流水线（§8 互斥）：两镜串行各自 15 分钟 ≈30 分钟——推进预算提到 50 分钟。
+    // 无条件推进（submitting 态在 syncArollPerShot/提交之后才落，active() 门控会
+    // 漏首拍零推进→永挂——本文件第二次踩同一坑）；收割后剩余推进空转即回
+    for (let k = 0; k < 50; k++) await vi.advanceTimersByTimeAsync(60_000)
+    await p
+    expect(gen.stateOf(0, 'aroll')?.phase).toBe('failed')
+    expect(gen.stateOf(0, 'aroll')?.msg).toContain('生成超时（15 分钟/镜）')
+    expect(gen.stateOf(1, 'aroll')?.msg).toContain('生成超时（15 分钟/镜）')
+    expect(gen.active(0, 'aroll')).toBe(false)
+  })
+})
+
+describe('逐镜独立任务契约（2026-11-27 用户再裁决：15 分钟按各自开跑起算）', () => {
+  it('两镜勾选=两个 scheduled 任务，各自 aroll_shot_indexes 单元素（不再单任务包干全部镜号）', async () => {
+    const shots = [shot('开场'), shot('第二镜')]
+    shots[0]!.index = 1
+    shots[1]!.index = 2
+    shots[0]!.markARoll = true
+    shots[1]!.markARoll = true
+    const gen = makeGen(shots)
+    downloadOk = true
+    posts.length = 0; downloads.length = 0; scheduledBodies.length = 0
+    scheduledPostResult = { id: 'ah-v4' }
+    scriptDetail = { shots: [ { index: 1, aroll_material_id: 901 }, { index: 2, aroll_material_id: 902 } ] }
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
+    for (let k = 0; k < 20; k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    console.log('POSTS=', JSON.stringify(posts))
+    expect(posts.filter((x) => x === '/scheduled/tasks').length).toBe(2)
+    expect(scheduledBodies.map((b) => (b.params as Record<string, unknown>).aroll_shot_indexes)).toEqual([[0], [1]])
+    expect(shots[0]!.slots?.aroll?.local).toContain('ah-v4_1.mp4')
+    expect(shots[1]!.slots?.aroll?.local).toContain('ah-v4_2.mp4')
+  })
+
+  it('queued 不吃生成窗口：排队 20 分钟不超时，转 running 后满 15 分钟才判超时并取消该任务', async () => {
+    const shots = [shot('开场')]
+    shots[0]!.markARoll = true
+    const gen = makeGen(shots)
+    downloadOk = true
+    posts.length = 0; cancelPaths.length = 0
+    scheduledPostResult = { id: 'ah-q' }
+    let ticks = 0
+    scheduledTaskNode = () => {
+      ticks += 1
+      return ticks <= 400 ? { status: 'queued' } : { status: 'running', progress: 30 }
+    }
+    scriptDetail = { shots: [] }
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
+    // 排队 20 分钟（400 tick×3s）：窗口随 tick 后移，不判超时
+    for (let k = 0; k < 20; k++) await vi.advanceTimersByTimeAsync(60_000)
+    expect(gen.active(0, 'aroll')).toBe(true)
+    expect(gen.stateOf(0, 'aroll')?.msg).toContain('等待服务端队列')
+    // running 再 10 分钟（累计 30 分钟墙钟）：仍未到该镜 15 分钟窗口——不超时
+    for (let k = 0; k < 10; k++) await vi.advanceTimersByTimeAsync(60_000)
+    expect(gen.stateOf(0, 'aroll')?.msg).not.toContain('生成超时')
+    // running 满 15 分钟（再 5 分钟）：到点判超时 + 取消该任务让位串行队列
+    for (let k = 0; k < 6; k++) await vi.advanceTimersByTimeAsync(60_000)
+    await p
+    expect(gen.stateOf(0, 'aroll')?.phase).toBe('failed')
+    expect(gen.stateOf(0, 'aroll')?.msg).toContain('生成超时（15 分钟/镜）')
+    expect(cancelPaths).toContain('/scheduled/tasks/ah-q/cancel')
+  })
+
+  it('AI 生成 queued 同口径：排队 20 分钟不超时（转 running 前不烧窗口）', async () => {
+    const shots = [shot()]
+    const gen = makeGen(shots)
+    postResult = { task_id: 't-q' }
+    let ticks = 0
+    taskNode = () => {
+      ticks += 1
+      return ticks <= 400 ? { status: 'queued' } : { status: 'running', progress: 0.5 }
+    }
+    const p = gen.generate(0, shots[0]!)
+    for (let k = 0; k < 20; k++) await vi.advanceTimersByTimeAsync(60_000)
+    expect(gen.active(0, 'gen')).toBe(true)
+    expect(gen.stateOf(0, 'gen')?.msg).toContain('等待服务端队列')
+    for (let k = 0; k < 10; k++) await vi.advanceTimersByTimeAsync(60_000)
+    expect(gen.stateOf(0, 'gen')?.msg).not.toContain('生成超时')
+    // 收尾：转 done 让 generate 走完（防假定时器下悬挂 promise）
+    taskNode = () => ({ status: 'done', result: { output_url: 'http://srv/q.mp4' } })
+    downloadOk = true
+    for (let k = 0; k < 10 && gen.active(0, 'gen'); k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    expect(gen.stateOf(0, 'gen')?.phase).toBe('done')
+  })
+})
+
+describe('判死同步取消（2026-11-27 用户裁决：客户端失败服务端不许继续烧）', () => {
+  it('批量异常中断（轮询通道炸）→ catch 域逐镜取消未回轨镜的任务', async () => {
+    const shots = [shot('开场'), shot('第二镜')]
+    shots[0]!.index = 1
+    shots[1]!.index = 2
+    shots[0]!.markARoll = true
+    shots[1]!.markARoll = true
+    const gen = makeGen(shots)
+    posts.length = 0; cancelPaths.length = 0
+    scheduledPostResult = { id: 'ah-boom' }
+    scheduledTaskNode = () => { throw new Error('轮询通道炸了') }
+    scriptDetail = { shots: [] }
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
+    for (let k = 0; k < 10; k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    expect(gen.stateOf(0, 'aroll')?.phase).toBe('failed')
+    expect(gen.groupMsgs.value.aroll).toContain('A-roll 生成失败')
+    // 流水线（§8 互斥）：异常瞬间仅 in-flight 的镜 1 有任务——被取消；
+    // 镜 2 尚未提交（无任务可取消），瓦片由 catch 兜底 stamp
+    expect(cancelPaths.filter((x) => x === '/scheduled/tasks/ah-boom/cancel').length).toBe(1)
+    expect(gen.stateOf(1, 'aroll')?.msg).toContain('A-roll 生成失败')
+  })
+})
+
+describe('§8 任务级互斥契约（2026-11-27 实测：同脚本同时只允许一个在飞任务）', () => {
+  const shots2 = (): StoryboardShot[] => {
+    const arr = [shot('开场'), shot('第二镜')]
+    arr[0]!.index = 1
+    arr[1]!.index = 2
+    arr[0]!.markARoll = true
+    arr[1]!.markARoll = true
+    return arr
+  }
+
+  it('409 在飞竞态：退避重试后成功，镜不误判失败', async () => {
+    const shots = shots2()
+    const gen = makeGen(shots)
+    downloadOk = true
+    posts.length = 0; scheduledBodies.length = 0
+    scheduledPostResult = { id: 'ah-mutex' }
+    scriptDetail = { shots: [ { index: 1, aroll_material_id: 911 }, { index: 2, aroll_material_id: 912 } ] }
+    // 首个提交返回 409（互斥竞态）→ 退避重试第二次成功
+    let mutexFired = false
+    const origPost = window.tintin.server.post
+    ;(window.tintin.server as { post: unknown }).post = async (path: string, body?: Record<string, unknown>) => {
+      if (path === '/scheduled/tasks' && !mutexFired) {
+        mutexFired = true
+        throw new Error('HTTP 409：脚本 sb_1 已有生成任务在飞（#2012 queued），完成后或取消后再提交（§8 任务级互斥）')
+      }
+      return (origPost as (p: string, b?: Record<string, unknown>) => Promise<unknown>)(path, body)
+    }
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
+    for (let k = 0; k < 30; k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    ;(window.tintin.server as { post: unknown }).post = origPost
+    expect(gen.stateOf(0, 'aroll')?.phase).toBe('done')
+    expect(gen.stateOf(1, 'aroll')?.phase).toBe('done')
+    expect(gen.msg.value).toContain('成功 2/2')
+  })
+
+  it('持续 409：detail 原样透出瓦片（不吞成「服务端不可达」），该镜失败其余镜继续', async () => {
+    const shots = shots2()
+    shots[0]!.markARoll = false
+    shots[1]!.markARoll = true // 只跑镜 2（下标 1），聚焦单镜提交失败透传
+    const gen = makeGen(shots)
+    posts.length = 0
+    scheduledPostResult = { error: 'HTTP 409：脚本 sb_1 已有生成任务在飞（#2012 queued），完成后或取消后再提交（§8 任务级互斥）' }
+    scriptDetail = { shots: [] }
+    const p = gen.batchGenerateARoll('/home/srv/person.png')
+    for (let k = 0; k < 20; k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    expect(gen.stateOf(1, 'aroll')?.phase).toBe('failed')
+    expect(gen.stateOf(1, 'aroll')?.msg).toContain('已有生成任务在飞')
+    expect(gen.stateOf(1, 'aroll')?.msg).not.toContain('服务端不可达')
   })
 })

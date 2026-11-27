@@ -283,7 +283,9 @@ function scoreClass(score: number | undefined): string {
 
     <!-- 页尾状态区（原版底部共享：stage_label + progress_bar；
       确认合成期间不重复显示——状态文案已置进度条上方，用户裁决：下面的文字提示不需要） -->
-    <div v-if="(polling || statusText) && !confirmBusy" class="bottom-status">
+    <!-- 2026-11-26 用户裁决：第三步（视频素材）的提示信息移到右栏「视频模式」组
+         生成剪辑方案按钮下方，本页尾状态条第三步不再渲染（其余步骤照旧） -->
+    <div v-if="(polling || statusText) && !confirmBusy && step !== 2" class="bottom-status">
       <div class="bottom-status-row">
         <span class="status-text" :class="{ spinning: polling }">{{ statusText }}</span>
         <span v-if="activeTaskId" class="muted">任务 {{ activeTaskId }}</span>

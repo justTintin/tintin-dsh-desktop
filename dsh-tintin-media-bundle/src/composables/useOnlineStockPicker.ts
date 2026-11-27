@@ -30,9 +30,14 @@ export function useOnlineStockPicker() {
     oSelected.value = next
   }
   function oClearSelection(): void { oSelected.value = new Map() }
+  /** 单选（2026-11-26 用户裁决：单镜弹窗结果只选一个）——清空其它只留该条 */
+  function oSelectOnly(it: OnlineItem): void {
+    oSelected.value = new Map([[onlineKey(it), it]])
+  }
 
   async function runOnline(p = 1): Promise<void> {
-    const q = oKw.value.trim()
+    // 2026-11-26 服务端契约：query 上限 100 字符（超长 422）——画面描述整段代入时截断
+    const q = oKw.value.trim().slice(0, 100)
     if (!q) { oError.value = '请输入搜索关键词（支持中文）'; return }
     oLoading.value = true
     oError.value = ''
@@ -50,7 +55,7 @@ export function useOnlineStockPicker() {
 
   return {
     oKw, oKind, oItems, oLoading, oError, oMsg, oPage, oHasMore,
-    oSelected, oThumbFailed, oSelectedCount, oToggle, oSelectPageAll, oClearSelection, runOnline,
+    oSelected, oThumbFailed, oSelectedCount, oToggle, oSelectOnly, oSelectPageAll, oClearSelection, runOnline,
   }
 }
 

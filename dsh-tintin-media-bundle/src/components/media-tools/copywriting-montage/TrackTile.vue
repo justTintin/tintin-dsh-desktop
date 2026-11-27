@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // TrackTile.vue — 分镜卡轨道占位瓦片（2026-11-26 四源四轨裁决）：每轨一瓦片，
 // 三态=产物视频 / 任务进行中进度卡 / 占位图。纯展示，状态对象由宿主按轨取好传入。
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { ShotGenState } from '@/composables/useShotMaterialGen'
 
 const props = defineProps<{
@@ -28,12 +28,31 @@ const subLine = computed(() => {
   return s.elapsedSec > 0 ? `${p} · ${s.elapsedSec}s` : p
 })
 const mediaStyle = computed(() => (props.aspect ? { aspectRatio: props.aspect } : {}))
+
+/** 视频点击播放/暂停（2026-11-26 用户裁决：中央半透明大图标，点切播放暂停；
+ *  去原生 controls——瓦片尺寸小，交互只保留播放/暂停）。src 切换时复位状态。 */
+const vid = ref<HTMLVideoElement | null>(null)
+const playing = ref(false)
+watch(() => props.videoSrc, () => { playing.value = false })
+function togglePlay(): void {
+  const v = vid.value
+  if (!v) return
+  if (v.paused) void v.play()
+  else v.pause()
+}
 </script>
 
 <template>
   <div class="track-tile">
-    <!-- 2026-11-26 用户裁决：顶部标题删除——占位框内已有名称，不重复 -->
-    <video v-if="videoSrc" controls preload="metadata" :src="videoSrc" class="track-video" :style="mediaStyle" />
+    <!-- 2026-11-26 用户裁决：顶部标题删除——占位框内已有名称，不重复。
+         2026-11-26 用户再裁：视频点击播放/暂停，中央半透明大图标；去原生 controls -->
+    <div v-if="videoSrc" class="track-media" :style="mediaStyle" @click="togglePlay">
+      <video ref="vid" preload="metadata" :src="videoSrc" class="track-video" @play="playing = true" @pause="playing = false" @ended="playing = false" />
+      <span class="track-playicon" :class="{ 'is-playing': playing }" aria-hidden="true">
+        <svg v-if="!playing" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z" /></svg>
+        <svg v-else viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" /></svg>
+      </span>
+    </div>
     <div v-else-if="state && state.phase !== 'done'" class="track-gen" :class="{ 'is-failed': state.phase === 'failed' }" :style="mediaStyle">
       <span class="track-gen-phase">{{ phaseText }}</span>
       <div v-if="state.phase !== 'failed'" class="iv-bar" :class="{ 'is-indeterminate': state.progress < 0 }">
@@ -47,7 +66,7 @@ const mediaStyle = computed(() => (props.aspect ? { aspectRatio: props.aspect } 
         <circle cx="9" cy="10" r="1.6" />
         <path d="M4 17l4.5-3.5 3.5 2.5 3-2 5 3" />
       </svg>
-      <span>{{ fallback || '空' }}</span>
+      <span v-if="fallback">{{ fallback }}</span>
     </div>
   </div>
 </template>
@@ -55,7 +74,16 @@ const mediaStyle = computed(() => (props.aspect ? { aspectRatio: props.aspect } 
 <style scoped>
 .track-tile { width: 104px; flex: 0 0 104px; display: flex; flex-direction: column; gap: 3px; }
 
-.track-video { width: 100%; height: auto; object-fit: cover; display: block; background: #101010; border-radius: var(--radius-sm); }
+.track-media { position: relative; width: 100%; cursor: pointer; }
+.track-video { width: 100%; height: 100%; object-fit: cover; display: block; background: #101010; border-radius: var(--radius-sm); }
+/* 中央半透明大图标（2026-11-26 用户裁决）：暂停态显 ▶、播放态显 ⏸ */
+.track-playicon {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: rgba(255, 255, 255, 0.62); pointer-events: none;
+}
+.track-playicon svg { width: 34px; height: 34px; filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.5)); }
+.track-playicon.is-playing { opacity: 0; transition: opacity 0.25s ease; }
+.track-media:hover .track-playicon.is-playing { opacity: 0.62; }
 /* 进行中/失败进度卡 */
 .track-gen { width: 100%; padding: 8px 4px; display: flex; flex-direction: column; gap: 4px; align-items: stretch; background: #101010; border-radius: var(--radius-sm); min-height: 58px; justify-content: center; }
 .track-gen-phase { font-size: 11px; color: var(--foreground); text-align: center; }
