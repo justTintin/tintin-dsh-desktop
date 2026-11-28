@@ -196,9 +196,15 @@ export function useShotMaterialGen(deps: {
 
       /** 每镜窗口锚点（2026-11-27 用户再裁决：15 分钟按**各自开跑**起算）——queued
        *  阶段随 tick 后移不计时（排队不吃生成窗口，同 A-Roll 口径），running 起锚定；
-       *  排队兜底帽 24h（QUEUE_WAIT_CAP）防队列僵死永挂 */
+       *  排队兜底帽 24h（QUEUE_WAIT_CAP）防队列僵死永挂。2026-11-27 实测补：服务端
+       *  文生视全局在途闸 cap=1（成功任务日志实证闸前等 610s、真实生成仅 ~3min），
+       *  闸前等待期 status 不在 queued 词表 → 排队被计入窗口 → 并发提交成批误判
+       *  超时。双保险=①批量改逐镜流水线（见 batchGenerateAI）②统一任务 log 末条
+       *  含「在途闸等待」视同排队，窗口同步后移。 */
       let clockStart = Date.now()
       let aiQueuedAt = 0
+      let gateWaitedSec = 0
+      let lastRawStatus = ''
       let output = ''
       let stopped = false
       while (Date.now() - clockStart < SHOT_TASK_TIMEOUT) {
@@ -210,18 +216,25 @@ export function useShotMaterialGen(deps: {
         const nodeErr = (node && typeof node === 'object' ? (node as { error?: unknown }).error : undefined)
         if (nodeErr !== null && nodeErr !== undefined && nodeErr !== '') throw new Error(String(nodeErr))
         const task = extractTaskObj(node)
+        const rawStatus = String(task?.status ?? task?.state ?? '').toLowerCase()
+        lastRawStatus = rawStatus
         const phase = mapTaskStatus(task?.status ?? task?.state, task).phase
         // queued 看原始 status（mapTaskStatus 无 queued 映射，同 A-Roll 口径）
-        const rawStatus = String(task?.status ?? task?.state ?? '').toLowerCase()
         const isQueued = rawStatus === 'queued' || rawStatus === 'pending' || rawStatus === 'waiting'
-        if (isQueued) {
+        // 在途闸等待视同排队（实测兜底：闸前 status 不进 queued 词表；log 契约=服务端
+        // 成功任务日志实证「在途闸等待: 引擎在途 1 个 job（cap=1）」）
+        const recLog = (node as { log?: unknown } | null)?.log
+        const lastLog = Array.isArray(recLog) && recLog.length ? String(recLog[recLog.length - 1]) : ''
+        const gateWaiting = !isQueued && phase === 'running' && lastLog.includes('在途闸等待')
+        if (isQueued || gateWaiting) {
           clockStart = Date.now() // 排队中：窗口起点随 tick 后移
           if (!aiQueuedAt) aiQueuedAt = Date.now()
           else if (Date.now() - aiQueuedAt >= QUEUE_WAIT_CAP) throw new Error('排队超时（24 小时未开跑，请检查服务端队列）')
-          setState(k, { phase: 'generating', progress: -1, elapsedSec: Math.round((Date.now() - startedAt) / 1000), msg: '已提交，等待服务端队列…' })
+          gateWaitedSec = Math.round((Date.now() - aiQueuedAt) / 1000)
+          setState(k, { phase: 'generating', progress: -1, elapsedSec: Math.round((Date.now() - startedAt) / 1000), msg: gateWaiting && !isQueued ? '已提交，服务端在途闸排队…' : '已提交，等待服务端队列…' })
           continue
         }
-        aiQueuedAt = 0
+        if (aiQueuedAt) { gateWaitedSec = Math.round((Date.now() - aiQueuedAt) / 1000); aiQueuedAt = 0 }
         setState(k, {
           phase: 'generating',
           progress: progressOf(task),
@@ -236,19 +249,27 @@ export function useShotMaterialGen(deps: {
           break
         }
       }
+      const cancelNow = async (): Promise<string> => {
+        // 2026-11-27 停止/超时裁决：取消该统一任务（契约=task_ids 键，探针实证）。
+        // 2026-11-27 可观测性补：等待并回显结果——原先 void 吞掉一切，路由未部署/
+        // 契约不符时「客户端已失败、服务端照烧」永不可见（本机 7 镜实况）
+        try {
+          const cr = await window.tintin.server.post<Record<string, unknown>>('/tasks/batch_cancel', { task_ids: [taskId] }, {}, 30_000)
+          return cr && typeof cr === 'object' && cr.error ? `取消失败：${String(cr.error)}` : '已请求取消'
+        } catch (e) { return `取消请求失败：${errMsg(e)}` }
+      }
       if (stopped) {
-        // 2026-11-27 停止裁决：向服务端请求取消该统一任务（未开跑的不再跑；契约
-        // 探针 2026-11-27 实证 task_ids 键名），取消结果不阻塞收割，已落地产物保留
-        void window.tintin.server.post('/tasks/batch_cancel', { task_ids: [taskId] }, {}, 30_000)
-        setGroupMsg('ai', `第 ${idx + 1} 镜已停止（已请求取消）。`)
-        setState(k, { phase: 'failed', msg: '已停止（已请求取消）', elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
+        const note = await cancelNow()
+        setGroupMsg('ai', `第 ${idx + 1} 镜已停止（${note}）。`)
+        setState(k, { phase: 'failed', msg: `已停止（${note}）`, elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
         return false
       }
       if (!output) {
         // 客户端判超时必须同时取消服务端统一任务（2026-11-27 用户裁决：不允许
-        // 客户端已失败而服务端还在烧小时级；契约=task_ids 键，探针实证）
-        void window.tintin.server.post('/tasks/batch_cancel', { task_ids: [taskId] }, {}, 30_000)
-        throw new Error('生成超时（15 分钟/镜）')
+        // 客户端已失败而服务端还在烧小时级）
+        const note = await cancelNow()
+        const gateNote = gateWaitedSec ? `｜闸前排队约 ${gateWaitedSec}s` : ''
+        throw new Error(`生成超时（15 分钟/镜）${gateNote}｜末次观测 status=${lastRawStatus || '无'}；${note}`)
       }
 
       setState(k, { phase: 'downloading', progress: -1, msg: '生成完成，正在下载产物…', elapsedSec: Math.round((Date.now() - startedAt) / 1000) })
@@ -315,7 +336,13 @@ export function useShotMaterialGen(deps: {
     return { map, detail: `${map.size}/${list.length} 行有效`, undeployed: false }
   }
 
-  /** 批量 AI 生成（2026-11-26 用户裁决：所有勾选 AI生成的分镜并行提交，进度就地）。 */
+  /** 批量 AI 生成（2026-11-26 用户裁决：勾选 AI 生成的分镜逐个提交、进度就地）。
+   *  2026-11-27 实测改串行流水线（推翻同日并行口径）：服务端文生视全局在途闸
+   *  cap=1（成功任务日志实证闸前等 610s、真实生成仅 ~3min），原 Promise.all
+   *  并发提交时后位镜闸前排队被计入 15 分钟窗口→成批误判超时（7 镜实况=1 成
+   *  5 超时 1 进行中）；cap=1 下并发不损吞吐（同 A-Roll §8 互斥实测口径），
+   *  前一镜终态后再提交下一镜，闸前等待≈0；停止=当前镜取消+不再提交后续
+   *  （真·「停止队列里下面的任务」）。 */
   async function batchGenerateAI(): Promise<void> {
     const shots = deps.activeShots()
     const idxs = markedShotIdxs(shots, 'ai')
@@ -323,10 +350,14 @@ export function useShotMaterialGen(deps: {
     busy.value = true
     activeGroup.value = 'ai' // 停止按钮归属本组（2026-11-27 用户裁决）
     try {
-      const results = await Promise.all(idxs.map((i) => generate(i, shots[i]!)))
-      const ok = results.filter(Boolean).length
+      let ok = 0
+      let stoppedEarly = false
+      for (const i of idxs) {
+        if (stopFlags.value.ai) { stoppedEarly = true; break }
+        if (await generate(i, shots[i]!)) ok += 1
+      }
       // 停止收割后的批量结尾报「已停止」而非「完成 0/N」（2026-11-27 停止裁决）
-      setGroupMsg('ai', stopFlags.value.ai
+      setGroupMsg('ai', (stoppedEarly || stopFlags.value.ai)
         ? `AI 批量已停止：成功 ${ok}/${idxs.length}。`
         : `AI 批量生成完成：成功 ${ok}/${idxs.length}。`)
     } finally { busy.value = false }

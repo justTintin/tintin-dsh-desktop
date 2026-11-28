@@ -561,6 +561,15 @@ declare interface TintinBridgeFfmpeg {
   probe(file: string): Promise<TintinBridgeFfprobeResult>
   /** 仅取时长（秒）；resources/bin 无 ffprobe.exe 时主进程回退 ffmpeg -i stderr 解析，失败返 0 */
   probeDuration(file: string): Promise<number>
+  /** 是否含音轨（2026-11-27 带声 A-Roll 裁决：数字人口型音轨=该镜旁白权威源，探测它决定整段旁白是否静音） */
+  probeHasAudio(file: string): Promise<boolean>
+  /** A-Roll 声波对齐（2026-11-27 带声裁决）：每条 aroll 音轨与整段旁白 NCC 互相关
+   *  定位真实起点；产物无音轨/解析失败时 matched=false（调用方回退估算窗） */
+  arollAlign(payload: {
+    narrationWav: string
+    arollProducts: Array<{ path: string; estStartSec?: number; estDurSec?: number }>
+    envRate?: number
+  }): Promise<{ results?: Array<{ path: string; offsetSec: number; durSec: number; score: number; matched: boolean }>; error?: string }>
   /** 预览可播性保障（2026-09-10）：Chromium 不可播编码（H.264 4:2:2/10bit、MP4+PCM 等）
    *  自动转码到临时缓存 mp4；可播/检测失败原路径直返 → { path, transcoded } 或 { error } */
   ensurePlayable(file: string): Promise<{ path: string; transcoded: boolean } | { error: string }>

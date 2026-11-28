@@ -45,6 +45,7 @@ function exportAndRead(options: {
   voiceClips?: Array<Array<{ path: string; startUs: number; durUs: number }>>
   bgmPath?: string
   gapAfterUs?: number[]
+  videoTrackKinds?: string[]
 }): Record<string, any> {
   const videos = options.durationsSec.map((_, i) => makeFakeVideo(`v${i}.mp4`))
   const srts = options.durationsSec.map((_, i) => makeFakeSrt(`v${i}.srt`))
@@ -52,6 +53,7 @@ function exportAndRead(options: {
   mkdirSync(draftRoot, { recursive: true })
   const res = exporter.exportMultiToDraft({
     videoPaths: videos,
+    videoTrackKinds: options.videoTrackKinds ?? null,
     videoDurations: options.durationsSec.map(US),
     muteVideoAudio: true,
     srtPaths: srts,
@@ -318,6 +320,43 @@ describe('exportMultiToDraft track alignment (2026-09-29 regression)', () => {
     expect(bgmSegs.length).toBeGreaterThan(0)
     const bgmEnd = Math.max(...bgmSegs.map((s: any) => s.target_timerange.start + s.target_timerange.duration))
     expect(bgmEnd).toBe(US(3.0))
+
+    // 内容总时长对齐口播末端
+    expect(content.duration).toBe(US(3.0))
+  })
+
+  // 2026-11-27 口型保护裁决：A-Roll 段不作慢放基准（数字人口型由生成端按该镜
+  // 旁白锁定，慢放=口型渐错；产物实测无音轨，对齐完全依赖时长一致）——拉伸基准
+  // 只在非 aroll 内容段取：素材末段吃满口播窗，aroll 段保持内在时长原样
+  it('aroll segments are never the slow-mo stretch base: material tail absorbs the voice window', () => {
+    savedLocalAppData = process.env.LOCALAPPDATA || ''
+    home = mkdtempSync(join(tmpdir(), 'jy-aroll-nostretch-'))
+    process.env.LOCALAPPDATA = home
+
+    const voice = makeFakeWav('voice.wav')
+    const content = exportAndRead({
+      durationsSec: [1.0, 1.0], // [素材 0-1s, aroll 1-2s]
+      videoTrackKinds: ['material', 'aroll'],
+      voiceClips: [[{ path: voice, startUs: 0, durUs: US(3.0) }], []], // 口播 3.0s > 2.0s
+    })
+
+    // 四轨制：两段分落「素材」「A-Roll」两条轨
+    const materialTrack = content.tracks.find((t: any) => t.type === 'video' && t.name === '素材')
+    const arollTrack = content.tracks.find((t: any) => t.type === 'video' && t.name === 'A-Roll')
+    expect(materialTrack).toBeTruthy()
+    expect(arollTrack).toBeTruthy()
+
+    // aroll 段保持内在时长 [1.0s, 2.0s)：不裁不慢放（口型锁死）
+    const arollSeg = arollTrack.segments[0].target_timerange
+    expect(arollSeg.start).toBe(US(1.0))
+    expect(arollSeg.duration).toBe(US(1.0))
+    expect(arollTrack.segments[0].speed).toBe(1.0)
+
+    // 拉伸基准=非 aroll 的最末内容段（素材段 0→3.0s 慢放铺满口播窗）
+    const matSeg = materialTrack.segments[materialTrack.segments.length - 1].target_timerange
+    expect(matSeg.start).toBe(US(0))
+    expect(matSeg.duration).toBe(US(3.0))
+    expect(materialTrack.segments[materialTrack.segments.length - 1].speed).toBeLessThan(1.0)
 
     // 内容总时长对齐口播末端
     expect(content.duration).toBe(US(3.0))

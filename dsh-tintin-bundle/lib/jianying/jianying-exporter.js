@@ -1223,6 +1223,9 @@ function exportMultiToDraft({ videoPaths, videoTrackKinds = null, videoDurations
     // 逐视频 BGM（bgmPaths[i] 优先，空则回退全局 bgmPath，落段时再判存在性）
     const bgmWindows = []
     let cursorUs = 0
+    // 2026-11-27 口型保护裁决：A-Roll 段不作慢放基准（口型由生成端按该镜旁白锁定，慢放=渐错）
+    // ——内容段引用表 {seg,kind}，末段拉伸基准只在非 aroll 段里取
+    const contentSegRefs = []
     // 2026-11-06 用户裁决：方案间黑场必须是实体段——剪映主轨相邻段吸合渲染，纯游标
     // 空隙在成片里无黑场。1×1 透明 PNG 拉伸全屏即黑场，仅存在方案边界时落盘一次
     let gapPngPath = ''
@@ -1254,7 +1257,7 @@ function exportMultiToDraft({ videoPaths, videoTrackKinds = null, videoDurations
         ...visualSegmentFields(),
         hdr_settings: { intensity: 1.0, mode: 1, nits: 1000 },
       }
-      trackOfKind(segKinds[i]).segments.push(seg)
+      trackOfKind(segKinds[i]).segments.push(seg); contentSegRefs.push({ seg, kind: segKinds[i] })
       if (i > 0 && segKinds[i] === segKinds[i - 1] && !(gapAfter[i - 1] > 0)) { // 转场仅同轨相邻片段生效（异轨跳过）
         const spec = transitionSpecs[i - 1], segs = trackOfKind(segKinds[i]).segments
         if (spec && segs.length >= 2) segs[segs.length - 2].extra_material_refs.push(buildTransitionMaterial(materials, spec))
@@ -1286,12 +1289,12 @@ function exportMultiToDraft({ videoPaths, videoTrackKinds = null, videoDurations
       }
       cursorUs += clip.durationUs + (gapAfter[i] || 0) // 段后黑场（2026-11-06：仅方案边界，末段后无 clip 不受影响）
     })
-    // 配音末端 > 视频轨末端：末段视频慢速延长铺满（speed<1，画面末帧缓放，
-    // 源消耗=target*speed 恰好=源全长）；BGM 末窗同步延长；内容总时长对齐
-    // 末段延长基准=四轨里时间轴最末的内容段（1126 四轨制：末段可能在任一轨）
-    const allVideoSegs = videoTracks.flatMap((t) => t.track.segments), endUsOf = (sg) => (Number(sg.target_timerange?.start) || 0) + (Number(sg.target_timerange?.duration) || 0)
-    if (voiceTimelineEndUs > cursorUs && allVideoSegs.length) {
-      const lastSeg = allVideoSegs.reduce((a, b) => (endUsOf(b) > endUsOf(a) ? b : a))
+    // 配音末端 > 视频轨末端：末段视频慢速延长铺满（speed<1 末帧缓放，源消耗=target*speed
+    // 恰好=源全长），BGM 末窗同步延长，内容总时长对齐；基准=时间轴最末内容段（1126 四轨制）。
+    // 2026-11-27 口型保护：基准排除 A-Roll 段，全为 aroll 时放弃延长
+    const allVideoSegs = videoTracks.flatMap((t) => t.track.segments), endUsOf = (sg) => (Number(sg.target_timerange?.start) || 0) + (Number(sg.target_timerange?.duration) || 0), stretchCands = contentSegRefs.filter((x) => x.kind !== 'aroll').map((x) => x.seg)
+    if (voiceTimelineEndUs > cursorUs && stretchCands.length) {
+      const lastSeg = stretchCands.reduce((a, b) => (endUsOf(b) > endUsOf(a) ? b : a))
       const tt = lastSeg.target_timerange
       const srcDur = Number(tt.duration) || 0
       const newDur = voiceTimelineEndUs - Number(tt.start)

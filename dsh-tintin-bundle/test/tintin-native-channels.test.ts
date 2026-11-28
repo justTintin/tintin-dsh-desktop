@@ -50,11 +50,11 @@ function offlineError(): Error {
 }
 
 describe('ffmpeg-gate native channels', () => {
-  it('registers exactly the 8 source channels (probe/probeDuration/cut/embedCover/ensurePlayable/extractAudio/extractAudioCached/extractFrames)', () => {
+  it('registers exactly the 10 source channels (probe/probeDuration/probeHasAudio/arollAlign/cut/embedCover/ensurePlayable/extractAudio/extractAudioCached/extractFrames)', () => {
     const api = createFfmpegGateApi({ ffmpegPath: 'ffmpeg', ffprobePath: 'ffprobe' })
     expect(Object.keys(api).sort()).toEqual([
-      'ffmpeg:cut', 'ffmpeg:embedCover', 'ffmpeg:ensurePlayable', 'ffmpeg:extractAudio',
-      'ffmpeg:extractAudioCached', 'ffmpeg:extractFrames', 'ffmpeg:probe', 'ffmpeg:probeDuration',
+      'ffmpeg:arollAlign', 'ffmpeg:cut', 'ffmpeg:embedCover', 'ffmpeg:ensurePlayable', 'ffmpeg:extractAudio',
+      'ffmpeg:extractAudioCached', 'ffmpeg:extractFrames', 'ffmpeg:probe', 'ffmpeg:probeDuration', 'ffmpeg:probeHasAudio',
     ])
   })
 

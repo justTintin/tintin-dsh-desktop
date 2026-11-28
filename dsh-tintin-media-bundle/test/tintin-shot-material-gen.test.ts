@@ -432,7 +432,7 @@ describe('每镜 15 分钟超时 + 停止按钮（2026-11-27 用户裁决）', (
     expect(posts).toContain('/tasks/batch_cancel')
   })
 
-  it('AI 生成停止：stopBatch 置旗标→轮询收割→/tasks/batch_cancel 带 task_ids→瓦片已停止', async () => {
+  it('AI 生成停止（串行流水线）：旗标→当前镜 /tasks/batch_cancel 带 task_ids→后续镜不再提交', async () => {
     const shots = [shot('a'), shot('b')]
     shots[0]!.markAI = true
     shots[1]!.markAI = true
@@ -440,18 +440,20 @@ describe('每镜 15 分钟超时 + 停止按钮（2026-11-27 用户裁决）', (
     taskNode = () => ({ status: 'running', progress: 0.3 })
     postResult = { task_id: 't-stop' }
     cancelPostBody = null
+    posts.length = 0
     const p = gen.batchGenerateAI()
-    for (let k = 0; k < 4 && posts.filter((x) => x === '/generate/video').length < 2; k++) await vi.advanceTimersByTimeAsync(3000)
+    // 串行流水线：同一时刻只有第一镜在飞（服务端 cap=1 实测口径，2026-11-27）
+    for (let k = 0; k < 4 && !posts.includes('/generate/video'); k++) await vi.advanceTimersByTimeAsync(3000)
     gen.stopBatch('aroll') // 跨组误触：AI 跑批时 A-Roll 组停止无效果（activeGroup 归属闸）
     expect(gen.groupMsgs.value.aroll).toBe('')
     gen.stopBatch('ai')
-    for (let k = 0; k < 10 && (gen.active(0, 'gen') || gen.active(1, 'gen')); k++) await vi.advanceTimersByTimeAsync(3000)
+    for (let k = 0; k < 10 && gen.active(0, 'gen'); k++) await vi.advanceTimersByTimeAsync(3000)
     await p
-    await vi.advanceTimersByTimeAsync(3000) // void 取消请求微任务排空
-    // 两镜共用同一假任务 id：逐镜各发一次取消，捕获到的是最后一发的 body
     expect(cancelPostBody?.task_ids).toEqual(['t-stop'])
+    // 真·停止队列里下面的任务：第二镜从未提交
+    expect(posts.filter((x) => x === '/generate/video').length).toBe(1)
     expect(gen.stateOf(0, 'gen')?.msg).toContain('已停止')
-    expect(gen.stateOf(1, 'gen')?.msg).toContain('已停止')
+    expect(gen.stateOf(1, 'gen')).toBeUndefined()
     expect(gen.groupMsgs.value.ai).toContain('已停止')
   })
 
@@ -493,6 +495,52 @@ describe('每镜 15 分钟超时 + 停止按钮（2026-11-27 用户裁决）', (
     expect(gen.stateOf(0, 'aroll')?.msg).toContain('生成超时（15 分钟/镜）')
     expect(gen.stateOf(1, 'aroll')?.msg).toContain('生成超时（15 分钟/镜）')
     expect(gen.active(0, 'aroll')).toBe(false)
+  })
+})
+
+describe('AI 生成串行流水线 + 闸前排队豁免（2026-11-27 实测：服务端文生视 cap=1，闸前等 610s 被计入窗口）', () => {
+  it('batchGenerateAI 串行：前一镜终态后才提交下一镜，两镜各自完成落轨', async () => {
+    const shots = [shot('a'), shot('b')]
+    shots[0]!.markAI = true
+    shots[1]!.markAI = true
+    const gen = makeGen(shots)
+    taskNode = () => ({ status: 'done', result: { output_url: 'http://srv/sx.mp4' } })
+    postResult = { task_id: 't-sx' }
+    downloadOk = true
+    posts.length = 0; downloads.length = 0
+    const p = gen.batchGenerateAI()
+    for (let k = 0; k < 30 && (gen.active(0, 'gen') || gen.active(1, 'gen')); k++) await vi.advanceTimersByTimeAsync(3000)
+    await p
+    expect(posts.filter((x) => x === '/generate/video').length).toBe(2)
+    expect(shots[0]!.slots?.gen?.local).toContain('t-sx.mp4')
+    expect(shots[1]!.slots?.gen?.local).toContain('t-sx.mp4')
+    expect(gen.groupMsgs.value.ai).toContain('成功 2/2')
+  })
+
+  it('闸前排队豁免：status=processing 但 log 末条=在途闸等待 → 不吃窗口（16 分钟排队不误判），转开跑后满 15 分钟才判超时且消息带闸候秒数', async () => {
+    const shots = [shot()]
+    const gen = makeGen(shots)
+    let ticks = 0
+    taskNode = () => {
+      ticks += 1
+      return ticks <= 320 // 320 tick×3s=16 分钟 > 15 分钟窗口：全程闸前不判超时
+        ? { status: 'processing', progress: 0, log: ['任务开始', '在途闸等待: 引擎在途 1 个 job（cap=1），文生视频排队中（每 10s 探测）'] }
+        : { status: 'processing', progress: 0.5, log: ['在途闸放行（等了 960s）', '生成 media job（video）'] }
+    }
+    postResult = { task_id: 't-gate' }
+    const p = gen.generate(0, shots[0]!)
+    // 推进 15 分钟（旧口径此处已判死）：窗口随闸前 tick 后移，仍在豁免期
+    for (let k = 0; k < 15 && gen.active(0, 'gen'); k++) await vi.advanceTimersByTimeAsync(60_000)
+    expect(gen.stateOf(0, 'gen')?.phase).toBe('generating')
+    expect(gen.stateOf(0, 'gen')?.msg).toContain('在途闸排队')
+    // 闸放行（≈16 分钟处转 running）后再推满 15 分钟窗口：判超时
+    for (let k = 0; k < 20 && gen.active(0, 'gen'); k++) await vi.advanceTimersByTimeAsync(60_000)
+    await p
+    expect(gen.stateOf(0, 'gen')?.phase).toBe('failed')
+    expect(gen.stateOf(0, 'gen')?.msg).toContain('生成超时（15 分钟/镜）')
+    expect(gen.stateOf(0, 'gen')?.msg).toMatch(/闸前排队约 9\d+s/)
+    expect(gen.stateOf(0, 'gen')?.msg).toContain('status=processing')
+    expect(posts).toContain('/tasks/batch_cancel')
   })
 })
 

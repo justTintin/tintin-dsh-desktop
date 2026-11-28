@@ -666,3 +666,32 @@ export function srtTimestamp(sec: number): string {
  *  （句号/问号等句末标点保留），不影响重切校验（校验发生在序列化之前） */
 const stripTrailingComma = (t: unknown): string => String(t ?? '').replace(/\s*[，,、]\s*$/, '')
 
+
+/** 语音覆盖拟合（2026-11-27 对齐方向裁决：Σ视频槽位 = 旁白时长，精确相等）：
+ *  aroll 段内在时长锁死（生成存在偏移：视频时长/内部时序≠切窗音频——锁死只是防止
+ *  客户端在生成偏移之上二次引入错位;根治=服务端把切窗音频 mux 进产物,见 §16.80 补记④）;非 aroll 段整体缩放到 (旁白时长 - aroll 总长)：升=慢放/
+ *  图片垫底承接，降=裁素材（无口型概念，双向自由）；旁白时长缺失回退原值；
+ *  aroll 总长已 ≥ 旁白时 b-roll 压到 0.1s 下限并置 arollOverVoice=true（服务端
+ *  切窗漂移信号，调用方告警）。舍入残差归末个 b-roll 段，Σ 精确等于旁白。
+ *  纯函数可单测。 */
+export function applyVoiceCoverFit(
+  segs: Array<{ durSec: number; trackKind: string }>,
+  voiceDurSec: number,
+): { durs: number[]; arollOverVoice: boolean } {
+  const segDur = segs.map((m) => Math.max(0.1, Number(m.durSec) || 0.1))
+  if (!(voiceDurSec > 0)) return { durs: segDur, arollOverVoice: false }
+  const arollSum = segs.reduce((a, m, i) => a + (m.trackKind === 'aroll' ? segDur[i] : 0), 0)
+  const brollIdx = segs.map((_, i) => i).filter((i) => segs[i].trackKind !== 'aroll')
+  const brollSum = brollIdx.reduce((a, i) => a + segDur[i], 0)
+  const target = voiceDurSec - arollSum
+  if (!(brollSum > 0)) return { durs: segDur, arollOverVoice: target < -0.05 }
+  if (target <= 0.1) {
+    return { durs: segDur.map((d, i) => (brollIdx.includes(i) ? 0.1 : d)), arollOverVoice: true }
+  }
+  const factor = target / brollSum
+  const durs = segDur.map((d, i) => (brollIdx.includes(i) ? Math.max(0.1, Math.round(d * factor * 100) / 100) : d))
+  // 舍入残差归末个 b-roll 段：Σ 精确 = 旁白时长（含 aroll 段）
+  const others = brollIdx.slice(0, -1).reduce((a, i) => a + durs[i], 0)
+  durs[brollIdx[brollIdx.length - 1]] = Math.max(0.1, Math.round((target - others) * 100) / 100)
+  return { durs, arollOverVoice: false }
+}

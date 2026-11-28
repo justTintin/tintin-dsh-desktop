@@ -22,6 +22,7 @@ import {
 } from '../copywritingMontageLogic'
 import { notify, unwrapIpc, errText, joinPath } from './context'
 import { buildBoundaryTransitions } from '../copywritingMontageStep2ConcatLogic.ts'
+import { applyVoiceCoverFit } from '../copywritingMontageStep4FxBgmLogic.ts'
 import { useCopywritingMontageStep3Voice } from './useCopywritingMontageStep3Voice'
 import { useCopywritingMontageBgmGen } from './useCopywritingMontageBgmGen'
 import { useCopywritingMontageBgmPlayer } from './useCopywritingMontageBgmPlayer'
@@ -879,41 +880,107 @@ async function exportAllToJianyingDraft(): Promise<void> {
     }
     const segs: SegMeta[] = []
     const planHits: Array<Array<{ text: string; start: number; end: number; keywords: string[]; templateId?: string }>> = []
-    vPlans.forEach((p, planIdx) => {
+    // 2026-11-27 三轨对齐/口型保护裁决：A-Roll 槽位=视频内在时长（probe 实测——
+    // 下载产物实测无音轨，口型同步完全依赖时长一致，任何裁剪/慢放=渐错）；B-roll
+    // 槽位仍走方案 useDurs。带声 A-Roll（probeHasAudio 实测有音轨）→ 该方案整段
+    // 克隆旁白静音、A-Roll 段放自带口型音轨（音轨即该镜旁白权威源，2026-11-27
+    // 用户裁决）；混合方案（带声 aroll 与素材镜并存）暂不切换（整段旁白要覆盖
+    // 素材镜，双重人声风险 > 静音收益），记 warnNote。
+    const arollAudioPlans = new Set<number>()
+    const arollMuteNotes: string[] = []
+    const alignNotes: string[] = [] // Σ槽位=旁白拟合的告警（aroll 总长超旁白=服务端切窗漂移信号）
+    /** 带声 aroll 声波实测登记（§16.80 补记⑥ 方案1 裁切接线）：抽音轨→NCC 对齐
+     *  整段旁白→实测窗覆盖内在时长（生成偏移消除）。休眠至服务端 mux 落地——
+     *  产物无音轨时 probeHasAudio=false 整段跳过，现行口径不受影响 */
+    const measureTasks: Array<{ planIdx: number; path: string; seg: SegMeta; estStartSec: number; estDurSec: number; wavPath?: string }> = []
+    const pureArollAudio = new Set<number>()
+    for (const [planIdx, p] of vPlans.entries()) {
       const tab = getTabById(p.tabId)
-      if (!tab) return
+      if (!tab) continue
       let c0 = 0
-      p.groups.forEach((g, gi) => {
+      for (const [gi, g] of p.groups.entries()) {
         const shotLen = g.useDurs.reduce((a, b) => a + (Number(b) || 0), 0)
-        g.scenes.forEach((s, si) => {
-          const durSec = Math.max(0.1, Number(g.useDurs[si]) || Math.max(0.1, Number(s.duration) || 0.1))
-            // 2026-11-26 四视频占位=四条剪映视频轨：轨属源自合成行标记
-            // （轨道产物行 serverPath='track:<轨>'；素材池行=material）
-            const sp = String(s.serverPath || '')
-            const trackKind = sp.startsWith('track:aroll') ? 'aroll'
-              : sp.startsWith('track:gen') ? 'gen'
-              : sp.startsWith('track:stock') ? 'stock'
-              : 'material'
-            segs.push({
-              path: s.clipLocalPath || '',
-              durSec,
-              c0, c1: c0 + durSec,
-              planIdx, planFirst: gi === 0 && si === 0, shotFirst: si === 0,
-              planKey: `plan:${p.tabId}`,
-              text: tab.narrative,
-              timingPath: tab.voiceWav ? tab.voiceWav + '.timing.json' : '',
-              voicePath: tab.voiceWav,
-              srtKey: `plan${planIdx}`,
-              sfxWavLocal: tab.shots[gi]?.sfxWavLocal,
-              sfxDurSec: tab.shots[gi]?.sfxDurSec,
-              shotLen,
-              usageRef: s.serverPath || s.clipUrl || s.clipLocalPath || '',
-              trackKind,
-            })
+        for (const [si, s] of g.scenes.entries()) {
+          // 2026-11-26 四视频占位=四条剪映视频轨：轨属源自合成行标记
+          // （轨道产物行 serverPath='track:<轨>'；素材池行=material）
+          const sp = String(s.serverPath || '')
+          const trackKind = sp.startsWith('track:aroll') ? 'aroll'
+            : sp.startsWith('track:gen') ? 'gen'
+            : sp.startsWith('track:stock') ? 'stock'
+            : 'material'
+          const planDur = Math.max(0.1, Number(g.useDurs[si]) || Math.max(0.1, Number(s.duration) || 0.1))
+          let durSec = planDur
+          let hasAudio = false
+          if (trackKind === 'aroll' && s.clipLocalPath) {
+            const real = Number(await window.tintin.ffmpeg.probeDuration(s.clipLocalPath).catch(() => 0)) || 0
+            if (real > 0.1) durSec = real // 口型保护：内在时长锁死（生成偏移下 best-effort 防二次错位）
+            if (await window.tintin.ffmpeg.probeHasAudio(s.clipLocalPath).catch(() => false)) {
+              hasAudio = true
+              arollAudioPlans.add(planIdx)
+            }
+          }
+          segs.push({
+            path: s.clipLocalPath || '',
+            durSec,
+            c0, c1: c0 + durSec,
+            planIdx, planFirst: gi === 0 && si === 0, shotFirst: si === 0,
+            planKey: `plan:${p.tabId}`,
+            text: tab.narrative,
+            timingPath: tab.voiceWav ? tab.voiceWav + '.timing.json' : '',
+            voicePath: tab.voiceWav,
+            srtKey: `plan${planIdx}`,
+            sfxWavLocal: tab.shots[gi]?.sfxWavLocal,
+            sfxDurSec: tab.shots[gi]?.sfxDurSec,
+            shotLen,
+            usageRef: s.serverPath || s.clipUrl || s.clipLocalPath || '',
+            trackKind,
+          })
+          // 带声 aroll：登记声波实测（estStart=旁白时间轴估算起点，作 NCC 搜索先验）
+          if (hasAudio && s.clipLocalPath) {
+            measureTasks.push({ planIdx, path: s.clipLocalPath, seg: segs[segs.length - 1]!, estStartSec: c0, estDurSec: durSec })
+          }
           c0 += durSec
+        }
+      }
+    }
+    // 带声 aroll 方案的音频源切换仅限「全部内容段均 aroll」——混合方案整段旁白要
+    // 覆盖素材镜，切换会让素材镜静音（见上方裁决注）
+    for (const pi of arollAudioPlans) {
+      const kinds = segs.filter((m) => m.planIdx === pi).map((m) => m.trackKind)
+      if (kinds.length && kinds.every((k) => k === 'aroll')) pureArollAudio.add(pi)
+      else if (kinds.some((k) => k === 'aroll')) arollMuteNotes.push(`分镜方案 ${pi + 1} 含带声 A-Roll 与素材镜混合——暂以整段旁白覆盖（A-Roll 段静音）`)
+    }
+    // 带声 aroll 声波实测（§16.80 补记⑥ 方案1 裁切接线；休眠至服务端 mux 落地——
+    // 产物无音轨时 probeHasAudio=false 整段跳过，现行口径不受影响）：抽音轨 →
+    // NCC 对齐整段旁白 → 实测时长覆盖内在时长（生成偏移消除，Σ槽位=旁白精确成立）；
+    // 未匹配（score 低于阈值/抽轨失败）回退内在时长
+    {
+      const audioDir = await readCacheDir()
+      const byPlan = new Map<number, Array<{ path: string; estStartSec: number; estDurSec: number; seg: SegMeta }>>()
+      for (const t of measureTasks) {
+        const mTab = getTabById(vPlans[t.planIdx]?.tabId)
+        if (!mTab?.voiceWav) continue // 无整段旁白可对齐=无从实测
+        const list = byPlan.get(t.planIdx) ?? []
+        const wavPath = joinPath(audioDir, `aroll_p${t.planIdx}_${t.seg.c0.toFixed(3)}.wav`)
+        list.push({ path: wavPath, estStartSec: t.estStartSec, estDurSec: t.estDurSec, seg: t.seg })
+        t.wavPath = wavPath
+      }
+      for (const [planIdx, products] of byPlan) {
+        const mTab = getTabById(vPlans[planIdx]?.tabId)
+        if (!mTab?.voiceWav) continue
+        for (const pr of products) {
+          try { await window.tintin.ffmpeg.extractAudio(pr.seg.path, pr.path, 'wav') } catch (_) { /* 抽轨失败→该段回退内在时长 */ }
+        }
+        const res = await window.tintin.ffmpeg.arollAlign({
+          narrationWav: mTab.voiceWav,
+          arollProducts: products.map(({ path, estStartSec, estDurSec }) => ({ path, estStartSec, estDurSec })),
+        }).catch(() => null)
+        ;(res?.results ?? []).forEach((r, ri) => {
+          const ref = products[ri]
+          if (r.matched && r.durSec > 0.1) ref.seg.durSec = r.durSec // 实测窗覆盖内在时长
         })
-      })
-    })
+      }
+    }
     // 逐分镜关键词命中（与剪映导出同一取数函数；串行——2026-09-12 并发 500 教训）
     for (let pi = 0; pi < vPlans.length; pi++) {
       const tab = getTabById(vPlans[pi].tabId)
@@ -923,6 +990,33 @@ async function exportAllToJianyingDraft(): Promise<void> {
         planHits.push(await resolveKeywordHits(tab.narrative, tab.voiceWav ? tab.voiceWav + '.timing.json' : '', vPlans[pi].outputPath))
       } else {
         planHits.push([])
+      }
+    }
+    // 逐分镜声音时长（口播轨段长；探测失败回退镜标累计）
+    const voiceDurByPlan = new Map<number, number>()
+    for (let pi = 0; pi < vPlans.length; pi++) {
+      const vw = getTabById(vPlans[pi].tabId)?.voiceWav || ''
+      const d = vw ? Number(await window.tintin.ffmpeg.probeDuration(vw).catch(() => 0)) || 0 : 0
+      voiceDurByPlan.set(pi, d)
+    }
+    // 2026-11-27 对齐方向裁决（Σ视频槽位 = 旁白时长，精确相等；语音不动做主轨）：
+    // aroll 内在时长锁死（生成偏移下的 best-effort：防客户端二次错位；根治=服务端
+    // mux 切窗音频进产物，见 §16.80 补记④），非 aroll 段整体缩放到
+    // (旁白时长 - aroll 总长)——升=慢放/图片垫底承接，降=裁素材；aroll 总长已超
+    // 旁白时 b-roll 压下限并记告警（服务端切窗漂移信号）
+    for (const [planIdx] of vPlans.entries()) {
+      const segsOfPlan = segs.filter((m) => m.planIdx === planIdx)
+      if (!segsOfPlan.length) continue
+      const voiceDur = voiceDurByPlan.get(planIdx) || 0
+      const fit = applyVoiceCoverFit(
+        segsOfPlan.map((m) => ({ durSec: m.durSec, trackKind: m.trackKind })),
+        voiceDur,
+      )
+      let c0 = 0
+      segsOfPlan.forEach((m, i) => { m.durSec = fit.durs[i] ?? m.durSec; m.c0 = c0; m.c1 = c0 + m.durSec; c0 += m.durSec })
+      if (fit.arollOverVoice) {
+        const arollSum = segsOfPlan.filter((m) => m.trackKind === 'aroll').reduce((a, m) => a + m.durSec, 0)
+        alignNotes.push(`分镜方案 ${planIdx + 1} 的 A-Roll 总长（${arollSum.toFixed(1)}s）已超旁白（${voiceDur.toFixed(1)}s）——素材镜已压至下限，请检查服务端 A-Roll 切窗与旁白是否同源`)
       }
     }
     const segsReady = segs.filter((s) => !!s.path)
@@ -942,13 +1036,6 @@ async function exportAllToJianyingDraft(): Promise<void> {
       const tabId = String(seg.planKey || '').replace(/^plan:/, '')
       return getTabById(tabId)?.transition || ''
     })
-    // 逐分镜声音时长（口播轨段长；探测失败回退镜标累计）
-    const voiceDurByPlan = new Map<number, number>()
-    for (let pi = 0; pi < vPlans.length; pi++) {
-      const vw = getTabById(vPlans[pi].tabId)?.voiceWav || ''
-      const d = vw ? Number(await window.tintin.ffmpeg.probeDuration(vw).catch(() => 0)) || 0 : 0
-      voiceDurByPlan.set(pi, d)
-    }
     exportProgress.value = 10
     exportStage.value = `剪辑方案共 ${vPlans.length} 条虚拟时间轴 / ${segsReady.length} 个片段，生成字幕资产...`
     const srtPaths: Array<string | null> = []
@@ -974,7 +1061,10 @@ async function exportAllToJianyingDraft(): Promise<void> {
         const srtFile = m.planFirst && m.text ? await ensureProcessedSrt(m.text, m.voicePath, m.srtKey) : ''
         if (srtFile) {
           srtPaths.push(srtFile)
-          srtLimitUs.push(Math.round((planDurUsByPlanIdx.get(m.planIdx) || 0) * 1e6))
+          // 2026-11-27 对齐裁决：字幕窗口=旁白实际时长（原=方案视频时长——语音更长
+          // 时尾部旁白被截掉字幕，三轨错位来源之一）；与视频时长取大者兜底
+          const limSec = Math.max(planDurUsByPlanIdx.get(m.planIdx) || 0, voiceDurByPlan.get(m.planIdx) || 0)
+          srtLimitUs.push(Math.round(limSec * 1e6))
         } else {
           srtPaths.push(null)
           srtLimitUs.push(null)
@@ -997,15 +1087,18 @@ async function exportAllToJianyingDraft(): Promise<void> {
       } else {
         textTemplateClips.push([])
       }
-      // 口播轨（每分镜一段整条克隆声音，挂在该分镜首片段上）
+      // 口播轨（每分镜一段整条克隆声音，挂在该分镜首片段上）。2026-11-27 带声
+      // A-Roll 裁决：纯 aroll 且带声的方案不挂整段旁白（A-Roll 自带口型音轨即
+      // 该镜旁白），计入口播完整口径
       const voiceDurUs = Math.round((voiceDurByPlan.get(m.planIdx) || 0) * 1e6)
       if (m.planFirst && (!m.text || !m.voicePath)) {
         clientError('copywriting-montage', '口播首片段缺文案/声音', `text 长度=${String(m.text || '').length}，voicePath=${m.voicePath || '(空)'}——该分镜将无字幕轨`)
       }
-      if (m.planFirst && m.voicePath && voiceDurUs > 0) {
+      if (m.planFirst && m.voicePath && voiceDurUs > 0 && !pureArollAudio.has(m.planIdx)) {
         voiceClips.push([{ path: m.voicePath, startUs: 0, durUs: voiceDurUs }])
         planVoiceOk.add(m.planIdx)
       } else {
+        if (m.planFirst && pureArollAudio.has(m.planIdx)) planVoiceOk.add(m.planIdx) // 带声 A-Roll=旁白由视频自带
         voiceClips.push([])
       }
       if (fancyEnabled.value) {
@@ -1048,7 +1141,8 @@ async function exportAllToJianyingDraft(): Promise<void> {
     const preVoiced = voiceClips.filter((v) => v.length > 0).length
     const preSrt = srtPaths.filter(Boolean).length
     const preMissing: string[] = []
-    if (!preVoiced) preMissing.push('口播')
+    // 带声 A-Roll 方案的旁白由视频自带音轨承载（2026-11-27 裁决），计入口播完整口径
+    if (!preVoiced && !pureArollAudio.size) preMissing.push('口播')
     if (!preSrt) preMissing.push('字幕')
     if (preMissing.length) {
       exportWarnMsg.value = `⚠ 未导出：缺少${preMissing.join('、')}轨——请检查声音克隆与字幕资产后再导出`
@@ -1065,6 +1159,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
       .filter((x) => !x.ok)
       .map((x) => `第 ${x.pi + 1} 条分镜「${x.pl.outputName || '未命名'}」未生成口播——回第三步克隆后重新导出`)
       .join('；')
+    const arollAudioNote = [...arollMuteNotes, ...alignNotes].join('；')
     exportStage.value = '组装剪映时间轴草稿（转场/口播/字幕/BGM 各轨）...'
     exportProgress.value = 85
     exportStage.value = '组装剪映时间轴草稿（转场/口播/字幕/BGM 各轨）...'
@@ -1086,10 +1181,12 @@ async function exportAllToJianyingDraft(): Promise<void> {
       // 2026-11-26 四视频占位=四条剪映视频轨：逐段轨属（与 cands 平行），
       // 导出器按轨属落四条命名视频轨（A-Roll→素材→AI生成→在线搜索）
       videoTrackKinds: segsReady.map((sg) => sg.trackKind),
-      // 2026-09-22 虚拟时间轴：逐段源裁剪时长（微秒）+ 视频段静音（旁白轨覆盖）
+      // 2026-09-22 虚拟时间轴：逐段源裁剪时长（微秒）+ 视频段静音（旁白轨覆盖）。
+      // 2026-11-27 带声 A-Roll 裁决：静音改逐段——纯 aroll 带声方案的 aroll 段不静音
+      // （放自带口型音轨），其余段/方案维持静音
       videoDurations,
       gapAfterUs,
-      muteVideoAudio: true,
+      muteVideoAudio: segsReady.map((sg) => !(pureArollAudio.has(sg.planIdx) && sg.trackKind === 'aroll')),
       srtPaths,
       srtLimitUs,
       // 逐边界转场：镜间=转场设置、镜内=硬切（导出器 normalizeTransitions 数组口径）
@@ -1117,7 +1214,7 @@ async function exportAllToJianyingDraft(): Promise<void> {
         ? joinPath(resolveOutMontageDir(voiceDirInput.value), 'sfx')
         : joinPath(await readCacheDir(), 'montage_cache', 'sfx'),
       draftName: finalName,
-      successBody: (name: string) => '已按原始轨道结构导出 ' + cands.length + ' 段候选视频（转场：' + transition + '，含口播/字幕/关键词/BGM 轨）！\n项目名称：' + name + (missingPlanNote ? '\n（注：' + missingPlanNote + '）' : ''),
+      successBody: (name: string) => '已按原始轨道结构导出 ' + cands.length + ' 段候选视频（转场：' + transition + '，含口播/字幕/关键词/BGM 轨）！\n项目名称：' + name + (missingPlanNote ? '\n（注：' + missingPlanNote + '）' : '') + (arollAudioNote ? '\n（注：' + arollAudioNote + '）' : ''),
       // 素材使用上报标识（§usage：serverPath/material://<id>，服务端解析归属）
       usageClips: segsReady.map((s) => s.usageRef).filter((x): x is string => !!x),
     })

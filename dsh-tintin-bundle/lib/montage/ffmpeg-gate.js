@@ -9,6 +9,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import * as logger from './logger.js'
+import { alignArollAudioToNarration } from './aroll-audio-align.js'
 const require = createRequire(import.meta.url)
 
 // ffmpeg/ffprobe 可执行文件路径
@@ -628,6 +629,35 @@ function createFfmpegGateApi({ ffmpegPath, ffprobePath }) {
     return await probeDurationViaFfmpeg(ffmpegPath, file)
   }
 
+  // ── ffmpeg:probeHasAudio — 是否含音轨（2026-11-27 带声 A-Roll 裁决）──────
+  // 数字人口型视频的音轨=该镜旁白权威源：导出前探测它决定整段克隆旁白是否静音
+  // （有带声 aroll→旁白静音、aroll 段放自带音轨）。复用 probeViaFfmpeg 的
+  // parseFfmpegInfo（Stream Audio 行），无 ffprobe 依赖；文件缺失/解析失败=false。
+  async function ffmpegProbeHasAudio(file) {
+    try {
+      const fb = await probeViaFfmpeg(ffmpegPath, file)
+      return !!(fb && fb.audio)
+    } catch (_) { return false }
+  }
+
+  // ── ffmpeg:arollAlign — A-Roll 声波对齐（2026-11-27 用户裁决「声音的对齐就是
+  // 声波」）：切窗/脚本窗只是生成驱动信号，产物口型时序与驱动音频存在帧级偏移，
+  // 元数据皆非实测锚点——每条 aroll 音轨与整段旁白做 NCC 波形互相关，测出真实
+  // 起点（服务端 mux 落地后即插即用；产物无音轨时 matched=false 回退估算窗）
+  async function ffmpegArollAlign(payload) {
+    const p = payload || {}
+    try {
+      return await alignArollAudioToNarration({
+        ffmpegPath,
+        narrationWav: p.narrationWav,
+        arollProducts: Array.isArray(p.arollProducts) ? p.arollProducts : [],
+        envRate: p.envRate,
+      })
+    } catch (err) {
+      return { error: (err && err.message) || String(err) }
+    }
+  }
+
   // ── ffmpeg:ensurePlayable — 预览可播性保障（2026-09-10 素材预览全灭兜底）：
   // Chromium 不可播编码（H.264 4:2:2/10bit、MP4+PCM 等）自动转码到临时缓存，
   // 可播/检测失败原路径直返 → { path, transcoded } 或 { error } ──
@@ -668,6 +698,8 @@ function createFfmpegGateApi({ ffmpegPath, ffprobePath }) {
 
   channels['ffmpeg:probe'] = (args, _ctx) => ffmpegProbe(...args)
   channels['ffmpeg:probeDuration'] = (args, _ctx) => ffmpegProbeDuration(...args)
+  channels['ffmpeg:probeHasAudio'] = (args, _ctx) => ffmpegProbeHasAudio(...args)
+  channels['ffmpeg:arollAlign'] = (args, _ctx) => ffmpegArollAlign(...args)
   channels['ffmpeg:ensurePlayable'] = (args, _ctx) => ffmpegEnsurePlayable(...args)
   channels['ffmpeg:extractFrames'] = (args, _ctx) => ffmpegExtractFrames(...args)
   channels['ffmpeg:embedCover'] = (args, _ctx) => ffmpegEmbedCover(...args)
